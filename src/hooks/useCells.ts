@@ -32,6 +32,9 @@ import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells 
 // this local widening so the lane filter compiles under `no-any`. Once
 // `CellRow.targetLang` exists, drop `LaneCellRow` and read `r.targetLang`.
 type LaneCellRow = CellRow & { targetLang?: string }
+
+/** Minimum gap between progressive complete-row repaints. */
+export const PAINT_COALESCE_MS = 200
 /** The lane a row belongs to. Source rows and default-lane targets → `''`. */
 function laneOf(r: CellRow): string {
   return (r as LaneCellRow).targetLang ?? ""
@@ -569,6 +572,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // one of those falls straight through to the unchanged HTTP path below.
   const { store: offlineStore } = useOfflineStore()
   const offlineStoreRef = useRef(offlineStore)
+  // `doFetch` re-enters itself from its own token-retry timer. It reaches the
+  // callback through this ref (kept pointed at the latest closure just below)
+  // rather than by name, so the retry always runs the current callback instead
+  // of the one captured when the timer was scheduled (react-hooks/immutability).
+  const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
 
   statsRef.current = auditStats
   laneRef.current = lane
@@ -829,6 +837,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     // refetch: accumulate into a buffer and swap once at the end.
     const effectiveSoft = soft || usedCache
     setIsError(false)
+    let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
       const token = getToken ? await getToken(fileId) : null
       if (!token) {
@@ -848,7 +857,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
         tokenRetryRef.current = setTimeout(() => {
           tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetch(soft)
+          if (generationRef.current === gen) void doFetchRef.current(soft)
         }, delay)
         return
       }
@@ -916,21 +925,20 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // kind === "resync": the changed set outgrew the delta budget, or the
         // server predates ?since=. Fall through to the full stream below.
       }
-      // Stream pages in: on a hard fetch, append each page in place and rebuild
-      // ONCE on the first page so the first 500 rows paint immediately on
-      // Bible-sized files (~30k cells × ~60 round-trips); the final rebuild
-      // below swaps in the rest. On a soft refetch, accumulate into a buffer
-      // and swap it in once at the end so the visible list never flickers (and
-      // never shrink-then-grows across pages). The `gen` fence aborts the
-      // stream if the caller switches files mid-flight.
+      // Publish complete row groups progressively. Soft refetches stay atomic
+      // so already-visible rows never shrink while a replacement loads.
       const buffer: CellRow[] = []
-      // Paint the FIRST page that asks for a rebuild (the first source page) so
-      // the empty state never flashes, then defer: the unconditional final
-      // rebuild after both streams (below) swaps in the complete list once.
-      // Rebuilding on every page was O(pages × cells) — the dominant cost of a
-      // ~60-page Bible-sized first open.
       let paintedFirstPage = false
-      const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
+      let lastPaintAt = 0
+      const paintRows = () => {
+        if (paintTimer) clearTimeout(paintTimer)
+        paintTimer = undefined
+        if (generationRef.current !== gen) return
+        paintedFirstPage = true
+        lastPaintAt = Date.now()
+        rebuildFromCache()
+      }
+      const pushRows = (rows: CellRow[]): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (effectiveSoft) {
@@ -942,36 +950,18 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // is always the owned `[]` seeded above (cache hits and resyncs take
         // the effectiveSoft buffer path), so mutating it in place is safe.
         for (const r of rows) rowsRef.current.push(r)
-        if (rebuild && !paintedFirstPage) {
-          paintedFirstPage = true
-          rebuildFromCache()
-        }
+        const remaining = PAINT_COALESCE_MS - (Date.now() - lastPaintAt)
+        if (!paintedFirstPage || remaining <= 0) paintRows()
+        else paintTimer ??= setTimeout(paintRows, remaining)
       }
       // AQU-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this
       // fetch's data — it can neither confirm that cell's shadow nor replace
       // its rows at the swap below.
       const startSeq = writeSeqRef.current
-      // Stream the TARGET side first. The combined read returns every source
-      // row before any target row, so on a Bible-sized file (~30k source cells
-      // vs. a handful of translated target cells) fetching both sides at once
-      // hides every translation behind the entire ~60-page source stream —
-      // committed edits look lost on reload until the whole file loads. The
-      // target side is tiny (one page), so loading it up front means a
-      // translated cell shows its value the moment its source row paints.
-      // Seed it silently (no rebuild) so we don't flash target-only orphan rows.
-      //
-      // The TARGET stream's first page carries the earliest watermark of the
-      // whole two-stream snapshot — the safe `?since=` cursor: anything that
-      // lands mid-stream has a higher seq, so the next delta re-fetches it.
-      //
-      // B2 (torn snapshot): the server paginates by OFFSET, so a row that
-      // shifts across a page boundary while the stream is in flight can be
-      // skipped entirely — and a skipped-but-unchanged cell is never
-      // re-delivered by any later delta. The tell is a page-to-page
-      // `maxServerSeq` bump within a side-stream; when seen, the snapshot's
-      // rows are kept (better than blanking) but NO cursor is stored, so the
-      // next trigger full-streams once and self-heals.
+      // The first page supplies the earliest safe watermark. If it changes
+      // during offset pagination, discard the cursor so a full refetch heals
+      // any row that moved across a page boundary.
       let streamMaxSeq: number | null = null
       // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
       // so cursor and epoch always describe the same snapshot.
@@ -997,21 +987,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         }
       }
       await streamFileCells(
-        projectId,
-        fileId,
-        token,
-        (rows) => pushRows(rows, false),
-        "target",
-        trackStreamMeta(),
-      )
-      if (generationRef.current !== gen) return
-      await streamFileCells(
-        projectId,
-        fileId,
-        token,
-        (rows) => pushRows(rows, true),
-        "source",
-        trackStreamMeta(),
+        projectId, fileId, token, pushRows, undefined, trackStreamMeta(), undefined, true,
       )
       if (generationRef.current !== gen) return
       let discardedProtected = false
@@ -1026,10 +1002,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         rowsRef.current = kept
         discardedProtected = discardedCellIds.size > 0
       }
-      // Final rebuild: the source pass paints per page, but a target-only or
-      // empty-source file yields no source page to trigger one — and the
-      // target seed pass is intentionally silent. This also swaps in the soft
-      // buffer. Cheap and idempotent on the hard path.
+      // Flush any complete pages coalesced since the last paint.
       rebuildFromCache()
       // Persist the freshly-loaded snapshot (+ its delta cursor). Best-effort;
       // failures are swallowed inside writeCellsCache so a hostile IDB never
@@ -1059,11 +1032,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       setIsError(true)
       setIsLoading(false)
     } finally {
+      if (paintTimer) clearTimeout(paintTimer)
       // Only the current-generation fetch owns the in-flight flag; a
       // superseded fetch must not clear it out from under its successor.
       if (generationRef.current === gen) inFlightRef.current = false
     }
   }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
+  doFetchRef.current = doFetch
 
   // Reload on (projectId, fileId, enabled, lane) change. The optimistic-edit
   // shadow and freshness floors are per-file/per-lane local state — drop them

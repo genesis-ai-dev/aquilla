@@ -36,11 +36,24 @@ export type ContextualRunStatus =
   | "failed"
   | "terminated"
 
+/**
+ * Why a `parked` run stopped (AQU-1300) — mirrors the server's column.
+ *
+ * `parked` on its own cannot answer the user's only question: is there more?
+ * `awaiting_input` means yes, and the run is deliberately holding for a human.
+ * `work_exhausted` means the scope is finished. The UI renders these as
+ * opposites, so they must never collapse into one.
+ */
+export type ContextualParkReason = "awaiting_input" | "work_exhausted"
+
 /** Full run snapshot as the transport reports it (GET …/contextual/runs). */
 export interface ContextualRunSnapshot {
   runId: string
   fileId: string
   status: ContextualRunStatus
+  /** Absent on a backend that predates the trust gate — which is NOT the same
+   *  as `null`, so the UI can tell "no gate here" from "nothing pending". */
+  parkReason?: ContextualParkReason | null
   /** User-facing phase words ("Reading context…"), never spec jargon. */
   phase: string | null
   /** Display label of the span being worked ("LUK 1:1–1:8"). */
@@ -63,6 +76,9 @@ export interface ContextualRunStateFrame {
   done: number
   total: number
   failed?: number
+  /** Only sent with `status: "parked"` (AQU-1300), and only by a backend that
+   *  has the trust gate. */
+  parkReason?: ContextualParkReason
 }
 
 export interface ContextualSceneFrame {
@@ -132,11 +148,21 @@ export interface ContextualTransportSnapshot {
 
 export interface ContextualTransport {
   fetchSnapshot(projectId: string, fileId: string, targetLang?: string): Promise<ContextualTransportSnapshot>
-  /** `anchorCellId` is where the user is looking — the first wave starts there. */
-  start(projectId: string, fileId: string, anchorCellId?: string, targetLang?: string): Promise<{ runId: string }>
+  /** `anchorCellId` is where the user is looking — the first wave starts there.
+   *  `translateEverything` is the explicit whole-scope choice (AQU-1300); left
+   *  off, the run drafts one passage and parks to ask. */
+  start(
+    projectId: string,
+    fileId: string,
+    anchorCellId?: string,
+    targetLang?: string,
+    translateEverything?: boolean,
+  ): Promise<{ runId: string }>
   pause(runId: string): Promise<void>
   resume(runId: string): Promise<void>
   terminate(runId: string): Promise<void>
+  /** Grant a parked run more work: a batch, or the rest of its scope. */
+  continueRun(runId: string, scope: "batch" | "all"): Promise<void>
 }
 
 /** Default stub until the durable backend (slice D) exists. */
@@ -146,6 +172,7 @@ const stubTransport: ContextualTransport = {
   pause: async () => { throw new Error("Contextual drafting is not available yet") },
   resume: async () => { throw new Error("Contextual drafting is not available yet") },
   terminate: async () => { throw new Error("Contextual drafting is not available yet") },
+  continueRun: async () => { throw new Error("Contextual drafting is not available yet") },
 }
 
 let _transport: ContextualTransport = stubTransport
@@ -170,6 +197,11 @@ export interface ContextualRunState {
   phase: string | null
   spanLabel: string | null
   activeDirections: string[]
+  /** Why a `parked` run stopped (AQU-1300). `awaiting_input` means there IS
+   *  more work and the run is holding for a human — the state that renders
+   *  "waiting for you" with Continue / Translate everything. `null` on any
+   *  other status, and on a backend that predates the trust gate. */
+  parkReason: ContextualParkReason | null
   /** Passages currently in flight, oldest first. Empty when nothing is running. */
   lanes: ContextualLane[]
 }
@@ -190,6 +222,7 @@ const IDLE_STATE: ContextualRunState = {
   phase: null,
   spanLabel: null,
   activeDirections: [],
+  parkReason: null,
   lanes: [],
 }
 
@@ -363,6 +396,10 @@ export function applyRemoteFrame(projectId: string, frame: ContextualFrame): voi
       fileId: frame.fileId,
       targetLang: _attachedTargetLang,
       status,
+      // Owned by the parked status, exactly as on the server: stamped when a
+      // frame parks the run, cleared by any frame that moves it off `parked`.
+      // Carrying it forward would leave a resumed run reading "waiting for you".
+      parkReason: status === "parked" ? frame.parkReason ?? null : null,
       // First running frame of a span/run with no phase yet: the analyzer is
       // reading. Terminal/idle-ish states drop the phase readout.
       phase:
@@ -483,6 +520,9 @@ export async function attachContextualRun(
     phase: run.phase,
     spanLabel: run.spanLabel,
     activeDirections: run.activeDirections,
+    // Only a parked run has a reason. Carrying one onto a running run is how a
+    // live run gets painted as "waiting for you" and reported as stuck.
+    parkReason: run.status === "parked" ? run.parkReason ?? null : null,
     // Lanes are live-only: the snapshot carries durable state, and passages in
     // flight are not durable. They repopulate from the next frame.
     lanes: run.runId === _state.runId ? _state.lanes : [],
@@ -504,6 +544,7 @@ export async function startContextualRun(
   fileId: string,
   anchorCellId?: string,
   targetLang?: string,
+  translateEverything?: boolean,
 ): Promise<boolean> {
   if (targetLang !== undefined) _attachedTargetLang = targetLang
   if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
@@ -526,6 +567,7 @@ export async function startContextualRun(
       fileId,
       anchorCellId,
       _attachedTargetLang,
+      translateEverything,
     )
     if (
       _attachedProjectId === projectId &&
@@ -546,6 +588,36 @@ export async function startContextualRun(
   } catch {
     if (_attachedProjectId === projectId && _attachedFileId === fileId) setState({ ..._state, status: "idle" })
     return false
+  }
+}
+
+/**
+ * Give a run parked `awaiting_input` more work (AQU-1300).
+ *
+ * `"batch"` buys a handful of passages, `"all"` the rest of the scope. Both go
+ * through the same server action, which grants the budget BEFORE resuming —
+ * so unlike `resumeContextualRun`, this cannot bounce straight back to parked.
+ *
+ * Guarded on the park reason, not just the status: a `work_exhausted` run has
+ * nothing left to continue into, and offering it would be a button that does
+ * nothing.
+ */
+export async function continueContextualRun(scope: "batch" | "all"): Promise<void> {
+  const runId = _state.runId
+  if (!runId || _state.status !== "parked" || _state.parkReason !== "awaiting_input") return
+  const previous = _state
+  setState({
+    ..._state,
+    status: "running",
+    parkReason: null,
+    phase: _state.phase ?? PHASE_READING,
+  })
+  try {
+    await _transport.continueRun(runId, scope)
+  } catch {
+    // Roll the optimistic move back rather than leaving a dead "running" pill
+    // on a run the server never actually restarted.
+    if (_state.runId === runId) setState(previous)
   }
 }
 

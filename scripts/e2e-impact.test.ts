@@ -15,6 +15,7 @@ const specs = [
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
   "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+  "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
@@ -75,6 +76,19 @@ describe("changed-file E2E impact selection", () => {
       "src/components/knowledge/KnowledgeBaseSurface.tsx",
       "auth-worker/src/routes/knowledge.ts",
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
+  })
+
+  it("maps app font-size preference and boot script to preferences persist-reload", () => {
+    for (const file of [
+      "src/branding/FontSize.tsx",
+      "src/pages/Preferences.tsx",
+      "src/lib/store/file-view-prefs.ts",
+      "index.html",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
+      )
+    }
   })
 
   it("maps a format parser to the import journey rather than shared runtime", () => {

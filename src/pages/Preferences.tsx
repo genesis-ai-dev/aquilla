@@ -21,6 +21,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
+import {
+  FONT_SIZE_SCALES,
+  isFontSizeScale,
+  useFontSizeScale,
+  type FontSizeScale,
+} from "@/branding/FontSize"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
@@ -42,8 +48,8 @@ import {
  * these are reachable by EVERY signed-in user (via the AccountSwitcher), not
  * just org admins — /settings is now an org-level surface gated to managers.
  *
- * `/preferences` shows a General card inline (theme, UI language, analytics,
- * and a Workspace nav row in the same group); heavier sections stay as
+ * `/preferences` shows a General card inline (theme, app font size, UI language,
+ * analytics, and a Workspace nav row in the same group); heavier sections stay as
  * navigation rows into `/preferences/:section`. Both routes render this
  * same component — it branches on the `section` param.
  *
@@ -64,6 +70,13 @@ const THEME_OPTIONS: { id: ThemeMode; labelKey: MessageKey }[] = [
   { id: "light", labelKey: "onboarding.preferences.theme.light" },
   { id: "dark", labelKey: "onboarding.preferences.theme.dark" },
 ]
+
+const FONT_SIZE_LABEL_KEYS: Record<FontSizeScale, MessageKey> = {
+  small: "onboarding.preferences.fontSize.small",
+  default: "onboarding.preferences.fontSize.default",
+  large: "onboarding.preferences.fontSize.large",
+  "extra-large": "onboarding.preferences.fontSize.extraLarge",
+}
 
 /** Single-line fields rendered as text inputs, in render order. */
 const PROFILE_TEXT_FIELDS: {
@@ -147,8 +160,9 @@ function WorkspaceSection() {
 }
 
 /**
- * Device-scoped General card on the Preferences index — theme, UI language,
- * analytics consent, plus Workspace as a connected nav row into its detail page.
+ * Device-scoped General card on the Preferences index — theme, app font size,
+ * UI language, analytics consent, plus Workspace as a connected nav row into
+ * its detail page.
  */
 function GeneralSection({
   workspaceHint,
@@ -158,9 +172,11 @@ function GeneralSection({
   backgroundLocation?: Location
 }) {
   const { mode, setMode } = useThemeMode()
+  const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
   const { enabled, setEnabled } = useAnalyticsConsent()
   const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
+  const fontSizeItems = FONT_SIZE_SCALES.map((id) => ({ value: id, label: t(FONT_SIZE_LABEL_KEYS[id]) }))
 
   return (
     <SettingsGroup label={t("common.general")}>
@@ -189,6 +205,36 @@ function GeneralSection({
                 {THEME_OPTIONS.map(({ id, labelKey }) => (
                   <SelectItem key={id} value={id}>
                     {t(labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label={t("onboarding.preferences.fontSize.groupLabel")}
+        description={t("onboarding.preferences.fontSize.rowDescription")}
+        control={
+          <Select
+            items={fontSizeItems}
+            value={fontSizeScale}
+            onValueChange={(value) => {
+              if (isFontSizeScale(value)) setFontSizeScale(value)
+            }}
+          >
+            <SelectTrigger
+              id="app-font-size"
+              aria-label={t("onboarding.preferences.fontSize.groupLabel")}
+              className="w-44 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {FONT_SIZE_SCALES.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {t(FONT_SIZE_LABEL_KEYS[id])}
                   </SelectItem>
                 ))}
               </SelectGroup>

@@ -186,8 +186,19 @@ export const workspace = defineNamespace({
 
     // -- AiSetupDialog --
     "workspace.aiSetup.title": "Set up AI",
-    "workspace.aiSetup.description": "Choose a provider to enable translation suggestions.",
+    "workspace.aiSetup.description":
+      "Choose once how this project drafts. You can change it later in settings.",
     "workspace.aiSetup.fullSettingsLink": "Full settings →",
+    "workspace.aiSetup.frontierDescriptionSignedIn":
+      "Aquilla's hosted model with your {username} login. Billed as Aquilla usage.",
+    "workspace.aiSetup.projectKeyLabel": "This project's API key",
+    "workspace.aiSetup.projectKeyDescription":
+      "Your OpenRouter or compatible key for this project on this device. Not shared with teammates, and not used on other projects.",
+    "workspace.aiSetup.overrideDescription":
+      "Use the endpoint already saved in Preferences ({endpoint}). Default for this browser; this project's API key beats it.",
+    "workspace.aiSetup.overrideMissingError": "No personal override is saved in Preferences.",
+    "workspace.aiSetup.overrideNeedsKey":
+      "That override still needs an API key. Add it in Preferences, or choose this project's API key.",
 
     // -- ApiKeyField --
     "workspace.apiKeyField.saveAcrossProjects": "Save across my projects (this browser)",
@@ -979,7 +990,10 @@ export const workspace = defineNamespace({
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.description": {
-        description: "Subtitle under workspace.aiSetup.title, explaining what setting up a provider enables.",
+        description:
+          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "project API key, or a personal override; the dialog does not return " +
+          "after that choice.",
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.fullSettingsLink": {
@@ -989,6 +1003,45 @@ export const workspace = defineNamespace({
           "Keep the trailing arrow glyph (→) or your language's equivalent " +
           "'go to' convention.",
         screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.frontierDescriptionSignedIn": {
+        description:
+          "Body of the Frontier option when the user is signed in. Names the " +
+          "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
+        placeholders: {
+          username: "Signed-in account username.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyLabel": {
+        description:
+          "Title of the per-project bring-your-own-key option. Contrast with " +
+          "the personal override (Preferences, all projects) and Frontier " +
+          "(hosted). Short, no period.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyDescription": {
+        description:
+          "Body of the project API-key option. The key is the user's, but it " +
+          "is stored on this project on this device — not a teammate-synced " +
+          "setting and not the device-wide personal override.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideDescription": {
+        description:
+          "Body of the personal-override option, naming the saved endpoint " +
+          "and that it is the browser default until this project has its own key.",
+        placeholders: {
+          endpoint: "The OpenAI-compatible base URL already saved in Preferences.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideMissingError": {
+        description: "Error if Continue is pressed on override but none is stored.",
+      },
+      "workspace.aiSetup.overrideNeedsKey": {
+        description:
+          "Error when the saved personal override is a hosted endpoint with no key.",
       },
 
       "workspace.apiKeyField.saveAcrossProjects": {

@@ -114,6 +114,44 @@ accessLinks.post("/", authMiddleware, zValidator("json", createSchema), async (c
     return c.json({ error: "target user not found" }, 404)
   }
 
+  // [Pen test] Authorization & access control (2026-09-08): redemption below
+  // mints a full, unscoped login session for the bound account — not merely
+  // project access. Until now `userId` was trusted at face value, so any
+  // project_lead+ caller (trivially every user, via their own personal
+  // project) could target an arbitrary numeric userId platform-wide and
+  // immediately redeem a real login as that account: full cross-tenant
+  // account takeover, IDOR on `userId`. This route's own design comment says
+  // a link binds a "pre-provisioned" account — enforce that: the target must
+  // not already have a footprint outside this project/org. A genuinely fresh
+  // translator account (the intended flow) always clears this; an
+  // established account with memberships elsewhere never does.
+  const projectOrg = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = projectOrg?.org_id ?? null
+  const foreignFootprint =
+    orgId === null
+      ? await c.env.AQUILLA_PG.prepare(
+          `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+           UNION ALL
+           SELECT 1 FROM org_members WHERE user_id = ?`,
+        )
+          .bind(userId, projectId, userId)
+          .first()
+      : await c.env.AQUILLA_PG.prepare(
+          `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+           UNION ALL
+           SELECT 1 FROM org_members WHERE user_id = ? AND org_id != ?`,
+        )
+          .bind(userId, projectId, userId, orgId)
+          .first()
+  if (foreignFootprint) {
+    return c.json(
+      { error: "target user already has access elsewhere on the platform" },
+      403,
+    )
+  }
+
   const grantedRole = clampLinkRole(roleLevel ?? ROLE.CONTRIBUTOR)
 
   // Ensure the bound account can actually read/write the project on arrival:

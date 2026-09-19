@@ -475,7 +475,7 @@ export function normalizeTranslatableStrings(
   })
   const units: NormalizedImportUnit[] = unitsWithoutMilestones.map((unit, index) => ({
     ...unit,
-    milestone: milestones[index]!,
+    milestone: milestones[index],
   }))
 
   return {

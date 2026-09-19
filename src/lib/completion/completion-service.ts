@@ -2,69 +2,38 @@ import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
-import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
 import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+// AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
+// API's effective-prompt preview (sync-worker) can call the SAME builders
+// instead of re-deriving them server-side. This module keeps everything that
+// needs the browser (Vite env, storage-backed keys, i18n, fetch) and re-exports
+// the core so existing importers are unaffected.
+import {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  selectApprovedExamples,
+  type ChatMessage,
+  type ValidatedPair,
+} from "./prompt-build"
+
+export {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  selectApprovedExamples,
+}
+export type { ChatMessage, PromptRule, ValidatedPair } from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
 // ---------------------------------------------------------------------------
-
-/**
- * A validated source→target pair surfaced from the project's cell store.
- * Used as few-shot examples that capture this team's terminology decisions.
- */
-export interface ValidatedPair {
-  cellId?: string
-  source: string
-  target: string
-}
-
-/**
- * Research-backed default for Luna: keep the global approved-example pool
- * small enough to stay focused, while leaving room for local discourse
- * context. This is a TOTAL prompt budget, not a per-retriever allowance.
- */
-export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
-
-function normalizedExampleSource(source: string): string {
-  return source.trim().replace(/\s+/g, " ").toLowerCase()
-}
-
-/**
- * Merge canonical retrieval with the local approved-cell fallback into one
- * bounded prompt pool. Retrieved examples win; local cells only fill unused
- * slots. Examples already present in the live request or immediate discourse
- * window are excluded, and source text is preserved in full.
- */
-export function selectApprovedExamples(
-  retrieved: ValidatedPair[],
-  fallback: ValidatedPair[],
-  limit: number,
-  excludedContext: { source: string }[] = [],
-): ValidatedPair[] {
-  if (limit <= 0) return []
-
-  const excludedSources = new Set(
-    excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
-  )
-  const seenSources = new Set<string>()
-  const seenCellIds = new Set<string>()
-  const selected: ValidatedPair[] = []
-
-  for (const example of [...retrieved, ...fallback]) {
-    if (selected.length >= limit) break
-    const sourceKey = normalizedExampleSource(example.source)
-    if (!sourceKey || !example.target.trim() || excludedSources.has(sourceKey)) continue
-    if (seenSources.has(sourceKey) || (example.cellId && seenCellIds.has(example.cellId))) continue
-
-    selected.push(example)
-    seenSources.add(sourceKey)
-    if (example.cellId) seenCellIds.add(example.cellId)
-  }
-
-  return selected
-}
 
 /**
  * Extract validated source→target pairs from a snapshot of the project's
@@ -118,63 +87,6 @@ export function collectValidatedPairs(
   }))
 }
 
-/**
- * Render active project rules as a concise terminology/guidance block that
- * can be injected into a system prompt. Only `source-requires-target` rules
- * are rendered as explicit "if you see X → use Y" guidance; other check
- * types become a simple "avoid: X" instruction. Disabled rules are skipped.
- *
- * Returns an empty string when there are no active, injectable rules.
- */
-export function buildRulesBlock(rules: TranslationRule[]): string {
-  const active = rules.filter((r) => r.enabled)
-  if (!active.length) return ""
-
-  const lines: string[] = []
-  for (const rule of active) {
-    const { check } = rule
-    if (check.type === "source-requires-target") {
-      lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
-    } else if (check.type === "target-forbids") {
-      lines.push(`- Do NOT use "${check.targetPattern}" in the translation.`)
-    } else if (check.type === "source-target-match") {
-      lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
-    }
-    // builtin checks are algorithmic; no useful prompt injection
-  }
-
-  if (!lines.length) return ""
-  return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
-}
-
-/**
- * Render the brief's L1 summary as a labeled block for the system prompt.
- * Empty/blank input → "" (caller skips injection). The brief states the
- * project's purpose, audience, register, and constraints; it sits ABOVE the
- * mechanical rules block so the model reads intent before specifics.
- */
-export function buildBriefBlock(summary: string | undefined | null): string {
-  const s = (summary ?? "").trim()
-  if (!s) return ""
-  return "Translation brief (the project's purpose and standards — follow it):\n" + s
-}
-
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
-  "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
-  "To produce the translation, follow these steps:\n" +
-  "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
-  "2. Complete the translation of the given source line or passage.\n" +
-  "3. Ensure your translation is consistent with the existing partial translation and surrounding context.\n" +
-  "4. Pay careful attention to the provided reference data — match its terminology, register, and conventions as closely as possible.\n" +
-  "5. Translate only into {targetLanguage}.\n" +
-  "6. When unsure, err on the side of literalness and stay consistent with the examples.\n" +
-  "7. Preserve the line breaks and any inline formatting present in the source.\n\n" +
-  "Output rules (strictly enforced):\n" +
-  "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
-  "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
-
 export const DEFAULT_COMPLETION_MAX_TOKENS = 16384
 
 // Former defaults (512 pre-2026-07-29, then 4096). Saving any project setting
@@ -206,7 +118,30 @@ const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://api.aquilla.app/chat"}/api/v1/chat/completions`
 
-interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+/** Direct OpenRouter base used when hosted Frontier has no server key and the
+ *  user has supplied their own (BYOK). Browser → OpenRouter; no Aquilla bill. */
+export const OPENROUTER_BYOK_ENDPOINT = "https://openrouter.ai/api/v1"
+
+export function isHostedOpenRouterUnconfigured(status: number, body: string): boolean {
+  if (status !== 500 && status !== 503) return false
+  const lowered = body.toLowerCase()
+  return (
+    lowered.includes("openrouter_api_key is not configured") ||
+    lowered.includes("openrouter_not_configured")
+  )
+}
+
+function isFrontierChatProxy(endpoint: string): boolean {
+  const ep = endpoint.trim()
+  if (!ep || ep === FRONTIER_CHAT_URL) return true
+  return /aquilla\.app\/chat/i.test(ep)
+}
+
+function byokEndpointForFrontierFallback(settings: CompletionSettings): string {
+  const ep = (settings.endpoint ?? "").trim()
+  if (!ep || isFrontierChatProxy(ep)) return OPENROUTER_BYOK_ENDPOINT
+  return ep
+}
 
 /**
  * The project id of the project currently being edited, derived from the SPA
@@ -240,85 +175,73 @@ export function resolveProvider(settings: CompletionSettings): CompletionProvide
   return (settings.endpoint ?? "").trim() ? "custom" : "frontier"
 }
 
-export function buildPrompt(options: {
-  sourceLanguage: string; targetLanguage: string; systemPrompt: string
-  sourceText: string; examples: { source: string; target: string }[]
-  /** Active project rules — injected as a "must follow" block in the system prompt. */
-  rules?: TranslationRule[]
-  /** Pre-filtered validated pairs from the project — prepended to examples. */
-  validatedPairs?: ValidatedPair[]
-  /** How to render few-shot examples. Default "source-and-target". */
-  exampleFormat?: "source-and-target" | "target-only"
-  /** The project brief's L1 summary — injected before the rules block. */
-  briefSummary?: string
-  /** Committed target of the immediately preceding cells (document order) — the
-   *  discourse window. Rendered last (closest to the live source) because it is
-   *  real continuity, not a retrieved example. Left-context is the TARGET, not the
-   *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
-  /** Extra task instruction appended to the system prompt after the rules
-   *  block. Must be placeholder-free — it is appended AFTER the
-   *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
-   *  output contract (buildFootnoteInstruction); instructions must live here,
-   *  never inside `sourceText`, where they contradict the base prompt's
-   *  "translate the final source line only" rule. */
-  systemAddendum?: string
-  /** Labelled context block rendered in the user message after
-   *  precedingContext and immediately BEFORE the final `Source:` line — never
-   *  inside it. Used for the source-footnote listing. */
-  preSourceBlock?: string
-}): ChatMessage[] {
-  let sys = options.systemPrompt
-    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
-    .replace(/\{targetLanguage\}/g, options.targetLanguage)
+/** Hosted OpenAI-compatible APIs that refuse unauthenticated chat. Local /
+ *  self-hosted endpoints do not need a key. */
+export function customProviderNeedsKey(endpoint: string): boolean {
+  const e = endpoint.trim().toLowerCase()
+  if (!e) return false
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(e)) return false
+  return /openrouter\.ai|openai\.com|groq\.com|together\.xyz|mistral\.ai|deepseek\.com/.test(e)
+}
 
-  const briefBlock = buildBriefBlock(options.briefSummary)
-  if (briefBlock) sys = sys + "\n\n" + briefBlock
+/** True when this project has its own custom endpoint (BYOK / self-hosted). */
+export function projectUsesOwnProvider(settings: CompletionSettings): boolean {
+  if (resolveProvider(settings) !== "custom") return false
+  const endpoint = (settings.endpoint ?? "").trim()
+  return Boolean(endpoint) && endpoint !== FRONTIER_CHAT_URL
+}
 
-  // Inject rules block after the base system prompt so it is always visible.
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
-    if (block) sys = sys + "\n\n" + block
+/**
+ * Drafting target for a request.
+ *
+ * More specific wins: this project's custom provider beats the device-wide
+ * personal override. The override is only the default for projects still on
+ * Frontier (no project key of their own).
+ */
+export function resolveEffectiveCompletionSettings(
+  settings: CompletionSettings,
+  override?: UserProviderOverride | null,
+): CompletionSettings {
+  if (projectUsesOwnProvider(settings) || !override?.endpoint?.trim()) return settings
+  return {
+    ...settings,
+    provider: "custom",
+    endpoint: override.endpoint,
+    model: override.model || settings.model,
+    apiKey: override.apiKey,
   }
+}
 
-  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
-
-  const targetOnly = options.exampleFormat === "target-only"
-
-  // Validated pairs lead the few-shot examples; search-retrieved examples follow.
-  // Drop incomplete pairs (empty source or target): the branching-search corpus
-  // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
-  // projects still retrieve neighbors, but an example with an empty target
-  // teaches the model nothing and leaks a blank "Translation:" into the prompt.
-  // Mirrors the reference impl (codex-editor shared.ts fetchFewShotExamples).
-  // In target-only mode we still require a non-empty target; source is omitted.
-  const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
-    .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
-
-  // In target-only mode, append a note so the model understands what the
-  // examples represent (reference translations, not source→target alignments).
-  if (targetOnly) {
-    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+/**
+ * Whether the sparkle / draft path may run. A personal override or a saved
+ * Custom endpoint is enough — do not also require a model (connecting to
+ * OpenRouter lists models; picking one is optional until the request fires)
+ * and never send the user back to the Set up AI modal.
+ */
+export function isCompletionConfigured(
+  settings: CompletionSettings,
+  sessionJwt: string | null | undefined,
+  override?: UserProviderOverride | null,
+): boolean {
+  const resolved = resolveEffectiveCompletionSettings(settings, override)
+  const provider = resolveProvider(resolved)
+  if (provider === "frontier") return Boolean(sessionJwt)
+  const endpoint = (resolved.endpoint ?? "").trim()
+  if (!endpoint) return false
+  if (customProviderNeedsKey(endpoint)) {
+    return Boolean(resolveApiKey("completion", resolved.apiKey))
   }
+  return true
+}
 
-  let user = ""
-  if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
-  } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
-  }
-  // Immediately-preceding committed context (discourse window): render after the
-  // few-shot examples and just before the live source so it sits closest to what
-  // the model is about to translate. Skip blank pairs. (D4)
-  for (const ctx of options.precedingContext ?? []) {
-    if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
-    }
-  }
-  if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
-
-  return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
+/**
+ * The sparkle Set up AI dialog is a one-time chooser (Frontier / project key /
+ * personal override). After they pick, this is false for that project.
+ * A personal override does not skip the prompt — it is only the default
+ * selection when the chooser opens.
+ */
+export function shouldPromptAiSetup(aiProviderChosen: boolean | undefined): boolean {
+  return aiProviderChosen !== true
 }
 
 // A segmented prompt preserves passage context (pronoun antecedents, tense
@@ -649,19 +572,10 @@ export async function complete(options: CompleteOptions): Promise<string> {
     return text
   }
 
-  // Personal per-device override (set in user Settings) takes precedence over
-  // the project's completionSettings. This is the "advanced" path: the user
-  // wants their own endpoint/key for everything they translate on this device.
-  const override = getUserProviderOverride()
-  const effectiveSettings: CompletionSettings = override
-    ? {
-        ...options.settings,
-        provider: "custom",
-        endpoint: override.endpoint,
-        model: override.model || options.settings.model,
-        apiKey: override.apiKey,
-      }
-    : options.settings
+  const effectiveSettings = resolveEffectiveCompletionSettings(
+    options.settings,
+    getUserProviderOverride(),
+  )
   const provider = resolveProvider(effectiveSettings)
   const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
@@ -700,6 +614,24 @@ export async function complete(options: CompleteOptions): Promise<string> {
       // Frontier returns 402 when subscription/credits are exhausted; surface message.
       if (provider === "frontier" && res.status === 402) {
         throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
+      }
+      // AQU-1158: hosted drafting has no OPENROUTER_API_KEY (typical on
+      // api.dev). If the user pasted their own completion key, talk to
+      // OpenRouter from the browser — that request never hits our chat
+      // proxy, so it is not billed as Aquilla usage.
+      if (provider === "frontier" && isHostedOpenRouterUnconfigured(res.status, text)) {
+        const byokKey = resolveApiKey("completion", effectiveSettings.apiKey)
+        if (byokKey) {
+          return complete({
+            ...options,
+            settings: {
+              ...effectiveSettings,
+              provider: "custom",
+              endpoint: byokEndpointForFrontierFallback(effectiveSettings),
+              apiKey: byokKey,
+            },
+          })
+        }
       }
       throw new Error(t("rules.completion.completionFailed", { status: res.status, text }))
     }

@@ -1368,3 +1368,59 @@ describe("AQU-1160: chain-order cache", () => {
     expect(body.maxServerSeq).toBeNull()
   })
 })
+
+// The actual HTTP producer feeds the SPA's streaming consumer, not a synthetic
+// page fixture: this pins the contract that a visible row can be edited safely.
+describe("AQU-1328 complete source/target row pages", () => {
+  it("keeps all lanes together at cold and cached boundaries, with empty and target-only rows", async () => {
+    const { streamFileCells } = await import("../../../src/lib/sync/cells-read")
+    const db = await makeTestDb({ cells: [
+      makeCell({ cell_id: "a", side: "source", anchor_cell_id: null, event_id: "s-a", value: "Source A" }),
+      makeCell({ cell_id: "b", side: "source", anchor_cell_id: "a", event_id: "s-b", value: "Source B" }),
+      makeCell({ cell_id: "c", side: "source", anchor_cell_id: "b", event_id: "s-c", value: "Source C" }),
+      makeCell({ cell_id: "a", anchor_cell_id: null, event_id: "t-a", value: "Target A" }),
+      makeCell({ cell_id: "a", target_lang: "es", anchor_cell_id: null, event_id: "es-a", value: "Destino A" }),
+      makeCell({ cell_id: "c", anchor_cell_id: "a", event_id: "t-c", value: "Target C" }),
+      makeCell({ cell_id: "c", target_lang: "es", anchor_cell_id: "a", event_id: "es-c", value: "Destino C" }),
+      makeCell({ cell_id: "orphan", anchor_cell_id: "c", event_id: "t-o", value: "Target only" }),
+    ] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = async (url: string) => (await handleCellsReadRequest(
+      new Request(url, { headers: { Authorization: `Bearer ${token}` } }), envWith(db.db),
+    ))!
+    try {
+      // Prime the legacy ordering: paired pages must use a separate cache key.
+      const legacy = await request("https://w/api/v1/projects/proj-a/files/file-x/cells?limit=2")
+      expect((await legacy.json() as { cells: { cellId: string }[] }).cells.map(r => r.cellId)).toEqual(["a", "b"])
+      vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+        const url = new URL(input)
+        expect(url.searchParams.get("paired")).toBe("1")
+        url.searchParams.set("limit", "2") // Cut directly through a multi-lane row.
+        return request(url.toString())
+      }))
+      const pages: Array<Array<{ cellId: string; side: string; value: string }>> = []
+      await streamFileCells("proj-a", "file-x", token, (rows) => { pages.push(rows) }, undefined, undefined, undefined, true)
+      expect(pages.map(rows => rows.map(r => [r.cellId, r.side, r.value]))).toEqual([
+        [["a", "source", "Source A"], ["a", "target", "Target A"], ["a", "target", "Destino A"]],
+        [["b", "source", "Source B"], ["c", "source", "Source C"], ["c", "target", "Target C"], ["c", "target", "Destino C"]],
+        [["orphan", "target", "Target only"]],
+      ])
+      // An offset shifted inside a group must re-deliver the complete group,
+      // on both a cache hit and the cold fallback.
+      const shifted = `https://w/api/v1/projects/proj-a/files/file-x/cells?paired=1&limit=1&cursor=${encodeURIComponent(btoa(JSON.stringify({ offset: 1 })))}`
+      for (const cold of [false, true]) {
+        if (cold) {
+          const { resetChainCacheForTests } = await import("../events/cells-read-route")
+          resetChainCacheForTests()
+        }
+        const response = await request(shifted)
+        const body = await response.json() as { cells: { cellId: string }[]; completeRows: boolean }
+        expect(body.completeRows).toBe(true)
+        expect(body.cells.map(r => r.cellId)).toEqual(["a", "a", "a"])
+      }
+    } finally {
+      vi.unstubAllGlobals()
+      await db.close()
+    }
+  })
+})

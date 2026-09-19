@@ -399,6 +399,66 @@ describe("flushOutboxBatch", () => {
     expect(pending.map((r) => r.id).sort()).toEqual(["e2"])
   })
 
+  // -- AQU-1068: a 403 has to REACH the caller, not just be quarantined --
+
+  it("AQU-1068: calls onForbidden for a 403, with the kind read back off the batch", async () => {
+    // The cell-structure gate answers 403 and NOTHING ELSE, while `onRejected`
+    // documents itself as deliberately skipping that class. An optimistic
+    // insert or removal carries a freshness floor, so no correcting fetch can
+    // undo it — without this callback the caller can never learn to roll back,
+    // and the row stays wrong until the tab is closed.
+    //
+    // The reason string below is the live one. It was the tier's refusal until
+    // 2026-09-09; the tier is no longer checked at the perimeter, so the 403
+    // this path actually sees is the maintainer rule on removing an imported
+    // cell (sync-worker authorize.ts).
+    // The kind is what the caller reads back to decide whether to roll back,
+    // so it has to survive the round trip. `makeEvent` is typed to the commit
+    // kind; the cast keeps this leg honest without widening the helper.
+    await enqueueOutboxEvent({
+      ...makeEvent("e1", "f1"),
+      kind: "source.cell.create",
+    } as unknown as Parameters<typeof enqueueOutboxEvent>[0])
+    const onForbidden = vi.fn()
+    const onRejected = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "removing an imported cell requires maintainer" }],
+      }),
+    )
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+      onRejected,
+    })
+
+    expect(onForbidden).toHaveBeenCalledTimes(1)
+    expect(onForbidden.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        id: "e1",
+        kind: "source.cell.create",
+        status: 403,
+        reason: "removing an imported cell requires maintainer",
+      }),
+    ])
+    // The existing callback still does NOT see it — that contract is unchanged.
+    expect(onRejected).not.toHaveBeenCalled()
+  })
+
+  it("AQU-1068: leaves onForbidden alone when nothing was forbidden", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const onForbidden = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+    expect(onForbidden).not.toHaveBeenCalled()
+  })
+
   // -- AQU-633: a 403-refused event is quarantined with its reason preserved --
 
   it("AQU-633: quarantines a 403-refused event preserving the server reason (for the banner)", async () => {

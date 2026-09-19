@@ -47,7 +47,7 @@
 > rather than fixed, because three product surfaces deliberately re-display a
 > live invite token and hashing them is a product decision, not a port of
 > OPS-20's migration).
-> `docs/OPSEC-REVIEW-2026-09-03.md` is the most recent pass — the fourth on
+> `docs/OPSEC-REVIEW-2026-09-03.md` covers the fourth pass on
 > API security & data exposure. It adds OPS-27: the first-party
 > `/api/v1/chat/completions`, `/api/v1/ai/agent/run`, and `/api/v1/voice/tts`
 > proxies had no rate limiting at all, and every spend guard on them
@@ -56,6 +56,55 @@
 > each route; whether to ever flip the enforce flags is flagged as a separate
 > product decision, not auto-changed. OPS-28 closes two routes that echoed
 > raw database error text to the caller.
+>
+> `docs/OPSEC-REVIEW-2026-09-14.md` covers the first pass on **third-party data
+> egress from the browser** rather than on what an attacker
+> can pull out of our servers. OPS-29: the five routes that carry a bearer
+> credential in the URL (`/join/:token`, `/join-org/:token`, `/link/:token`,
+> `?token=` on `/reset-password` and `/verify-email`) had that credential
+> exported verbatim to PostHog on every event — `$current_url`/`$pathname`, the
+> persisted `$initial_*` person properties, and the session replay's own rrweb
+> `href` — because input/text masking covers rendered DOM text and a URL is
+> neither; fixed with a `before_send` redaction hook plus a drift guard. OPS-30:
+> four parsers quoted the imported document's own text into the thrown message,
+> which the import surfaces send on as `IMPORT_FAILED.error_message` and
+> `captureException`. That pass also flags — without changing — that analytics
+> consent defaults to *enabled* before any choice is recorded, which is exactly
+> the `/link/:token` fresh-browser case.
+> `docs/OPSEC-REVIEW-2026-09-07.md` is dated before that one but landed after
+> it. A parallel session ran the broad auth/session sweep the same morning
+> (PR #569), so this one is deliberately narrow: it adds OPS-31 (0080's
+> plaintext-token compatibility arm outlived its own 24h/7d rollover window by
+> two weeks — both `token` columns now dropped by migration 0087, with the
+> hash-only guarantee asserted structurally; and the reset tests, which had
+> drifted onto that compatibility arm, had left the *production* digest path
+> with no end-to-end coverage at all for those two weeks) and OPS-32 (an
+> adversarial read of #569's own change: its per-source-IP PAT throttle is a
+> hard lockout that rejects valid tokens from a shared egress IP, and by its own
+> DB-load rationale likely costs more round trips than it saves — reported to
+> that PR, not patched here).
+> `docs/OPSEC-REVIEW-2026-09-17.md` covers the sixth pass on API security &
+> data exposure, reviewing the large batch of Agent API surface (cell comments,
+> Living Memory reads, membership/changeset/cell commands) that landed since
+> the 09-10 pass. OPS-33: the cell-comments read route (AQU-1233) keyed
+> identity solely off the credential's own `pii` flag and never consulted a
+> project's `agentAuthorship: 'none'` opt-out — the opposite of `pii.ts`'s
+> documented "project setting wins over the token flag" invariant — so an
+> opted-out project's comment authors still leaked, pseudonymously by default
+> or as real usernames on a `pii` credential. OPS-34: the Living Memory read
+> route (AQU-1229) ran its own independent pseudonymizer that honored neither
+> the `'none'` opt-out nor a `pii: true` credential. Both routes now delegate
+> to `pii.ts`'s shared `resolveAuthorshipPolicy`/`mapAuthor` instead of
+> reimplementing identity scrubbing locally.
+>
+> **Numbering note:** OPS-n is assigned at write time, and three passes have now
+> run concurrently on separate branches, so the numbers are *not* in date order.
+> The 09-07 pass originally claimed OPS-27/OPS-28, was renumbered to
+> OPS-29/OPS-30 when 09-03 merged first with those numbers, and renumbered again
+> to **OPS-31/OPS-32** when 09-14 merged ahead of it with OPS-29/OPS-30. Merge
+> order wins; no finding has been lost, merged, or given someone else's number.
+> The real fix is scheduling — concurrent OPSEC passes should not be racing for
+> the same counter — not more renumbering.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -84,9 +133,9 @@ Ranked by what it would cost us if it leaked, not by volume.
 |---|---|---|---|
 | D1 | **Signing keys** — `SECRET_KEY` (access tokens), `SYNC_SECRET_KEY` (sync tokens, and a plaintext admin bearer) | Worker secrets; `.dev.vars` locally | Holding either mints credentials for *any* user or project. Root of the whole trust tree. |
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
-| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. |
+| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and, checked on 2026-08-31, they are the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
@@ -290,6 +339,14 @@ generic invite unfurl copy so no org/project/inviter name reaches link scrapers
 (AQU-471), and V2 now pins `Referrer-Policy`. The residual risk is a token
 forwarded in a screenshot or a pasted URL, which is a user-behaviour problem, not
 a code one. See §5.
+
+**Update (2026-09-14, OPS-29):** those mitigations did not cover our *own*
+outbound analytics — PostHog exported these URLs verbatim in `$current_url`,
+in the persisted `$initial_*` person properties, and in the session replay's
+rrweb `href`. Now redacted at the event boundary
+(`src/lib/analytics-redaction.ts`); see `docs/OPSEC-REVIEW-2026-09-14.md`. That
+pass also extends this row to the three token-bearing routes that post-date it:
+`/link/:token`, `/reset-password?token=` and `/verify-email?token=`.
 
 ---
 

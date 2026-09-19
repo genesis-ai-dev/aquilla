@@ -386,8 +386,25 @@ function chainCacheKey(
   etag: string,
   sideFilter: "source" | "target" | null,
   laneFilter: string | null,
+  paired: boolean,
 ): string {
-  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""}`
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""} ${paired}`
+}
+
+/** Keep every side/lane of a cell together, even across a page boundary. */
+function completePageStart<T>(items: T[], offset: number, paired: boolean, id: (item: T) => string): number {
+  // A write can shift an offset into the middle of a group. Re-deliver that
+  // whole group rather than certifying a partial row as safe to edit.
+  while (paired && offset > 0 && offset < items.length && id(items[offset - 1]) === id(items[offset])) offset--
+  return offset
+}
+
+function completePageEnd<T>(items: T[], offset: number, limit: number, paired: boolean, id: (item: T) => string): number {
+  let end = Math.min(offset + limit, items.length)
+  if (paired) {
+    while (end > offset && end < items.length && id(items[end - 1]) === id(items[end])) end++
+  }
+  return end
 }
 
 function chainCacheDelete(key: string): void {
@@ -591,6 +608,8 @@ export async function handleCellsReadRequest(
   }
 
   const cursor = decodeCursor(url.searchParams.get("cursor"))
+  // Opt-in row paging preserves the legacy side-ordered API for other readers.
+  const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
   // AQU-538: optional lane filter — target rows only; source rows are always
   // included (the shared-source invariant). Absent = all lanes (unchanged).
@@ -776,12 +795,12 @@ export async function handleCellsReadRequest(
   // caller's request order) and only when the watermark/ETag was computed
   // (i.e. cellIdsFilter is empty, same gate as the delta branch above).
   const useChainCache = etag !== null && (!cellIdsFilter || cellIdsFilter.length === 0)
-  const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter) : null
+  const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired) : null
   const cached = cacheKey ? chainCacheGet(cacheKey) : null
 
   if (cached) {
-    const offset = cursor?.offset ?? 0
-    const pageItems = cached.items.slice(offset, offset + limit)
+    const offset = completePageStart(cached.items, cursor?.offset ?? 0, paired, (r) => r.cellId)
+    const pageItems = cached.items.slice(offset, completePageEnd(cached.items, offset, limit, paired, (r) => r.cellId))
     const nextOffset = offset + pageItems.length
     const hasMore = nextOffset < cached.items.length
 
@@ -825,6 +844,7 @@ export async function handleCellsReadRequest(
         total: cached.items.length,
         maxServerSeq,
         projectEpoch,
+        ...(paired ? { completeRows: true } : {}),
       },
       { headers: cacheHeaders(etag!) },
     )
@@ -924,6 +944,19 @@ export async function handleCellsReadRequest(
     ordered = walkAnchorChain(allRows)
   }
 
+  if (paired) {
+    // First occurrence follows the source chain, then target-only chains.
+    // Group all target lanes with their source before taking a page: absence
+    // of a target now means genuinely untranslated, never "on a later page".
+    const byCell = new Map<string, CellRowRaw[]>()
+    for (const row of ordered) {
+      const group = byCell.get(row.cell_id)
+      if (group) group.push(row)
+      else byCell.set(row.cell_id, [row])
+    }
+    ordered = [...byCell.values()].flat()
+  }
+
   if (cacheKey) {
     chainCacheSet(cacheKey, {
       items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
@@ -931,8 +964,8 @@ export async function handleCellsReadRequest(
     })
   }
 
-  const offset = cursor?.offset ?? 0
-  const slice = ordered.slice(offset, offset + limit)
+  const offset = completePageStart(ordered, cursor?.offset ?? 0, paired, (r) => r.cell_id)
+  const slice = ordered.slice(offset, completePageEnd(ordered, offset, limit, paired, (r) => r.cell_id))
   const nextOffset = offset + slice.length
   const hasMore = nextOffset < ordered.length
 
@@ -941,6 +974,7 @@ export async function handleCellsReadRequest(
       cells: slice.map(mapRow),
       nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
       total: ordered.length,
+      ...(paired ? { completeRows: true } : {}),
       // Null only on the cellIds fast path, which skips the watermark query.
       maxServerSeq,
       // AQU-943: the incarnation this page's cursor belongs to. The client

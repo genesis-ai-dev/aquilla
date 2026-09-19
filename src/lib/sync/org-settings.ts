@@ -31,6 +31,14 @@ export interface OrgWideSettings {
    */
   exportMinRole?: number
   /**
+   * AQU-907: Minimum role level required to use the org-wide Data egress
+   * surface (bulk zip of everything the org has). Default (when absent) =
+   * OWNER (700) — the most restrictive floor, unlike exportMinRole's
+   * MAINTAINER default, because one action here hands out the whole corpus.
+   * OWNER-only on write (permission-policy key).
+   */
+  egressMinRole?: number
+  /**
    * AQU-485: Minimum role level required to see the member roster (list +
    * count) on org and project surfaces. Default (when absent) = MAINTAINER
    * (600) — safe for sensitive teams that don't want to reveal who/how many
@@ -61,6 +69,12 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-1037: Minimum effective project role allowed to assign, reassign, or
+   * unassign file/chapter/target-lane work and route AI changesets. Default
+   * (when absent) = PROJECT_LEAD (500), preserving prior behavior.
+   */
+  assignmentMinRole?: number
+  /**
    * AQU-822: Minimum role level allowed to manage a project's termbase —
    * add, edit, delete, and archive concepts. Default (when absent) =
    * PROJECT_LEAD (500), the level the terminology UI has always shown the
@@ -75,6 +89,20 @@ export interface OrgWideSettings {
    * Same OWNER-only write gate as exportMinRole / rosterViewMinRole.
    */
   termbaseEditMinRole?: number
+  /**
+   * AQU-1086: minimum org/project role allowed to change a project's source
+   * and target language, and its extra target-lane registry (`targetLanes` /
+   * `archivedLanes`). Unset ⇒ MAINTAINER (600), i.e. the behaviour before
+   * this setting existed; an org opts in to project-lead language editing by
+   * lowering it to 500.
+   *
+   * It does NOT widen any other project setting: the server carve-out applies
+   * only to a write whose changed keys are all language keys (auth-worker
+   * project-settings route).
+   *
+   * Same OWNER-only write gate as termbaseEditMinRole / exportMinRole.
+   */
+  languageEditMinRole?: number
   /**
    * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
    * reply. Default (when absent) = COMMENTER (200), the static

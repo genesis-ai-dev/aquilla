@@ -165,15 +165,34 @@ describe("SourceRegionLane", () => {
       expect(onRetime).toHaveBeenCalledWith("a", 15, 17)
     })
 
-    it("a drag stops at the neighbouring cue's edge — cues may touch, never overlap", () => {
+    it("a drag stops where the next cue STARTS — overlapping it is fine, passing it is not", () => {
+      // AQU-1068 item 5 (Sam, 2026-09-09). This wall used to be the next cue's
+      // near edge, on the reasoning that "cues are a transcript: they may touch
+      // but never overlap". A transcript does say two things at once — two
+      // speakers over each other — and the timed exporters already sort by
+      // start time, so the overlap is free. What a cue may not do is BEGIN
+      // after the one following it, which is what would part the clock order
+      // from the anchor chain the text table reads.
       const onRetime = vi.fn()
       renderLane({ retimable: true, onRetime })
       const card = screen.getByTestId("tl-card-a")
       fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
       fireEvent.pointerMove(window, { clientX: 1000 }) // +90s — way past "b"
       fireEvent.pointerUp(window, { clientX: 1000 })
-      // "b" starts at 20; "a" is 2s long, so it parks flush against it.
-      expect(onRetime).toHaveBeenCalledWith("a", 18, 20)
+      // "b" starts at 20, so "a" starts there too and runs straight through it.
+      expect(onRetime).toHaveBeenCalledWith("a", 20, 22)
+    })
+
+    it("a drag back stops where the PREVIOUS cue starts, not where it ends", () => {
+      // The other half of the same rule — a start pulled above the line before
+      // it breaks the order exactly as one pushed past the next line does.
+      const onRetime = vi.fn()
+      renderLane({ retimable: true, onRetime, cells: [cell("a", 10, 12, "First"), cell("b", 20, 22, "Second")] })
+      const card = screen.getByTestId("tl-card-b")
+      fireEvent.pointerDown(card, { clientX: 300, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 0 }) // −30s, way before "a"
+      fireEvent.pointerUp(window, { clientX: 0 })
+      expect(onRetime).toHaveBeenCalledWith("b", 10, 12)
     })
   })
 

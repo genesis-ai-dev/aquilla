@@ -126,7 +126,7 @@ describe("useActiveCellStore (Tauri offline read branch)", () => {
     offlineTestState.isTauri = true
     offlineTestState.ready = false
     streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      const rows = [row("c1", "source", "src"), row("c1", "target", "tgt")].filter((r) => r.side === side)
+      const rows = [row("c1", "source", "src"), row("c1", "target", "tgt")].filter((r) => !side || r.side === side)
       await onPage(rows, true)
     })
 

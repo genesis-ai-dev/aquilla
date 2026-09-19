@@ -30,7 +30,7 @@ import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/fi
 import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import {
@@ -57,6 +57,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -611,7 +612,11 @@ export function ProjectOverview() {
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
-  const canAssign = (project?.syncRole?.level ?? 0) >= 500
+  const canAssign = canOpenAssignUi(
+    project?.syncRole?.level ?? null,
+    orgSettings.allowSelfAssignment,
+    orgSettings.assignmentMinRole,
+  )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
 
@@ -1442,7 +1447,7 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              {project && isFlagEnabled(project, "contextualTranslation") && (
+              {project && isAutopilotVisible(project) && (
                 <ProjectAutopilotPanel
                   key={id}
                   projectId={id}
@@ -1720,6 +1725,9 @@ export function ProjectOverview() {
                         files={project?.files ?? []}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
+                        roleLevel={project?.syncRole?.level ?? 0}
+                        allowSelfAssignment={orgSettings.allowSelfAssignment}
+                        assignmentMinRole={orgSettings.assignmentMinRole}
                         onAssigned={handleAssigned}
                       />
                     </div>

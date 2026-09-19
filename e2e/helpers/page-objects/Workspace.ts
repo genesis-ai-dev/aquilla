@@ -307,12 +307,20 @@ export class Workspace {
     ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
-  /** Hover the first cell until the action rail reveals, then click Translate with AI. */
-  async clickSparkleOnFirstCell(): Promise<void> {
+  /** First-cell sparkle: Translate with AI, or Set up AI before the chooser. */
+  private firstCellSparkle(): { row: Locator; sparkle: Locator } {
     const row = this.page.locator("[data-cell-id]").first()
     const sparkle = row
-      .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
+      .locator(
+        "[data-tooltip*='Translate with AI'] button, [data-tooltip*='Set up AI'] button, " +
+          "button[aria-label*='Translate with AI'], button[aria-label*='Set up AI']",
+      )
       .first()
+    return { row, sparkle }
+  }
+
+  private async revealAndClickSparkle(): Promise<string> {
+    const { row, sparkle } = this.firstCellSparkle()
     await sparkle.scrollIntoViewIfNeeded()
     await row.hover()
     await expect(row.locator('[data-slot="cell-action-rail"]')).toHaveAttribute(
@@ -322,11 +330,59 @@ export class Workspace {
     )
     await expect(sparkle).toBeVisible()
     await expect(sparkle).toBeEnabled({ timeout: 15_000 })
+    const label = (await sparkle.getAttribute("aria-label")) ?? ""
     await row.hover()
     // The unrevealed rail wrapper intercepts Playwright's hit-test even after
     // data-revealed=true if idle-hide races the click. force skips that check;
     // the button is already asserted visible and enabled.
     await sparkle.click({ force: true })
+    return label
+  }
+
+  /** Open the per-project Set up AI chooser from the first cell's sparkle. */
+  async openAiSetupFromFirstCell(): Promise<Locator> {
+    await this.revealAndClickSparkle()
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    return dialog
+  }
+
+  async confirmAiSetup(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await dialog.getByRole("button", { name: /^Continue$/i }).click()
+    await expect(dialog).toBeHidden()
+  }
+
+  /** Hover the first cell until the action rail reveals, then click sparkle.
+   *  If this project still needs the Set up AI chooser, Continue with the
+   *  default selection and click sparkle again to draft. */
+  async clickSparkleOnFirstCell(): Promise<void> {
+    const label = await this.revealAndClickSparkle()
+    if (!label.includes("Set up AI")) return
+    await this.confirmAiSetup()
+    await this.revealAndClickSparkle()
+  }
+
+  /**
+   * AQU-200: the rail keeps only the AI-generate group as direct buttons —
+   * comments, history, record, play, TTS and footnote live behind a single
+   * `⋯`. Reveal the row's rail, open that overflow, and return the named
+   * action. The popup is portalled to the body, so the returned locator is
+   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   */
+  async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    const rail = row.locator('[data-slot="cell-action-rail"]')
+    await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const overflow = rail.locator('[data-slot="cell-action-rail-overflow"]')
+    await expect(overflow).toBeVisible({ timeout: 5_000 })
+    // force for the same reason as the sparkle above: the unrevealed rail
+    // wrapper can still intercept the hit-test if idle-hide races the click.
+    await overflow.click({ force: true })
+    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    await expect(action).toBeVisible({ timeout: 5_000 })
+    return action
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {
@@ -760,9 +816,21 @@ export class Workspace {
 
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
+    await this.replaceCellMeasuringCommit(index, text)
+  }
+
+  /** `replaceCell`, returning the wall-clock milliseconds from the committing
+   * blur to the server's authoritative `/events` acknowledgement.
+   *
+   * Activation and typing are deliberately outside the measurement: the number
+   * the production timing probe (AQU-1024) asserts on is the write round-trip,
+   * not how long Playwright took to focus a cell. */
+  async replaceCellMeasuringCommit(index: number, text: string): Promise<number> {
     const target = await this.activateTargetCell(index)
     await target.fill(text)
+    const startedAt = Date.now()
     await this.commitTargetCellEdit(index, text)
+    return Date.now() - startedAt
   }
 
   async readCell(index: number): Promise<string> {
@@ -961,23 +1029,10 @@ export class Workspace {
     await this.page.locator("aside").click()
   }
 
-  private actionRail(index: number): Locator {
-    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
-  }
-
-  /** Open the per-cell "Edit history" drawer from the row's action rail. The
-   * rail springs out on row hover (data-revealed) — same reveal handshake as
-   * clickSparkleOnFirstCell. */
+  /** Open the per-cell "Edit history" drawer through the action overflow. */
   async openHistoryDrawer(index: number): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
-    const button = row.getByRole("button", { name: "Edit history" }).first()
-    await expect(button).toBeVisible()
-    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
-    // races the click; the button is already asserted visible.
-    await button.click({ force: true })
+    const button = await this.openRowAction(this.cellRow(index), "Edit history")
+    await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }
 

@@ -58,7 +58,12 @@ export const autopilot = defineNamespace({
     // — Discovery setting ———————————————————————————————————————————
     "autopilot.settings.experimentalTitle": "Experimental",
     "autopilot.settings.experimentalDescription":
-      "Early features still in development. These switches stay on this device — they are not shared with collaborators.",
+      "Early features still in development. Autopilot is turned on for the whole project and everyone working on it; any other switch here stays on this device.",
+    "autopilot.settings.autopilotLabel": "Try Autopilot",
+    "autopilot.settings.autopilotDescription":
+      "Turns on Autopilot for this project, for everyone working on it. Until then, nothing about Autopilot appears anywhere. Turning it on does not start work: choose Run Autopilot when you are ready, and suggestions stay in review until you accept them.",
+    "autopilot.settings.autopilotRoleHint":
+      "Only a project lead, maintainer, or owner can try experimental features on this project.",
     "autopilot.settings.controlsLabel": "Show Autopilot controls",
     "autopilot.settings.controlsDescription":
       "Shows Autopilot controls on this device. Turning this on does not start work, and hiding the controls does not stop a run. Choose Run Autopilot when you are ready; suggestions stay in review until you accept them.",
@@ -221,6 +226,27 @@ export const autopilot = defineNamespace({
       other: "Queued · {count} passages remaining",
     }),
     "autopilot.pill.idle": "Idle · no work queued",
+
+    // — Trust gate: parked awaiting input (AQU-1300) ————————————————
+    // The run has budget left over, not work left over. Word these as a
+    // deliberate hand-back ("waiting for you"), never as an error or a stall —
+    // stopping to ask is the feature, and copy that apologises for it teaches
+    // people to switch it off.
+    "autopilot.pill.waitingForYou": "Waiting for you",
+    "autopilot.pill.waitingWithRemaining": plural({
+      one: "Waiting for you · {count} passage left",
+      other: "Waiting for you · {count} passages left",
+    }),
+    "autopilot.pill.announcement.waitingForYou":
+      "Autopilot drafted a passage and is waiting for you. Review it, then continue.",
+    "autopilot.pill.waitingOnDecision":
+      "Waiting on your answer to a question about this passage.",
+    "autopilot.action.continue": "Continue",
+    "autopilot.action.continueHint": "Draft a few more passages, then check back with you",
+    "autopilot.action.translateEverything": "Translate everything",
+    "autopilot.action.translateEverythingHint":
+      "Draft every remaining passage in this file without stopping to ask",
+    "autopilot.error.continueFailed": "Autopilot couldn’t continue. Retry.",
     "autopilot.pill.completeWithAttention":
       "{done}/{total} complete · {failed} need attention",
     "autopilot.pill.announcement.completeWithAttention":
@@ -243,6 +269,12 @@ export const autopilot = defineNamespace({
     "autopilot.steering.sendFailed": "That direction didn't reach the agent. Try again.",
     "autopilot.steering.sending": "Sending direction…",
     "autopilot.steering.send": "Send",
+    "autopilot.steering.commandHint":
+      "Type “stop” or “pause” on its own to control the run instead of directing it.",
+    "autopilot.steering.sendStop": "Stop the run",
+    "autopilot.steering.sendPause": "Pause the run",
+    "autopilot.steering.commandNothingRunning":
+      "Autopilot wasn’t working, so nothing changed.",
     "autopilot.steering.queuedDirections": plural({
       one: "{count} direction queued",
       other: "{count} directions queued",
@@ -358,6 +390,9 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.kind.draftsStaged": "Drafts staged",
     "autopilot.inspector.event.kind.spanOutcome": "Passage outcome",
     "autopilot.inspector.event.kind.steeringQueued": "Steering queued",
+    "autopilot.inspector.event.kind.runCommand": "Asked in chat",
+    "autopilot.inspector.event.runCommandStop": "You asked Autopilot to stop.",
+    "autopilot.inspector.event.runCommandPause": "You asked Autopilot to pause.",
     "autopilot.inspector.event.kind.draftReviewed": "Draft reviewed",
     "autopilot.inspector.event.kind.unknown": "Activity event",
     "autopilot.inspector.event.status.started": "Work started",
@@ -634,6 +669,21 @@ export const autopilot = defineNamespace({
           "Device-local switch label that shows or hides Autopilot controls without starting or stopping server work.",
         screenshot: "project-settings",
       },
+      "autopilot.settings.autopilotLabel": {
+        description:
+          "Project-wide switch label that opts the whole project into the experimental Autopilot feature.",
+        screenshot: "project-settings",
+      },
+      "autopilot.settings.autopilotDescription": {
+        description:
+          "Safety explanation below the project-wide Autopilot opt-in switch: it reveals the feature for everyone on the project but starts no work.",
+        screenshot: "project-settings",
+      },
+      "autopilot.settings.autopilotRoleHint": {
+        description:
+          "Tooltip shown on the disabled Autopilot opt-in switch, naming the roles allowed to change it.",
+        screenshot: "project-settings",
+      },
       "autopilot.settings.controlsDescription": {
         description:
           "Safety explanation below the device-local Autopilot discovery switch in project settings.",
@@ -780,6 +830,10 @@ export const autopilot = defineNamespace({
       "autopilot.pill.queuedRemaining": withPlaceholders(
         "Compact visible editor-pill label for queued passages remaining.",
         { count: "Number of queued passages remaining." },
+      ),
+      "autopilot.pill.waitingWithRemaining": withPlaceholders(
+        "Editor-pill label for a run that paused itself to ask the person whether to keep drafting. It is waiting by design, not stuck.",
+        { count: "Number of passages in this file Autopilot has not drafted yet." },
       ),
       "autopilot.pill.completeWithAttention": withPlaceholders(
         "Editor-pill summary when a run finished some passages and left others needing a person.",

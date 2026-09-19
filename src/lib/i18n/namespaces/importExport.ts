@@ -526,6 +526,30 @@ export const importExport = defineNamespace({
     "importExport.dialog.downloadFile": "Download {fileName}",
     "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
+    // AQU-1068 (rewritten 2026-09-09): shown beside a native round-trip format
+    // when this file has cells somebody added or removed in the app. These
+    // exports put translations back into the client's OWN file, so what happens
+    // to that content differs per format and is worth saying plainly rather
+    // than warning about.
+    //
+    // Its predecessor said added cells could never be included. That is no
+    // longer true for USFM, Word or PowerPoint, and it was never true for the
+    // rendered formats it also reached (csv, tsv, xliff, tmx, md, txt all carry
+    // added lines fine — see exporters/added-lines.test.ts).
+    "importExport.dialog.structuralNoteUsfm":
+      "Content added here is written into the verse it follows, with no new verse number. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNoteDocx":
+      "Content added here becomes a new paragraph after the one it follows. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNotePptx":
+      "Content added here becomes a new paragraph after the one it follows, and a slide may " +
+      "overflow. Content removed here is left out.",
+    "importExport.dialog.structuralNoteUnplaceable":
+      "Cells can\u2019t be added or removed on this kind of file, so this export matches the original.",
+    "importExport.dialog.structuralNoteLegacy":
+      "This file was imported before we recorded where each paragraph came from, so content " +
+      "added or removed here can\u2019t be placed in it.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -556,6 +580,29 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    // — AQU-1148: what the exported file is allowed to contain. The hints say
+    //   exactly what lands in the file, because "approved text" was being
+    //   claimed for output that mixed validated text, unreviewed drafts and
+    //   untranslated source. —
+    "importExport.dialog.contentLegend": "Content",
+    "importExport.dialog.contentModeAriaLabel": "What the exported file contains",
+    "importExport.dialog.contentModeCurrent": "Current translations",
+    "importExport.dialog.contentModeValidatedOnly": "Validated translations only",
+    "importExport.dialog.contentModeCurrentHint":
+      "Every cell's current text — validated, unvalidated draft and AI draft alike. " +
+      "Untranslated cells are filled with the source text, so the file will not show " +
+      "which parts are approved.",
+    "importExport.dialog.contentModeValidatedOnlyHint":
+      "Only cells that meet this project's validation threshold. Everything else is left " +
+      "out — no unreviewed drafts and no source-language filler.",
+    "importExport.dialog.contentModeValidatedOnlyRoundTripHint":
+      "Only cells that meet this project's validation threshold are written into your " +
+      "original document. Anything else keeps the words already in the file you uploaded.",
+    "importExport.dialog.contentModeValidatedCount":
+      plural({
+        one: "{validated} of {count} cell in this file is validated.",
+        other: "{validated} of {count} cells in this file are validated.",
+      }),
     "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
     "importExport.dialog.allChapters": "All chapters",
     "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
@@ -753,6 +800,21 @@ export const importExport = defineNamespace({
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
+    // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
+    "importExport.errors.oversizedCells": plural({
+      one:
+        "Import failed: {count} cell in {fileName} is larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split that section in the source document and import again.",
+      other:
+        "Import failed: {count} cells in {fileName} are larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split those sections in the source document and import again.",
+    }),
+    "importExport.errors.oversizedCellSource": "{label} — source text, {size}",
+    "importExport.errors.oversizedCellTarget": "{label} — translation, {size}",
+    // No inflected noun to agree with the count, so a single form is correct
+    // here rather than a plural() whose English forms would be identical.
+    "importExport.errors.oversizedCellsMore": "and {count} more",
+
     // — Door43 (DCS) sync badge, catalog browser and upstream panel —
     // (importExport.linked.* below is the linked-project upstream-changes
     //  review surface, which is not Door43-specific.)
@@ -881,15 +943,16 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
-      "text is never changed. You'll review every match before anything is " +
-      "saved.",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, or VTT",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or VTT " +
+      "subtitle file. Source text is never changed. You'll review every match " +
+      "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
-      "(.csv/.tsv/.xlsx).",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
+      "(.csv/.tsv/.xlsx), or a WebVTT subtitle file (.vtt).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -922,8 +985,9 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.matchedCount": "{count} matched",
-    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
-      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
+      "order. Check the source text next to each row to confirm alignment " +
+      "before importing.",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
@@ -1313,6 +1377,37 @@ export const importExport = defineNamespace({
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
       },
+      "importExport.dialog.structuralNoteUsfm": {
+        description:
+          "Appended to the USFM format's hint in the Export dialog, when this file has cells " +
+          "somebody added or removed in the app. Says exactly what the export does with them. " +
+          "'The verse it follows' matters: an added cell gets no verse number of its own, so " +
+          "the client's numbering never changes.",
+      },
+      "importExport.dialog.structuralNoteDocx": {
+        description:
+          "The same note for a Word export: an added cell becomes its own paragraph after the " +
+          "one it follows, and a removed cell's paragraph is dropped from the document.",
+      },
+      "importExport.dialog.structuralNotePptx": {
+        description:
+          "The same note for a PowerPoint export, plus the caveat that a text box has a fixed " +
+          "size and does not reflow, so added content can push past the edge of a slide and " +
+          "need the box resizing by hand.",
+      },
+      "importExport.dialog.structuralNoteUnplaceable": {
+        description:
+          "Shown for a format where cells cannot be added or removed at all — InDesign today, " +
+          "whose layout is addressed by position so new or missing paragraphs cannot be " +
+          "expressed. Reassures the reader that the export matches their original.",
+      },
+      "importExport.dialog.structuralNoteLegacy": {
+        description:
+          "Shown for a Word or PowerPoint file imported before we recorded a locator for each " +
+          "paragraph. Those files are matched to the document by POSITION, where inserting or " +
+          "dropping a paragraph would shift every later one onto the wrong text, so added and " +
+          "removed content cannot be carried at all.",
+      },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",
         placeholders: { label: "The native format's own translated label (e.g. 'USFM')." },
@@ -1347,6 +1442,18 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.contentModeAriaLabel": {
+        description:
+          "Accessible name for the content-mode select on the Export dialog — the control that chooses between every current translation and validated translations only (AQU-1148).",
+      },
+      "importExport.dialog.contentModeValidatedCount": {
+        description:
+          "Count shown under the content-mode select once 'Validated translations only' is chosen, so the user knows how much of the file will actually be written. 'Validated' means a cell that has met this project's validation threshold.",
+        placeholders: {
+          validated: "Number of cells in the current file that are validated.",
+          count: "Total number of cells in the current file — the number the plural form agrees with.",
+        },
       },
       "importExport.dialog.chapterFilterAriaLabel": {
         description: "Accessible name for the chapter-scope select on the Export dialog.",
@@ -1579,6 +1686,49 @@ export const importExport = defineNamespace({
       "importExport.errors.sourceUploadTooLarge": {
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.oversizedCells": {
+        description:
+          "Thrown before any upload when one or more parsed cells exceed the server's " +
+          "per-cell text ceiling, so the user learns which sections are too big instead " +
+          "of waiting out a full upload that ends in a raw HTTP 413. The closing " +
+          "sentence is the remedy: break the oversized section up in the original " +
+          "document and re-import.",
+        placeholders: {
+          count: "Number of oversized cells found.",
+          fileName: "Name of the file being imported — not translated.",
+          maxSize: "The per-cell limit, already formatted (e.g. '256 KB') — not translated.",
+          cells:
+            "Pre-joined list of the offending cells, each already rendered by " +
+            "oversizedCellSource / oversizedCellTarget — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellSource": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose SOURCE text is too " +
+          "big. Reads as a label followed by which side is at fault and how large it " +
+          "is; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellTarget": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose pre-filled TRANSLATION " +
+          "is too big (paired imports carry both sides). Same shape as the source " +
+          "variant; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellsMore": {
+        description:
+          "Final entry in the oversized-cell list when more cells are oversized than the " +
+          "message names individually. A fragment appended after the listed ones, so it " +
+          "takes no closing full stop.",
+        placeholders: { count: "How many oversized cells are not listed individually." },
       },
       "importExport.errors.sourceUploadNetworkFailed": {
         description:
@@ -2335,6 +2485,13 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInVtt": {
+        description:
+          "Error shown in red under the drop area when a WebVTT subtitle file was " +
+          "read successfully but contained no cues, so there is nothing to fill in. " +
+          "Single short statement of fact. 'VTT' is the file extension and stays " +
+          "untranslated.",
       },
       "importExport.fileTarget.noVersesInUsfm": {
         description:

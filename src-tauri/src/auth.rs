@@ -47,7 +47,9 @@ fn handle_callback_url(app: &tauri::AppHandle, url_str: &str) {
     }
 }
 
-fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> {
+// Pulled out of `parse_and_store` so the URL/query parsing can be unit
+// tested without a `tauri::AppHandle`.
+fn parse_callback_url(url_str: &str) -> Result<(String, String), String> {
     let url = Url::parse(url_str).map_err(|e| format!("Invalid callback URL: {e}"))?;
 
     let mut token: Option<String> = None;
@@ -64,5 +66,57 @@ fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> 
     let token = token.ok_or_else(|| "Missing 'token' query parameter".to_string())?;
     let refresh = refresh.ok_or_else(|| "Missing 'refresh' query parameter".to_string())?;
 
+    Ok((token, refresh))
+}
+
+fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> {
+    let (token, refresh) = parse_callback_url(url_str)?;
     keychain::store_tokens(app, token, refresh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_callback_url_extracts_token_and_refresh() {
+        let (token, refresh) =
+            parse_callback_url("codex://auth/callback?token=abc123&refresh=def456").unwrap();
+        assert_eq!(token, "abc123");
+        assert_eq!(refresh, "def456");
+    }
+
+    #[test]
+    fn parse_callback_url_decodes_percent_encoded_values() {
+        let (token, _) =
+            parse_callback_url("codex://auth/callback?token=a%2Fb&refresh=r").unwrap();
+        assert_eq!(token, "a/b");
+    }
+
+    #[test]
+    fn parse_callback_url_ignores_unknown_params() {
+        let (token, refresh) = parse_callback_url(
+            "codex://auth/callback?token=abc&refresh=def&extra=ignored",
+        )
+        .unwrap();
+        assert_eq!(token, "abc");
+        assert_eq!(refresh, "def");
+    }
+
+    #[test]
+    fn parse_callback_url_rejects_missing_token() {
+        let err = parse_callback_url("codex://auth/callback?refresh=def456").unwrap_err();
+        assert!(err.contains("token"));
+    }
+
+    #[test]
+    fn parse_callback_url_rejects_missing_refresh() {
+        let err = parse_callback_url("codex://auth/callback?token=abc123").unwrap_err();
+        assert!(err.contains("refresh"));
+    }
+
+    #[test]
+    fn parse_callback_url_rejects_malformed_url() {
+        assert!(parse_callback_url("not a url").is_err());
+    }
 }

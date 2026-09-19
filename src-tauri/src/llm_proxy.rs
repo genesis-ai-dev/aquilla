@@ -137,3 +137,39 @@ pub fn build_router(config: LlmConfig) -> Router {
         .layer(CorsLayer::permissive())
         .with_state((config, client))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_points_at_local_ollama() {
+        let config = LlmConfig::default();
+        assert_eq!(*config.endpoint.read().unwrap(), "http://localhost:11434");
+        assert_eq!(*config.model.read().unwrap(), "llama3");
+    }
+
+    #[test]
+    fn resolve_endpoint_prefers_query_param_over_saved_config() {
+        let config = LlmConfig::default();
+        let mut params = HashMap::new();
+        params.insert("endpoint".to_string(), "http://127.0.0.1:1234".to_string());
+        assert_eq!(resolve_endpoint(&config, &params).unwrap(), "http://127.0.0.1:1234");
+    }
+
+    #[test]
+    fn resolve_endpoint_ignores_empty_query_param() {
+        let config = LlmConfig::default();
+        let mut params = HashMap::new();
+        params.insert("endpoint".to_string(), "".to_string());
+        assert_eq!(resolve_endpoint(&config, &params).unwrap(), "http://localhost:11434");
+    }
+
+    #[test]
+    fn resolve_endpoint_falls_back_to_saved_config_when_no_param() {
+        let config = LlmConfig::default();
+        *config.endpoint.write().unwrap() = "http://localhost:8080".to_string();
+        let params = HashMap::new();
+        assert_eq!(resolve_endpoint(&config, &params).unwrap(), "http://localhost:8080");
+    }
+}

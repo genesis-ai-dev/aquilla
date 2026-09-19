@@ -40,6 +40,16 @@ impl ShutdownGuardState {
     }
 }
 
+// True the first time this is called for a given `exiting` flag (the caller
+// should run the shutdown handshake); false on every call after, including
+// the exit that `begin_graceful_exit` itself triggers, which should be let
+// through immediately rather than re-entering the handshake. Split out of
+// `handle_window_event`/`handle_run_event` so the once-only guarantee is
+// testable without a `Window`/`AppHandle`.
+fn claim_shutdown(exiting: &AtomicBool) -> bool {
+    !exiting.swap(true, Ordering::SeqCst)
+}
+
 /// Invoked by `OfflineShutdownGuard.tsx` once it has awaited
 /// `shutdownOfflineStoreGracefully()` (or immediately, if no offline store
 /// was ever booted this session).
@@ -72,7 +82,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         let app = window.app_handle();
         let state = app.state::<ShutdownGuardState>();
-        if state.exiting.swap(true, Ordering::SeqCst) {
+        if !claim_shutdown(&state.exiting) {
             return;
         }
         api.prevent_close();
@@ -85,10 +95,29 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
 pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
     if let RunEvent::ExitRequested { api, .. } = event {
         let state = app.state::<ShutdownGuardState>();
-        if state.exiting.swap(true, Ordering::SeqCst) {
+        if !claim_shutdown(&state.exiting) {
             return;
         }
         api.prevent_exit();
         begin_graceful_exit(app, state.notify.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claim_shutdown_succeeds_exactly_once() {
+        let exiting = AtomicBool::new(false);
+        assert!(claim_shutdown(&exiting), "first caller should claim the handshake");
+        assert!(!claim_shutdown(&exiting), "second caller must not re-enter it");
+        assert!(!claim_shutdown(&exiting), "and neither should any caller after that");
+    }
+
+    #[test]
+    fn claim_shutdown_on_already_exiting_flag_never_claims() {
+        let exiting = AtomicBool::new(true);
+        assert!(!claim_shutdown(&exiting));
     }
 }

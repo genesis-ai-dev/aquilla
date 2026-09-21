@@ -65,9 +65,16 @@ writer, a mapping bug) that needs a human, not another automatic retry.
 
 - `PUSH_EVENTS_PER_SEC` — target push throughput; canary default `100`, steady
   state `400` once Hyperdrive + PostHog look clean at canary rate.
-- `FETCH_CONCURRENCY` — concurrent git fetch/clone operations (default `4`).
+- `FETCH_CONCURRENCY` — concurrent git fetch/clone operations (default `1`).
 - `MATERIALIZE_CONCURRENCY` — concurrent materialize (plan-build) operations,
-  CPU/disk bound so kept low (default `2`).
+  CPU/disk bound so kept low (default `1`).
+- `AUDIO_COPY_CONCURRENCY` — concurrent R2 object copies for audio (default
+  `4`); attachment bytes do not pass through local disk.
+- `MIGRATE_INBOX_POLL_MS` — webhook inbox polling interval (default `5000`).
+  A separate background loop keeps polling during long clone, materialize, and
+  push stages; periodic reconciliation remains the fallback for missed hooks.
+- `MIGRATE_RECONCILE_MS` — full GitLab activity reconciliation interval
+  (default `900000`, or 15 minutes).
 - The push stage itself is strictly serial (one writer, one chunk at a time) —
   there is no push concurrency knob; only the pacer's rate.
 
@@ -143,13 +150,13 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   scheduler deletes the file once its job reaches `done`. A plan therefore only
   survives on disk while its job is unfinished (a dry-run leaves it at
   `planned`, so `--dry-run` runs do accumulate one plan per project).
-- `daemon.log` — stdout of the systemd unit (`StandardOutput=append:...`),
-  rotated by `/etc/logrotate.d/aquilla-migrate` (weekly, 8 rotations,
-  compressed, copytruncate so the daemon's open file handle stays valid).
+- On the Hetzner systemd host, logs go to journald and can be read with
+  `journalctl -u aquilla-migrate`; the database, clones, and plans live under
+  `/var/lib/aquilla-migrate`.
 
 ## Operations
 
-- **Deploy (first time)** — two steps, because the box requires an
+- **Legacy deploy (first time)** — two steps, because the old box requires an
   interactive sudo password so a non-interactive SSH session can't run
   privileged commands:
   1. As `clear` (no sudo): `ssh clear@<box> 'bash -s' < deploy/migrate-daemon/install.sh [branch] [env-file]`
@@ -162,6 +169,18 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
      the systemd unit, installs the env file (if given), writes the
      logrotate stanza, and enables (but does not start) the service.
   See `deploy/migrate-daemon/env.example` for every variable.
+
+- **Hetzner host** — the daemon runs as the dedicated `aquilla-migrate` user
+  on `ubuntu-4gb-hel1-1`. The checked-in unit is
+  `deploy/migrate-daemon/aquilla-migrate-hetzner.service`. The app and Node 22
+  runtime live under `/opt`; mutable state lives under `/var/lib`. Install the
+  unit as `/etc/systemd/system/aquilla-migrate.service`, create
+  `/etc/aquilla-migrate/env` with mode `0640` and owner `root:aquilla-migrate`,
+  then run `systemctl daemon-reload`. Keep `DRY_RUN=1` for initial validation.
+  Start the service only after the active-writer cutover is confirmed and the
+  required credentials are in the environment file. Read logs with
+  `journalctl -u aquilla-migrate -f`. The unit launches `tsx` directly through
+  Node so systemd tracks and signals the daemon process itself during a drain.
 
   **Why user-space pnpm**: the box's system `node` (`/usr/bin/node`) has no
   bundled `pnpm`, and `corepack enable` writes shims next to it — into
@@ -208,9 +227,8 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   attachment behaviour must not shift under the migration. Plans, by contrast,
   are pruned (see Files on disk).
 
-- **Tail logs**: `tail -f ~/aquilla-migrate/daemon.log` on the box, or
-  `journalctl -u aquilla-migrate -f` for the unit's own lifecycle events
-  (start/stop/restart, not stdout — stdout is redirected to the log file).
+- **Tail logs**: `journalctl -u aquilla-migrate -f` on Hetzner. The legacy
+  box writes stdout to `~/aquilla-migrate/daemon.log`.
 
 - **Discord digest**: if `DISCORD_WEBHOOK_URL` is set, the daemon posts an
   hourly digest (events pushed, jobs done, breaker trips, failures) plus a
@@ -234,7 +252,7 @@ covers every project, not a per-project webhook):
    ```bash
    aws s3 ls s3://aquilla-snapshots/_migrate/inbox/ --endpoint-url <r2-endpoint>
    ```
-   The daemon's `inbox` poll (every `inboxPollMs`, default 30s) picks these up
+  The daemon's `inbox` poll (every `MIGRATE_INBOX_POLL_MS`, default 5s) picks these up
    and enqueues jobs; you should see a `detected` job appear in `status` within
    a poll interval.
 
@@ -307,6 +325,8 @@ From the design spec's Rollout plan:
 - `once`'s exit code reflects **any** failed job currently in the queue, not
   only jobs touched by that invocation — a stale failed job from an earlier run
   will make an otherwise-clean `once --only <id>` exit non-zero.
-- Audio migration and users/groups migration are still handled by the nightly
-  `audio-delta-sync.yml` GitHub Actions workflow; this daemon only covers
-  content (sub-projects 2 and 3 will bring those under the daemon too).
+- Users/groups migration is still handled by the nightly
+  `audio-delta-sync.yml` GitHub Actions workflow. Audio migration is queued by
+  this daemon after content reaches the same commit and copies R2 objects
+  directly; remove only the workflow's audio step after the Hetzner daemon is
+  live and verified.

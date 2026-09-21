@@ -26,6 +26,9 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
+import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 /** "Take 7" → 7; anything else → null. */
 function parseTakeNumber(label: string | null | undefined): number | null {
@@ -48,6 +51,13 @@ export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): 
 
 interface Props {
   projectId: string
+  /**
+   * AQU-490: the project record, for the audio validation control beside each
+   * take's keeper circle. Required rather than optional on purpose — this
+   * strip IS the place a reviewer signs a take off, and an optional prop one
+   * call site forgot would simply mean no control there, silently.
+   */
+  project: ProjectRecord
   fileId: string
   cellId: string
   /** Recorded AND generated (TTS) takes — one list (round 8c). */
@@ -75,6 +85,7 @@ interface Props {
 
 export function TakesStrip({
   projectId,
+  project,
   fileId,
   cellId,
   takes,
@@ -87,6 +98,7 @@ export function TakesStrip({
   chromeless = false,
 }: Props) {
   const t = useT()
+  const audioValidation = useAudioValidation({ project, fileId, cellId, username: author })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -579,6 +591,24 @@ export function TakesStrip({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </AppTooltip>
+              )}
+              {/* AQU-490. Only the CIRCLED take carries a vote: validation is
+                  about the take that will be heard, and offering it on a
+                  take nobody has chosen would collect sign-off on audio that
+                  never plays. */}
+              {isCircled && (
+                <AudioValidationControl
+                  cellRef={cellId}
+                  takes={audioValidation.takeFor(
+                    { attachments: { [att.audioId]: att }, selectedBySlot: { [att.slot]: att.audioId } },
+                    att.audioId,
+                  )}
+                  currentUsername={author}
+                  validationRequirement={audioValidation.validationRequirement}
+                  canValidate={audioValidation.canValidate}
+                  onValidationChange={audioValidation.onValidationChange}
+                  variant="inline"
+                />
               )}
               <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button

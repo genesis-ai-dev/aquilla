@@ -35,6 +35,7 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
 }))
 
 import { TakesStrip } from "./TakesStrip"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 const session = { jwt: "jwt", username: "dir" } as never
 
@@ -42,7 +43,11 @@ function take(id: string, durationMs: number): AudioAttachmentOut {
   return { audioId: id, url: `frontier-audio://${id}.webm`, slot: "recording", mimeType: "audio/webm", voiceId: null, referenceAudioId: null, durationMs, trimStartMs: null, trimEndMs: null }
 }
 
-const common = { projectId: "p1", fileId: "f1", cellId: "c1", author: "dir", session }
+// AQU-490: the strip now draws the audio validation control beside the
+// circled take, which needs the project's policy. A bare record is the
+// unrestricted default — no role floor, no allowlist, self-validation on.
+const project = { id: "p1", name: "P" } as unknown as ProjectRecord
+const common = { projectId: "p1", project, fileId: "f1", cellId: "c1", author: "dir", session }
 
 beforeEach(() => {
   emitSelect.mockClear()

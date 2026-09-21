@@ -31,10 +31,14 @@ const ROLE_FLOOR: Record<string, number> = {
  * to put it back would produce takes the control could name but never vote on.
  */
 export interface CellLikeAudio {
+  // Deliberately permissive on nullability: the editor's CodexCellAttachment
+  // spells an absent voice `undefined` and the wire's AudioAttachmentOut
+  // spells it `null`, and both are valid inputs here. Narrowing to one would
+  // force a cast at whichever call site held the other.
   attachments?: Record<string, {
     slot?: string
     label?: string | null
-    voiceId?: string
+    voiceId?: string | null
     role?: "dub" | "source"
     validatorCount?: number
     validators?: string[]

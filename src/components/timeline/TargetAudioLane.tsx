@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
+import { CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -128,6 +128,13 @@ export interface TargetAudioLaneProps {
   /** AQU-646: what the waveform loader needs to fetch take bytes. All three
    *  absent = no waveforms, which is what this lane's own tests get. */
   projectId?: string | null
+  /**
+   * AQU-490: the project's required validator count for audio. Optional and
+   * defaulting to 1, because this lane renders in its own tests and in the
+   * showcase with no project behind it — and 1 is the product default, so an
+   * omission reads as "validated once" rather than as "never validated".
+   */
+  validationRequirementAudio?: number
   fileId?: string | null
   session?: FrontierSession | null
   /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
@@ -190,6 +197,7 @@ function TargetAudioChip({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  validationRequirementAudio = 1,
   peaks,
   preview,
 }: {
@@ -237,6 +245,8 @@ function TargetAudioChip({
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   onOpenRecording?(cellId: string): void
+  /** AQU-490: how many validators the project asks for on a recording. */
+  validationRequirementAudio?: number
 }) {
   const t = useT()
   const { cell } = chip.item
@@ -269,6 +279,20 @@ function TargetAudioChip({
   // AQU-924: saved on this device, and its attach event will NOT reach the
   // server without user action (quarantined / out of retries).
   const syncFailed = Boolean(cell.attachments?.[chip.item.audioId]?.syncFailed)
+  // AQU-490: validated at a GLANCE, and deliberately not a control.
+  //
+  // This is a 16px hover corner with play and record already in it; a popover
+  // and a vote would not fit and would fight the chip's own drag gestures.
+  // The timeline's job here is to show which takes are signed off while you
+  // scrub past them — the vote itself lives on the four surfaces that have
+  // room for it. The source clip is excluded, so an imported film's own
+  // soundtrack never wears a tick.
+  const chipTake = cell.attachments?.[chip.item.audioId]
+  const chipValidated = Boolean(
+    chipTake
+    && (chipTake.role ?? "dub") === "dub"
+    && (chipTake.validatorCount ?? 0) >= Math.max(1, validationRequirementAudio),
+  )
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -996,6 +1020,16 @@ function TargetAudioChip({
           <Mic className="h-2.5 w-2.5" />
         </span>
       )}
+      {chipValidated && (
+        <span
+          data-testid={`tl-target-${cell.id}-validated`}
+          title={t("workspace.targetAudioLane.takeValidated")}
+          aria-label={t("workspace.targetAudioLane.takeValidated")}
+          className="pointer-events-none absolute bottom-1 right-2 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/80 text-green-600 shadow-sm ring-1 ring-border dark:text-green-400"
+        >
+          <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
+        </span>
+      )}
       {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
           exists only while this chip's own preview sounds. Left/opacity are
           written by the rAF effect above; it mounts hidden so no line flashes
@@ -1072,6 +1106,7 @@ export function TargetAudioLane({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  validationRequirementAudio = 1,
   emptyCells,
   emptySpans,
   onAddLineAndRecord,
@@ -1362,6 +1397,7 @@ export function TargetAudioLane({
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording}
+            validationRequirementAudio={validationRequirementAudio}
             peaks={peaksFor.get(chip.item.audioId)}
             preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
           />

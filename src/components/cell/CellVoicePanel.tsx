@@ -40,6 +40,9 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { AudioValidationControl } from "./AudioValidationControl"
+import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -399,6 +402,17 @@ export function CellVoicePanel({
   }, [voices, recency])
 
   // Section breaks (paratext) aren't voiced — render nothing.
+  // AQU-490. The source clip is excluded by the adapter (role 'source'), so a
+  // media line whose only audio is the shared programme track shows no control
+  // here — which is right: nobody validates the film's own soundtrack.
+  const audioValidation = useAudioValidation({
+    project: project as unknown as ProjectRecord,
+    fileId: cell.fileId,
+    cellId: cell.id,
+    username,
+  })
+  const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
+
   if (isParatext) return null
 
   // Nothing to voice yet (untranslated) — a quiet hint, no player chrome.
@@ -419,6 +433,17 @@ export function CellVoicePanel({
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
+      {voiceValidationTakes.length > 0 && (
+        <AudioValidationControl
+          cellRef={cell.context?.trim() || cell.id}
+          takes={voiceValidationTakes}
+          currentUsername={username}
+          validationRequirement={audioValidation.validationRequirement}
+          canValidate={audioValidation.canValidate}
+          onValidationChange={audioValidation.onValidationChange}
+          variant="inline"
+        />
+      )}
       {/* Round 5: no crop on the shared source clip — its window is the
           section's timing; retime the section in the timeline. */}
       {!isSourceClip && (

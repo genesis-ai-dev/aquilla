@@ -393,6 +393,7 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
+    "workspace.targetAudioLane.takeValidated": "This take is validated",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -1668,6 +1669,14 @@ export const workspace = defineNamespace({
           "button. It plays only that one clip, trimmed exactly as the " +
           "timeline draws it, without moving the playhead or starting the " +
           "rest of the timeline.",
+      },
+      "workspace.targetAudioLane.takeValidated": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip whose "
+          + "recording has reached the number of validators the project asks "
+          + "for. Read-only — the vote itself is cast in the editor, the "
+          + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

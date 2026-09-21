@@ -240,6 +240,7 @@ function GroupedTakes({
             <TakesStrip
               chromeless
               projectId={project.id}
+              project={project}
               fileId={cell.fileId}
               cellId={cell.id}
               takes={group.takes}

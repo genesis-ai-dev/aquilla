@@ -153,7 +153,9 @@ routine never modifies test files.
   re-surfacing it as a follow-up, but nothing on the live surface has offered it since the
   swap. `mergeConcepts()` in `store.ts` and its tests are deliberately kept so that
   follow-up only needs UI; the dialog is recoverable from git (`git show
-  707287dfd:src/components/TerminologyMergeDialog.tsx`). Kept because `GlossaryEditor` still
+  707287dfd:src/components/TerminologyMergeDialog.tsx`). **Re-surfaced 2026-09-21 (AQU-1337)**:
+  the dialog is back byte-for-byte and `GlossaryEditor` mounts it behind a "Merge duplicates"
+  toolbar button, writing through `persist(mergeConcepts(…))`. Kept because `GlossaryEditor` still
   uses them: `TerminologyTermDetail`, `TerminologyViolationsInbox`, `candidates.ts`,
   `csv.ts`, `tbx.ts`, `store.ts`.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
@@ -211,21 +213,20 @@ routine never modifies test files.
 
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
-  `src/lib/i18n/namespaces/terminology.ts` with no reader. Proof: for every key in the
+  `src/lib/i18n/namespaces/terminology.ts` with no reader — **51 since AQU-1337 re-surfaced
+  merge-duplicates** and put the 12 `terminology.mergeDialog.*` keys,
+  `terminology.page.mergeDuplicatesButton` and `terminology.common.noRenderings` back in use;
+  the lists below are the 51. Proof: for every key in the
   namespace's `messages` block, search all tracked `src`/`e2e`/`scripts`/`worker`/`tools`
   source outside `src/lib/i18n/` for the quoted key, then keep only the misses that the
   deleted files *did* reference. No live code builds a `terminology.*` key dynamically
   (no `` `terminology.…${ `` template anywhere), so a literal search is sufficient.
-  - `terminology.page.*` (17): `editConceptAria`, `deleteConceptAria`,
+  - `terminology.page.*` (16): `editConceptAria`, `deleteConceptAria`,
     `reviewQueueCountLabel`, `candidateTermsCountLabel`, `addConceptButton`,
-    `editConceptTitle`, `deleteConcept`, `deleteNamedConcept`, `mergeDuplicatesButton`,
+    `editConceptTitle`, `deleteConcept`, `deleteNamedConcept`,
     `reviewQueueHeading`, `candidateTermsHeading`, `conceptsHeading`, `noConceptsTitle`,
     `noConceptsDescription`, `addFirstConceptButton`, `renderingsColumnHeader`,
     `deleteConceptDialogTitle`
-  - `terminology.mergeDialog.*` (12): `title`, `selectDescription`, `survivorBadge`,
-    `mergeFailed`, `previewMergeButton`, `previewDescription`, `survivorLabel`,
-    `mergedRenderingsLabel`, `combinedNotesLabel`, `conceptsToRemoveLabel`, `merging`,
-    `confirmMerge`
   - `terminology.candidates.*` (11): `emptyTitle`, `emptyDescription`, `countRankedByNc`,
     `ncTooltip`, `cTooltip`, `g2Tooltip`, `promoteButton`, `minedFromSummary`,
     `corpusScopeFull`, `corpusScopeCapped`, `miningLabel`
@@ -235,7 +236,7 @@ routine never modifies test files.
     `emptyTitle`, `emptyDescription`, `awaitingReviewCount`
   - `terminology.importDialog.*` (6): `title`, `parsing`, `dropZoneText`,
     `chooseFileButton`, `csvColumnsHint`, `tbxDialectsHint`
-  - `terminology.common.*` (4): `noRenderings`, `managed`, `notesLabel`, `statusLabel`
+  - `terminology.common.*` (3): `managed`, `notesLabel`, `statusLabel`
   - `terminology.conceptDialog.*` (2): `renderingPlaceholder`, `targetRenderingsLabel`
 - **Already orphaned before that deletion** (same search, but the deleted files never
   referenced them either — 6 keys): `terminology.editor.loadingTermDetails`,
@@ -261,17 +262,18 @@ routine never modifies test files.
   were in flight against this namespace's surface when the page was deleted, and #657 adds
   ~96 lines to `namespaces/terminology.ts` itself. Do it once those land, in the same
   single pass as the three `rules.*` prefixes above: same files, same proof.
-- **Section headers**: the `── TerminologyPage.tsx: … ──`, `── TerminologyMergeDialog.tsx ──`,
+- **Section headers**: the `── TerminologyPage.tsx: … ──`,
   `── TerminologyReviewQueue.tsx ──` and `── CandidateTermsPanel.tsx ──` comments in
-  `namespaces/terminology.ts` now name deleted files. Left in place on purpose, following
+  `namespaces/terminology.ts` now name deleted files (`── TerminologyMergeDialog.tsx ──`
+  names a live file again since AQU-1337). Left in place on purpose, following
   the `rules.ts` precedent — they are the only provenance the still-present keys have.
   Remove the headers together with the keys, not before.
 - **Also stale, not touched**: 28 of the 32 `T-*` rows in `docs/FEATURE-STORIES.csv` (all
   but T-16, T-24, T-30, T-31) cite the deleted files as their code pointers, and the early
   ones describe the retired tabbed page. Most have a live
-  equivalent in `GlossaryEditor`, but T-02 (library statistics header) and T-26/T-27 (merge
-  duplicate concepts) describe features nothing renders any more while still marked
-  `Implemented`. Re-pointing them is a feature-by-feature check against the live surface,
+  equivalent in `GlossaryEditor`, but T-02 (library statistics header) describes a feature
+  nothing renders any more while still marked `Implemented`. (T-26/T-27, merge duplicate
+  concepts, were in the same state until AQU-1337 re-surfaced merge and re-pointed them.) Re-pointing them is a feature-by-feature check against the live surface,
   not a mechanical path swap.
 
 ## 2026-09-18 — `RulesPage.tsx` orphan follow-up shipped; rest of the zero-importer sweep deferred

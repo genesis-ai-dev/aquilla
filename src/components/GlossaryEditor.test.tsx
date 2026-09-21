@@ -295,6 +295,95 @@ describe("GlossaryEditor", () => {
   })
 })
 
+// AQU-1337: merge-duplicates was dropped by the 2026-07-08 surface swap and is
+// back on the live surface. These run the REAL `mergeConcepts` output through
+// the REAL `emitConceptDelta`, so the assertion is the event shape that reaches
+// the outbox — the contract a second user's projection depends on.
+describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
+  const MERGE_BUTTON = "Merge duplicate concepts"
+
+  function seedDuplicates() {
+    mockProject.terminology = [
+      concept({ id: "c1", notes: "from list A" }),
+      concept({
+        id: "c2",
+        renderings: [
+          // Collides with c1's "favor" case-insensitively — the survivor's wins.
+          { rendering: "Favor", status: "admitted" },
+          { rendering: "mercy", status: "admitted" },
+        ],
+        notes: "from list B",
+      }),
+      concept({ id: "c3", sourceTerm: "wrath", renderings: [{ rendering: "anger", status: "preferred" }] }),
+    ]
+  }
+
+  function selectForMerge(dialog: HTMLElement, ...indexes: number[]) {
+    const rows = within(dialog).getAllByTestId("merge-concept-row")
+    for (const i of indexes) fireEvent.click(rows[i])
+  }
+
+  it("offers the merge only once there are two concepts to merge", () => {
+    const { unmount } = renderEditor()
+    expect(screen.queryByRole("button", { name: MERGE_BUTTON })).not.toBeInTheDocument()
+    unmount()
+
+    seedDuplicates()
+    renderEditor()
+    expect(screen.getByRole("button", { name: MERGE_BUTTON })).toBeEnabled()
+  })
+
+  it("merges into the first-selected survivor as one term.update plus a term.delete per loser", async () => {
+    seedDuplicates()
+    renderEditor()
+    fireEvent.click(screen.getByRole("button", { name: MERGE_BUTTON }))
+    const dialog = screen.getByRole("dialog")
+
+    selectForMerge(dialog, 0, 1)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview merge" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm merge" }))
+
+    await waitFor(() => expect(emitTermDelete).toHaveBeenCalled())
+    expect(emitTermUpdate).toHaveBeenCalledTimes(1)
+    expect(emitTermUpdate).toHaveBeenCalledWith({
+      projectId: "p1",
+      conceptId: "c1",
+      author: "tester",
+      renderings: [
+        { rendering: "favor", status: "preferred" },
+        { rendering: "mercy", status: "admitted" },
+      ],
+      notes: "from list A | from list B",
+    })
+    expect(emitTermDelete).toHaveBeenCalledTimes(1)
+    expect(emitTermDelete).toHaveBeenCalledWith({ projectId: "p1", conceptId: "c2", author: "tester" })
+    // The bystander concept is not rewritten, and nothing is re-created.
+    expect(emitTermCreate).not.toHaveBeenCalled()
+    expect(patchSettings).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    const rows = screen.getAllByTestId("glossary-row")
+    expect(rows.map((row) => row.getAttribute("data-concept-id"))).toEqual(["c1", "c3"])
+  })
+
+  it("keeps the dialog open on its error when the write is rejected, and deletes nothing", async () => {
+    seedDuplicates()
+    emitTermUpdate.mockRejectedValueOnce(new Error("outbox blocked"))
+    renderEditor()
+    fireEvent.click(screen.getByRole("button", { name: MERGE_BUTTON }))
+    const dialog = screen.getByRole("dialog")
+
+    selectForMerge(dialog, 0, 1)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview merge" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm merge" }))
+
+    expect(await within(dialog).findByText("Merge failed")).toBeInTheDocument()
+    expect(emitTermDelete).not.toHaveBeenCalled()
+    // The optimistic merge rolled back: both duplicates are still on the surface.
+    expect(screen.getAllByTestId("glossary-row")).toHaveLength(3)
+  })
+})
+
 // AQU-208: role gating on the LIVE terminology surface.
 //
 // The fixture is the real output of `minimalProjectRecord` — the shape every
@@ -384,6 +473,25 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
       expect(screen.getByRole("button", { name: control })).toBeEnabled()
     }
     fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  // AQU-1337: merge is a termbase write, so it rides the same floor.
+  it("gates Merge duplicates on the termbase floor like every other termbase write", async () => {
+    const duplicates = [concept({}), concept({ id: "c2" })]
+    const { unmount } = renderAs({ ...hydrated(400, "contributor"), terminology: duplicates })
+    const merge = screen.getByRole("button", { name: "Merge duplicate concepts" })
+    expect(merge).toBeDisabled()
+    await expectTooltip(
+      merge,
+      /Contributors cannot perform this action — you need at least Project lead access/,
+    )
+    fireEvent.click(merge)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    unmount()
+
+    renderAs({ ...hydrated(500, "project_lead"), terminology: duplicates })
+    fireEvent.click(screen.getByRole("button", { name: "Merge duplicate concepts" }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 

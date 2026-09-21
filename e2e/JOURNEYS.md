@@ -113,6 +113,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
+| Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |

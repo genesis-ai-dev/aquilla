@@ -35,6 +35,14 @@ export const settings = defineNamespace({
       "for themselves from the assign-work picker — they still can't assign " +
       "work to anyone else. Leads and maintainers can always assign, to " +
       "anyone, regardless of this setting.",
+    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.description":
+      "When on, a member (contributor and above) who has been restricted to " +
+      "specific target languages can assign work to other people — but only " +
+      "within those languages. Give a mentor or coordinator the languages they " +
+      "look after under Members, and they can hand out chapters there without " +
+      "any other admin rights. Members with no language restriction are " +
+      "unaffected by this setting.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",

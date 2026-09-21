@@ -35,6 +35,13 @@
 // server-side in sync-worker (authorize.ts + assignment-authority.ts); this
 // route only stores/validates the setting.
 //
+// AQU-581: allowScopedLaneAssignment is the lane-delegate sibling of
+// allowSelfAssignment — whether a member below the assignment floor who
+// carries lane scopes (AQU-553) may create assignments for OTHER people
+// inside those lanes. Same boolean shape, same OWNER-only write gate, same
+// default of false. Enforced server-side in sync-worker (authorize.ts +
+// assignment-authority.ts); this route only stores/validates it.
+//
 // AQU-907: egressMinRole (who may use the org-wide Data egress surface —
 // the bulk zip of everything the org has) is another role-ladder
 // permission-policy key on the same OWNER-only write gate. Its effective
@@ -89,6 +96,13 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
   allowSelfAssignment: "allowSelfAssignment",
+  // AQU-581: whether a lane-scoped member below the assignment floor may
+  // assign work to OTHER people inside the lanes they are scoped to.
+  // Boolean-valued like allowSelfAssignment, and OWNER-only on write for the
+  // same reason — this is the org saying who may hand out chapters in a given
+  // target-language lane, and a maintainer must not be able to widen that on
+  // their own.
+  allowScopedLaneAssignment: "allowScopedLaneAssignment",
   // AQU-1037: who may assign file/chapter work or route an AI changeset.
   // Role-ladder valued; defaults to PROJECT_LEAD in each enforcement worker.
   assignmentMinRole: "assignmentMinRole",
@@ -113,7 +127,7 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
  * AQU-496: subset of PERMISSION_POLICY_KEYS validated as a boolean instead of
  * a role-ladder number. Still gated OWNER-only on write (same loop below).
  */
-const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
+const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssignment"])
 
 interface OrgSettingsRow {
   org_id: number

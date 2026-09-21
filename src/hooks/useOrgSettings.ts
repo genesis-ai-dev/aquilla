@@ -96,6 +96,12 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+
+// AQU-581: allowScopedLaneAssignment rides the SAME OWNER-only write gate as
+// allowSelfAssignment above (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) — both are
+// the org deciding who may write `assignment.create` below the assignment
+// floor — and shares its safe default of `false`.
+const DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT = false
 const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
 const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
@@ -222,6 +228,15 @@ export interface UseOrgSettings {
    * `sync-worker/src/events/assignment-authority.ts`.
    */
   allowSelfAssignment: boolean
+  /**
+   * AQU-581: effective lane-delegate assignment authority — true when a
+   * lane-scoped member below the assignment floor may create assignments for
+   * OTHER people inside the lanes they are scoped to. Explicit org setting,
+   * or `false` when unset. Server-enforced; see
+   * `resolveAllowScopedLaneAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowScopedLaneAssignment: boolean
   /**
    * AQU-1037: effective floor for assigning work to anyone, including
    * file/chapter/target-lane assignments and AI changeset routing.
@@ -421,6 +436,14 @@ export function useOrgSettings(
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
 
+  // AQU-581: effective lane-delegate assignment authority — explicit org
+  // setting, or false when unset. Rides the SAME OWNER-only write gate as
+  // allowSelfAssignment (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) and shares its
+  // safe default of `false`.
+  const allowScopedLaneAssignment = server?.settings?.allowScopedLaneAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT
+
   const assignmentMinRole = (() => {
     const raw = server?.settings?.assignmentMinRole
     if (typeof raw === "number" && VALID_ROLE_LEVELS.has(raw)) return raw
@@ -552,6 +575,7 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    allowScopedLaneAssignment,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

@@ -69,7 +69,12 @@ import {
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
-import { canOpenAssignUi, canSubmitAssignment } from "@/lib/sync/role-policy"
+import {
+  canOpenAssignUi,
+  canSubmitAssignment,
+  laneDelegateLanes,
+  type LaneDelegateGrant,
+} from "@/lib/sync/role-policy"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
@@ -121,6 +126,13 @@ interface AssignModalProps {
   allowSelfAssignment?: boolean
   /** Org-configured floor for assigning work to anyone (default Project lead). */
   assignmentMinRole?: number
+  /**
+   * AQU-581: the caller's own lane-delegate grant — the org's
+   * `allowScopedLaneAssignment` setting plus this caller's lane/file scopes.
+   * When it covers at least one lane, a below-floor caller assigns to OTHER
+   * people (not just themselves), restricted to the lanes it names.
+   */
+  laneDelegate?: LaneDelegateGrant
   /**
    * AQU-496: the caller's own Frontier user id. Required to lock the assignee
    * picker to "self" when `roleLevel` is below PROJECT_LEAD — without it, a
@@ -174,6 +186,7 @@ export function AssignModal({
   roleLevel,
   allowSelfAssignment = false,
   assignmentMinRole = ROLE.PROJECT_LEAD,
+  laneDelegate,
   callerUserId = null,
   selectedCellIds,
   jwt,
@@ -181,10 +194,21 @@ export function AssignModal({
   onAssigned,
 }: AssignModalProps) {
   const t = useT()
-  // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
-  // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
-  // "below lead" and "self-assign mode" are equivalent here.
-  const isSelfAssignMode = roleLevel < assignmentMinRole
+  // AQU-496: below the org's assignment floor, the self-assign carve-out is
+  // one reason this modal can be open (see the canOpenAssignUi gate below),
+  // and it locks the assignee picker to the caller.
+  //
+  // AQU-581: the lane-delegate carve-out is the other, and it does NOT — a
+  // mentor scoped to a lane is assigning OTHER people, which is the whole
+  // point. So "below floor" alone no longer implies self-assign mode; a
+  // delegate keeps the full picker and is restricted by lane instead.
+  //
+  // The grant is only ever consulted BELOW the floor, so a member carrying
+  // stale scopes who is later promoted never has their lane picker silently
+  // shrink to those scopes.
+  const effectiveDelegate = roleLevel < assignmentMinRole ? laneDelegate : undefined
+  const isLaneDelegate = laneDelegateLanes(effectiveDelegate).length > 0
+  const isSelfAssignMode = roleLevel < assignmentMinRole && !isLaneDelegate
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
@@ -219,7 +243,16 @@ export function AssignModal({
           ? String(effectiveCallerUserId)
           : "",
       )
-      setSelectedLane(defaultLane)
+      // AQU-581: a delegate launching from a lane outside their scopes must
+      // not open pre-set to it — land them on their first scoped lane instead,
+      // which is also the only sane default when their grant covers exactly
+      // one lane and the picker below stays hidden.
+      const delegateLanes = laneDelegateLanes(effectiveDelegate)
+      setSelectedLane(
+        delegateLanes.length > 0 && !delegateLanes.includes(defaultLane)
+          ? delegateLanes[0]
+          : defaultLane,
+      )
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
       setAvailableChapters([])
@@ -227,7 +260,7 @@ export function AssignModal({
       setNote("")
       setDeadlineDate(undefined)
     }
-  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane])
+  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane, effectiveDelegate])
 
   // AQU-658: derive the unit vocabulary from the active file's type so the
   // scope options and confirmation copy read correctly for non-scripture
@@ -292,11 +325,17 @@ export function AssignModal({
     // the launching default lane reads as the language, not "default". Only
     // fall back to the generic label when the default language is unknown.
     const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
-    return [
+    const all = [
       { value: "", label: defaultLabel },
       ...extra.map((lane) => ({ value: lane, label: lane })),
     ]
-  }, [targetLanes, defaultLaneLabel, t])
+    // AQU-581: a lane delegate may only assign inside the lanes the org
+    // scoped them to, so don't offer the rest — a lane in this picker that
+    // canSubmitAssignment would then refuse is a dead end, not a choice.
+    // Leads/maintainers pass no grant and keep the full list.
+    const allowed = laneDelegateLanes(effectiveDelegate)
+    return allowed.length > 0 ? all.filter((item) => allowed.includes(item.value)) : all
+  }, [targetLanes, defaultLaneLabel, effectiveDelegate, t])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -379,8 +418,12 @@ export function AssignModal({
       effectiveCallerUserId,
       member.userId,
       assignmentMinRole,
+      effectiveDelegate,
+      selectedLane,
     )) {
-      setError(t("dialog.assign.error.selfOnly"))
+      // AQU-581: a delegate who picked a lane outside their scopes gets the
+      // lane message; everyone else below the floor is still self-only.
+      setError(t(isLaneDelegate ? "dialog.assign.error.laneOutOfScope" : "dialog.assign.error.selfOnly"))
       return
     }
 
@@ -499,13 +542,15 @@ export function AssignModal({
     members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
-    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveCallerUserId, deadlineDate, groupLabelByFileId,
+    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
+    effectiveCallerUserId, deadlineDate, groupLabelByFileId,
     selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
   ])
 
-  // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
-  // when the org's allowSelfAssignment carve-out applies (canOpenAssignUi).
-  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole)) return null
+  // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
+  // always renders; below that, only when one of the org's two carve-outs
+  // applies — self-assign, or a lane-scoped delegate grant (canOpenAssignUi).
+  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate)) return null
 
   // AQU-496: in self-assign mode the picker is locked to the caller's own
   // membership row. If callerUserId couldn't be resolved (edge case — caller

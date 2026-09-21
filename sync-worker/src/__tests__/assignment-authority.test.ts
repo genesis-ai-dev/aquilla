@@ -75,6 +75,7 @@ describe("resolveAssignmentAuthority (AQU-1037)", () => {
     expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
       minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
       allowSelfAssignment: false,
+      allowScopedLaneAssignment: false,
     })
   })
 
@@ -83,6 +84,7 @@ describe("resolveAssignmentAuthority (AQU-1037)", () => {
     expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
       minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
       allowSelfAssignment: true,
+      allowScopedLaneAssignment: false,
     })
   })
 
@@ -96,6 +98,7 @@ describe("resolveAssignmentAuthority (AQU-1037)", () => {
     expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
       minRole: 300,
       allowSelfAssignment: true,
+      allowScopedLaneAssignment: false,
     })
   })
 

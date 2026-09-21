@@ -580,6 +580,29 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    // — AQU-1148: what the exported file is allowed to contain. The hints say
+    //   exactly what lands in the file, because "approved text" was being
+    //   claimed for output that mixed validated text, unreviewed drafts and
+    //   untranslated source. —
+    "importExport.dialog.contentLegend": "Content",
+    "importExport.dialog.contentModeAriaLabel": "What the exported file contains",
+    "importExport.dialog.contentModeCurrent": "Current translations",
+    "importExport.dialog.contentModeValidatedOnly": "Validated translations only",
+    "importExport.dialog.contentModeCurrentHint":
+      "Every cell's current text — validated, unvalidated draft and AI draft alike. " +
+      "Untranslated cells are filled with the source text, so the file will not show " +
+      "which parts are approved.",
+    "importExport.dialog.contentModeValidatedOnlyHint":
+      "Only cells that meet this project's validation threshold. Everything else is left " +
+      "out — no unreviewed drafts and no source-language filler.",
+    "importExport.dialog.contentModeValidatedOnlyRoundTripHint":
+      "Only cells that meet this project's validation threshold are written into your " +
+      "original document. Anything else keeps the words already in the file you uploaded.",
+    "importExport.dialog.contentModeValidatedCount":
+      plural({
+        one: "{validated} of {count} cell in this file is validated.",
+        other: "{validated} of {count} cells in this file are validated.",
+      }),
     "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
     "importExport.dialog.allChapters": "All chapters",
     "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
@@ -1419,6 +1442,18 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.contentModeAriaLabel": {
+        description:
+          "Accessible name for the content-mode select on the Export dialog — the control that chooses between every current translation and validated translations only (AQU-1148).",
+      },
+      "importExport.dialog.contentModeValidatedCount": {
+        description:
+          "Count shown under the content-mode select once 'Validated translations only' is chosen, so the user knows how much of the file will actually be written. 'Validated' means a cell that has met this project's validation threshold.",
+        placeholders: {
+          validated: "Number of cells in the current file that are validated.",
+          count: "Total number of cells in the current file — the number the plural form agrees with.",
+        },
       },
       "importExport.dialog.chapterFilterAriaLabel": {
         description: "Accessible name for the chapter-scope select on the Export dialog.",

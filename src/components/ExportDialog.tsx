@@ -52,6 +52,13 @@ import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
 import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import {
+  DEFAULT_EXPORT_CONTENT_MODE,
+  scopeCellsForExport,
+  scopeRoundTripCells,
+  validatedOnly as isValidatedOnlyMode,
+  type ExportContentMode,
+} from "@/lib/export/validation-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -887,6 +894,17 @@ export function ExportDialog({
   // Only appears when at least one cell has a cast assignment.
   const [voiceFilter, setVoiceFilter] = useState<string>("") // "" = All voices
 
+  /**
+   * AQU-1148: which cells may contribute a translation to this export.
+   *
+   * Deliberately NOT remembered across opens (unlike the format/scope prefs in
+   * `export-dialog-memory`): "validated only" is a claim about the file leaving
+   * the app, and a remembered one silently narrows a later export somebody else
+   * is doing. Each export states its own mode.
+   */
+  const [contentMode, setContentMode] = useState<ExportContentMode>(DEFAULT_EXPORT_CONTENT_MODE)
+  const validatedOnly = isValidatedOnlyMode(contentMode)
+
   /** Extract the cast voice name for a cell (from metadata.cast_name). */
   function getCellVoice(cell: CellData): string {
     return typeof cell.metadata?.cast_name === "string" ? cell.metadata.cast_name : ""
@@ -912,8 +930,13 @@ export function ExportDialog({
   )
 
   // Reset voice filter when dialog closes or cells change.
+  // AQU-1148: the content mode resets with it — the dialog stays mounted
+  // between opens, and a narrowed export must never be silently inherited.
   useEffect(() => {
-    if (!open) setVoiceFilter("")
+    if (!open) {
+      setVoiceFilter("")
+      setContentMode(DEFAULT_EXPORT_CONTENT_MODE)
+    }
   }, [open])
 
   /**
@@ -929,6 +952,24 @@ export function ExportDialog({
   // "whole project". "" = every chapter, the same "no filter" contract the
   // voice filter uses.
   const [chapterFilter, setChapterFilter] = useState<string>("")
+
+  const contentModeItems = useMemo(
+    () => [
+      { value: "current", label: t("importExport.dialog.contentModeCurrent") },
+      { value: "validated-only", label: t("importExport.dialog.contentModeValidatedOnly") },
+    ],
+    [t],
+  )
+
+  /** The formats that write into the client's own uploaded package rather than
+   *  building a file from the cells — they cannot omit a cell, so validated-only
+   *  leaves the original words in place and the hint has to say so. */
+  const isRoundTripFormat = format === "usfm" || format === "docx" || format === "pptx" || format === "idml"
+
+  const validatedCellCount = useMemo(
+    () => cells.filter((c) => c.status === "validated").length,
+    [cells],
+  )
 
   const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
 
@@ -1044,6 +1085,8 @@ export function ExportDialog({
             files: projectFiles,
             getToken,
             targetLang,
+            // AQU-1148: only validated translations are overlaid server-side.
+            validatedOnly,
             onProgress: (done, total) =>
               setStatus({ kind: "busy", msg: t("importExport.status.downloadingCount", { done, total }) }),
           })
@@ -1059,7 +1102,7 @@ export function ExportDialog({
           const stem = buildExportStem(false)
           const downloadName = `${stem}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang })
+          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang, validatedOnly })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -1083,7 +1126,10 @@ export function ExportDialog({
         // the client's original words for a line somebody deliberately took
         // out. Fails soft to an empty list — never blocks the download.
         const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
-        const result = await exportDocx(rawBytes, cells, { removedCells })
+        // AQU-1148: a non-validated cell keeps its place (the package is located
+        // through it) but carries no translation, so the exporter leaves that
+        // paragraph's original words alone — as it already does when untranslated.
+        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([
@@ -1111,7 +1157,8 @@ export function ExportDialog({
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         // See the docx branch above.
         const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
-        const result = await exportPptx(rawBytes, cells, { removedCells })
+        // AQU-1148: see the docx branch above.
+        const result = await exportPptx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
         const baseName = buildExportStem(false)
         downloadBlob(result.blob, `${baseName}.pptx`)
         setFidelityWarnings([
@@ -1139,7 +1186,8 @@ export function ExportDialog({
         recoverableIdmlOriginal = { bytes: rawBytes.slice(0), downloadName: `${baseName}-original.idml` }
         setStatus({ kind: "busy", msg: t("importExport.status.validatingProtectedTranslations") })
         const { exportIdml } = await import("@/lib/export/exporters/idml")
-        const result = await exportIdml(rawBytes, cells)
+        // AQU-1148: see the docx branch above.
+        const result = await exportIdml(rawBytes, scopeRoundTripCells(cells, contentMode))
         posthog.capture("idml export completed", idmlTelemetryProperties({
           cells,
           report: result.report,
@@ -1431,7 +1479,7 @@ export function ExportDialog({
         }
         // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
         if (fmt === "metadata-csv") {
-          const allCells = projectFileCells.flatMap((f) => f.cells)
+          const allCells = scopeCellsForExport(projectFileCells.flatMap((f) => f.cells), contentMode)
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
           const safeName = buildExportStem(true)
           downloadBlob(csvBlob, `${safeName}.csv`)
@@ -1443,7 +1491,9 @@ export function ExportDialog({
         }
         setStatus({ kind: "busy", msg: t("importExport.status.buildingZip", { count: projectFileCells.length }) })
         const zipBlob = await buildProjectZip({
-          files: projectFileCells,
+          // AQU-1148: each file's cells are narrowed by the same rule the
+          // single-file path uses, before any exporter sees them.
+          files: projectFileCells.map((f) => ({ ...f, cells: scopeCellsForExport(f.cells, contentMode) })),
           format: fmt as TextExportFormat,
           sourceLanguage,
           targetLanguage,
@@ -1469,9 +1519,15 @@ export function ExportDialog({
         // primary "Download <file>" action — that one means "give me my file
         // back", whole, whatever chapter the fold happens to be showing.
         const chapter = overrideFormat || opts?.audioCues ? "" : activeChapter
+        // AQU-1148: the content mode narrows LAST, and by OMISSION — a
+        // non-validated cell never reaches the exporters' `translated ||
+        // effectiveSourceText(cell)` fallback, so it cannot come back as
+        // source-language filler in a validated-only file. Not applied to the
+        // audio cues: cue text is the recording's own script, and audio
+        // validation is a separate flag (AQU-508 / AQU-965).
         const filteredCells = opts?.audioCues
           ? (audioCells ?? [])
-          : [...filterCellsByChapter(applyVoiceFilter(cells), chapter)]
+          : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
@@ -2156,6 +2212,52 @@ export function ExportDialog({
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
               <Skeleton className="h-3 w-40" />
             </div>
+          )}
+        </fieldset>
+
+        {/* AQU-1148: Content — what the exported file is allowed to contain.
+            Always shown: the point is that the DEFAULT stops being silent about
+            mixing validated text, unreviewed drafts and source-language filler. */}
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
+            {t("importExport.dialog.contentLegend")}
+          </legend>
+          <Select
+            value={contentMode}
+            onValueChange={(v) => setContentMode((v as ExportContentMode | null) ?? DEFAULT_EXPORT_CONTENT_MODE)}
+            items={contentModeItems}
+          >
+            <SelectTrigger
+              size="sm"
+              className="w-full"
+              aria-label={t("importExport.dialog.contentModeAriaLabel")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {contentModeItems.map((i) => (
+                  <SelectItem key={i.value} value={i.value}>{i.label}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground">
+            {t(
+              !validatedOnly
+                ? "importExport.dialog.contentModeCurrentHint"
+                : isRoundTripFormat
+                  ? "importExport.dialog.contentModeValidatedOnlyRoundTripHint"
+                  : "importExport.dialog.contentModeValidatedOnlyHint",
+            )}
+          </p>
+          {validatedOnly && (
+            <p className="text-[10px] text-muted-foreground">
+              {t("importExport.dialog.contentModeValidatedCount", {
+                validated: validatedCellCount,
+                count: cells.length,
+              })}
+            </p>
           )}
         </fieldset>
 

@@ -2,14 +2,10 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import {
-  balanceShards, mergeSuites, recordDurations, shardLayout, type SuiteEvidence,
+  balanceShards, mergeSuites, recordDurations, selectionPattern, shardLayout,
+  type SuiteEvidence,
 } from "../smart-tests/parallel"
 import { killChildTree } from "./lib/spawn-worker"
-
-/** Playwright --grep is a JS regex; a journey title is literal text. */
-function escapeForGrep(title: string): string {
-  return title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 export async function runParallel(root: string, count: number, args: string[]) {
   if (args.some((arg) => /^--(?:workers|shard|reporter|config)(?:=|$)|^-[jc]/.test(arg))) {
@@ -66,7 +62,7 @@ export async function runParallel(root: string, count: number, args: string[]) {
       const childId = `${id}-${layout.suffix}`
       // Select this stack's assigned titles explicitly. --shard would
       // re-split the manifest and undo the balancing.
-      const selection = `^(?:${assignments[index].map(escapeForGrep).join("|")})$`
+      const selection = selectionPattern(assignments[index], planned)
       const child = spawn("pnpm", ["exec", "tsx", "scripts/e2e-up.ts", "--",
         "--shard=1/1", "--workers=1", ...passthrough, "--grep", selection], {
         cwd: root, stdio: "inherit", env: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mergeSuites, shardCount, shardLayout, type SuiteEvidence, balanceShards, recordDurations } from "./parallel"
+import { mergeSuites, shardCount, shardLayout, type SuiteEvidence, balanceShards, recordDurations, selectionPattern } from "./parallel"
 
 const build = "a".repeat(40)
 const suite = (title: string): SuiteEvidence => ({
@@ -119,5 +119,49 @@ describe("recordDurations", () => {
       { title: "a", status: "interrupted", durationMs: 1 },
       { title: "b", status: "skipped", durationMs: 1 },
     ])).toEqual({ a: 5 })
+  })
+})
+
+describe("selectionPattern", () => {
+  const planned = ["Jev edit durability: normal", "Jev validation sign-off: normal"]
+
+  it("anchors only at the end, because Playwright greps the file path too", () => {
+    // Regression: a `^`-anchored pattern matched nothing, so every stack ran
+    // zero tests and still exited 0.
+    const pattern = selectionPattern([planned[0]], planned)
+    expect(pattern.startsWith("^")).toBe(false)
+    expect(new RegExp(pattern).test(`edit-durability.spec.ts:12:3 › ${planned[0]}`)).toBe(true)
+  })
+
+  it("matches every assigned journey and no other planned one", () => {
+    const pattern = new RegExp(selectionPattern([planned[0]], planned))
+    expect(pattern.test(`a.spec.ts › ${planned[0]}`)).toBe(true)
+    expect(pattern.test(`a.spec.ts › ${planned[1]}`)).toBe(false)
+  })
+
+  it("treats a title as literal text, not a regex", () => {
+    const titles = ["Outcome (a|b) [1]"]
+    expect(new RegExp(selectionPattern(titles, titles)).test("f.spec.ts › Outcome (a|b) [1]")).toBe(true)
+    expect(new RegExp(selectionPattern(titles, titles)).test("f.spec.ts › Outcome a")).toBe(false)
+  })
+
+  it("refuses a manifest where one title is a suffix of another", () => {
+    const shadowing = ["sign-off: normal", "Jev validation sign-off: normal"]
+    expect(() => selectionPattern([shadowing[0]], shadowing)).toThrow(/suffix/)
+  })
+
+  it("refuses an empty assignment rather than selecting everything", () => {
+    expect(() => selectionPattern([], planned)).toThrow()
+  })
+})
+
+describe("mergeSuites rejects a vacuous run", () => {
+  it("fails when every shard exits 0 having run no tests", () => {
+    const empty = { schemaVersion: 2, build: "b", dirty: false, status: "passed",
+      planned: [] as string[], tests: [] as SuiteEvidence["tests"] }
+    const merged = mergeSuites(["one", "two"], "b", false,
+      [{ exitCode: 0, suite: empty }, { exitCode: 0, suite: empty }], 10)
+    expect(merged.status).toBe("failed")
+    expect(merged.parallel.complete).toBe(false)
   })
 })

@@ -101,3 +101,23 @@ export function recordDurations(
   }
   return Object.fromEntries(Object.entries(next).sort(([left], [right]) => left.localeCompare(right)))
 }
+
+/**
+ * Build the `--grep` that selects one stack's assigned journeys.
+ *
+ * Playwright greps the whole title path, which carries a file prefix, so the
+ * pattern can only be anchored at its end. That makes selection ambiguous if
+ * one planned title ends with another: the shorter pattern would silently
+ * pull in the longer test. Refuse that manifest rather than run a split whose
+ * contents cannot be predicted.
+ */
+export function selectionPattern(assigned: string[], planned: string[]): string {
+  if (assigned.length === 0) throw new Error("A stack must be assigned at least one journey")
+  for (const title of assigned) {
+    const shadowed = planned.find((other) => other !== title && other.endsWith(title))
+    if (shadowed) {
+      throw new Error(`Journey title "${title}" is a suffix of "${shadowed}"; rename one`)
+    }
+  }
+  return `(?:${assigned.map((title) => title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`
+}

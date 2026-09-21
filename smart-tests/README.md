@@ -79,8 +79,24 @@ SMART_TEST_SHARDS=4 SMART_TEST_ENV_FILE=.env.smart-tests.local \
   pnpm test:smart:pr -- <PR-number>
 ```
 
-Choose one to four stacks; the default stays one until machine capacity is
-known. Parallel runs reserve E2E slots 9–12, beyond the smoke runner's maximum
+Choose one to six stacks; the default stays one until machine capacity is
+known. Stacks are filled by measured duration, longest journey first, and
+short journeys backfill around them. Playwright's own `--shard` splits the
+manifest into contiguous blocks with no idea what anything costs, so one
+stack could hold every slow journey; the launcher selects each stack's
+assigned titles explicitly instead.
+
+The floor for a suite is `max(longest journey, serial total / stacks)`. For
+today's twelve checks that is 18.2 s and 75.1 s, so four stacks already
+reach 18.8 s — essentially the longest journey — and more stacks cannot
+finish the suite sooner. Six is the cap because that is where the two terms
+meet; each extra stack still costs a database, a build, and a browser.
+
+`smart-tests/durations.json` is the baseline, rewritten after any complete
+run. A journey with no record is costed as the slowest known one, so a newly
+added journey claims its own stack instead of being appended to a loaded one.
+An out-of-date baseline can only cost wall time: the merged suite still
+checks the full manifest, so no test can be dropped by a bad estimate. Parallel runs reserve E2E slots 9–12, beyond the smoke runner's maximum
 eight slots. Each owns its database, ports, Wrangler state, frontend build,
 browser, auth-state namespace, and evidence directory. Each stack still runs
 one test at a time. Increasing Playwright workers within a shared database

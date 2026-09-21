@@ -15,6 +15,7 @@ import {
   buildRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  retainTranslationPairs,
   selectApprovedExamples,
   type ChatMessage,
   type ValidatedPair,
@@ -26,6 +27,7 @@ export {
   buildRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  retainTranslationPairs,
   selectApprovedExamples,
 }
 export type { ChatMessage, PromptRule, ValidatedPair } from "./prompt-build"

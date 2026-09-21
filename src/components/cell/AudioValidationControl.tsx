@@ -149,14 +149,12 @@ export function AudioValidationControl({
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
 
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
-  const tooltip = state === "empty"
-    ? t("editor.audioValidation.notRecordedTooltip")
-    : mineToGive.length > 0
-      ? t("editor.audioValidation.notValidatedTooltip")
-      : blocked?.blockedReason
-        ?? (canValidate
-          ? t("editor.audioValidation.outOfScopeTooltip")
-          : t("editor.audioValidation.unavailableTooltip"))
+  const tooltip = mineToGive.length > 0
+    ? t("editor.audioValidation.notValidatedTooltip")
+    : blocked?.blockedReason
+      ?? (canValidate
+        ? t("editor.audioValidation.outOfScopeTooltip")
+        : t("editor.audioValidation.unavailableTooltip"))
 
   // The shortest distance any take still is from the threshold, so the label
   // can say "one more needed" rather than a bare "validated" while the icon
@@ -229,31 +227,15 @@ export function AudioValidationControl({
     </button>
   )
 
-  // A line with nothing recorded. Inline surfaces (the take block, the strip,
-  // the voice panel) are about ONE take and draw nothing here. The GUTTER
-  // draws a placeholder — Sam's call, 2026-09-21: once audio validation is on
-  // for a file the column reads as three states, not two. A missing icon
-  // meant "nothing here" and "not recorded" at once; the faint mic says
-  // "not recorded" on its own, and lets a reviewer scan a chapter for the
-  // lines nobody has voiced yet. Not a button: there is nothing to press,
-  // and a disabled button would swallow the tooltip that explains it.
+  // A line with nothing recorded draws NOTHING — the same rule as text, where
+  // a cell with no text has no validation control either. (Sam, 2026-09-21,
+  // after a placeholder mic was tried and rejected: there is nothing to
+  // validate, so there is nothing to show.) The gutter slot survives so the
+  // column keeps its width.
   if (state === "empty") {
-    if (variant === "inline") return null
-    const notRecorded = t("editor.audioValidation.notRecordedTooltip")
-    return (
-      <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">
-        <AppTooltip content={notRecorded}>
-          <span
-            role="img"
-            aria-label={notRecorded}
-            data-testid="audio-validation-empty"
-            className="flex h-6 w-6 items-center justify-center text-muted-foreground/25"
-          >
-            <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
-          </span>
-        </AppTooltip>
-      </div>
-    )
+    return variant === "inline"
+      ? null
+      : <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1" />
   }
 
   const body = (

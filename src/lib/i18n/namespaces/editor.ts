@@ -1262,7 +1262,6 @@ export const editor = defineNamespace({
 
     // — Audio validation (AQU-490): the same control, one vote per TAKE ——
     "editor.audioValidation.notValidatedTooltip": "Recording not validated — click to validate",
-    "editor.audioValidation.notRecordedTooltip": "Nothing recorded on this line yet",
     "editor.audioValidation.outOfScopeTooltip": "Outside your assigned files",
     "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
     "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
@@ -4540,12 +4539,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip on the audio validation control when the line's recording has not " +
           "been signed off yet. The word is 'validate', never 'approve'.",
-      },
-      "editor.audioValidation.notRecordedTooltip": {
-        description:
-          "Tooltip when the line has no recording to validate. Note this means no DUB " +
-          "was recorded — on an imported film the shared programme audio is attached " +
-          "to every line and deliberately does not count.",
       },
       "editor.audioValidation.outOfScopeTooltip": {
         description:

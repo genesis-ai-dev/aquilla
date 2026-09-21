@@ -1,9 +1,9 @@
 /**
  * AQU-490, after Sam's first manual pass (2026-09-21):
  *
- * 1. With audio validation on for a file, EVERY row draws the control — a
- *    line with no recording gets a placeholder mic, not a gap. The column reads
- *    as three states (not recorded / recorded / validated) rather than two.
+ * 1. The switch is resolved once per FILE, not per cell — but a line with no
+ *    recording still draws no control, exactly as a cell with no text has no
+ *    text control. (A placeholder mic was tried and rejected the same day.)
  * 2. The Recording tab lists a take that lives on an ADDED track. It did not,
  *    so a line whose only recording sat off the default track opened to an
  *    empty panel — the attention dot said audio, the panel said nothing.
@@ -124,19 +124,19 @@ function renderTable() {
 const rowOf = async (target: string) => (await screen.findByText(target)).closest("[data-grid-row]") as HTMLElement
 
 describe("EditorTable — audio validation across the whole gutter", () => {
-  it("draws a placeholder on the line with no recording and a real control on the line with one", async () => {
+  it("draws a control on the line with a recording and nothing on the line without", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     renderTable()
     const withTake = await rowOf("bonjour cell-1")
     const without = await rowOf("bonjour cell-2")
     expect(within(withTake).getByTestId("audio-validation-button")).toBeInTheDocument()
     expect(within(without).queryByTestId("audio-validation-button")).toBeNull()
-    expect(within(without).getByTestId("audio-validation-empty")).toHaveAccessibleName(/nothing recorded on this line/i)
+    expect(within(without).queryByTestId("audio-validation-empty")).toBeNull()
   })
 
   // The derived switch looks at the FILE. A project with no stamp and no audio
-  // shows nothing at all — no placeholders, no controls — which is the "off
-  // until there is audio" half of Sam's ruling.
+  // shows nothing at all — which is the "off until there is audio" half of
+  // Sam's ruling.
   it("draws nothing anywhere when the file has no audio and the project has no stamp", async () => {
     audioState.byCellId = new Map()
     render(
@@ -145,7 +145,7 @@ describe("EditorTable — audio validation across the whole gutter", () => {
       </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
     )
     await screen.findByText("bonjour cell-1")
-    expect(screen.queryByTestId("audio-validation-empty")).toBeNull()
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
     expect(screen.queryByTestId("audio-validation-button")).toBeNull()
   })
 })

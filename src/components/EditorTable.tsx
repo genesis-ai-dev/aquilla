@@ -6447,10 +6447,9 @@ function EditorRow({
   )
   // Behind the project switch (AQU-490 slice 4), resolved once for the whole
   // file at the table level: a team used to one circle in this gutter should
-  // not find a second one there one morning. When it IS on, every row draws
-  // the control — a line with no recording gets the placeholder mic, so the
-  // column reads as not-recorded / recorded / validated rather than as a
-  // gap that could mean either of the first two (Sam, 2026-09-21).
+  // not find a second one there one morning. The control itself draws
+  // nothing on a line with no recording — same rule as text, no text means
+  // no text control (Sam, 2026-09-21).
   const audioValidationControl = audioValidationEnabled ? (
     <AudioValidationControl
       cellRef={cellRef}

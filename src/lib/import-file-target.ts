@@ -1,13 +1,17 @@
 // File-scoped target import: populate the open file's target column from a
-// USFM file or a spreadsheet (CSV/TSV/XLSX). Two match modes:
+// USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (VTT — AQU-1142;
+// SRT/SBV — AQU-1144). Two match modes:
 //
 //   - by ref:   incoming rows carry canonical refs ("GEN 1:1") matched against
 //               the file's cells (CellData.group) — same mechanism as the
 //               eBible → target import (AQU-191).
 //   - by order: Nth data row → Nth cell of the file. Fallback for spreadsheets
-//               with no ref column. The review screen shows the cell's source
-//               text beside each incoming row so misalignment is visible
-//               before anything is committed.
+//               with no ref column, and the entry point for subtitle cues (their
+//               cells carry opaque group ids, not canonical refs) — which align
+//               by timecode overlap instead when both sides carry timings
+//               (AQU-1143). The review screen shows the cell's source text
+//               beside each incoming row so misalignment is visible before
+//               anything is committed.
 //
 // The result shape is a structural superset of EBibleMatchResult, so
 // applyEBibleTargetImport (lib/import.ts) applies the commits unchanged:
@@ -15,7 +19,8 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
-import { parseCueRange, extractVttStrings } from "./parsers/subtitle"
+import { parseCueRange, extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
+import { extractSbvStrings } from "./parsers/sbv"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -26,6 +31,44 @@ export interface FileTargetCellRef extends SourceCellRef {
    *  positional matching aligns by timecode overlap (AQU-1143). */
   startMs?: number
   endMs?: number
+}
+
+/** The slice of an editor cell summary the file-scoped target import reads.
+ *  `CellSummary` (hooks/useActiveCellStore) satisfies it. */
+export interface FileTargetCellSource {
+  id: string
+  fileId: string
+  targetEventId?: string
+  sourceEventId?: string
+  translated?: string
+  group?: string
+  original: string
+  /** Cue timing in SECONDS — the cell view's unit (`useCells` divides the
+   *  server's `start_ms` by 1000). */
+  startTime?: number
+  endTime?: number
+}
+
+/** The open file's cells, in display order, as the matchers want them.
+ *
+ *  This is the seconds → milliseconds seam. Cell views carry cue timings in
+ *  seconds while `TargetRow` timings are milliseconds; handing the seconds
+ *  through unconverted put every cell within the first few ms of the file, so
+ *  overlap matching (AQU-1143) found no counterpart for any cue and a subtitle
+ *  target import matched 0 rows. */
+export function toFileTargetCells(summaries: readonly FileTargetCellSource[]): FileTargetCellRef[] {
+  return summaries.map((c) => ({
+    cellId: c.id,
+    fileId: c.fileId,
+    targetEventId: c.targetEventId,
+    sourceEventId: c.sourceEventId,
+    translated: c.translated ?? "",
+    canonicalRef: c.group,
+    original: c.original,
+    ...(c.startTime !== undefined && c.endTime !== undefined
+      ? { startMs: Math.round(c.startTime * 1000), endMs: Math.round(c.endTime * 1000) }
+      : {}),
+  }))
 }
 
 /** One incoming translation row, from USFM or a mapped spreadsheet. */
@@ -350,4 +393,36 @@ export function usfmToTargetRows(
   ]
     .sort((a, b) => a.order - b.order)
     .map(({ ref, text }) => ({ ref, text }))
+}
+
+/** Subtitle formats whose cues this module can turn into target rows. */
+export const CUE_TARGET_EXTENSIONS = new Set(["srt", "sbv"])
+
+/** Extract target rows from a subtitle file (AQU-1144).
+ *
+ *  Reuses the source-import cue parsers verbatim, so SRT numeric cue counters,
+ *  blank-line block separators and SBV's malformed blocks are dropped exactly
+ *  as they are on the source side — a cue's text is the only thing that
+ *  reaches the target column.
+ *
+ *  Each row's `ref` is the cue's own timecode line (`00:00:01,000 -->
+ *  00:00:04,000` for SRT, `0:00:01.000,0:00:02.000` for SBV), which is what
+ *  the review screen labels the row with. Cue-sourced cells carry opaque uuid
+ *  group ids rather than canonical refs, so rows go through
+ *  matchTargetRowsByOrder — aligned by timecode overlap when the file's cells
+ *  carry timings too (AQU-1143), cue N → cell N otherwise.
+ *
+ *  Timings are passed explicitly rather than left for `rowTimingMs` to recover
+ *  from `ref`: an SBV timecode line has no `-->`, so `parseCueRange` cannot
+ *  read it and SBV rows would silently fall back to raw order.
+ */
+export function subtitleToTargetRows(raw: string, ext: string): TargetRow[] {
+  const cues = ext === "sbv" ? extractSbvStrings(raw) : extractSrtStrings(raw)
+  return cues.map((cue) => ({
+    ref: cue.context || undefined,
+    text: cue.original,
+    ...(cue.start !== undefined && cue.end !== undefined
+      ? { startMs: Math.round(cue.start * 1000), endMs: Math.round(cue.end * 1000) }
+      : {}),
+  }))
 }

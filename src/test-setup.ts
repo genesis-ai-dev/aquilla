@@ -5,6 +5,7 @@ import { cleanup } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
+import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
 import {
   createOffMachineFetchGuard,
   takeOffMachineRequestViolations,
@@ -110,6 +111,11 @@ afterEach(() => {
   // and a roster cached in one test would answer the next test's fetch.
   resetWindowFocusRevalidateForTests()
   resetAllRequestCoalescersForTests()
+  // AQU-1325's seed map lives for the lifetime of the TAB, and every test is a
+  // fresh tab. Left in place, a project id resolved by one test puts the next
+  // test that mounts the same id on the warm path (ready at once, then a
+  // revalidated record) while it still reads as a cold-load test.
+  clearResolvedProjectSeeds()
 
   // The guard throws at the call site, but callers routinely wrap fetch in
   // try/catch, which would swallow it and leave the test green despite a

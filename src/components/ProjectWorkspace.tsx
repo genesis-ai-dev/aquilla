@@ -14,8 +14,9 @@ import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
-import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
-import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
+import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
+import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -97,6 +98,7 @@ import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import type { TimebaseCorrection } from "@/lib/import/timebase"
+import { toFileTargetCells } from "@/lib/import-file-target"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
   shouldPatchSystemPrompt,
@@ -106,7 +108,9 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  nextPaintGate,
 } from "./project-workspace-helpers"
+import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -1328,10 +1332,20 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
   }, [projectId])
+  // AQU-1326: opening a file used to fan out every workspace data hook at
+  // mount — audit stats, comments, per-file audio attachments, the project-wide
+  // progress rollup — all racing the cell stream for the same connection pool.
+  // On a high-latency link that pushed the first painted row several
+  // round-trips out. These hooks are gated on `editorFirstPaint` so the
+  // editor-critical requests (sync token → cells page) go out alone, and the
+  // rest start once the first cell page is on screen. Flipped by the effect
+  // just below the cell store, which owns the definition of "painted".
+  const [paintGate, setPaintGate] = useState<PaintGate>(() => ({ file: null, sawLoad: false, open: false }))
+  const editorFirstPaint = paintGate.open
   // Server-backed (Postgres) audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
-  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt) && editorFirstPaint
   const {
     byCellId: auditStatsByCellId,
     revalidate: revalidateAuditStats,
@@ -1371,6 +1385,28 @@ export function ProjectWorkspace() {
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
+  // cell page reaching the store — but a file that legitimately has no cells,
+  // a load that failed, and the no-file-open case must all release the gate
+  // too, or those hooks would never run.
+  //
+  // The reducer is pure and lives in `project-workspace-helpers` so the rule
+  // (in particular why "not loading" is not "settled") is tested directly —
+  // same extract-the-guard pattern as `shouldApplyCheckResult`.
+  useEffect(() => {
+    setPaintGate((prev) =>
+      nextPaintGate(prev, {
+        fileId: activeFileId ?? null,
+        cellCount: cellSummaries.length,
+        cellsError,
+        cellsLoading,
+      }),
+    )
+    // `cellStoreVersion` is a dep so any store change re-evaluates the gate —
+    // a repaint that happens to leave the cell COUNT unchanged would otherwise
+    // not re-run this. The reducer returns its previous object when nothing
+    // changed, so the extra runs cost a comparison and no render.
+  }, [activeFileId, cellStoreVersion, cellSummaries.length, cellsError, cellsLoading])
   const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
@@ -1593,17 +1629,17 @@ export function ProjectWorkspace() {
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
     // confirmed/cleared here; another lane's entries stay dormant until that
     // lane is active again.
+    // AQU-1309: only confirmation of THIS pending head retires it. With
+    // H → A → B queued locally, the projection can still report H. H differs
+    // from B's immediate parent A, but that is lag, not evidence of a competing
+    // edit. Forgetting B here makes the next edit branch off H and go stale.
+    // Actual conflicts are resolved by subscribeStaleSiblings above.
     for (const summary of cellSummaries) {
       const key = laneCellKey(summary.id)
       const pending = pendingTargetCommitHeadsRef.current.get(key)
       if (!pending) continue
       const projectedHead = summary.targetEventId ?? null
       if (projectedHead === pending.eventId) {
-        pendingTargetCommitHeadsRef.current.delete(key)
-        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(key)
-        }
-      } else if (projectedHead && projectedHead !== pending.parentId) {
         pendingTargetCommitHeadsRef.current.delete(key)
         if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
           pendingCompletionEventIdRef.current.delete(key)
@@ -2678,7 +2714,9 @@ export function ProjectWorkspace() {
 
   const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
     projectId: project?.id ?? null,
-    siblingFileId: audioCueSibling?.id ?? null,
+    // AQU-1326: the cue sibling is a second whole-file read. Deferred behind
+    // the first cell page so it doesn't race the editor's own stream.
+    siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
@@ -2751,7 +2789,8 @@ export function ProjectWorkspace() {
   // this second per-file read gives us.
   const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    audioCueSibling?.id ?? null,
+    // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
+    editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
   )
   // Dragging a take on a cue: the anchor the drag writes lands in the CUE
   // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
@@ -4194,6 +4233,11 @@ export function ProjectWorkspace() {
     // The open file's threads load first; the rest of the project pages in
     // behind them, so the editor's per-cell markers never wait on history.
     priorityFileId: activeFileId,
+    // AQU-1326: comments are a per-cell marker, not the cell itself — hold the
+    // project-wide load until the first cell page has painted so it doesn't
+    // compete with the cell stream on open. The hook re-fires the load when
+    // this flips true.
+    tokenReady: editorFirstPaint,
   })
 
   // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
@@ -4307,18 +4351,8 @@ export function ProjectWorkspace() {
   // subtitle file is aligned by timecode overlap rather than raw row order —
   // one inserted or deleted cue then can't cascade every later translation
   // onto the wrong cell. Cells without timings simply keep order matching.
-  const fileTargetCells = useMemo(() => cellSummaries.map((c) => ({
-    cellId: c.id,
-    fileId: c.fileId,
-    targetEventId: c.targetEventId,
-    sourceEventId: c.sourceEventId,
-    translated: c.translated ?? "",
-    canonicalRef: c.group,
-    original: c.original,
-    ...(c.startTime !== undefined && c.endTime !== undefined
-      ? { startMs: c.startTime, endMs: c.endTime }
-      : {}),
-  })), [cellSummaries])
+  // toFileTargetCells owns the seconds → ms conversion.
+  const fileTargetCells = useMemo(() => toFileTargetCells(cellSummaries), [cellSummaries])
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
@@ -5565,6 +5599,10 @@ export function ProjectWorkspace() {
     setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
   }, [getTokenForFile, progressSnapshotTokenFileId, project?.id])
   useEffect(() => {
+    // AQU-1326: the rollup paints the SIDEBAR's per-file progress bars, not the
+    // open file — hold it until the first cell page has painted so it doesn't
+    // take a slot from the cell stream on open.
+    if (!editorFirstPaint) return
     void refreshAllFilesProgress()
       .catch(() => {
         // Non-fatal — sidebar rows simply fall back to no progress bar
@@ -5572,7 +5610,7 @@ export function ProjectWorkspace() {
       })
     // Re-fetch whenever the file count changes (import/delete) so newly
     // added files pick up a snapshot without a full reload.
-  }, [project?.files.length, refreshAllFilesProgress])
+  }, [editorFirstPaint, project?.files.length, refreshAllFilesProgress])
   const fileProgress = useMemo(
     () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
     [allFilesProgressSnapshot, liveFileProgress],
@@ -8186,7 +8224,9 @@ export function ProjectWorkspace() {
     (project?.syncRole?.level ?? 0) >= (resolveCellEditingFloor(project) ?? Infinity)
   const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    lens === "audio" || mayRestructureCells ? activeFileId : null,
+    // AQU-1326: deferred behind the first cell page — the attachment map only
+    // decorates rows that have to exist first.
+    editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
@@ -10692,7 +10732,36 @@ export function ProjectWorkspace() {
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
 
-  if (status === "loading") return <WorkspaceSkeleton />
+  // AQU-1325: while the project record loads, paint the real chrome (rail,
+  // account switcher, breadcrumb) around a main-area skeleton. None of the
+  // chrome depends on the record, so blanking it behind a whole-page template
+  // only made a slow round-trip look like a page load.
+  if (status === "loading") {
+    return (
+      <AppShell
+        railCollapsed={dockTab === null}
+        dockStorageKey={projectId}
+        leftDock={
+          <LeftDock
+            activeTab={dockTab}
+            onActiveTabChange={setDockTab}
+            filesPanel={
+              <div className="flex flex-col gap-2 p-3" aria-hidden="true">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton key={index} className="h-8" style={{ width: `${72 + (index % 3) * 8}%` }} />
+                ))}
+              </div>
+            }
+            agentPanel={null}
+            searchPanel={null}
+          />
+        }
+        header={<OrgBreadcrumb section={t("common.project")} />}
+        statusBar={null}
+        main={<WorkspaceMainSkeleton />}
+      />
+    )
+  }
   if (status === "no-session") {
     return (
       <SignedOutWorkspace
@@ -11119,6 +11188,10 @@ export function ProjectWorkspace() {
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
                   activeChapterHealth={activeChapterHealth}
+                  // AQU-1326: the sidebar's per-file /progress reads wait for
+                  // the editor's first cell page, same gate as the other
+                  // secondary reads above.
+                  deferSectionProgress={!editorFirstPaint}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
@@ -12095,6 +12168,7 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
               </div>
+              <CellRowsLoadStatus loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>
               {mediaSections.showsRail("text") && (
                 <MediaSectionRail

@@ -128,7 +128,23 @@ usermod -aG docker "$CI_USER"
 
 if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 22)'; then
   log "installing Node.js 22"
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  # Same GPG-signed-repo pattern as install_docker_engine above, done inline
+  # instead of piping NodeSource's setup_22.x script into bash as root — this
+  # is exactly what that script does under the hood (verified by reading it),
+  # it just avoids executing an arbitrary fetched script with root privileges.
+  install -m 0755 -d /usr/share/keyrings
+  rm -f /usr/share/keyrings/nodesource.gpg
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg
+  chmod a+r /usr/share/keyrings/nodesource.gpg
+  cat <<'EOF' > /etc/apt/sources.list.d/nodesource.sources
+Types: deb
+URIs: https://deb.nodesource.com/node_22.x
+Suites: nodistro
+Components: main
+Architectures: amd64 arm64
+Signed-By: /usr/share/keyrings/nodesource.gpg
+EOF
+  apt-get update -y
   apt-get install -y nodejs
 fi
 

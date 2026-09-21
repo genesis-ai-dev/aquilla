@@ -111,7 +111,16 @@ export async function loadCorpus(
   ]
 
   if (args.validatedOnly) {
+    // validated = 1 already implies a non-empty target; no extra check needed.
     parts.push("AND t.validated = 1")
+  } else {
+    // AQU-153: always require a non-empty target translation. The LEFT JOIN
+    // above deliberately yields '' for a source-only cell (see the header),
+    // which is right for the join but wrong for example retrieval — a cell
+    // with no target cannot serve as a few-shot example. Without this the
+    // algorithm returned up to topK source-only cells and the UI reported
+    // "5 examples used" on a project with no translations at all.
+    parts.push("AND COALESCE(t.value, '') != ''")
   }
   if (args.excludeCellId) {
     parts.push("AND s.cell_id != ?")

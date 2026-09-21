@@ -138,7 +138,12 @@ export function GlossaryEditor({
 
   const [cellDataRequested, setCellDataRequested] = useState(false)
   const [cellLoadObserved, setCellLoadObserved] = useState(false)
-  const { files: cellFiles, isLoading: cellsLoading } = useProjectCells({
+  const {
+    files: cellFiles,
+    isLoading: cellsLoading,
+    revalidate: revalidateCells,
+    applyOptimisticTargetEdit,
+  } = useProjectCells({
     projectId: id ?? null,
     projectFiles,
     getToken,
@@ -202,10 +207,6 @@ export function GlossaryEditor({
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [optimisticTargets, setOptimisticTargets] = useState<
-    Record<string, { value: string; valueHtml?: string }>
-  >({})
-
   const allCells = useMemo(
     () => cellFiles.flatMap((file) => file.cells),
     [cellFiles],
@@ -217,15 +218,11 @@ export function GlossaryEditor({
     setCellLoadObserved(false)
   }, [id, projectFiles])
   const cellDataReady = projectFiles.length === 0 || allCells.length > 0 || (cellLoadObserved && !cellsLoading)
-  const detailCells = useMemo(
-    () => allCells.map((cell) => {
-      const patch = optimisticTargets[cell.id]
-      return patch
-        ? { ...cell, translated: patch.value, translatedHtml: patch.valueHtml }
-        : cell
-    }),
-    [allCells, optimisticTargets],
-  )
+  // AQU-206: the optimistic overlay now lives in useProjectCells, so it is keyed
+  // per (file, cell) and survives the outbox row being deleted on sync — the
+  // local Record<cellId, patch> this replaced reverted as soon as the write was
+  // accepted, snapping a just-fixed occurrence back to its old verdict.
+  const detailCells = allCells
   const selectedConcept = useMemo(
     () => concepts.find((concept) => concept.id === selectedConceptId) ?? null,
     [concepts, selectedConceptId],
@@ -450,10 +447,8 @@ export function GlossaryEditor({
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
         onClose={handleCloseDetails}
-        onCellCommitted={() => {}}
-        onOptimisticEdit={(cellId, patch) => {
-          setOptimisticTargets((current) => ({ ...current, [cellId]: patch }))
-        }}
+        onCellCommitted={revalidateCells}
+        onOptimisticEdit={applyOptimisticTargetEdit}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
         // The detail view owns add/status/remove for renderings; it hands us

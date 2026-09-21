@@ -161,7 +161,10 @@ interface OccurrenceRowProps {
   canEdit: boolean
   projectId: string
   username: string
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   onCellCommitted: () => void
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }
@@ -183,7 +186,7 @@ function OccurrenceRow({
 
   const handleCommit = useCallback(
     ({ value, valueHtml }: TranslatedEditorCommit) => {
-      onOptimisticEdit(cell.id, { value, valueHtml })
+      onOptimisticEdit({ cellId: cell.id, fileId: cell.fileId }, { value, valueHtml })
       void emitTargetCellCommit({
         projectId,
         fileId: cell.fileId,
@@ -293,7 +296,10 @@ export interface TerminologyTermDetailProps {
   /** Called after any commit so the parent can trigger a revalidate. */
   onCellCommitted: () => void
   /** Optimistic patch forwarded from the parent's useCells instance. */
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   /** Whether the user may promote a predicted equivalent to a managed rendering. */
   canManageTermbase?: boolean
   /**

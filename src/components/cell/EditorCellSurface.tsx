@@ -186,8 +186,11 @@ export const EditorTargetReadSurface = forwardRef<HTMLDivElement, EditorTargetRe
         {...props}
         ref={ref}
         data-editor-cell-surface="target-read"
-        role="textbox"
-        aria-multiline="true"
+        // This surface activates an editor; it cannot receive text itself.
+        // Expose TYPE_TEXT only after the real contenteditable mounts.
+        role={editable ? "button" : "textbox"}
+        aria-readonly={editable ? undefined : true}
+        aria-multiline={editable ? undefined : true}
         className={cn(
           // AQU-1101: `min-w-0` lets the surface shrink below its content's
           // min-content width; `break-words` is what lets an unbreakable run

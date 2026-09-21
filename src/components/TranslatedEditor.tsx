@@ -1617,29 +1617,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
   }, [editor, audioTimings, audioCurrentTime])
 
-  // Flush the pending idle commit on unmount so a programmatic navigate-away
-  // (file/tab switch, route change) doesn't drop work still inside the 1.2s
-  // idle window. The commit lands in the outbox (AD-3) and reconciles from
-  // there; without this it was silently discarded.
-  useEffect(() => {
-    return () => {
-      if (idleTimerRef.current !== null) {
-        clearTimeout(idleTimerRef.current)
-        idleTimerRef.current = null
-      }
-      const pending = pendingCommitRef.current
-      pendingCommitRef.current = null
-      if (
-        pending
-        && (pending.value !== lastCommittedRef.current
-          || pending.valueHtml !== lastCommittedHtmlRef.current)
-      ) {
-        lastCommittedRef.current = pending.value
-        lastCommittedHtmlRef.current = pending.valueHtml
-        onCommitRef.current(pending)
-      }
+  // Flush the pending idle commit so work still inside the 1.2s idle window
+  // isn't dropped. The commit lands in the outbox (AD-3) and reconciles from
+  // there; without this it was silently discarded. Runs on unmount (file/tab
+  // switch, route change) and — AQU-1334 — when the document is hidden or
+  // about to unload (tab close, reload, navigation off the SPA), which never
+  // unmounts anything. Idempotent: a flush clears the snapshot, so a later
+  // trigger finds nothing to commit.
+  const flushPendingCommit = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    const pending = pendingCommitRef.current
+    pendingCommitRef.current = null
+    if (
+      pending
+      && (pending.value !== lastCommittedRef.current
+        || pending.valueHtml !== lastCommittedHtmlRef.current)
+    ) {
+      lastCommittedRef.current = pending.value
+      lastCommittedHtmlRef.current = pending.valueHtml
+      onCommitRef.current(pending)
     }
   }, [])
+  useEffect(() => flushPendingCommit, [flushPendingCommit])
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushPendingCommit()
+    }
+    window.addEventListener("pagehide", flushPendingCommit)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flushPendingCommit)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [flushPendingCommit])
 
   if (!editor) {
     return (

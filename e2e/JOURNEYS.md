@@ -27,7 +27,7 @@ not a micro-spec farm.
 | Orgs | Billing & usage shows the Field Plan CTA and agent-credit meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
-| Editor | Import markdown, edit cell, persists across reload; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
@@ -52,6 +52,19 @@ not a micro-spec farm.
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
 | Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+
+## Smart journeys (adaptive navigation, independent outcomes)
+
+Aquilla owns these contracts, fixtures, and release evidence. The pinned Jev
+dependency chooses browser actions. See [smart testing](../smart-tests/README.md)
+for commands, limits, and qualification requirements. These runs currently
+provide advisory evidence; they do not silently replace a release check.
+
+| Outcome | Conditions | Journey |
+| --- | --- | --- |
+| Open a project and file, edit the intended translation, preserve every other source/target, and read the correction in server state and a fresh session | Normal; immediate hard navigation after input; delayed HTTP | `smart-tests/journeys/edit-durability.spec.ts` |
+| Reject a missing write and a corrupted target, accept a real durable edit | Model-free oracle qualification | `smart-tests/journeys/qualification.spec.ts` |
+| Expose meaningful controls to Jev's actual DOM reader, and activate a target before offering fill | Eight initial route surfaces and editor activation | `smart-tests/journeys/dom-audit.spec.ts` |
 
 ## Journeys moved to another repository
 
@@ -111,6 +124,13 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
+
+- DOM navigation and editing: plan inspector editor link, filename keyboard
+  access, corpus rename input, read-surface button activation, and cell labels
+  (`PlanInspector.test.tsx`, `ProjectOverview.test.tsx`, `FileRow.test.tsx`,
+  `ExpandableFileList.test.tsx`, `EditorCellSurface.test.tsx`,
+  `EditorTable.editorActions.test.tsx`). Pending-edit page-hide flush is covered
+  in `TranslatedEditor.commit.test.tsx` and import-and-edit smoke.
 
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip

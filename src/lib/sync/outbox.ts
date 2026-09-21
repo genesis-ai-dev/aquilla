@@ -9,6 +9,7 @@
  */
 
 import type { CqrsRawEvent } from "./outbox-types"
+import { journalTargetCommit, clearJournalRecord, recoverJournal } from "./outbox-recovery"
 
 const DB_NAME = "aquilla-cqrs-outbox"
 /** v3: new records carry the account that created them. */
@@ -173,7 +174,13 @@ async function openDb(): Promise<IDBDatabase> {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onerror = () => reject(req.error ?? new Error("IDB open failed"))
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        void recoverJournal(req.result, STORE).then(() => resolve(req.result), (error) => {
+          req.result.close()
+          dbPromise = null
+          reject(error)
+        })
+      }
       req.onupgradeneeded = (ev) => {
         const db = req.result
         const tx = req.transaction
@@ -216,7 +223,6 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
   // Capture before IndexedDB opens. A transition that lands during that await
   // must not reclassify an edit initiated by the previous account.
   const ownerKey = activeOwnerKey
-  const db = await openDb()
   const rec: OutboxRecord = {
     id: event.id,
     enqueuedAt: Date.now(),
@@ -227,12 +233,17 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
     status: "pending",
     ownerKey,
   }
+  // pagehide cannot await openDb or a transaction. Persist the same event
+  // synchronously first, preserving the account that initiated this write.
+  if (ownerKey !== undefined) journalTargetCommit(rec)
+  const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("enqueue tx failed"))
     tx.oncomplete = () => resolve()
     tx.objectStore(STORE).put(rec)
   })
+  clearJournalRecord(event.id)
   notifyOutboxChanged()
 }
 

@@ -6325,13 +6325,12 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // FRO-297: Accessible label for the target editor textbox.
-  // Format: "<ref> — <state>" so screen readers announce context on focus.
-  // Uses cell.context (the canonical reference like "GEN 1:1") when available,
-  // falls back to globalReferences[0], then rowIndex+1.
-  const cellRef = cell.context?.trim()
-    || cell.globalReferences?.[0]?.trim()
-    || `row ${rowIndex + 1}`
+  // Human references help people and DOM agents identify a cell. Importers
+  // also store opaque UUIDs as canonical refs; those carry no useful context.
+  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
+    .map((value) => value?.trim())
+    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
       cellRef={cellRef}
@@ -6347,11 +6346,14 @@ function EditorRow({
     />
   )
   const cellStateLabel =
-    cell.status === "validated" ? "validated" :
-    cell.status === "empty" ? "empty" :
-    cell.activeValidators.includes(username) ? "self-validated" :
-    "unvalidated"
-  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+    cell.status === "validated" ? t("editor.state.validated") :
+    cell.status === "empty" ? t("editor.state.empty") :
+    cell.activeValidators.includes(username) ? t("editor.state.selfValidated") :
+    t("editor.state.unvalidated")
+  const sourceExcerpt = cell.original.replace(/\s+/g, " ").trim().slice(0, 120)
+  const editorAriaLabel = sourceExcerpt
+    ? t("editor.row.translationAria", { ref: cellRef, source: sourceExcerpt, state: cellStateLabel })
+    : t("editor.row.editorAria", { ref: cellRef, state: cellStateLabel })
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -6965,7 +6967,7 @@ function EditorRow({
                         : null)
                     }}
                     onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
+                      if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
                       requestTargetEdit()

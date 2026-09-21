@@ -27,6 +27,21 @@ test("alice imports markdown, edits a cell, and the edit persists across reload"
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText(text, { timeout: 5_000 })
+
+  // AQU-1336 / AQU-1334: hard navigation does not run React cleanup. Leave
+  // immediately after input, while the idle commit is still pending.
+  const editorUrl = alice.url()
+  const correction = `Immediate correction ${Date.now()}`
+  const editor = await ws.activateTargetCell(0)
+  await editor.fill(correction)
+  await alice.goto("about:blank")
+  await alice.goto(editorUrl)
+  await ws.waitForEditor()
+  await expect(ws.cellRow(0)).toContainText(correction, { timeout: 10_000 })
+  // A second reload verifies the recovered outbox survives another teardown.
+  await alice.reload()
+  await ws.waitForEditor()
+  await expect(ws.cellRow(0)).toContainText(correction, { timeout: 10_000 })
 })
 
 // AQU-1328: a cold reopen must never offer an existing translation as a blank.

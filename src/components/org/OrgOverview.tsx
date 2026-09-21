@@ -165,7 +165,13 @@ export function OrgOverview() {
         enableSorting: false,
         header: t("common.project"),
         cell: ({ row }) => (
-          <span className="truncate font-medium text-foreground">{row.original.project.name}</span>
+          <Link
+            to={`/projects/${encodeURIComponent(row.original.project.id)}`}
+            onClick={(event) => event.stopPropagation()}
+            className="truncate font-medium text-foreground hover:underline focus-visible:underline"
+          >
+            {row.original.project.name}
+          </Link>
         ),
       },
       {

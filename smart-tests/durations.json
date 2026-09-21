@@ -1,14 +1,14 @@
 {
-  "DOM audit: project surfaces and editor activation use Jev's actual snapshot": 7955,
-  "DOM audit: the validation control is a named entry point on a translated row": 1636,
-  "Jev edit durability: delayed-network": 18216,
-  "Jev edit durability: immediate-departure": 6393,
-  "Jev edit durability: normal": 6749,
-  "Jev project outcome: cell-comment": 5454,
-  "Jev project outcome: file-rename": 6009,
-  "Jev project outcome: project-rename": 6411,
-  "Jev validation sign-off: immediate-departure": 6306,
-  "Jev validation sign-off: normal": 4783,
-  "oracle qualification: rejects a missing write and accepts a real durable edit": 3427,
-  "oracle qualification: rejects an unsigned and a misplaced validation, accepts a real sign-off": 1769
+  "DOM audit: project surfaces and editor activation use Jev's actual snapshot": 10690,
+  "DOM audit: the validation control is a named entry point on a translated row": 3779,
+  "Jev edit durability: delayed-network": 24554,
+  "Jev edit durability: immediate-departure": 14145,
+  "Jev edit durability: normal": 9437,
+  "Jev project outcome: cell-comment": 7941,
+  "Jev project outcome: file-rename": 8509,
+  "Jev project outcome: project-rename": 7235,
+  "Jev validation sign-off: immediate-departure": 7412,
+  "Jev validation sign-off: normal": 6065,
+  "oracle qualification: rejects a missing write and accepts a real durable edit": 6139,
+  "oracle qualification: rejects an unsigned and a misplaced validation, accepts a real sign-off": 2576
 }

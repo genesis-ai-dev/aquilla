@@ -87,9 +87,9 @@ stack could hold every slow journey; the launcher selects each stack's
 assigned titles explicitly instead.
 
 The floor for a suite is `max(longest journey, serial total / stacks)`. For
-today's twelve checks that is 18.2 s and 75.1 s, so four stacks already
-reach 18.8 s — essentially the longest journey — and more stacks cannot
-finish the suite sooner. Six is the cap because that is where the two terms
+today's twelve checks, measured serially, that is 18.2 s and 75.1 s, so four
+stacks already reach the longest journey and more stacks cannot finish the
+suite sooner. Six is the cap because that is where the two terms
 meet; each extra stack still costs a database, a build, and a browser.
 
 `smart-tests/durations.json` is the baseline, rewritten after any complete
@@ -108,12 +108,18 @@ Missing, duplicate, interrupted, or wrong-build shard evidence fails the merged
 suite; a successful subset never becomes a whole-suite pass. Per-shard results
 remain available beside the merged directory. Existing run IDs cannot be reused.
 
-An initial four-stack local run completes all eight checks in 51.3 seconds
-including setup; its slowest test shard takes 29.6 seconds. The earlier serial
-test phase took roughly 70 seconds excluding setup. These are individual runs,
-not a stability study or a Hetzner capacity measurement. More parallelism can
-increase CPU, Postgres, browser, and provider contention. Measure both setup
-and test time on the target host before raising the cap or changing defaults.
+A balanced four-stack local run completes all twelve checks in 50.0 seconds
+including setup; its slowest test shard takes 30.2 seconds. The same suite
+run serially took 92.8 seconds of test time plus setup.
+
+Contention is real and worth stating: the same twelve journeys cost 75.1
+seconds of test time on one stack and 108.5 seconds spread over four, about
+45 percent more. Parallelism still wins on wall time, but each journey gets
+slower, so the achievable floor moves up with the stack count. That is why
+more stacks stop paying: at four stacks the bound is already the longest
+journey. These are individual runs, not a stability study or a Hetzner
+capacity measurement. Measure both setup and test time on the target host
+before raising the cap or changing defaults.
 
 The launcher reserves E2E stack four: database `aquilla_e2e_s3`, app port
 6473, identity port 10087, sync port 10088. It runs one journey at a time.

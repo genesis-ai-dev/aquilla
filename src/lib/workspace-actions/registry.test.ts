@@ -276,3 +276,48 @@ describe("the audio actions are gated on their counts", () => {
     expect(find("synth-all").requiresConfirmation!.description(c, t)).toContain("4")
   })
 })
+
+// ── AQU-490: bulk recording validation ─────────────────────────────────────
+//
+// Sam's ruling: a SEPARATE action beside the text one, in both places a bulk
+// text validate lives. Never combined — a reviewer signing off translations
+// has not listened to the recordings, and one button doing both would collect
+// sign-off nobody meant to give.
+describe("batch-validate-audio", () => {
+  const action = () => workspaceActions.find((a) => a.id === "batch-validate-audio")!
+  const withRole = (roleLevel: number, overrides: Partial<WorkspaceActionContext> = {}) => ctx({
+    project: { ...project, syncRole: { level: roleLevel, name: "t", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } },
+    activeFileId: "f1",
+    ...overrides,
+  })
+
+  it("exists as its own action, distinct from the text one", () => {
+    expect(action()).toBeDefined()
+    expect(workspaceActions.find((a) => a.id === "batch-validate")).toBeDefined()
+  })
+
+  // A text-only project must not grow a menu item it can do nothing with.
+  it("hides itself when the file has no take this user could validate", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 0 } }))).toBe(false)
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 3, unsynthesized: 2 } }))).toBe(false)
+  })
+
+  it("appears once there is something to sign off", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 } }))).toBe(true)
+  })
+
+  // Reviewer floor, same as the text action — and the same as the server's.
+  it("stays hidden below the reviewer floor", () => {
+    const counts = { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 }
+    expect(action().isAvailable(withRole(ROLE.COMMENTER, { audioCounts: counts }))).toBe(false)
+    expect(action().isAvailable(withRole(ROLE.REVIEWER, { audioCounts: counts }))).toBe(true)
+  })
+
+  it("runs its own handler, never the text one", () => {
+    const runBatchValidate = vi.fn()
+    const runBatchValidateAudio = vi.fn()
+    action().run(withRole(600), { runBatchValidate, runBatchValidateAudio } as never)
+    expect(runBatchValidateAudio).toHaveBeenCalledTimes(1)
+    expect(runBatchValidate).not.toHaveBeenCalled()
+  })
+})

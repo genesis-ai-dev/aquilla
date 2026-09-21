@@ -169,7 +169,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -218,7 +218,6 @@ import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/l
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
@@ -389,6 +388,8 @@ import { getMyAssignments, getProjectAssignments, type MyAssignment, type Assign
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
+import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
   setVisibleCellIds as setEditorViewportVisibleCellIds,
@@ -8343,7 +8344,7 @@ export function ProjectWorkspace() {
   // carries a `selectedAudioId` there. That zero hid "Transcribe all
   // recordings" from the menu outright on exactly the files this branch is for.
   const audioCounts = useMemo(() => {
-    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
+    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0, validatableTakes: 0 }
     // The cue list is already merged with its own file's attachments, and it
     // includes the ~10 heard lines an episode that no subtitle is linked to —
     // a take on one of those needs transcribing like any other.
@@ -8351,9 +8352,27 @@ export function ProjectWorkspace() {
       audioCueCells ??
       mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     let untranscribed = 0
+    // AQU-490: takes this viewer could still validate — the number the bulk
+    // audio action offers and then does. Counted the same way the action
+    // counts, through the same adapter, so the menu cannot promise work the
+    // run then skips. Generated voices are excluded here as they are there:
+    // a TTS take is the AI-draft analogue and is signed off one at a time.
+    let validatableTakes = 0
+    for (const c of holders) {
+      for (const take of audioValidationTakes(
+        audioEntryFromCell(c),
+        project ?? {},
+        { roleLevel: project?.syncRole?.level ?? null, username: currentUsername },
+        () => "",
+      )) {
+        if (take.canValidate && !take.isGenerated && !take.validators.includes(currentUsername)) {
+          validatableTakes++
+        }
+      }
+    }
     for (const c of holders) if (needsTranscription(c)) untranscribed++
-    return { untranscribed, unsynthesized: synthTargets.length }
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets])
+    return { untranscribed, unsynthesized: synthTargets.length, validatableTakes }
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets, project, currentUsername])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -8422,8 +8441,12 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
+      // AQU-490: the SAME predicate the selection toolbar uses. This path used
+      // to carry neither of its two guards — see bulk-validation.ts.
       const eligible = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+        (c) =>
+          c.fileId === activeFileId
+          && isBulkValidatableByMe(c, currentUsername, myScopes, activeLane),
       )
       // AQU-586: cap how many eligible cells one batch-validate processes.
       // 0/undefined = validate all eligible (unchanged default behavior).
@@ -8446,6 +8469,54 @@ export function ProjectWorkspace() {
         await refreshOutboxPending()
         revalidateAuditStats()
         for (const cell of validatable) revalidateCell(cell.id)
+      })()
+    },
+    // AQU-490: bulk audio validation — a SEPARATE action beside the text one,
+    // per Sam. Never combined: a reviewer signing off translations has not
+    // listened to the recordings, and one button doing both would collect
+    // sign-off nobody meant to give.
+    runBatchValidateAudio: () => {
+      if (!project?.id || !activeFileId) return
+      if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
+      const scope = audioValidationScope(project, {
+        roleLevel: project.syncRole?.level ?? null,
+        username: currentUsername,
+      })
+      if (!scope.canValidate) return
+      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
+      const targets: Array<{ fileId: string; cellId: string; audioId: string }> = []
+      for (const cell of cells) {
+        if (cell.fileId !== activeFileId) continue
+        if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue
+        for (const take of audioValidationTakes(
+          audioEntryFromCell(cell),
+          project,
+          { roleLevel: project.syncRole?.level ?? null, username: currentUsername },
+          () => "",
+        )) {
+          // Skips, per Sam's ruling: already mine, out of scope, no take, and
+          // a GENERATED voice — the AI-draft analogue, which a person must
+          // choose to sign off one at a time rather than sweep up in a batch.
+          if (!take.canValidate) continue
+          if (take.isGenerated) continue
+          if (take.validators.includes(currentUsername)) continue
+          targets.push({ fileId: cell.fileId, cellId: cell.id, audioId: take.audioId })
+        }
+      }
+      if (targets.length === 0) return
+      void (async () => {
+        for (const target of targets) {
+          await emitCellAudioValidate({
+            projectId: project.id,
+            fileId: target.fileId,
+            cellId: target.cellId,
+            audioId: target.audioId,
+            author: currentUsername,
+          })
+        }
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await refreshOutboxPending()
+        notifyAudioAttachmentsChanged(activeFileId)
       })()
     },
     runImportIntoFile: () => {
@@ -11403,6 +11474,7 @@ export function ProjectWorkspace() {
                   username={currentUsername}
                   activeLane={activeLane}
                   myScopes={myScopes}
+                  audioByCellId={workspaceAudioByCellId}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}

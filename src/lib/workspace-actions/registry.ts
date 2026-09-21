@@ -131,6 +131,31 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runBatchValidate(),
   },
   {
+    // AQU-490. BESIDE the text action, never merged into it: Sam's ruling is
+    // that combining them would be "really dumb" — signing off a translation
+    // says nothing about whether anyone has listened to its recording.
+    id: "batch-validate-audio",
+    labelKey: "nav.workspaceActions.batchValidateAudio.label",
+    icon: Mic,
+    group: "primary",
+    // Only where there is audio to validate at all, so a text-only project
+    // never grows a menu item it can do nothing with.
+    isAvailable: (c) =>
+      c.activeFileId != null
+      && roleAllows(c, "cell.audio.validate")
+      && (c.audioCounts?.validatableTakes ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.batchValidateAudio.title",
+      description: (c, t) => {
+        if (!c.activeFileId) return ""
+        const takes = c.audioCounts?.validatableTakes ?? 0
+        return t("nav.workspaceActions.batchValidateAudio.description", { takes })
+      },
+      confirmLabelKey: "nav.workspaceActions.batchValidateAudio.label",
+    },
+    run: (_c, args) => args.runBatchValidateAudio(),
+  },
+  {
     id: "export", labelKey: "nav.workspaceActions.export", icon: Download, group: "primary",
     // AQU-253 (revised): stay visible even when org policy forbids export —
     // the ExportDialog shows a permission gate explaining the block, which

@@ -122,6 +122,12 @@ export const nav = defineNamespace({
     ),
     "nav.workspaceActions.completeAll.confirmLabel": "Draft all",
     "nav.workspaceActions.batchValidate.label": "Batch validate…",
+    "nav.workspaceActions.batchValidateAudio.label": "Validate recordings",
+    "nav.workspaceActions.batchValidateAudio.title": "Validate every recording in this file?",
+    "nav.workspaceActions.batchValidateAudio.description": plural({
+      one: "Adds your validation to {takes} recording that you have not signed off yet. Generated voices are skipped.",
+      other: "Adds your validation to {takes} recordings that you have not signed off yet. Generated voices are skipped.",
+    }),
     "nav.workspaceActions.batchValidate.title": "Batch validate",
     "nav.workspaceActions.batchValidate.description": plural(
       {
@@ -740,6 +746,24 @@ export const nav = defineNamespace({
           "cells as validated in bulk. Trailing ellipsis marks it as opening a " +
           "confirmation, per this catalog's convention.",
         maxLength: 24,
+      },
+      "nav.workspaceActions.batchValidateAudio.label": {
+        description:
+          "Menu item that adds the current user's validation to every recording "
+          + "in the open file. SEPARATE from the text action beside it — signing "
+          + "off a translation says nothing about whether anyone has listened to "
+          + "its recording. The word is 'validate', never 'approve'.",
+        maxLength: 26,
+      },
+      "nav.workspaceActions.batchValidateAudio.title": {
+        description: "Confirmation dialog title for the bulk recording validation above.",
+      },
+      "nav.workspaceActions.batchValidateAudio.description": {
+        description:
+          "Confirmation body for bulk recording validation. Says how many takes "
+          + "will be signed off, and that text-to-speech takes are left out — "
+          + "those are reviewed one at a time, like AI-drafted text.",
+        placeholders: { takes: "How many recordings this will validate." },
       },
       "nav.workspaceActions.batchValidate.title": {
         description: "Heading of the confirmation dialog for the action above.",

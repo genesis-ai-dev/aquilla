@@ -543,6 +543,15 @@ export const editor = defineNamespace({
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my validations",
+    "editor.selection.validateAudio": "Validate recordings",
+    "editor.selection.validateAudioTooltip": plural({
+      one: "Validate {count} recording in the selection",
+      other: "Validate {count} recordings in the selection",
+    }),
+    "editor.selection.validatedAudioToast": plural({
+      one: "Validated {count} recording",
+      other: "Validated {count} recordings",
+    }),
     "editor.selection.noValidations": "No cells have your validation",
     "editor.selection.unvalidateTooltip": plural({
       one: "Remove your validation from {count} cell",
@@ -3734,6 +3743,22 @@ export const editor = defineNamespace({
           "the selected cells, leaving other reviewers' sign-offs alone. The " +
           "first-person possessive is load-bearing.",
         maxLength: 30,
+      },
+      "editor.selection.validateAudio": {
+        description:
+          "Button in the selection toolbar that validates the recordings on every "
+          + "selected line. SEPARATE from the text Validate beside it — signing off "
+          + "a translation says nothing about whether anyone has listened to its "
+          + "recording. The word is 'validate', never 'approve'.",
+        maxLength: 26,
+      },
+      "editor.selection.validateAudioTooltip": {
+        description: "Tooltip for the button above, with the number of recordings it would sign off.",
+        placeholders: { count: "How many recordings the selection holds that this user can still validate." },
+      },
+      "editor.selection.validatedAudioToast": {
+        description: "Confirmation after the bulk recording validation above ran.",
+        placeholders: { count: "How many recordings were validated." },
       },
       "editor.selection.noValidations": {
         description:

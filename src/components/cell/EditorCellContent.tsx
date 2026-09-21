@@ -3,13 +3,19 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   prepareReadOnlyRichTextHtml,
-  sanitizeIdmlEditorHtml,
   sanitizeSourceDisplayHtml,
 } from "@/lib/richtext/editor-content"
+import {
+  looksLikeIdmlHtml,
+  prepareIdmlDisplayHtml,
+  type IdmlStyleCatalog,
+} from "@/lib/richtext/idml-style-display"
 import {
   segmentUsfmForDisplay,
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
+import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
+import type { Concept } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export function UsfmNoteChip({
@@ -55,8 +61,37 @@ export function UsfmNoteChip({
 }
 
 /** Sanitized source-rich-text surface shared by the grid and agent workbench. */
-export function SanitizedRichHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => sanitizeSourceDisplayHtml(html), [html])
+export function SanitizedRichHtml({
+  html,
+  idmlStyleCatalog,
+  idmlParagraphStyleId,
+  concepts,
+}: {
+  html: string
+  idmlStyleCatalog?: IdmlStyleCatalog
+  idmlParagraphStyleId?: string
+  /**
+   * AQU-1135: managed terminology for this project. When supplied, every
+   * active-concept match is wrapped in the shared `.term-chip-host
+   * [data-source-term]` highlight so a FORMATTED source cell gets the same key
+   * terms — and the same clickable lookup — a plain-text one already had.
+   * Omitted by callers with no terminology surface (the agent workbench).
+   */
+  concepts?: Concept[]
+}) {
+  const t = useT()
+  const safeHtml = useMemo(
+    () => {
+      const sanitized = looksLikeIdmlHtml(html)
+        ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
+        : sanitizeSourceDisplayHtml(html)
+      // Strictly after sanitizing — the source sanitizer drops data-* attrs.
+      return decorateTermsInHtml(sanitized, concepts, {
+        label: (term) => t("editor.term.managed", { term }),
+      })
+    },
+    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t],
+  )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
   return (
@@ -93,8 +128,19 @@ export function TargetRichHtml({
   )
 }
 
-export function TargetIdmlHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => sanitizeIdmlEditorHtml(html), [html])
+export function TargetIdmlHtml({
+  html,
+  idmlStyleCatalog,
+  idmlParagraphStyleId,
+}: {
+  html: string
+  idmlStyleCatalog?: IdmlStyleCatalog
+  idmlParagraphStyleId?: string
+}) {
+  const safeHtml = useMemo(
+    () => prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId),
+    [html, idmlParagraphStyleId, idmlStyleCatalog],
+  )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
   return (
     <div

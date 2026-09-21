@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
@@ -15,8 +15,12 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { downloadImportedOriginal } from "@/lib/file-original-download"
+import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -48,6 +52,12 @@ interface Props {
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
+   * AQU-1326: hold each expanded row's per-file `/progress` read until the
+   * editor's first cell page has painted, so the sidebar doesn't take a
+   * connection slot from the cell stream on file open.
+   */
+  deferSectionProgress?: boolean
+  /**
    * AQU-253 (a fix): whether org policy allows export. When false, the
    * per-file export menu items are hidden so dashboard affordances match
    * the workspace. Defaults to true (no gate) for callers that haven't
@@ -63,6 +73,7 @@ export function ExpandableFileList({
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   activeChapterHealth,
+  deferSectionProgress,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -73,17 +84,41 @@ export function ExpandableFileList({
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+  const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
 
+  // AQU-1326: this prefetch is deliberately eager, but on a file OPEN it lands
+  // just ahead of the cell stream and takes a slot from it — the sidebar's
+  // progress spine is not what the user is waiting for. Held until the editor's
+  // first cell page has painted; the effect re-runs the moment that flips, so
+  // the prefetch still happens, just behind the cells.
   useEffect(() => {
+    if (deferSectionProgress) return
     if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
     for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
-  }, [activeFileId, expanded, getTokenForFile, projectId])
+  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, projectId])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     const filtered = needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files
     return groupByCorpus(filtered)
   }, [files, filter])
+
+  // AQU-1084: one-click jump to a Testament for full-Bible projects. Decided
+  // with QA (2026-09-02): the control never hides or collapses anything on the
+  // user's behalf — it expands the chosen group if it was collapsed and scrolls
+  // its header to the top, and leaves the other group exactly as the user had
+  // it. Offered only when both testaments are present (unfiltered), since with
+  // one there is nothing to jump past.
+  const showTestamentJump = useMemo(() => {
+    const labels = new Set(groupByCorpus(files).map((g) => g.label))
+    return labels.has("OT") && labels.has("NT")
+  }, [files])
+  const groupEls = useRef(new Map<string, HTMLDivElement>())
+  const visibleGroupLabels = useMemo(() => new Set(groups.map((g) => g.label)), [groups])
+  function jumpToGroup(label: string) {
+    if (collapsed.has(label)) toggleCollapsed(label)
+    groupEls.current.get(label)?.scrollIntoView({ block: "start" })
+  }
 
   return (
     <>
@@ -121,6 +156,29 @@ export function ExpandableFileList({
             </InputGroupAddon>
           )}
         </InputGroup>
+        {showTestamentJump && (
+          <ButtonGroup
+            aria-label={t("nav.fileList.jumpToTestament")}
+            className="mt-2 w-full *:flex-1"
+          >
+            {/* i18n-exempt: "OT"/"NT" are the groups' identity strings (see
+                CorpusGroup.label); only the button text is translated. */}
+            {(["OT", "NT"] as const).map((testament) => (
+              <Button
+                key={testament}
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={!visibleGroupLabels.has(testament)}
+                onClick={() => jumpToGroup(testament)}
+              >
+                {testament === "OT"
+                  ? t("importExport.helloao.presetOldTestament")
+                  : t("importExport.helloao.presetNewTestament")}
+              </Button>
+            ))}
+          </ButtonGroup>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
@@ -138,11 +196,19 @@ export function ExpandableFileList({
             const displayLabel = group.labelKey ? t(group.labelKey) : group.label
             const showHeader = groups.length > 1 || group.label !== "Ungrouped"
             const isCollapsed = showHeader && collapsed.has(group.label)
+            // Derived groups (members grouped by bookCode, not by their own
+            // corpusMarker) can't be renamed: renameCorpus would skip them.
             const canEditCorpus =
-              showHeader && group.label !== "Ungrouped" && onRenameCorpus !== undefined
+              showHeader && group.label !== "Ungrouped" && onRenameCorpus !== undefined && !group.derived
             const isEditingCorpus = editingCorpus === group.label
             return (
-              <div key={group.label}>
+              <div
+                key={group.label}
+                ref={(el) => {
+                  if (el) groupEls.current.set(group.label, el)
+                  else groupEls.current.delete(group.label)
+                }}
+              >
                 {showHeader && (
                   <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] text-muted-foreground">
                     <button
@@ -233,6 +299,15 @@ export function ExpandableFileList({
                                 ? () => { void exportFile(file) }
                                 : undefined
                             }
+                            onDownloadOriginal={
+                              canExportByOrgPolicy && originalSourceIds.has(file.id)
+                                ? () => { void downloadImportedOriginal({
+                                    projectId,
+                                    file,
+                                    getToken: getTokenForFile,
+                                  }) }
+                                : undefined
+                            }
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
@@ -244,6 +319,7 @@ export function ExpandableFileList({
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
                               chapters={file.id === activeFileId ? activeChapterHealth : undefined}
+                              deferFetch={deferSectionProgress}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

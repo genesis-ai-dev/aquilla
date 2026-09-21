@@ -136,6 +136,28 @@ export function shouldPublishPresenceDraft(previous: string, next: string): bool
   return Math.max(changedBefore, changedAfter) >= PRESENCE_WORD_BATCH_SIZE
 }
 
+/**
+ * What the typing-idle timer should do with the current draft.
+ *
+ * The word-boundary + two-word batch gates keep a live draft from leaking half
+ * a word on every pause, but a continuous typist who stops mid-word (or types
+ * one long word) would otherwise never be seen typing at all. So a draft that
+ * fails the gates is deferred exactly ONCE — the next idle window publishes it
+ * regardless, as long as the text actually changed. "typing…" then shows up
+ * within two idle windows (~1.3s) for any typist.
+ */
+export function presenceDraftIdleAction(args: {
+  atWordBoundary: boolean
+  alreadyDeferred: boolean
+  previous: string
+  next: string
+}): "publish" | "defer" | "skip" {
+  const { atWordBoundary, alreadyDeferred, previous, next } = args
+  if (next === previous) return "skip"
+  if (atWordBoundary && shouldPublishPresenceDraft(previous, next)) return "publish"
+  return alreadyDeferred ? "publish" : "defer"
+}
+
 export function isPresenceWordBoundary(text: string, caretOffset: number): boolean {
   if (caretOffset <= 0) return false
   const preceding = Array.from(text.slice(0, caretOffset)).at(-1)
@@ -367,14 +389,14 @@ interface TranslatedEditorProps {
   onNavigateCell?: (direction: "prev" | "next") => void
   /**
    * Optional managed terminology concepts. When provided, active concepts are
-   * highlighted with a tiny status-tinted chip at the top-right of each match.
+   * shown with the shared subtle blue highlight on each match.
    * Defaults to undefined (feature off) so other call sites are unaffected.
-   * Chip click exposes `data-source-term` for AQU-204 (TermLookupPopover).
+   * Highlight clicks expose `data-source-term` for AQU-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
   /**
-   * AQU-204: Called when the user clicks a term chip in the editor.
-   * Receives the sourceTerm string and the chip DOM element as an anchor.
+   * AQU-204: Called when the user clicks a managed-term highlight in the editor.
+   * Receives the sourceTerm string and the highlight DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -534,8 +556,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
   const lastPublishedDraftRef = useRef(initialPlain)
+  /** Draft text last put ON THE WIRE this focus session — caret-only frames
+   *  omit `draftText` when it has not changed (bandwidth: every frame fans
+   *  out to all peers). Null until the first publish after focus. */
+  const lastSentDraftRef = useRef<string | null>(null)
+  const presenceDraftDeferredRef = useRef(false)
   const lastTypingEndedAtBoundaryRef = useRef(false)
   const lastCommittedRef = useRef<string>(initialPlain)
+  // Formatting-only edits (bold, underline, a link) leave the plain text
+  // identical, so a text-only dirty check drops them on blur and the user
+  // watches their formatting vanish. Track the serialized HTML alongside the
+  // text and commit when EITHER moved.
+  const lastCommittedHtmlRef = useRef<string | null>(null)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
   // the edit into the void — the commit has to reach the outbox to survive).
@@ -563,6 +595,16 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     setIdmlError(message)
     onIdmlValidationErrorRef.current?.(message)
   }, [])
+
+  /**
+   * The editor's own serialized HTML, by the same serializer a commit uses —
+   * but WITHOUT validation or error reporting, so seeding the committed
+   * baseline can never surface a diagnostic on mount.
+   */
+  const canonicalHtml = useCallback((editorInstance: TiptapEditor): string | null => {
+    if (!idmlContext) return editorInstance.getHTML()
+    return serializeIdmlEditorDocument(editorInstance.state.doc)
+  }, [idmlContext])
 
   const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
     if (!idmlContext) return { value: editorInstance.getText(), valueHtml: editorInstance.getHTML() }
@@ -612,18 +654,22 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const anchor = pmPositionToPlainPosition(doc, selection.anchor)
     const head = pmPositionToPlainPosition(doc, selection.head)
     const text = editorInstance.getText()
+    // Oversized cells still get live caret/selection presence, but wait for
+    // the durable commit before broadcasting their full text. A draft that
+    // already went out this session rides on the DO's stored copy instead.
+    const sendDraft = text.length <= MAX_PRESENCE_DRAFT_LENGTH && text !== lastSentDraftRef.current
     const next: TargetPresenceSelection = {
       side: "target",
       anchor,
       head,
-      // Oversized cells still get live caret/selection presence, but wait for
-      // the durable commit before broadcasting their full text.
-      ...(text.length <= MAX_PRESENCE_DRAFT_LENGTH ? { draftText: text } : {}),
+      ...(sendDraft ? { draftText: text } : {}),
     }
-    const key = `${next.side}:${next.anchor}:${next.head}:${next.draftText ?? ""}`
+    const key = `${next.side}:${next.anchor}:${next.head}:${text}`
     if (key === lastSelectionKeyRef.current) return
     lastSelectionKeyRef.current = key
     lastPublishedDraftRef.current = text
+    if (sendDraft) lastSentDraftRef.current = text
+    presenceDraftDeferredRef.current = false
     onSelectionChangeRef.current?.(next)
   }, [])
   const scheduleSelectionPublish = useCallback((editorInstance: TiptapEditor | null) => {
@@ -643,13 +689,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (presenceDraftIdleTimerRef.current !== null) {
       clearTimeout(presenceDraftIdleTimerRef.current)
     }
-    presenceDraftIdleTimerRef.current = setTimeout(() => {
+    const onIdle = () => {
       presenceDraftIdleTimerRef.current = null
-      const text = editorInstance.getText()
-      if (!lastTypingEndedAtBoundaryRef.current) return
-      if (!shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) return
+      const action = presenceDraftIdleAction({
+        atWordBoundary: lastTypingEndedAtBoundaryRef.current,
+        alreadyDeferred: presenceDraftDeferredRef.current,
+        previous: lastPublishedDraftRef.current,
+        next: editorInstance.getText(),
+      })
+      if (action === "skip") return
+      if (action === "defer") {
+        presenceDraftDeferredRef.current = true
+        presenceDraftIdleTimerRef.current = setTimeout(onIdle, PRESENCE_DRAFT_IDLE_MS)
+        return
+      }
       publishSelection(editorInstance)
-    }, PRESENCE_DRAFT_IDLE_MS)
+    }
+    presenceDraftIdleTimerRef.current = setTimeout(onIdle, PRESENCE_DRAFT_IDLE_MS)
   }, [publishSelection])
 
   const editor = useEditor({
@@ -708,9 +764,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
+          // AQU-1101: `break-words` on the editable surface too. ProseMirror's
+          // own `word-wrap: break-word` does not survive `prose`'s reset here,
+          // and without it the active cell re-widens its grid track the moment
+          // an unbreakable token is typed or pasted into it — the read surface
+          // and the editing surface have to agree or the row jumps on focus.
           compactHeight
-            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
-            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+            ? "prose prose-sm max-w-none min-w-0 break-words px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] min-w-0 break-words px-1 py-0.5 leading-relaxed focus:outline-none",
           idmlContext && "whitespace-pre-wrap",
           "rounded-lg transition-colors",
           className
@@ -1157,8 +1218,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       pendingCommitRef.current = snapshot
       idleTimerRef.current = setTimeout(() => {
         pendingCommitRef.current = null
-        if (text === lastCommittedRef.current) return
+        if (text === lastCommittedRef.current && html === lastCommittedHtmlRef.current) return
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
       // AQU-664: publish the live buffer on a much shorter debounce so the
@@ -1231,6 +1293,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         presenceDraftIdleTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
+      lastSentDraftRef.current = null
+      presenceDraftDeferredRef.current = false
       onSelectionChangeRef.current?.(null)
       if (idleTimerRef.current !== null) {
         clearTimeout(idleTimerRef.current)
@@ -1264,8 +1328,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         aiDraftedRef.current &&
         initialPlainRef.current !== lastHydratedPlainRef.current &&
         text !== initialPlainRef.current
-      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
+      const changed =
+        text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current
+      if (!hasUnabsorbedDraft && changed) {
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }
       onBlur?.()
@@ -1305,8 +1372,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (!snapshot) return
     const { value: text, valueHtml: html } = snapshot
-    if (text !== lastCommittedRef.current) {
+    if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
       lastCommittedRef.current = text
+      lastCommittedHtmlRef.current = html
       onCommitRef.current({ value: text, valueHtml: html })
     }
   }
@@ -1408,6 +1476,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1452,7 +1521,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext])
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
+  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext, canonicalHtml])
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -1546,8 +1616,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       }
       const pending = pendingCommitRef.current
       pendingCommitRef.current = null
-      if (pending && pending.value !== lastCommittedRef.current) {
+      if (
+        pending
+        && (pending.value !== lastCommittedRef.current
+          || pending.valueHtml !== lastCommittedHtmlRef.current)
+      ) {
         lastCommittedRef.current = pending.value
+        lastCommittedHtmlRef.current = pending.valueHtml
         onCommitRef.current(pending)
       }
     }
@@ -1689,21 +1764,26 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
-          // AQU-204: term chip click → open TermLookupPopover via caller
+          // A violation owns the term text when both decorations overlap.
+          // This preserves the blot-to-toast path after removing the tiny,
+          // separate terminology glyph.
+          if (onRuleClick) {
+            const blot = target.closest("[data-rule-id]")
+            if (blot) {
+              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
+              return
+            }
+          }
+          // AQU-204: managed-term highlight click → open TermLookupPopover.
           if (onTermChipClick) {
-            const chip = target.closest(".term-chip[data-source-term]")
-            if (chip) {
-              const term = chip.getAttribute("data-source-term")
+            const termHighlight = target.closest(".term-chip-host[data-source-term]")
+            if (termHighlight) {
+              const term = termHighlight.getAttribute("data-source-term")
               if (term) {
-                onTermChipClick(term, chip as HTMLElement)
+                onTermChipClick(term, termHighlight as HTMLElement)
                 return
               }
             }
-          }
-          if (!onRuleClick) return
-          const blot = target.closest("[data-rule-id]")
-          if (blot) {
-            onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
           }
         }}
       >

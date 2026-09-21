@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { handleCellsReadRequest } from "../events/cells-read-route"
+import { describe, it, expect, vi } from "vitest"
+import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -1048,5 +1048,379 @@ describe("project incarnation (AQU-943)", () => {
     ))!
     expect(res.status).toBe(400)
     expect(await res.text()).toContain("invalid epoch")
+  })
+})
+
+// ── AQU-1160: ordered-id chain cache ────────────────────────────────────────
+//
+// Cell page reads used to materialize + walk every row on EVERY page. These
+// tests verify the fix's two obligations: (1) a page past the first one for
+// an unchanged file touches a bounded number of rows, independent of file
+// size (AC1); (2) the cached path returns byte-identical cells/order to the
+// uncached full-materialization walk on the same fixtures the ordering-oracle
+// tests above already cover — ties, orphans, multi-root, lanes, both sides
+// (AC2). It never changes cellIds=/since= behavior (untouched code paths).
+
+/** Wraps `db` so every `.all()` row count issued through it is recorded in
+ *  `counts`, in call order — lets a test assert a request touched a bounded
+ *  number of rows without depending on internal query shapes. */
+function countingEnv(db: AquillaDb): { env: CellsReadEnv; counts: number[] } {
+  const counts: number[] = []
+  // Monkey-patches `db.prepare` in place. (The chain cache is module-level
+  // and keyed on projectId + ETag, so instance identity no longer matters —
+  // see the cross-instance test below.)
+  const originalPrepare = db.prepare.bind(db)
+  db.prepare = (sql: string) => {
+    let bound = originalPrepare(sql)
+    const wrapper = {
+      bind(...args: unknown[]) {
+        bound = bound.bind(...args)
+        return wrapper
+      },
+      async all<T>() {
+        const res = await bound.all<T>()
+        counts.push(res.results.length)
+        return res
+      },
+      async run<T>() {
+        return bound.run<T>()
+      },
+      async first<T>(colName?: string) {
+        return bound.first<T>(colName)
+      },
+      async raw<T>() {
+        return bound.raw<T>()
+      },
+    }
+    return wrapper
+  }
+  return { env: { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }, counts }
+}
+
+/** A single-side (`target`) linear chain of `n` cells, head → tail, so
+ *  ordering is unambiguous and easy to assert against by index. */
+function makeLinearChain(n: number): CellRow[] {
+  const cells: CellRow[] = []
+  let prev: string | null = null
+  for (let i = 0; i < n; i++) {
+    const id = `lc${i.toString().padStart(5, "0")}`
+    cells.push(makeCell({ cell_id: id, anchor_cell_id: prev, event_id: `e${id}` }))
+    prev = id
+  }
+  return cells
+}
+
+describe("AQU-1160: chain-order cache", () => {
+  it("AC1: a page past the first touches only that page's rows, independent of file size", async () => {
+    const N = 500
+    const cells = makeLinearChain(N)
+    const { db } = await makeTestDb({ cells })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const limit = 20
+
+    // Page 1: cache miss — pays the full-file cost once (unchanged from the
+    // pre-AQU-1160 behavior; nothing to bound here).
+    const firstReq = new Request(
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const firstRes = (await handleCellsReadRequest(firstReq, envWith(db)))!
+    const firstBody = (await firstRes.json()) as {
+      cells: Array<{ cellId: string }>
+      nextCursor: string | null
+    }
+    expect(firstBody.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${i.toString().padStart(5, "0")}`),
+    )
+
+    // Page 5 (deep into the file): cache hit — must NOT re-touch anything
+    // close to N rows. Walk cursors forward through pages 2..5 first (each
+    // still against the same unchanged ETag, so all are hits after page 1).
+    let cursor = firstBody.nextCursor
+    let lastBody: { cells: Array<{ cellId: string }>; nextCursor: string | null } = firstBody
+    const { env: countedEnv, counts } = countingEnv(db)
+    for (let page = 2; page <= 5; page++) {
+      const req = new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}&cursor=${encodeURIComponent(cursor!)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      const res = (await handleCellsReadRequest(req, countedEnv))!
+      lastBody = (await res.json()) as { cells: Array<{ cellId: string }>; nextCursor: string | null }
+      cursor = lastBody.nextCursor
+    }
+    expect(lastBody.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(4 * limit + i).toString().padStart(5, "0")}`),
+    )
+    // Every one of the 4 cache-hit requests above issued only bounded,
+    // page-sized queries (watermark point-reads + the `IN (...)` page fetch)
+    // — never anything close to N=500. This is the AC1 evidence: total rows
+    // read across 4 pages stays a small multiple of `limit`, not of file size.
+    const totalRowsRead = counts.reduce((a, b) => a + b, 0)
+    expect(totalRowsRead).toBeLessThan(N)
+    expect(totalRowsRead).toBeLessThan(limit * 4 * 3) // generous slack for watermark rows
+    // eslint-disable-next-line no-console
+    console.log(
+      `[AQU-1160 test evidence] file size=${N} cells; 4 cache-hit pages of ${limit} touched ${totalRowsRead} total rows (query counts: ${JSON.stringify(counts)})`,
+    )
+  })
+
+  it("hits across distinct AquillaDb instances — production builds a fresh db per request (perf/cells-chain-cache)", async () => {
+    // sync-worker/src/index.ts constructs a brand-new PostgresDb via
+    // makePostgres() for EVERY request. A cache keyed on db-instance
+    // identity therefore never hits in production: each page re-runs the
+    // full-file SELECT. Model that here with two wrapper objects over the
+    // same underlying store — distinct identities, identical data.
+    const N = 300
+    const { db } = await makeTestDb({ cells: makeLinearChain(N) })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const limit = 10
+
+    /** A NEW object per call (never the same identity twice), recording the
+     *  row count of every `.all()` it serves. */
+    const freshDb = (counts: number[]): AquillaDb => ({
+      prepare(sql: string) {
+        let bound = db.prepare(sql)
+        const wrapper = {
+          bind(...args: unknown[]) {
+            bound = bound.bind(...args)
+            return wrapper
+          },
+          async all<T>() {
+            const res = await bound.all<T>()
+            counts.push(res.results.length)
+            return res
+          },
+          async run<T>() {
+            return bound.run<T>()
+          },
+          async first<T>(colName?: string) {
+            return bound.first<T>(colName)
+          },
+          async raw<T>() {
+            return bound.raw<T>()
+          },
+        }
+        return wrapper
+      },
+    }) as unknown as AquillaDb
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const logged = (marker: string) =>
+      logSpy.mock.calls.filter(([line]) => String(line).includes(marker)).length
+
+    const firstCounts: number[] = []
+    const firstRes = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: freshDb(firstCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const firstBody = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string }
+    // Page 1 is the unavoidable miss: it paid the full-file cost.
+    expect(Math.max(...firstCounts)).toBe(N)
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(0)
+
+    const secondCounts: number[] = []
+    const secondRes = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      { AQUILLA_PG: freshDb(secondCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const secondBody = (await secondRes.json()) as { cells: Array<{ cellId: string }>; total: number }
+    expect(secondBody.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(limit + i).toString().padStart(5, "0")}`),
+    )
+    expect(secondBody.total).toBe(N)
+    // Page 2 came through a DIFFERENT db instance and must still be a cache
+    // hit: no query on this request may return anything near the whole file.
+    expect(Math.max(...secondCounts)).toBeLessThanOrEqual(limit)
+    // ...and it says so at the same verbosity the miss path logs at.
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(1)
+    logSpy.mockRestore()
+  })
+
+  it("AC2: cache-hit pages reproduce the exact anchor-chain order the uncached walk produces (ties + orphans + multi-root)", async () => {
+    // Same shape as the two AQU-931 oracle tests above, concatenated into one
+    // file: a sibling tie, an orphaned sub-chain, and two orphan roots.
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "head", anchor_cell_id: null, event_id: "ev0" }),
+        makeCell({ cell_id: "second", anchor_cell_id: "head", event_id: "ev2" }),
+        makeCell({ cell_id: "first", anchor_cell_id: "head", event_id: "ev1" }),
+        makeCell({ cell_id: "o2", anchor_cell_id: "gone", event_id: "e9" }),
+        makeCell({ cell_id: "o3", anchor_cell_id: "o2", event_id: "e2" }),
+        makeCell({ cell_id: "o4", anchor_cell_id: "o3", event_id: "e3" }),
+        makeCell({ cell_id: "b1", anchor_cell_id: "gone-b", event_id: "e7" }),
+        makeCell({ cell_id: "b2", anchor_cell_id: "b1", event_id: "e1" }),
+        makeCell({ cell_id: "a1", anchor_cell_id: "gone-a", event_id: "e4" }),
+        makeCell({ cell_id: "a2", anchor_cell_id: "a1", event_id: "e8" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+
+    // Uncached oracle: one big unpaginated read (limit above the row count).
+    const oracleReq = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=100",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const oracleBody = (await (await handleCellsReadRequest(oracleReq, envWith(db)))!.json()) as {
+      cells: Array<{ cellId: string }>
+    }
+    const oracleOrder = oracleBody.cells.map((c) => c.cellId)
+    expect(oracleOrder).toEqual([
+      "head", "first", "second", "a1", "a2", "b1", "b2", "o2", "o3", "o4",
+    ])
+
+    // Now walk it page by page with a tiny limit so every page after the
+    // first is a cache hit, and confirm the concatenated pages equal the
+    // oracle order exactly — no dropped, duplicated, or reordered rows.
+    const { env: countedEnv } = countingEnv(db)
+    let cursor: string | null = null
+    const pagedOrder: string[] = []
+    for (let i = 0; i < 20; i++) {
+      const url = cursor
+        ? `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=3&cursor=${encodeURIComponent(cursor)}`
+        : "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=3"
+      const req = new Request(url, { headers: { Authorization: `Bearer ${token}` } })
+      const body = (await (await handleCellsReadRequest(req, countedEnv))!.json()) as {
+        cells: Array<{ cellId: string }>
+        nextCursor: string | null
+      }
+      pagedOrder.push(...body.cells.map((c) => c.cellId))
+      cursor = body.nextCursor
+      if (!cursor) break
+    }
+    expect(pagedOrder).toEqual(oracleOrder)
+  })
+
+  it("invalidates on a new event (ETag change) instead of serving a stale ordering", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" }),
+        makeCell({ cell_id: "c2", anchor_cell_id: "c1", event_id: "e2" }),
+      ],
+      events: [makeEvent({ id: "e1", server_seq: 1, cell_id: "c1" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+
+    // Warm the cache at limit=1 (page 1 only — c1).
+    const firstReq = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=1",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const firstRes = (await handleCellsReadRequest(firstReq, envWith(db)))!
+    const firstBody = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string }
+    expect(firstBody.cells.map((c) => c.cellId)).toEqual(["c1"])
+    const cursor = firstBody.nextCursor
+
+    // A new cell lands BEFORE c1 in chain order (new event → new ETag).
+    await db
+      .prepare(
+        "INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, 1, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind("e0", "proj-a", "file-x", "c0", "target.cell.create", "alice", "{}", 1700000000001, 1700000000001, 2)
+      .run()
+    await db
+      .prepare(
+        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
+      )
+      .bind("proj-a", "file-x", "c0", "v0", "e0", "alice", 1700000000001)
+      .run()
+
+    // Reusing the OLD cursor against the NEW ETag must not serve a page built
+    // from the stale (pre-c0) ordering — the offset now means something
+    // different in the new chain, exactly like the pre-cache full-recompute
+    // behavior (this route has never validated a cursor's offset against the
+    // version it was minted under; the cache must not make that worse).
+    const secondReq = new Request(
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=1&cursor=${encodeURIComponent(cursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const secondRes = (await handleCellsReadRequest(secondReq, envWith(db)))!
+    const secondBody = (await secondRes.json()) as { cells: Array<{ cellId: string }> }
+    // New chain order is c0 → c1 → c2; offset 1 in the fresh walk is c1 —
+    // same as before c0 landed, proving the cache recomputed rather than
+    // reusing a stale id list (a stale reuse would return c2 here).
+    expect(secondBody.cells.map((c) => c.cellId)).toEqual(["c1"])
+  })
+
+  it("does not apply to the cellIds= fast path (unpaginated, caller-order, unaffected by the cache)", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" }),
+        makeCell({ cell_id: "c2", anchor_cell_id: "c1", event_id: "e2" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?cellIds=c2,c1",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }>; maxServerSeq: number | null }
+    // Caller-requested order (c2, c1), not chain order — and no watermark
+    // (maxServerSeq stays null), exactly as before this change.
+    expect(body.cells.map((c) => c.cellId)).toEqual(["c2", "c1"])
+    expect(body.maxServerSeq).toBeNull()
+  })
+})
+
+// The actual HTTP producer feeds the SPA's streaming consumer, not a synthetic
+// page fixture: this pins the contract that a visible row can be edited safely.
+describe("AQU-1328 complete source/target row pages", () => {
+  it("keeps all lanes together at cold and cached boundaries, with empty and target-only rows", async () => {
+    const { streamFileCells } = await import("../../../src/lib/sync/cells-read")
+    const db = await makeTestDb({ cells: [
+      makeCell({ cell_id: "a", side: "source", anchor_cell_id: null, event_id: "s-a", value: "Source A" }),
+      makeCell({ cell_id: "b", side: "source", anchor_cell_id: "a", event_id: "s-b", value: "Source B" }),
+      makeCell({ cell_id: "c", side: "source", anchor_cell_id: "b", event_id: "s-c", value: "Source C" }),
+      makeCell({ cell_id: "a", anchor_cell_id: null, event_id: "t-a", value: "Target A" }),
+      makeCell({ cell_id: "a", target_lang: "es", anchor_cell_id: null, event_id: "es-a", value: "Destino A" }),
+      makeCell({ cell_id: "c", anchor_cell_id: "a", event_id: "t-c", value: "Target C" }),
+      makeCell({ cell_id: "c", target_lang: "es", anchor_cell_id: "a", event_id: "es-c", value: "Destino C" }),
+      makeCell({ cell_id: "orphan", anchor_cell_id: "c", event_id: "t-o", value: "Target only" }),
+    ] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = async (url: string) => (await handleCellsReadRequest(
+      new Request(url, { headers: { Authorization: `Bearer ${token}` } }), envWith(db.db),
+    ))!
+    try {
+      // Prime the legacy ordering: paired pages must use a separate cache key.
+      const legacy = await request("https://w/api/v1/projects/proj-a/files/file-x/cells?limit=2")
+      expect((await legacy.json() as { cells: { cellId: string }[] }).cells.map(r => r.cellId)).toEqual(["a", "b"])
+      vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+        const url = new URL(input)
+        expect(url.searchParams.get("paired")).toBe("1")
+        url.searchParams.set("limit", "2") // Cut directly through a multi-lane row.
+        return request(url.toString())
+      }))
+      const pages: Array<Array<{ cellId: string; side: string; value: string }>> = []
+      await streamFileCells("proj-a", "file-x", token, (rows) => { pages.push(rows) }, undefined, undefined, undefined, true)
+      expect(pages.map(rows => rows.map(r => [r.cellId, r.side, r.value]))).toEqual([
+        [["a", "source", "Source A"], ["a", "target", "Target A"], ["a", "target", "Destino A"]],
+        [["b", "source", "Source B"], ["c", "source", "Source C"], ["c", "target", "Target C"], ["c", "target", "Destino C"]],
+        [["orphan", "target", "Target only"]],
+      ])
+      // An offset shifted inside a group must re-deliver the complete group,
+      // on both a cache hit and the cold fallback.
+      const shifted = `https://w/api/v1/projects/proj-a/files/file-x/cells?paired=1&limit=1&cursor=${encodeURIComponent(btoa(JSON.stringify({ offset: 1 })))}`
+      for (const cold of [false, true]) {
+        if (cold) {
+          const { resetChainCacheForTests } = await import("../events/cells-read-route")
+          resetChainCacheForTests()
+        }
+        const response = await request(shifted)
+        const body = await response.json() as { cells: { cellId: string }[]; completeRows: boolean }
+        expect(body.completeRows).toBe(true)
+        expect(body.cells.map(r => r.cellId)).toEqual(["a", "a", "a"])
+      }
+    } finally {
+      vi.unstubAllGlobals()
+      await db.close()
+    }
   })
 })

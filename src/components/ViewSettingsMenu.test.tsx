@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { ComponentProps } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast, Toaster } from "@/components/ui/toast"
+import {
+  getMilestoneSplit,
+  resetMilestoneSplitCacheForTests,
+  setMilestoneSplit,
+} from "@/lib/store/milestone-split-pref"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -12,7 +17,10 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
     onCellLabelsChange: vi.fn(),
     onSourceFontSizeChange: vi.fn(),
     onTargetFontSizeChange: vi.fn(),
+    onSourceFontSizeReset: vi.fn(),
+    onTargetFontSizeReset: vi.fn(),
     onTnSidebarChange: vi.fn(),
+    onTargetKeyTermHighlightModeChange: vi.fn(),
   }
   render(
     <>
@@ -28,6 +36,7 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
         tnSidebarEnabled={false}
         sourceFontSize={14}
         targetFontSize={14}
+        targetKeyTermHighlightMode="never"
         {...handlers}
         {...overrides}
       />
@@ -39,6 +48,12 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
 function directionWarning() {
   return screen.getByRole("dialog", { name: /is forced/i })
 }
+
+beforeEach(() => {
+  localStorage.clear()
+  resetMilestoneSplitCacheForTests()
+  setMilestoneSplit(false)
+})
 
 afterEach(() => {
   toast.close(DIRECTION_MISMATCH_TOAST_ID)
@@ -52,14 +67,40 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
+    expect(screen.getByText("Target key terms")).toBeTruthy()
     expect(screen.getByText("Text Direction")).toBeTruthy()
     expect(screen.getByText("Font Size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("toggles split-into-milestones and keeps the popover open", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Split into milestones" })
+    expect(toggle).not.toBeChecked()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeChecked()
+    expect(getMilestoneSplit()).toBe(true)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("changes when target key terms are highlighted", () => {
+    const handlers = renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const targetTermOptions = screen.getByRole("radiogroup", { name: "Target key terms" })
+    fireEvent.click(within(targetTermOptions).getByRole("radio", { name: "Focused cell only" }))
+
+    expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
   })
 
   it("changes source direction via the tabs", () => {
@@ -70,6 +111,46 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(within(sourceTabs).getByRole("tab", { name: "RTL" }))
 
     expect(handlers.onSourceDirectionModeChange).toHaveBeenCalledWith("rtl")
+  })
+
+  it("steps font size from the scaled Large default (AQU-1170)", () => {
+    const handlers = renderViewSettings({ sourceFontSize: 16, targetFontSize: 16 })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getAllByText("16px")).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase target font size" }))
+    expect(handlers.onTargetFontSizeChange).toHaveBeenCalledWith(17)
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
+    expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
+    expect(screen.queryByRole("button", { name: "Use app font size for target" })).toBeNull()
+  })
+
+  it("steps font size from the Small scaled default (AQU-1170)", () => {
+    const handlers = renderViewSettings({ sourceFontSize: 12, targetFontSize: 12 })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Increase target font size" }))
+    expect(handlers.onTargetFontSizeChange).toHaveBeenCalledWith(13)
+  })
+
+  it("steps Extra Large scaled default and resets a pinned column to the app size", () => {
+    const handlers = renderViewSettings({
+      sourceFontSize: 18,
+      targetFontSize: 19,
+      targetFontSizeExplicit: true,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByText("18px")).toBeTruthy()
+    expect(screen.getByText("19px")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase source font size" }))
+    expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(19)
+
+    fireEvent.click(screen.getByRole("button", { name: "Use app font size for target" }))
+    expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Use app font size for source" })).toBeNull()
   })
 })
 

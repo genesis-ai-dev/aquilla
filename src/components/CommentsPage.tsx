@@ -33,8 +33,13 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { renderCommentHtml } from "@/lib/comments/comment-helpers"
-import { canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
+import { renderCommentHtml, stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
+import {
+  canMutateComment,
+  commentFloorsFrom,
+  DEFAULT_COMMENT_FLOORS,
+  type CommentFloors,
+} from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
@@ -317,6 +322,11 @@ interface ThreadProps {
    * project with no sync role. Drives the per-thread resolve gate below.
    */
   roleLevel?: number | null
+  /**
+   * AQU-1002: the org's configurable comment floors, read off the project
+   * record. Omitted ⇒ the stock defaults, i.e. pre-AQU-1002 behaviour.
+   */
+  floors?: CommentFloors
   fileMap: Map<string, string>
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
@@ -325,7 +335,8 @@ interface ThreadProps {
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, roleLevel = null, fileMap, onResolve, onEdit, onDelete, onNavigate,
+  root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
+  fileMap, onResolve, onEdit, onDelete, onNavigate,
 }: ThreadProps) {
   const t = useT()
   // AQU-1000: this page offered Resolve / Reopen to every reader, including
@@ -333,13 +344,14 @@ function CommentThreadCard({
   // optimistically, so the refusal showed up as a thread that closed and then
   // sprang back open. Decide before offering, and explain a refusal.
   const isOwnThread = !!currentUsername && root.authorId === currentUsername
-  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread)
+  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)
   const resolveDenialReason = canResolve
     ? null
-    : canMutateComment("comment.resolve", roleLevel, true)
-      // Role clears the self floor but not the foreign one.
+    : canMutateComment("comment.resolve", roleLevel, true, floors)
+      // Role clears the self floor but not the foreign one. AQU-1002: name the
+      // org's configured floor, so the sentence matches the real refusal.
       ? t("comments.resolve.foreignDenied", {
-          minRole: resolveRoleName(t, foreignRoleFor("comment.resolve") ?? ROLE.MAINTAINER, { plural: true }),
+          minRole: resolveRoleName(t, floors.resolveMinRole, { plural: true }),
         })
       : denialMessage(t, ROLE.COMMENTER, roleLevel)
   const [open, setOpen] = useState(!root.resolved)
@@ -882,7 +894,10 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
     const authors = new Map<string, string>()
     for (const c of comments) {
       if (c.fileId) fileIds.add(c.fileId)
-      authors.set(c.authorId, c.authorLabel ?? c.authorId)
+      // AQU-1233: one filter entry per person — drop the "(via agent)" marker
+      // an agent-posted comment carries, or the filter for a real translator
+      // reads as their tool depending on which comment was seen last.
+      authors.set(c.authorId, stripAgentCommentMarker(c.authorLabel ?? c.authorId))
     }
     // Resolve each fileId to its display name; tombstone deleted files
     const fileOptions = Array.from(fileIds)
@@ -997,6 +1012,7 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               replies={repliesByParent.get(root.commentId) ?? []}
               currentUsername={session?.username}
               roleLevel={project?.syncRole?.level ?? null}
+              floors={commentFloorsFrom(project)}
               fileMap={fileMap}
               onResolve={resolveThread}
               onEdit={editComment}

@@ -31,7 +31,10 @@ export const rules = defineNamespace({
     // ── Infraction messages (rule-engine reason codes → predicate text) ────
     "rules.infraction.withRuleName": '"{ruleName}": {message}',
     "rules.infraction.targetForbids": "target contains forbidden pattern",
-    "rules.infraction.sourceRequiresTarget": "source matches pattern but target does not",
+    "rules.infraction.sourceRequiresTarget":
+      "This term is in the source, but the translation doesn't use a required rendering",
+    "rules.infraction.sourceRequiresTargetCount":
+      "This term doesn't add up: {sourceCount} in the source, {targetCount} in the translation",
     "rules.infraction.sourceTargetMatch": "pattern found in source but missing in target",
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
@@ -142,6 +145,14 @@ export const rules = defineNamespace({
       one: "{count} issue",
       other: "{count} issues",
     }),
+
+    // ── Org rules as a top-level Settings section (AQU-1131) ────────────────
+    // "Rules" is the settled term — Paratext's "checks" and "standards" were
+    // both considered and dropped.
+    "rules.orgSettings.title": "Rules",
+    "rules.orgSettings.navHint": "Org-wide translation rules",
+    "rules.orgSettings.description":
+      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
 
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
@@ -429,6 +440,14 @@ export const rules = defineNamespace({
         placeholders: {
           ruleName: "The user's own rule name — verbatim, never translated.",
           message: "The already-localized predicate sentence (see rules.infraction.* reason keys).",
+        },
+      },
+      "rules.infraction.sourceRequiresTargetCount": {
+        description:
+          "Blot/Issues explanation when source and translation instance counts don't match (too few or extra renderings). {sourceCount} and {targetCount} are instance counts, shown as digits.",
+        placeholders: {
+          sourceCount: "How many times the source term appears in the source cell.",
+          targetCount: "How many required renderings appear in the translation.",
         },
       },
       "rules.infraction.builtin.placeholderIntegrity": {

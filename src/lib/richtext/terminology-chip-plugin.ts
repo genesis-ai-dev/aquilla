@@ -1,14 +1,12 @@
 /**
- * Terminology chip decoration plugin.
+ * Terminology highlight decoration plugin.
  *
  * Scans the editor doc for active Concept sourceTerm matches (case-insensitive,
- * word-boundary aware) and renders a small status-tinted chip absolutely
- * positioned at the top-right of each matched word span. The host span is
- * `position:relative`; the chip is `position:absolute` so line height is
- * NOT affected.
+ * word-boundary aware) and wraps each match in the shared, subtle terminology
+ * highlight. The matched term itself is the lookup target.
  *
  * Usage: wire into TranslatedEditor via the optional `terminologyConcepts` prop.
- * Chip click is annotated with `data-source-term` for AQU-204 (TermLookupPopover).
+ * Clicks are annotated with `data-source-term` for AQU-204 (TermLookupPopover).
  */
 
 import { Plugin, PluginKey } from "@tiptap/pm/state"
@@ -47,20 +45,15 @@ export function findTermMatches(text: string, term: string): Array<{ start: numb
 }
 
 /**
- * Build a DecorationSet with:
- *  - an inline decoration wrapping each match (adds `position:relative` host span)
- *  - a widget decoration at the match start rendering the chip
- */
-/**
- * The tint a concept's chip carries: the status of its best-ranked rendering,
- * using the same `preferred > admitted > forbidden` precedence TermLookupPopover
- * sorts renderings by, so the chip and the popover never disagree about which
- * guidance a term carries.
+ * The status a concept's highlight carries: the status of its best-ranked
+ * rendering, using the same `preferred > admitted > forbidden` precedence
+ * TermLookupPopover sorts renderings by, so the highlight and the popover never
+ * disagree about which guidance a term carries.
  *
  * A concept whose renderings are *all* forbidden offers the translator no
- * acceptable option, so its chip reads red. A concept with no renderings at all
- * carries no guidance yet, so it reads neutral (`admitted`, a muted grey) rather
- * than claiming a preference it does not have.
+ * acceptable option, so it reads `forbidden`. A concept with no renderings at
+ * all carries no guidance yet, so it reads neutral (`admitted`) rather than
+ * claiming a preference it does not have.
  *
  * Exported so the precedence can be unit-tested without ProseMirror.
  */
@@ -71,6 +64,9 @@ export function conceptChipStatus(concept: Concept): RenderingStatus {
   return "admitted"
 }
 
+/**
+ * Build a DecorationSet with one inline decoration wrapping each match.
+ */
 export function buildTerminologyChipDecorationSet(
   doc: PMNode,
   concepts: Concept[],
@@ -86,7 +82,11 @@ export function buildTerminologyChipDecorationSet(
   const decorations: Decoration[] = []
 
   for (const concept of activeConcepts) {
-    const chipStatus = conceptChipStatus(concept)
+    // The status-tinted dot this used to drive is gone (AQU-1006/AQU-1110: one
+    // quiet highlight marks a managed term, violation blots mark misuse), so
+    // the status rides on the highlight itself, non-visually.
+    const status = conceptChipStatus(concept)
+    const label = `Managed term: ${concept.sourceTerm} (${status})`
     const matches = findTermMatches(plainText, concept.sourceTerm)
     for (const match of matches) {
       const from = plainToPm[match.start]
@@ -98,34 +98,10 @@ export function buildTerminologyChipDecorationSet(
         Decoration.inline(from, to, {
           class: "term-chip-host",
           "data-source-term": concept.sourceTerm,
+          "data-status": status,
+          "aria-label": label,
+          title: label,
         })
-      )
-
-      // Widget chip rendered at the END of the matched span. The chip is
-      // wrapped in its own `position:relative` host so the absolutely-positioned
-      // dot anchors to the term's trailing edge. Without this wrapper a widget
-      // is a *sibling* of the term span (ProseMirror inserts it between inline
-      // nodes, not inside `term-chip-host`), so `.term-chip`'s absolute offset
-      // would escape to the nearest positioned ancestor — the `position:relative`
-      // cell wrapper — and paint in the cell's top-right corner (AQU-664).
-      decorations.push(
-        Decoration.widget(to, () => {
-          const host = document.createElement("span")
-          host.className = "term-chip-host"
-          const chip = document.createElement("span")
-          chip.className = `term-chip term-chip-${chipStatus}`
-          chip.setAttribute("data-source-term", concept.sourceTerm)
-          chip.setAttribute("data-status", chipStatus)
-          // The tint is the only visual carrier of status, so it is spelled out
-          // in the accessible name too — a colour-only signal is invisible to
-          // screen readers and to anyone who cannot distinguish the two dots.
-          const label = `Managed term: ${concept.sourceTerm} (${chipStatus})`
-          chip.setAttribute("aria-label", label)
-          chip.setAttribute("title", label)
-          // Dot rendered via CSS content/background, text is empty
-          host.appendChild(chip)
-          return host
-        }, { side: 1 }) // side:1 → placed after the character, before any following content
       )
     }
   }

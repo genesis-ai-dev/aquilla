@@ -39,6 +39,15 @@ export interface CellState {
   sourceExists: boolean
   /** True when ANY lane has a target row for this cell (lane-independent). */
   targetExists: boolean
+  /** AQU-1184: the requested lane's target head is an UNREVIEWED machine draft
+   *  (`cells.ai_drafted = 1`, AQU-292). A human target commit or a validation
+   *  clears the marker, so this is true only while nobody has reviewed the
+   *  text. The Agent API refuses to stage a validation over it — see
+   *  prepareEmitEvents. Null when no target row exists in the lane. */
+  targetAiDrafted: boolean | null
+  /** Current target text in the requested lane — the text an approver is being
+   *  asked to endorse (AQU-1184 guardrail 2). Null when no target row. */
+  targetValue: string | null
 }
 
 /** Resolve current source + lane-qualified target head event ids for the given
@@ -71,13 +80,21 @@ export async function resolveCellStates(
 
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, side, target_lang, event_id FROM cells
+      `SELECT file_id, cell_id, side, target_lang, event_id, ai_drafted, value FROM cells
        WHERE project_id = ?
          AND side IN ('source', 'target')
          AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(projectId, ...binds)
-    .all<{ file_id: string; cell_id: string; side: string; target_lang: string | null; event_id: string }>()
+    .all<{
+      file_id: string
+      cell_id: string
+      side: string
+      target_lang: string | null
+      event_id: string
+      ai_drafted: number | null
+      value: string | null
+    }>()
 
   for (const c of list) {
     for (const lane of c.lanes) {
@@ -86,6 +103,8 @@ export async function resolveCellStates(
         sourceEventId: null,
         sourceExists: false,
         targetExists: false,
+        targetAiDrafted: null,
+        targetValue: null,
       })
     }
   }
@@ -97,7 +116,11 @@ export async function resolveCellStates(
       if (!s) continue
       if (r.side === 'target') {
         s.targetExists = true
-        if ((r.target_lang ?? '') === lane) s.targetHeadEventId = r.event_id
+        if ((r.target_lang ?? '') === lane) {
+          s.targetHeadEventId = r.event_id
+          s.targetAiDrafted = Number(r.ai_drafted ?? 0) === 1
+          s.targetValue = r.value ?? null
+        }
       } else {
         s.sourceEventId = r.event_id
         s.sourceExists = true

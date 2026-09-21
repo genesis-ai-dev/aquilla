@@ -988,8 +988,8 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // the same projection code the live HTTP path uses).
   const baseSeq = await allocateSeqRange(db, downstreamProjectId, eventRows.length)
   for (let i = 0; i < eventRows.length; i++) {
-    eventRows[i]!.serverSeq = baseSeq + i
-    persistedForProjection[i]!.serverSeq = baseSeq + i
+    eventRows[i].serverSeq = baseSeq + i
+    persistedForProjection[i].serverSeq = baseSeq + i
   }
 
   const allStmts: AquillaStatement[] = [buildBulkEventInsertStmt(db, eventRows)]

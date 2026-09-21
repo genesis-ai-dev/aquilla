@@ -229,7 +229,11 @@ async function discover(agent: ColdStartAgent): Promise<{ projectId: string; cel
   expect(Array.isArray(caps.errorCodes)).toBe(true)
 
   const identity = await agent.callOk('get_identity_and_scope')
-  expect(typeof identity.userId).toBe('string')
+  // AQU-1180: the cold-start agent learns its credential and scope, never who
+  // the human behind the token is (that needs an owner-minted pii credential).
+  expect(typeof identity.credentialId).toBe('string')
+  expect(typeof identity.mode).toBe('string')
+  expect(identity.userId).toBeUndefined()
 
   // list_projects description: "Each item has { id, name, org_id, role_source }".
   const projectsOut = await agent.callOk('list_projects')
@@ -308,13 +312,19 @@ describe('cold start — act mode (gate 10)', () => {
       expect(targets.some((r) => r.cellId === t.cellId && r.value === t.value)).toBe(true)
     }
 
-    // read_history on one cell shows the commit event with the agent's author.
+    // read_history on one cell shows the commit event the agent just staged.
+    // AQU-1180: `author` is a stable per-project pseudonym, not the human's
+    // handle — the agent can still confirm the write landed (the receipt's
+    // event id is the real proof), it just never learns who 'lea' is.
     const history = await agent.callOk('read_history', { projectId, cellId: translations[0].cellId })
     const historyEvents = history.data as { kind: string; author: string; id: string }[]
     const commitEvt = historyEvents.find((e) => e.kind === 'target.cell.commit')
     expect(commitEvt).toBeDefined()
-    expect(commitEvt!.author).toBe('lea')
+    expect(commitEvt!.author).not.toBe('lea')
+    expect(commitEvt!.author).toMatch(/^u_[0-9a-f]{8}$/)
     expect(receipt.eventIds).toContain(commitEvt!.id)
+    // The raw handle appears nowhere in the payload the agent can see.
+    expect(JSON.stringify(history)).not.toContain('lea')
 
     // ── vendor-side SQL assertions (outside the agent's world) ──────────────
     // Provenance envelope is server-stamped with agent origin + the credential.

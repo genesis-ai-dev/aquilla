@@ -68,4 +68,30 @@ describe("what files.meta projects into a file summary", () => {
     expect(file.orderedBy).toBe("time")
     expect(file.audioVttTimebase).toEqual({ scale: 1.001 })
   })
+
+  it("forwards an explicit corpusMarker so sidebar folders survive reload", async () => {
+    await seed("meta-corpus", { corpusMarker: "Treasure Hunt Bible" })
+    const byProject = await loadFilesByProject(env, ["proj-meta-test"])
+    const file = byProject.get("proj-meta-test")!.find((f) => f.id === "meta-corpus")!
+    expect(file.corpusMarker).toBe("Treasure Hunt Bible")
+  })
+
+  it("recovers a Biblica folder from parserVersion when corpusMarker was never stored", async () => {
+    await seed("meta-thb-legacy", { parserVersion: "builtin:biblica-treasure-hunt@1" })
+    await seed("meta-r4l-legacy", { parserVersion: "builtin:biblica-reach4life@1" })
+    const byProject = await loadFilesByProject(env, ["proj-meta-test"])
+    const files = byProject.get("proj-meta-test")!
+    expect(files.find((f) => f.id === "meta-thb-legacy")!.corpusMarker).toBe("Treasure Hunt Bible")
+    expect(files.find((f) => f.id === "meta-r4l-legacy")!.corpusMarker).toBe("Reach 4 Life")
+  })
+
+  it("prefers the stored corpusMarker over a Biblica parserVersion backfill", async () => {
+    await seed("meta-moved", {
+      corpusMarker: "My Notes",
+      parserVersion: "builtin:biblica-study-notes@1",
+    })
+    const byProject = await loadFilesByProject(env, ["proj-meta-test"])
+    const file = byProject.get("proj-meta-test")!.find((f) => f.id === "meta-moved")!
+    expect(file.corpusMarker).toBe("My Notes")
+  })
 })

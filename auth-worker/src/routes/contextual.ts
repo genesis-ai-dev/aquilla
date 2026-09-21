@@ -62,11 +62,16 @@ import {
   countDrafts,
   countDraftsByRun,
   reviewDraft,
+  grantSpanAllowance,
+  CONTINUE_BATCH_SPANS,
+  INPUT_GRANT_CAP,
+  INPUT_GRANT_SPANS,
   appendContextualRunEvent,
   listContextualRunEvents,
   CONTEXTUAL_EVENT_LIST_LIMIT,
   CONTEXTUAL_RUN_LIST_DEFAULT_LIMIT,
   CONTEXTUAL_RUN_LIST_MAX_LIMIT,
+  transitionRun,
   claimStrandedRuns,
   listAutopilotCandidateFiles,
   listActiveAutopilotRunFiles,
@@ -76,12 +81,13 @@ import {
   CONTEXTUAL_PROJECT_LEASE_SECONDS,
   getProjectAutopilotSummary,
   type ContextualRun,
+  type ContextualRunStatus,
   type ContextualProjectLease,
   type AppendContextualRunEventInput,
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
 import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
-import { computeContextReadiness, type ContextReadiness } from "../lib/contextual/readiness"
+import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
   makeLlmCall,
@@ -96,7 +102,13 @@ import {
   type SegmentationPreviewQuery,
 } from "../lib/contextual/tick"
 import { friendlyScriptureLabel } from "../../../shared/span-label"
+import { classifyRunCommandIntent, type RunCommandIntent } from "../../../shared/run-command-intent"
 import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
+import {
+  getCachedContextualRead,
+  getCachedContextualReadiness,
+  invalidateContextualReads,
+} from "../lib/contextual/read-cache"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -394,7 +406,12 @@ async function selfTickLoop(
     }
     // Cap reached with spans still queued. Park (never leave it 'running' with
     // no driver) so resume, steering, or the sweeper can pick it back up.
-    const parked = await parkRun(db, runId)
+    //
+    // `awaiting_input` rather than `work_exhausted` (AQU-1300): work IS still
+    // queued, and calling that "finished" is the exact lie the park reason
+    // exists to prevent. It also surfaces Continue, which is precisely the
+    // action that gives this run a driver again.
+    const parked = await parkRun(db, runId, "awaiting_input")
     if (parked.status === "ok") {
       await publishRunStateOutsideTick(env, db, projectId, parked.run)
     }
@@ -538,6 +555,12 @@ const startSchema = z.object({
   /** "file" (default) drafts one file; "project" fans out across every
    *  discourse file with work left. */
   scope: z.enum(["file", "project"]).optional(),
+  /** AQU-1300: the explicit "translate the whole file/project" choice, which
+   *  starts the run with no span budget. Absent/false is the trust-gated
+   *  default — draft one passage, then park and ask. A project-scope start
+   *  applies it PER FILE, so "everything" still means every file's own scope
+   *  rather than one file eating the fan-out. */
+  translateEverything: z.boolean().optional(),
 })
 
 // POST /:projectId/contextual/runs — start a run (CONTRIBUTOR: this is
@@ -564,6 +587,24 @@ contextual.post(
         "validation_failed",
         "That target-language lane is not registered on this project.",
         400,
+      )
+      return c.json(err, status)
+    }
+
+    // Minimum steering context (AQU-827). Checked before the budget/credit
+    // guards because it is a precondition, not a spend decision: a project
+    // missing its languages or any brief cannot be steered, and the run would
+    // bill for fluent output nobody asked for. Covers BOTH scopes — the
+    // file-scoped pill and the project-wide start land on this route.
+    const startBlockers = computeStartBlockers(
+      await loadProjectContext(c.env.AQUILLA_PG, projectId),
+    )
+    if (startBlockers.length > 0) {
+      const { body: err, status } = errorJson(
+        "context_required",
+        "Autopilot needs the project's source and target languages and a translation brief before it can start.",
+        400,
+        { missing: startBlockers },
       )
       return c.json(err, status)
     }
@@ -654,6 +695,7 @@ contextual.post(
               roleSnapshot,
               scopeGroup,
               ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
+              ...(body.translateEverything ? { spanAllowance: null } : {}),
             })
           } catch (err) {
             // A single corrupt/racing candidate must not strand earlier rows
@@ -713,6 +755,7 @@ contextual.post(
       initiatedBy: user.username,
       roleSnapshot,
       ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
+      ...(body.translateEverything ? { spanAllowance: null } : {}),
     })
     if (created.status === "active_exists") {
       const { body: err, status } = errorJson(
@@ -735,23 +778,35 @@ contextual.post(
   },
 )
 
-// GET /:projectId/contextual/overview — project-wide autopilot rollup for the
-// PM surface (VIEWER: read-only observability, not a control).
-contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
-  const projectId = c.req.param("projectId") ?? ""
-  const gate = await requireRole(c, projectId, ROLE.VIEWER)
-  if (!gate.ok) return gate.res
-  const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
+/**
+ * Serve a poll endpoint from the isolate read cache (lib/contextual/read-cache).
+ * Runs AFTER the role gate — the cached body is project-scoped, never
+ * user-scoped, so the gate is the only per-user work on a hit. A matching
+ * `If-None-Match` answers 304 with no body; the SPA transport retains the
+ * last body per URL and replays it. `no-store` keeps the browser's own HTTP
+ * cache out of the loop so the conditional round-trip is explicit.
+ */
+async function cachedPollJson(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  scope: string,
+  compute: () => Promise<unknown>,
+): Promise<Response> {
+  const cached = await getCachedContextualRead(projectId, scope, compute)
+  c.header("ETag", cached.etag)
+  c.header("Cache-Control", "no-store")
+  if (c.req.header("If-None-Match") === cached.etag) return c.body(null, 304)
+  return c.body(cached.body, 200, { "Content-Type": "application/json" })
+}
 
-  // What autopilot actually KNOWS about this project. A run with no brief, no
-  // key terms and no validated examples still produces confident output — the
-  // most expensive kind, because nothing looks wrong until a consultant reads
-  // it, and the progress numbers say "staged" either way. Reporting the gaps
-  // is the only way a PM finds out before spending the run.
-  let readiness: ContextReadiness | null = null
-  try {
-    const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
-    const counts = await c.env.AQUILLA_PG
+/** Readiness cell counts: a full-project `cells` self-join. Off the poll hot
+ *  path — cached per project for CONTEXTUAL_READINESS_TTL_MS. */
+async function readinessCellCounts(
+  db: AquillaDb,
+  projectId: string,
+): Promise<{ validated: number; untranslated: number }> {
+  return getCachedContextualReadiness(projectId, async () => {
+    const counts = await db
       .prepare(
         `SELECT COUNT(*) FILTER (WHERE t.validated = 1 AND COALESCE(t.value,'') <> '') AS validated,
                 COUNT(*) FILTER (WHERE COALESCE(t.value,'') = '') AS untranslated
@@ -763,16 +818,42 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()
-    readiness = computeContextReadiness({
-      context,
-      validatedExamples: Number(counts?.validated ?? 0),
-      untranslatedCells: Number(counts?.untranslated ?? 0),
-    })
-  } catch {
-    // Readiness is advisory — never fail the rollup over it.
-  }
+    return {
+      validated: Number(counts?.validated ?? 0),
+      untranslated: Number(counts?.untranslated ?? 0),
+    }
+  })
+}
 
-  return c.json({ available: true, ...summary, ...(readiness ? { readiness } : {}) })
+// GET /:projectId/contextual/overview — project-wide autopilot rollup for the
+// PM surface (VIEWER: read-only observability, not a control).
+contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+  return cachedPollJson(c, projectId, "overview", async () => {
+    const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
+
+    // What autopilot actually KNOWS about this project. A run with no brief, no
+    // key terms and no validated examples still produces confident output — the
+    // most expensive kind, because nothing looks wrong until a consultant reads
+    // it, and the progress numbers say "staged" either way. Reporting the gaps
+    // is the only way a PM finds out before spending the run.
+    let readiness: ContextReadiness | null = null
+    try {
+      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
+      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId)
+      readiness = computeContextReadiness({
+        context,
+        validatedExamples: counts.validated,
+        untranslatedCells: counts.untranslated,
+      })
+    } catch {
+      // Readiness is advisory — never fail the rollup over it.
+    }
+
+    return { available: true, ...summary, ...(readiness ? { readiness } : {}) }
+  })
 })
 
 /** Snapshot shape the pill hydrates from (mirrors run-store's expectations). */
@@ -802,6 +883,12 @@ function runSnapshot(
     callsSpent: run.callsSpent,
     proposedDrafts: options.proposedDrafts,
     lastError: run.lastError,
+    // AQU-1300 trust gate. `parked` alone cannot tell the user whether there is
+    // more work, so the reason rides along: 'awaiting_input' renders "waiting
+    // for you" with Continue / Translate everything, 'work_exhausted' renders
+    // as finished. `spanAllowance: null` is unlimited ("translate everything").
+    spanAllowance: run.spanAllowance,
+    parkReason: run.parkReason,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
   }
@@ -861,29 +948,31 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
     })
   }
   const targetLang = c.req.query("targetLang") ?? ""
-  const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
-  const latest = active
-    ? null
-    : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
-  const run = active ?? latest
-  const steering = run
-    ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
-    : []
-  const [draftCounts, runDraftCounts] = await Promise.all([
-    countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
-    run
-      ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
-      : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
-  ])
-  const activeDirections = steering.filter((s) => s.kind === "direction").map((s) => s.body)
-  return c.json({
-    available: true,
-    run: run
-      ? runSnapshot(run, { activeDirections, proposedDrafts: runDraftCounts.proposed })
-      : null,
-    // Kept at the top level too for consumers that never look inside `run`.
-    activeDirections,
-    draftCounts,
+  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&targetLang=${targetLang}`, async () => {
+    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
+    const latest = active
+      ? null
+      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
+    const run = active ?? latest
+    const steering = run
+      ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
+      : []
+    const [draftCounts, runDraftCounts] = await Promise.all([
+      countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
+      run
+        ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
+        : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
+    ])
+    const activeDirections = steering.filter((s) => s.kind === "direction").map((s) => s.body)
+    return {
+      available: true,
+      run: run
+        ? runSnapshot(run, { activeDirections, proposedDrafts: runDraftCounts.proposed })
+        : null,
+      // Kept at the top level too for consumers that never look inside `run`.
+      activeDirections,
+      draftCounts,
+    }
   })
 })
 
@@ -934,45 +1023,49 @@ contextual.get("/:projectId/contextual/runs/:runId/activity", authMiddleware, as
     const { body, status } = errorJson("validation_failed", "draftBeforeCreatedAt is invalid", 400)
     return c.json(body, status)
   }
-  const [activity, briefRows, draftPage, runDraftCounts] = await Promise.all([
-    listContextualRunEvents(c.env.AQUILLA_PG, { projectId, runId, limit: evidenceLimit }),
-    listSceneBriefsByRun(c.env.AQUILLA_PG, projectId, runId, evidenceLimit + 1),
-    listDraftPageByRun(c.env.AQUILLA_PG, projectId, runId, {
-      limit: draftLimit,
-      ...(draftStatus ? { status: draftStatus } : {}),
-      ...(draftBeforeCreatedAt && draftBeforeId
-        ? { before: { createdAt: draftBeforeCreatedAt, draftId: draftBeforeId } }
-        : {}),
-    }),
-    countDraftsByRun(c.env.AQUILLA_PG, projectId, runId),
-  ])
-  const briefsTruncated = briefRows.length > evidenceLimit
-  const truncatedCollections = {
-    events: activity.truncated,
-    sceneBriefs: briefsTruncated,
-    drafts: draftPage.truncated,
-  }
-  const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
-  let labelled = {
-    events: activity.events,
-    sceneBriefs,
-    drafts: draftPage.drafts,
-  }
-  try {
-    const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
-    labelled = decorateActivityLabels(labelled, cells)
-  } catch (err) {
-    console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
-  }
-  return c.json({
-    run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
-    events: labelled.events,
-    sceneBriefs: labelled.sceneBriefs,
-    drafts: labelled.drafts,
-    draftCounts: runDraftCounts,
-    draftNextCursor: draftPage.nextCursor,
-    truncated: Object.values(truncatedCollections).some(Boolean),
-    truncatedCollections,
+  const scope = `activity:${runId}?draftStatus=${draftStatus ?? ""}&draftLimit=${draftLimit}` +
+    `&draftBeforeCreatedAt=${draftBeforeCreatedAt ?? ""}&draftBeforeId=${draftBeforeId ?? ""}`
+  return cachedPollJson(c, projectId, scope, async () => {
+    const [activity, briefRows, draftPage, runDraftCounts] = await Promise.all([
+      listContextualRunEvents(c.env.AQUILLA_PG, { projectId, runId, limit: evidenceLimit }),
+      listSceneBriefsByRun(c.env.AQUILLA_PG, projectId, runId, evidenceLimit + 1),
+      listDraftPageByRun(c.env.AQUILLA_PG, projectId, runId, {
+        limit: draftLimit,
+        ...(draftStatus ? { status: draftStatus } : {}),
+        ...(draftBeforeCreatedAt && draftBeforeId
+          ? { before: { createdAt: draftBeforeCreatedAt, draftId: draftBeforeId } }
+          : {}),
+      }),
+      countDraftsByRun(c.env.AQUILLA_PG, projectId, runId),
+    ])
+    const briefsTruncated = briefRows.length > evidenceLimit
+    const truncatedCollections = {
+      events: activity.truncated,
+      sceneBriefs: briefsTruncated,
+      drafts: draftPage.truncated,
+    }
+    const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
+    let labelled = {
+      events: activity.events,
+      sceneBriefs,
+      drafts: draftPage.drafts,
+    }
+    try {
+      const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
+      labelled = decorateActivityLabels(labelled, cells)
+    } catch (err) {
+      console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
+    }
+    return {
+      run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
+      events: labelled.events,
+      sceneBriefs: labelled.sceneBriefs,
+      drafts: labelled.drafts,
+      draftCounts: runDraftCounts,
+      draftNextCursor: draftPage.nextCursor,
+      truncated: Object.values(truncatedCollections).some(Boolean),
+      truncatedCollections,
+    }
   })
 })
 
@@ -982,7 +1075,10 @@ contextual.post("/:projectId/contextual/runs/:runId/:action", authMiddleware, as
   const projectId = c.req.param("projectId") ?? ""
   const runId = c.req.param("runId") ?? ""
   const action = c.req.param("action") ?? ""
-  if (!["pause", "resume", "terminate"].includes(action)) {
+  // AQU-1300: `continue` and `continue-all` are the two actions offered on a
+  // run parked `awaiting_input`. Both are resumes that first buy budget —
+  // `continue` a batch, `continue-all` the whole remaining scope.
+  if (!["pause", "resume", "terminate", "continue", "continue-all"].includes(action)) {
     const { body, status } = errorJson("not_found", `unknown action "${action}"`, 404)
     return c.json(body, status)
   }
@@ -995,12 +1091,23 @@ contextual.post("/:projectId/contextual/runs/:runId/:action", authMiddleware, as
     return c.json(body, status)
   }
 
+  // Grant BEFORE the transition to running: the tick gate reads the allowance
+  // at the span edge, and a driver kicked against a still-zero budget would
+  // park again before the grant landed. No cap — the user asked for this batch
+  // in so many words, which is exactly what the incidental-input cap is not.
+  if (action === "continue" || action === "continue-all") {
+    await grantSpanAllowance(c.env.AQUILLA_PG, runId, {
+      spans: CONTINUE_BATCH_SPANS,
+      unlimited: action === "continue-all",
+    })
+  }
+
   const result =
     action === "pause"
       ? await requestPause(c.env.AQUILLA_PG, runId)
-      : action === "resume"
-        ? await resumeRun(c.env.AQUILLA_PG, runId)
-        : await terminateRun(c.env.AQUILLA_PG, runId)
+      : action === "terminate"
+        ? await terminateRun(c.env.AQUILLA_PG, runId)
+        : await resumeRun(c.env.AQUILLA_PG, runId)
   if (result.status === "not_found") {
     const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
     return c.json(body, status)
@@ -1016,7 +1123,9 @@ contextual.post("/:projectId/contextual/runs/:runId/:action", authMiddleware, as
   }
 
   await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, result.run)
-  if (action === "resume") kickLoop(c, projectId, runId)
+  if (action === "resume" || action === "continue" || action === "continue-all") {
+    kickLoop(c, projectId, runId)
+  }
   const draftCounts = await countDraftsByRun(c.env.AQUILLA_PG, projectId, runId)
   return c.json({ run: runSnapshot(result.run, { proposedDrafts: draftCounts.proposed }) })
 })
@@ -1027,6 +1136,56 @@ const steeringSchema = z.object({
   fileId: z.string().optional(),
   runId: z.string().optional(),
 })
+
+/** Statuses a conversationally typed stop applies to. `parked` is deliberately
+ *  absent (AQU-1299): a parked run has nothing left to do, and the bug being
+ *  fixed is precisely that a message typed at one used to wake it. A stop there
+ *  changes nothing — least of all resumes it. */
+const COMPOSER_STOPPABLE: ContextualRunStatus[] = ["running", "pausing", "paused", "waiting"]
+
+/**
+ * A composer message the classifier read as a run command (AQU-1299). Routes to
+ * the SAME guarded transitions the Pause/Stop buttons use, records the command
+ * in durable activity so the human can see it was honoured, and — the point of
+ * the fix — never appends steering and never wakes a parked run.
+ */
+async function applyComposerRunCommand(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  target: ContextualRun,
+  intent: Exclude<RunCommandIntent, "direction">,
+): Promise<Response> {
+  await appendActivitySafely(c.env.AQUILLA_PG, {
+    runId: target.id,
+    projectId,
+    fileId: target.fileId,
+    kind: "run_command",
+    status: "queued",
+    details: { command: intent },
+  })
+
+  const result =
+    intent === "pause"
+      ? await requestPause(c.env.AQUILLA_PG, target.id)
+      : await transitionRun(c.env.AQUILLA_PG, target.id, COMPOSER_STOPPABLE, "terminated")
+
+  // `invalid_state` is the ordinary outcome here, not an error: the human typed
+  // "stop" at a run that had already stopped. Report it as an unapplied command
+  // rather than a 409 the composer would have to render as a failure.
+  const applied = result.status === "ok"
+  if (result.status === "ok") {
+    await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, result.run)
+  }
+  invalidateContextualReads(projectId)
+
+  const run = result.status === "ok" ? result.run : await getRun(c.env.AQUILLA_PG, target.id)
+  const draftCounts = await countDraftsByRun(c.env.AQUILLA_PG, projectId, target.id)
+  return c.json({
+    command: intent,
+    applied,
+    ...(run ? { run: runSnapshot(run, { proposedDrafts: draftCounts.proposed }) } : {}),
+  })
+}
 
 // POST /:projectId/contextual/steering — append steering (CONTRIBUTOR). A
 // parked run on the target file wakes and re-kicks so the steering applies.
@@ -1046,6 +1205,21 @@ contextual.post(
       : body.fileId
         ? await getActiveRun(c.env.AQUILLA_PG, projectId, body.fileId)
         : null
+    // AQU-1299: "stop"/"pause" typed here controls the run instead of steering
+    // it. The classifier is the same module the composer runs, so client and
+    // server always agree; the server check is what protects every other
+    // caller of this route (and is why a command can never become a direction
+    // even if a client skips its own fast path).
+    const intent = body.kind === "direction" ? classifyRunCommandIntent(body.body) : "direction"
+    if (intent !== "direction") {
+      if (target && target.projectId === projectId) {
+        return applyComposerRunCommand(c, projectId, target, intent)
+      }
+      // Nothing to command — but "stop" must still never be recorded as a
+      // drafting direction for whatever run comes next.
+      return c.json({ command: intent, applied: false })
+    }
+
     if (body.kind === "refresh_span") {
       const brief = await getSceneBrief(c.env.AQUILLA_PG, body.body.trim())
       if (
@@ -1091,6 +1265,17 @@ contextual.post(
       })
     }
     if (target && target.projectId === projectId && target.status === "parked") {
+      // AQU-1300: steering is human input, so it buys a span — but exactly one,
+      // capped like any other incidental input. Waking a parked run without
+      // this would be the hole in the whole gate: "go a bit warmer" would
+      // restart an unlimited walk through the book. A `note` is an annotation
+      // rather than an instruction to act, so it wakes nothing it did not buy.
+      if (result.entry.kind !== "note") {
+        await grantSpanAllowance(c.env.AQUILLA_PG, target.id, {
+          spans: INPUT_GRANT_SPANS,
+          cap: INPUT_GRANT_CAP,
+        })
+      }
       const resumed = await resumeRun(c.env.AQUILLA_PG, target.id)
       if (resumed.status === "ok") {
         woken = target.id
@@ -1098,6 +1283,9 @@ contextual.post(
         kickLoop(c, projectId, target.id)
       }
     }
+    // Steering changes `activeDirections`/activity without a frame unless it
+    // wakes a parked run — invalidate unconditionally.
+    invalidateContextualReads(projectId)
     return c.json({ steering: result.entry, ...(woken ? { wokeRunId: woken } : {}) }, 201)
   },
 )
@@ -1195,6 +1383,30 @@ contextual.post(
         outcome: result.draft.status === "applied" ? "applied" : "rejected",
       },
     })
+    // AQU-1300: reviewing a draft is the input the trust gate is waiting for.
+    // Approving, editing, or rejecting all say the same thing — a human looked
+    // at what Autopilot produced — so each buys one more span, up to the
+    // incidental cap, and wakes the run that staged it.
+    //
+    // Only from `parked`/`awaiting_input`. A `work_exhausted` run has nothing
+    // to resume, and a `paused` run was stopped on purpose: reviewing its
+    // backlog must not restart it behind the user's back.
+    const owningRun = await getRun(c.env.AQUILLA_PG, result.draft.runId)
+    if (owningRun && owningRun.projectId === projectId) {
+      await grantSpanAllowance(c.env.AQUILLA_PG, owningRun.id, {
+        spans: INPUT_GRANT_SPANS,
+        cap: INPUT_GRANT_CAP,
+      })
+      if (owningRun.status === "parked" && owningRun.parkReason === "awaiting_input") {
+        const resumed = await resumeRun(c.env.AQUILLA_PG, owningRun.id)
+        if (resumed.status === "ok") {
+          await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, resumed.run)
+          kickLoop(c, projectId, owningRun.id)
+        }
+      }
+    }
+    // No live frame carries a review decision — drop the cached polls by hand.
+    invalidateContextualReads(projectId)
     return c.json({ draft: result.draft })
   },
 )

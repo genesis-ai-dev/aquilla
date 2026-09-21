@@ -5,6 +5,7 @@ import {
   hasIntraVerseMarkers,
   countLossyVerses,
   parseUsfmLossless,
+  serializeUsfmLossless,
 } from "../lib/usfm-lossless"
 
 describe("hasIntraVerseMarkers (AQU-276)", () => {
@@ -91,5 +92,182 @@ describe("countLossyVerses (AQU-276)", () => {
     ])
     // v1 and v2 have \q1 — lossy; v3 is plain text
     expect(countLossyVerses(doc, overrides)).toBe(2)
+  })
+})
+
+// ── AQU-1068: what the editor did to the file beyond translating it ──────────
+//
+// Sam settled both rules on 2026-09-09. An added cell is ALWAYS content the
+// client's file is missing, never a note-to-self, so it must reach the export;
+// and it gets NO verse number of its own, because Biblica asked that nothing
+// renumber. A removed cell must leave, or the export silently re-emits the
+// client's original words for a line somebody deliberately took out.
+
+const BOOK = [
+  "\\id GEN",
+  "\\c 1",
+  "\\p",
+  "\\v 3 And God said, Let there be light.",
+  "\\v 4 And God saw the light, that it was good.",
+  "\\v 5 And God called the light Day.",
+  "",
+].join("\n")
+
+describe("serializeUsfmLossless — appending an added cell to its anchor verse", () => {
+  it("writes the addition into the verse it follows, with no marker of its own", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 1:4", ["Extra content the import dropped."]]]),
+    })
+    expect(out).toContain("\\v 4 And God saw the light, that it was good. Extra content the import dropped.")
+    // No new verse number anywhere, and the neighbours are untouched.
+    expect(out).not.toMatch(/\\v 4a|\\v 6/)
+    expect(out).toContain("\\v 5 And God called the light Day.")
+  })
+
+  it("re-parses to the SAME verse count — nothing renumbered", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 1:4", ["Extra content."]]]),
+    })
+    const reparsed = parseUsfmLossless(out)
+    expect(reparsed.verses.map((v) => v.ref)).toEqual(["GEN 1:3", "GEN 1:4", "GEN 1:5"])
+    expect(reparsed.verses[1].text.trim()).toBe("And God saw the light, that it was good. Extra content.")
+  })
+
+  it("keeps the anchor's ORIGINAL words when the anchor itself is untranslated", () => {
+    // The trap that made folding this into `overrides` wrong: an absent or
+    // empty override is the serializer's "fall back to source" signal, so
+    // appending through that map would have replaced the client's verse with
+    // the addition alone.
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, new Map(), {
+      appendAfter: new Map([["GEN 1:4", ["Added line."]]]),
+    })
+    expect(out).toContain("And God saw the light, that it was good. Added line.")
+  })
+
+  it("appends AFTER the translation when the anchor is translated", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(
+      doc,
+      new Map([["GEN 1:4", "Dieu vit que la lumière était bonne."]]),
+      { appendAfter: new Map([["GEN 1:4", ["Ligne ajoutée."]]]) },
+    )
+    expect(out).toContain("\\v 4 Dieu vit que la lumière était bonne. Ligne ajoutée.")
+    expect(out).not.toContain("And God saw the light")
+  })
+
+  it("keeps several additions on one anchor in the order given", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 1:4", ["First added.", "Second added."]]]),
+    })
+    expect(out).toContain("that it was good. First added. Second added.")
+  })
+
+  it("ignores an empty addition rather than emitting a stray space", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 1:4", ["", "   "]]]),
+    })
+    expect(out).toBe(BOOK)
+  })
+
+  it("ignores an anchor ref that is not in the file", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 9:99", ["Nowhere to go."]]]),
+    })
+    expect(out).toBe(BOOK)
+  })
+
+  it("changes nothing at all when there are no edits", () => {
+    const doc = parseUsfmLossless(BOOK)
+    expect(serializeUsfmLossless(doc, undefined, {})).toBe(BOOK)
+    expect(serializeUsfmLossless(doc)).toBe(BOOK)
+  })
+})
+
+describe("serializeUsfmLossless — removing a verse the editor deleted", () => {
+  it("takes the whole verse out, marker included", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:4"]) })
+    expect(out).not.toContain("And God saw the light")
+    // The marker must go with it. This is what `markerStart` exists for —
+    // without it the words leave and a bare `\v 4` stays behind.
+    expect(out).not.toContain("\\v 4")
+  })
+
+  it("leaves the verses around it exactly as they were — nothing renumbers", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:4"]) })
+    const reparsed = parseUsfmLossless(out)
+    expect(reparsed.verses.map((v) => v.ref)).toEqual(["GEN 1:3", "GEN 1:5"])
+    expect(reparsed.verses[1].text.trim()).toBe("And God called the light Day.")
+  })
+
+  it("re-parses cleanly — the output is still valid USFM", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:4"]) })
+    expect(parseUsfmLossless(out).bookId).toBe("GEN")
+    expect(out).toContain("\\c 1")
+    expect(out).toContain("\\p")
+  })
+
+  it("removes the LAST verse without eating the file's tail", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:5"]) })
+    expect(out).not.toContain("And God called the light Day")
+    expect(out).toContain("\\v 4 And God saw the light, that it was good.")
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual(["GEN 1:3", "GEN 1:4"])
+  })
+
+  it("removes the FIRST verse without disturbing the chapter or paragraph markers", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:3"]) })
+    expect(out).toContain("\\id GEN")
+    expect(out).toContain("\\c 1")
+    expect(out).toContain("\\p")
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual(["GEN 1:4", "GEN 1:5"])
+  })
+
+  it("removes several at once", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:3", "GEN 1:5"]) })
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual(["GEN 1:4"])
+  })
+
+  it("wins over an override for the same verse — a removal is not a translation", () => {
+    const doc = parseUsfmLossless(BOOK)
+    const out = serializeUsfmLossless(
+      doc,
+      new Map([["GEN 1:4", "Dieu vit que la lumière était bonne."]]),
+      { remove: new Set(["GEN 1:4"]) },
+    )
+    expect(out).not.toContain("Dieu vit")
+    expect(out).not.toContain("\\v 4")
+  })
+
+  it("removes a heading as well as a verse", () => {
+    const withHeading = [
+      "\\id GEN",
+      "\\c 1",
+      "\\s1 The First Day",
+      "\\p",
+      "\\v 3 And God said, Let there be light.",
+      "",
+    ].join("\n")
+    const doc = parseUsfmLossless(withHeading)
+    const headingRef = doc.headings[0].ref
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set([headingRef]) })
+    expect(out).not.toContain("The First Day")
+    expect(out).not.toContain("\\s1")
+    expect(out).toContain("\\v 3 And God said, Let there be light.")
+  })
+
+  it("ignores a ref that is not in the file", () => {
+    const doc = parseUsfmLossless(BOOK)
+    expect(serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 9:99"]) })).toBe(BOOK)
   })
 })

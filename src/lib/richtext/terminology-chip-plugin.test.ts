@@ -18,29 +18,24 @@ function makeConcept(sourceTerm: string, status: Concept["status"] = "active"): 
   }
 }
 
-/** An active concept whose renderings (and so whose chip tint) we control. */
+/** An active concept whose renderings (and so whose highlight status) we control. */
 function makeConceptWith(sourceTerm: string, renderings: TermRendering[]): Concept {
   return { ...makeConcept(sourceTerm), renderings }
 }
 
 /**
- * A widget `Decoration` keeps the `toDOM` factory on its `type`, which is not in
- * ProseMirror's public typings. Narrow cast rather than `any` so the chip's
- * rendered class/attributes can be asserted.
+ * An inline `Decoration` keeps its DOM attributes on its `type`, which is not in
+ * ProseMirror's public typings. Narrow cast rather than `any` so the highlight's
+ * attributes can be asserted.
  */
-type WidgetDecoration = { type: { toDOM: (view: unknown, getPos: () => number) => HTMLElement } }
+type InlineDecoration = { type: { attrs: Record<string, string> } }
 
-/** Render every widget decoration in `set` and return the `.term-chip` elements. */
-function renderChips(set: DecorationSet): HTMLElement[] {
+/** The DOM attributes of every managed-term highlight in `set`, in doc order. */
+function highlightAttrs(set: DecorationSet): Array<Record<string, string>> {
   return set
     .find()
-    .filter((d) => d.from === d.to)
-    .map((d) => {
-      const host = (d as unknown as WidgetDecoration).type.toDOM(null, () => d.from)
-      const chip = host.querySelector<HTMLElement>(".term-chip")
-      if (!chip) throw new Error("widget host rendered no .term-chip")
-      return chip
-    })
+    .sort((a, b) => a.from - b.from)
+    .map((d) => (d as unknown as InlineDecoration).type.attrs)
 }
 
 function makeDoc(text: string) {
@@ -122,11 +117,10 @@ describe("buildTerminologyChipDecorationSet", () => {
     expect(set.find()).toHaveLength(0)
   })
 
-  it("creates two decorations per match (host inline + widget chip)", () => {
+  it("creates one inline highlight per match", () => {
     const doc = makeDoc("worship God today")
     const set = buildTerminologyChipDecorationSet(doc, [makeConcept("God")])
-    // One inline (host) + one widget = 2
-    expect(set.find()).toHaveLength(2)
+    expect(set.find()).toHaveLength(1)
   })
 
   it("inline decoration covers the matched word positions", () => {
@@ -140,6 +134,10 @@ describe("buildTerminologyChipDecorationSet", () => {
     expect(inline).toBeDefined()
     expect(inline!.from).toBe(9)  // 8 + 1
     expect(inline!.to).toBe(12)   // 11 + 1
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attrs = (inline as any).type.attrs
+    expect(attrs.class).toContain("term-chip-host")
+    expect(attrs["data-source-term"]).toBe("God")
   })
 
   it("creates decorations for multiple concepts", () => {
@@ -148,13 +146,15 @@ describe("buildTerminologyChipDecorationSet", () => {
       makeConcept("God"),
       makeConcept("love"),
     ])
-    // "God" → 1 match → 2 decorations; "love" → 2 matches → 4 decorations = 6 total
-    expect(set.find()).toHaveLength(6)
+    // "God" → 1 match; "love" → 2 matches.
+    expect(set.find()).toHaveLength(3)
   })
 })
 
 // ---------------------------------------------------------------------------
-// AQU-199 — chip tint tracks the concept's rendering status
+// AQU-199 — the highlight tracks the concept's rendering status. The tinted dot
+// this was written for is gone (AQU-1006/AQU-1110), so the status is carried
+// by the inline highlight's attributes rather than by a widget's class.
 // ---------------------------------------------------------------------------
 
 describe("conceptChipStatus", () => {
@@ -188,47 +188,54 @@ describe("conceptChipStatus", () => {
   })
 })
 
-describe("buildTerminologyChipDecorationSet — chip tint", () => {
-  it("tints the chip emerald (preferred) for a preferred term", () => {
+describe("buildTerminologyChipDecorationSet — highlight status", () => {
+  it("marks a preferred term's highlight as preferred", () => {
     const doc = makeDoc("by grace alone")
     const set = buildTerminologyChipDecorationSet(doc, [
       makeConceptWith("grace", [{ rendering: "gracia", status: "preferred" }]),
     ])
-    const [chip] = renderChips(set)
-    expect(chip.className).toBe("term-chip term-chip-preferred")
-    expect(chip.getAttribute("data-status")).toBe("preferred")
+    const [attrs] = highlightAttrs(set)
+    expect(attrs["data-status"]).toBe("preferred")
   })
 
-  it("tints the chip red once that term's only rendering is toggled to forbidden", () => {
+  it("marks it forbidden once that term's only rendering is toggled to forbidden", () => {
     const doc = makeDoc("by grace alone")
     const set = buildTerminologyChipDecorationSet(doc, [
       makeConceptWith("grace", [{ rendering: "gracia", status: "forbidden" }]),
     ])
-    const [chip] = renderChips(set)
-    expect(chip.className).toBe("term-chip term-chip-forbidden")
-    expect(chip.getAttribute("data-status")).toBe("forbidden")
+    const [attrs] = highlightAttrs(set)
+    expect(attrs["data-status"]).toBe("forbidden")
   })
 
-  it("tints each concept independently in the same doc", () => {
+  it("keeps the single shared highlight class whatever the status", () => {
+    const doc = makeDoc("by grace alone")
+    const set = buildTerminologyChipDecorationSet(doc, [
+      makeConceptWith("grace", [{ rendering: "gracia", status: "forbidden" }]),
+    ])
+    const [attrs] = highlightAttrs(set)
+    expect(attrs.class).toBe("term-chip-host")
+  })
+
+  it("resolves each concept's status independently in the same doc", () => {
     const doc = makeDoc("grace and works")
     const set = buildTerminologyChipDecorationSet(doc, [
       makeConceptWith("grace", [{ rendering: "gracia", status: "preferred" }]),
       makeConceptWith("works", [{ rendering: "obras", status: "forbidden" }]),
     ])
-    expect(renderChips(set).map((c) => c.getAttribute("data-status"))).toEqual([
+    expect(highlightAttrs(set).map((attrs) => attrs["data-status"])).toEqual([
       "preferred",
       "forbidden",
     ])
   })
 
-  it("spells the status into the accessible name, so tint is not colour-only", () => {
+  it("spells the status into the accessible name", () => {
     const doc = makeDoc("by grace alone")
     const set = buildTerminologyChipDecorationSet(doc, [
       makeConceptWith("grace", [{ rendering: "gracia", status: "forbidden" }]),
     ])
-    const [chip] = renderChips(set)
-    expect(chip.getAttribute("aria-label")).toBe("Managed term: grace (forbidden)")
-    expect(chip.getAttribute("title")).toBe("Managed term: grace (forbidden)")
+    const [attrs] = highlightAttrs(set)
+    expect(attrs["aria-label"]).toBe("Managed term: grace (forbidden)")
+    expect(attrs.title).toBe("Managed term: grace (forbidden)")
   })
 
   it("still carries data-source-term for the AQU-204 lookup popover", () => {
@@ -236,7 +243,7 @@ describe("buildTerminologyChipDecorationSet — chip tint", () => {
     const set = buildTerminologyChipDecorationSet(doc, [
       makeConceptWith("grace", [{ rendering: "gracia", status: "admitted" }]),
     ])
-    const [chip] = renderChips(set)
-    expect(chip.getAttribute("data-source-term")).toBe("grace")
+    const [attrs] = highlightAttrs(set)
+    expect(attrs["data-source-term"]).toBe("grace")
   })
 })

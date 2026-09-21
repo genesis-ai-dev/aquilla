@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide } from "./frontier-api"
+import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -95,11 +95,22 @@ export async function readSeededFileEvents(
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string } = {},
+  opts: { name?: string; fixturePath?: string; steeringContext?: boolean } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
   await createProjectServerSide(jwt, { id: projectId, name: projectName })
+  // A seeded project stands in for one a team has actually set up: autopilot
+  // refuses to start without both languages and an answered brief question
+  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
+  // a spec covering that gate needs.
+  if (opts.steeringContext !== false) {
+    await updateProjectSettings(jwt, projectId, {
+      sourceLanguage: "en",
+      targetLanguage: "sw",
+      translationBrief: { parameters: { purpose: "Seeded fixture project" } },
+    })
+  }
 
   const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE
@@ -165,6 +176,8 @@ export interface ProjectedCellRow {
   value: string
   validated: boolean
   aiDrafted: boolean
+  /** Chain head for this side/lane — the event id the projection last applied. */
+  eventId: string
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —
@@ -186,31 +199,61 @@ export async function readProjectedCells(
   return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
 }
 
+/** One event on a cell's chain as returned by the per-cell history route
+ * (sync-worker `cell-history-read-route.ts`), newest-first. */
+export interface CellHistoryEventRow {
+  id: string
+  parentId: string | null
+  kind: string
+  author: string
+  serverSeq: number
+  payload: unknown
+}
+
+/** Read a cell's full event log (newest-first) from
+ * `GET /api/v1/projects/:p/files/:f/cells/:c/history` — the audit truth the
+ * history drawer renders. Stale (bumped) commits are in here too: they never
+ * advanced the projection but are still logged. */
+export async function readCellHistory(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  limit = 200,
+): Promise<CellHistoryEventRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url =
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}` +
+    `/cells/${encodeURIComponent(cellId)}/history?limit=${limit}`
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { events: CellHistoryEventRow[] }).events
+}
+
 /** Navigate an authed page straight into the seeded file's editor and wait
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */
 export async function openSeededProject(page: Page, seeded: SeededProject): Promise<Workspace> {
-  const sourceCellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
-  const sourceCellsLoaded = page.waitForResponse((response) => {
+  const cellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  const cellsLoaded = page.waitForResponse((response) => {
     if (response.request().method() !== "GET") return false
     const url = new URL(response.url())
-    return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
+    return url.pathname === cellsPath && url.searchParams.get("paired") === "1"
   }, { timeout: 60_000 })
 
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  const sourceResponse = await sourceCellsLoaded
-  if (!sourceResponse.ok()) {
+  const cellsResponse = await cellsLoaded
+  if (!cellsResponse.ok()) {
     throw new Error(
-      `Seeded source cells failed to load: HTTP ${sourceResponse.status()} — ${await sourceResponse.text()}`,
+      `Seeded complete rows failed to load: HTTP ${cellsResponse.status()} — ${await cellsResponse.text()}`,
     )
   }
-  const payload = await sourceResponse.json() as {
+  const payload = await cellsResponse.json() as {
     cells?: Array<{ cellId?: string }>
   }
   const firstCellId = seeded.cellIds[0]
   if (!firstCellId || !payload.cells?.some((cell) => cell.cellId === firstCellId)) {
     throw new Error(
-      `Seeded source response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
+      `Seeded complete-row response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
     )
   }
 

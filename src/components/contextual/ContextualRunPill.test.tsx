@@ -47,6 +47,7 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     terminate: vi.fn(async () => {}),
+    continueRun: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -329,5 +330,64 @@ describe("ContextualRunPill", () => {
     render(<ContextualRunPill projectId="p1" fileId="file-1" canControl={false} />)
     expect(screen.queryByRole("button", { name: "Resume drafting" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stop this run" })).not.toBeInTheDocument()
+  })
+
+  // ── Trust gate: parked awaiting input (AQU-1300) ─────────────────────────
+  //
+  // The single most important thing this pill does now is tell a person that
+  // Autopilot STOPPED ON PURPOSE and is waiting on them. It arrives as the
+  // same `parked` status as a finished run, so every assertion here is really
+  // about not confusing the two.
+
+  it("parked awaiting input reads as a hand-back, with both ways forward", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.getByText("Waiting for you · 5 passages left")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Translate everything" })).toBeInTheDocument()
+    // "Idle · no work queued" is the finished-run copy. Showing it here would
+    // tell the user Autopilot is done when five passages are still waiting.
+    expect(screen.queryByText("Idle · no work queued")).not.toBeInTheDocument()
+  })
+
+  it("offers neither action once the scope is genuinely finished", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 6, total: 6 }), parkReason: "work_exhausted" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Translate everything" })).not.toBeInTheDocument()
+  })
+
+  it("Continue asks for a batch; Translate everything asks for the whole scope", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    const view = render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    })
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN, "batch")
+    view.unmount()
+
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Translate everything" }))
+    })
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN, "all")
+  })
+
+  it("hides both actions from someone who cannot control the run", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl={false} />)
+
+    // A viewer still needs to know the run is waiting — they just cannot be
+    // the one to release it.
+    expect(screen.getByText("Waiting for you · 5 passages left")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Translate everything" })).not.toBeInTheDocument()
   })
 })

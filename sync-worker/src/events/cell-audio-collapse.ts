@@ -29,6 +29,14 @@ interface AudioRowRaw {
   timings_json: string | null
   selected: number
   created_ts: number
+  // AQU-490. Optional so a caller that builds rows by hand (the client-side
+  // contract test does) need not know about them; absent reads as an
+  // unvalidated dub with no recorder, which is what every pre-0096 row is.
+  validator_count?: number | null
+  role?: string | null
+  created_by?: string | null
+  /** Who has validated THIS take, newest vote first. Joined in by the route. */
+  validators?: string[]
 }
 
 export interface AttachmentOut {
@@ -53,6 +61,31 @@ export interface AttachmentOut {
    * every take made before this column existed.
    */
   targetOffsetMs: number | null
+  /**
+   * AQU-490: how many people have validated this take, and who.
+   *
+   * The count is denormalized onto cell_audio and `validators` is joined from
+   * cell_audio_validators, so the two always agree — but the COUNT is the one
+   * to compare against a threshold. A viewer works out "have I validated
+   * this?" by looking for themselves in `validators`; the server deliberately
+   * does not send a per-viewer bit, because that would make this response
+   * uncacheable across the people looking at the same file.
+   */
+  validatorCount: number
+  validators: string[]
+  /**
+   * 'dub' — somebody's translation of this line. 'source' — the shared
+   * programme audio an import attached, which sits SELECTED on every cell of a
+   * media file and is therefore never counted, never validated, and never
+   * auto-validated. See migration 0096.
+   */
+  role: "dub" | "source"
+  /**
+   * Who recorded it, for the self-validation rule. NULL is UNKNOWN — a take
+   * whose attach event is gone, or a project the rollout has not reached — and
+   * must never be treated as a match for the current viewer.
+   */
+  recordedBy: string | null
 }
 
 export interface CellAudioOut {
@@ -107,6 +140,14 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       trimStartMs: r.trim_start_ms,
       trimEndMs: r.trim_end_ms,
       targetOffsetMs: r.target_offset_ms,
+      // AQU-490. The defaults are the pre-0096 reading of a row: no votes, a
+      // dub, no known recorder. `role` is narrowed rather than cast, so a
+      // value the schema's CHECK could not produce still lands on 'dub' — the
+      // safe side, since 'source' is what excludes a take from being counted.
+      validatorCount: Number(r.validator_count ?? 0) || 0,
+      validators: r.validators ?? [],
+      role: r.role === "source" ? "source" : "dub",
+      recordedBy: r.created_by ?? null,
     }
     if (r.timings_json) {
       try {

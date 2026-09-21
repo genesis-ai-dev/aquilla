@@ -10,11 +10,14 @@
 import { describe, it, expect } from 'vitest'
 import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
 import { makeTestDb } from './helpers/pg-test-db'
+import { makeTestToken } from './helpers/auth'
+import { handleCellAudioReadRequest } from '../events/cell-audio-read-route'
 import type { EventKind } from '../events/types'
 
 const P = 'proj-1'
 const F = 'file-a'
 const C = 'cell-1'
+const SECRET = 'audio-validators-secret'
 
 function makeEvent<K extends EventKind>(
   kind: K,
@@ -414,6 +417,73 @@ describe('cell.audio.attach records provenance', () => {
     )
 
     expect((await rows<AudioRow>('cell_audio'))[0].role).toBe('source')
+    await close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The read route, against real Postgres.
+//
+// The route's own suite drives a stub that returns canned rows, so it cannot
+// see the SQL at all. These go through the statement itself, because the trap
+// here is a shape trap: joining cell_audio_validators plainly returns one row
+// per (take, validator), and the collapse keys attachments by audio_id — so a
+// take with two validators would arrive twice, the last row would silently
+// win, and nothing would look wrong until somebody read a duration off it.
+// ---------------------------------------------------------------------------
+
+describe('the audio-attachments read carries votes', () => {
+  const read = async (db: AquillaDb) => {
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const res = (await handleCellAudioReadRequest(
+      new Request(`https://w/api/v1/projects/${P}/files/${F}/audio-attachments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET },
+    ))!
+    expect(res.status).toBe(200)
+    return (await res.json()) as {
+      cells: Record<string, { attachments: Record<string, {
+        validatorCount: number; validators: string[]; role: string
+        recordedBy: string | null; durationMs: number | null
+      }> }>
+    }
+  }
+
+  it('returns each take once, with its count, its validators and its provenance', async () => {
+    const { db, rows, close } = await makeTestDb()
+    await attach(db, 'a1', { author: 'ana' })
+    await project(db, 'cell.audio.validate', { audioId: 'a1' }, { author: 'bo', id: 'e1', serverTs: 10 })
+    await project(db, 'cell.audio.validate', { audioId: 'a1' }, { author: 'cy', id: 'e2', serverTs: 20 })
+
+    const body = await read(db)
+    const takes = body.cells[C].attachments
+    // ONE entry, not two. This is the assertion the whole lateral exists for.
+    expect(Object.keys(takes)).toEqual(['a1'])
+    expect(takes.a1.validatorCount).toBe(2)
+    // Newest vote first.
+    expect(takes.a1.validators).toEqual(['cy', 'bo'])
+    expect(takes.a1.role).toBe('dub')
+    expect(takes.a1.recordedBy).toBe('ana')
+    expect((await rows<AudioRow>('cell_audio'))[0].validator_count).toBe(2)
+    await close()
+  })
+
+  it('reports an unvalidated take as zero votes and an empty list, never null', async () => {
+    const { db, close } = await makeTestDb()
+    await attach(db, 'a1', { author: 'ana' })
+
+    const takes = (await read(db)).cells[C].attachments
+    expect(takes.a1.validatorCount).toBe(0)
+    expect(takes.a1.validators).toEqual([])
+    await close()
+  })
+
+  it('carries role=source through, so the client can refuse to count it', async () => {
+    const { db, close } = await makeTestDb()
+    await attach(db, 'src', { role: 'source', author: 'importer' })
+
+    expect((await read(db)).cells[C].attachments.src.role).toBe('source')
     await close()
   })
 })

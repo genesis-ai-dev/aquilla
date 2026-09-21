@@ -225,10 +225,13 @@ export function ExpandableFileList({
                       <ChevronDown
                         className={cn("h-3 w-3", isCollapsed && "-rotate-90")}
                       />
-                      {isEditingCorpus ? (
+                      {!isEditingCorpus && <span>{displayLabel}</span>}
+                    </button>
+                    {isEditingCorpus && (
                         <input
                           autoFocus
                           autoComplete="off"
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                           defaultValue={group.label}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => {
@@ -242,14 +245,12 @@ export function ExpandableFileList({
                           }}
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
-                      ) : (
-                        <span>{displayLabel}</span>
-                      )}
-                    </button>
+                    )}
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
-                          className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          type="button"
+                          className="rounded-md p-0.5 transition-colors hover:text-foreground"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >

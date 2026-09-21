@@ -183,8 +183,8 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   Node so systemd tracks and signals the daemon process itself during a drain.
   Roll later `dev` commits forward as root with
   `bash deploy/migrate-daemon/update-hetzner.sh`; it verifies a clean checkout,
-  fast-forwards from GitHub using the repository deploy key, installs the
-  lockfile, and restarts the unit only when it was already active.
+  checks out the exact fetched `dev` commit using the repository deploy key,
+  installs the lockfile, and restarts the unit only when it was already active.
 
   **Why user-space pnpm**: the box's system `node` (`/usr/bin/node`) has no
   bundled `pnpm`, and `corepack enable` writes shims next to it — into

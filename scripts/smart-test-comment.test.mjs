@@ -13,6 +13,14 @@ function suite() {
 }
 const render = (value) => renderReport({ sha, phase: "finished", suite: value })
 describe("truthful outcome report", () => {
+  it("allows only scoped opaque Hetzner evidence links", () => {
+    const url = `https://koinegreek.app/aquilla-qa/artifacts/${"a".repeat(64)}/suite.json`
+    const report = renderReport({ sha, phase: "finished", suite: suite(), runUrl: url })
+    expect(report).toContain("expires after seven days")
+    for (const runUrl of ["https://evil.example/suite.json", url + "?redirect=evil", url.replace("https:", "http:")]) {
+      expect(() => renderReport({ sha, phase: "finished", runUrl })).toThrow("Invalid workflow URL")
+    }
+  })
   it("renders independent passes, cost, and commit identity", () => {
     expect(render(suite())).toContain("**PASS — all listed outcomes verified.**")
     expect(render(suite())).toContain("VERIFIED PASS")

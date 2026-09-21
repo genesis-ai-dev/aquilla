@@ -1,5 +1,5 @@
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from "@playwright/test/reporter"
-import { execFileSync } from "node:child_process"
+import { buildIdentity } from "./build"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -9,6 +9,7 @@ export default class SmartReporter implements Reporter {
   private planned: string[] = []
   private build = ""
   private dirty = true
+  private harnessBuild: string | null = null
   private started = Date.now()
   private readonly results: {
     title: string; status: string; durationMs: number; evidence: Record<string, unknown>;
@@ -23,8 +24,10 @@ export default class SmartReporter implements Reporter {
       console.log(`SMART_PLAN=${JSON.stringify(this.planned)}`)
       return
     }
-    this.build = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    this.dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
+    const identity = buildIdentity()
+    this.build = identity.build
+    this.dirty = identity.dirty
+    this.harnessBuild = identity.harnessBuild
     this.save("running")
   }
 
@@ -49,6 +52,7 @@ export default class SmartReporter implements Reporter {
     mkdirSync(this.directory, { recursive: true })
     writeFileSync(path.join(this.directory, "suite.json"), JSON.stringify({
       schemaVersion: 2, build: this.build, dirty: this.dirty,
+      harnessBuild: this.harnessBuild,
       planned: this.planned, status, tests: this.results,
       testWallMs: Date.now() - this.started,
     }, null, 2))

@@ -164,15 +164,19 @@ The existing automatic Cloudflare preview comment now points reviewers to
 these reports and explicitly says that preview deployment does not run Jev.
 Absence of a completed report matching the commit means NOT VERIFIED.
 
-**Automatic live PR execution is not activated.** On 2026-09-21, GitHub
-reports zero registered runners and blocks hosted jobs because of account
-billing. Provider secrets are also absent from GitHub Actions. Restoring
-billing or supplying a Linux host addresses compute, but execution still
-needs a boundary between PR code and model/reporting credentials. Do not
-attach the local PR command to an untrusted webhook or put provider keys
-into a persistent runner executing arbitrary PR heads. Use disposable test
-environments and a trusted model/report controller, or require review before
-a credential-bearing run. The reporting script needs no model of its own.
+The standalone [Hetzner webhook runner](../docs/runbooks/smart-testing-webhook.md)
+executes same-repository PRs without GitHub Actions compute. A signed webhook
+feeds a durable queue. The controller builds PR code in a disposable container,
+then runs a separately pinned, reviewed harness against it. GitHub credentials
+stay in the controller; model credentials enter only the trusted harness.
+PR code cannot replace the deployed outcome checks. Reports identify both
+commits and link seven-day evidence. One suite runs at a time on the shared
+4 GB host; laptop execution still supports four isolated stacks.
+
+Do not attach `test:smart:pr` directly to an untrusted webhook. The local command
+assumes a reviewed checkout and does not provide this container boundary.
+GitHub-hosted Actions were billing-blocked during installation; this service
+does not depend on hosted jobs or a GitHub Actions runner registration.
 
 The existing **E2E (Hetzner)** dispatch accepts `smart`, `smart-qualify`, and
 `smart-audit`. Live mode uses repository secrets `TYPESAFE_API_KEY` and

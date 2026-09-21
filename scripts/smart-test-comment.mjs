@@ -10,7 +10,8 @@ const escape = (value) => String(value).replace(/[&<>|`\r\n]/g, (char) =>
 export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
   if (!["running", "finished"].includes(phase)) throw new Error("Invalid report phase")
-  if (runUrl && !/^https:\/\/github\.com\/genesis-ai-dev\/aquilla\/actions\/runs\/\d+$/.test(runUrl)) {
+  const hostedEvidence = /^https:\/\/koinegreek\.app\/aquilla-qa\/artifacts\/[a-f0-9]{64}\/suite\.json$/.test(runUrl ?? "")
+  if (runUrl && !hostedEvidence && !/^https:\/\/github\.com\/genesis-ai-dev\/aquilla\/actions\/runs\/\d+$/.test(runUrl)) {
     throw new Error("Invalid workflow URL")
   }
   const lines = [MARKER, "## Jev smart testing", "",
@@ -74,7 +75,11 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
       }
     }
   }
-  if (runUrl) lines.push("", `[Run logs and downloadable evidence](${runUrl}).`)
+  if (suite?.harnessBuild) lines.push("", `Reviewed harness: \`${escape(suite.harnessBuild.slice(0, 8))}\`. PR code cannot replace these checks.`)
+  if (suite?.runner) lines.push("", `Hetzner: ${(Number(suite.runner.wallMs) / 1000).toFixed(1)} s including source preparation and setup; one active suite.`)
+  if (runUrl) lines.push("", hostedEvidence
+    ? `[Download outcome evidence](${runUrl}) (private bearer link; expires after seven days).`
+    : `[Run logs and downloadable evidence](${runUrl}).`)
   lines.push("", "Advisory coverage, not a release guarantee. No retries convert a failed journey into a pass. Preview deployment and workflows outside these journeys are not verified by this run.")
   return lines.join("\n")
 }

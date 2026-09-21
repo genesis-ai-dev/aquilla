@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
+import { buildIdentity } from "../build"
 import { prepareEdit, authenticatedPage, editorUrl, targetSurface } from "../fixture"
 import { runJev, JEV_REVISION, type AgentRun } from "../driver"
 import { mintSyncToken, readProjectedCells } from "../../e2e/helpers/seed-project"
@@ -48,9 +47,7 @@ for (const journey of ["project-rename", "file-rename", "cell-comment"] as const
     let pageErrors = 0
     let initialDom: Awaited<ReturnType<typeof observeDom>> | null = null
     page.on("pageerror", () => { pageErrors++ })
-    const build = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    const dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
-    const trackedDiffHash = createHash("sha256").update(execFileSync("git", ["diff", "HEAD"])).digest("hex")
+    const { build, dirty, trackedDiffHash, harnessBuild } = buildIdentity()
     try {
       await page.goto(journey === "project-rename" ? "/app" : editorUrl(seeded))
       if (journey === "project-rename") {
@@ -109,7 +106,7 @@ for (const journey of ["project-rename", "file-rename", "cell-comment"] as const
       expect(outcome, JSON.stringify(outcome)).toMatchObject({ verdict: "passed" })
     } finally {
       await testInfo.attach("smart-testing-evidence", { contentType: "application/json", body: Buffer.from(JSON.stringify({
-        schemaVersion: 1, journey, build, dirty, trackedDiffHash, jevRevision: JEV_REVISION,
+        schemaVersion: 1, journey, build, dirty, trackedDiffHash, harnessBuild, jevRevision: JEV_REVISION,
         runId: fixture.runId, projectId: seeded.projectId, fileId: seeded.fileId,
         goal, expected, inputObserved, agent, outcome, server, pageErrors, initialDom,
       })) })

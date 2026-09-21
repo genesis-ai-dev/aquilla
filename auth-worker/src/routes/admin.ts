@@ -205,6 +205,25 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
 admin.use("*", requireAdminElevation)
 
 /**
+ * GET /api/v2/admin/migration-status — read-only status published by the
+ * migration daemon to the shared snapshots bucket. It is served only after
+ * the platform-admin and elevation middleware above.
+ */
+admin.get("/migration-status", async (c) => {
+  const bucket = c.env.SNAPSHOTS
+  if (!bucket) return c.json({ error: "migration_status_unavailable" }, 503)
+  const prefix = c.env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "")
+  const key = `${prefix ? `${prefix}/` : ""}_migrate/daemon-status.json`
+  const object = await bucket.get(key)
+  if (!object) return c.json({ status: null })
+  try {
+    return c.json({ status: await object.json<unknown>() })
+  } catch {
+    return c.json({ error: "migration_status_invalid" }, 502)
+  }
+})
+
+/**
  * GET /api/v2/admin/admins — the ADMIN_EMAILS allowlist, joined to user
  * accounts by email. Allowlist entries without a matching users row are still
  * returned (hasAccount: false) so a typo'd or not-yet-registered email in

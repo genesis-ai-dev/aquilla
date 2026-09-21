@@ -139,7 +139,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:p:s4"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -161,7 +161,7 @@ describe('GET file progress', () => {
     await pg.query(
       `INSERT INTO cell_audio
          (project_id, file_id, cell_id, audio_id, slot, url, event_id, created_ts,
-          selected, deleted, approved, duration_ms)
+          selected, deleted, validator_count, duration_ms)
        VALUES ($1,$2,'c1','a1','take','u1','e1',1, 1,0,1,1000),
               ($1,$2,'c3','a2','take','u2','e2',1, 1,0,0,1000)`,
       [PROJECT, FILE],
@@ -176,7 +176,7 @@ describe('GET file progress', () => {
     expect(body.file).toMatchObject({ audioCount: 2, audioValidatedCount: 1 })
     const gen1 = body.sections.find((section) => section.key === 'GEN 1')!
     const gen2 = body.sections.find((section) => section.key === 'GEN 2')!
-    // GEN 1 holds the approved take, GEN 2 the unapproved one.
+    // GEN 1 holds the validated take, GEN 2 the unvalidated one.
     expect(gen1).toMatchObject({ audioCount: 1, audioValidatedCount: 1 })
     expect(gen2).toMatchObject({ audioCount: 1, audioValidatedCount: 0 })
   })
@@ -198,18 +198,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s3"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:f:s4"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:f:s3"',
+        'If-None-Match': '"progress:file-progress:7:v2:va1:f:s4"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:p:s4"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
@@ -256,12 +256,18 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:s3"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:va1:s4"')
 
-    const stale = (await handleProgressReadRequest(new Request(url, {
-      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag.replace(':s3', '') },
-    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(stale.status).toBe(200)
+    const notHonoured = async (candidate: string) => (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': candidate },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!.status
+
+    // A client from before shape markers existed at all.
+    expect(await notHonoured(etag.replace(':s4', ''))).toBe(200)
+    // AQU-490: and one from the shape immediately before this, which is the
+    // live case at deploy. `take_signed` kept its name and its type and
+    // changed its question — nothing else in the key moves for that.
+    expect(await notHonoured('"progress:file-progress:GEN%201:7:v2:s3"')).toBe(200)
 
     const current = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag },
@@ -390,11 +396,12 @@ describe('structural aggregates (AQU-1083)', () => {
     endorsement_count: endorsements, word_count: value ? 1 : 0,
   })
 
-  /** A live take. `selected + approved` is what the projection calls validated. */
-  const take = (cellId: string, approved: boolean) => ({
+  /** A live dub take. AQU-490: a SELECTED dub with at least one vote is what
+      the projection calls validated, counted against the threshold on read. */
+  const take = (cellId: string, validated: boolean) => ({
     project_id: P, file_id: F, cell_id: cellId, audio_id: `a-${cellId}`,
     slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0,
-    approved: approved ? 1 : 0, event_id: `au-${cellId}`, created_ts: 3,
+    validator_count: validated ? 1 : 0, event_id: `au-${cellId}`, created_ts: 3,
   })
 
   /** GEN 1: two verses (one filled at 2 endorsements, one empty) plus a chapter
@@ -604,11 +611,11 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
       // not leave it at 3 over a denominator of 2.
       cell_audio: [
         { project_id: P, file_id: F, cell_id: 't1', audio_id: 'a-t1', slot: 'take',
-          url: 'local://t1.webm', selected: 1, deleted: 0, approved: 1, event_id: 'au-t1', created_ts: 3 },
+          url: 'local://t1.webm', selected: 1, deleted: 0, validator_count: 1, event_id: 'au-t1', created_ts: 3 },
         { project_id: P, file_id: F, cell_id: 'v1', audio_id: 'a-v1', slot: 'take',
-          url: 'local://v1.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v1', created_ts: 3 },
+          url: 'local://v1.webm', selected: 1, deleted: 0, validator_count: 0, event_id: 'au-v1', created_ts: 3 },
         { project_id: P, file_id: F, cell_id: 'v2', audio_id: 'a-v2', slot: 'take',
-          url: 'local://v2.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v2', created_ts: 3 },
+          url: 'local://v2.webm', selected: 1, deleted: 0, validator_count: 0, event_id: 'au-v2', created_ts: 3 },
       ],
     })
     await db.db.batch(fullProgressRecomputeStmts(db.db, P, F, 100))
@@ -667,6 +674,7 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
         structural_audio_count: 3, structural_audio_validated_count: 3 },
       1,
       false,
+      1,
     )).toMatchObject({ totalCount: 0, audioCount: 0, audioValidatedCount: 0 })
   })
 
@@ -717,7 +725,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
   })
   const take = (fileId: string, cellId: string, over: Record<string, unknown> = {}) => ({
     project_id: PROJECT, file_id: fileId, cell_id: cellId, audio_id: `take-${cellId}`,
-    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, approved: 0,
+    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, validator_count: 0,
     event_id: `aev-${cellId}`, created_ts: 3, ...over,
   })
   const file = (id: string, over: Record<string, unknown> = {}) =>
@@ -763,7 +771,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
         src('bible', 'v4', { canonical_ref: 'GEN 1:4' }), tgt('bible', 'v4', 'd', 1),
       ],
       cell_audio: [
-        take('bible', 'v1', { approved: 1 }),   // signed off
+        take('bible', 'v1', { validator_count: 1 }), // signed off
         take('bible', 'v2', { deleted: 1 }),    // a deleted take is no take
         take('bible', 'v3'),                    // recorded, not signed off
       ],
@@ -827,7 +835,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
       }),
       cell_audio: [
         take('ep-cues', 'q1'),                  // recorded, not signed off
-        take('ep-cues', 'q3', { approved: 1 }), // signed off
+        take('ep-cues', 'q3', { validator_count: 1 }), // signed off
       ],
     })
     expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'unrecorded', '')).toBe('s2')

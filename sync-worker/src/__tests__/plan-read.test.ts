@@ -28,7 +28,12 @@ function progress(fileId: string, scope: string, key: string, over: Record<strin
   return {
     project_id: P, file_id: fileId, scope, section_key: key, target_lang: "",
     total_count: 0, filled_count: 0, validator_histogram: "{}",
-    audio_count: 0, audio_validated_count: 0, last_edit_at: null,
+    // AQU-490: audioValidatedCount is read from this histogram at the
+    // project's threshold, not from the stored column beside it — a stored
+    // verdict is fixed at "one vote" and would contradict the board the
+    // moment a project asked for two.
+    audio_count: 0, audio_validated_count: 0, audio_validator_histogram: "{}",
+    last_edit_at: null,
     revision: 5, updated_at: TS,
     ...over,
   }
@@ -400,7 +405,9 @@ describe("the headings policy reaches the audio numbers too", () => {
           structural_count: 2, structural_filled_count: 2,
           structural_validator_histogram: JSON.stringify({ "1": 2 }),
           audio_count: 12, audio_validated_count: 12,
+          audio_validator_histogram: JSON.stringify({ "1": 12 }),
           structural_audio_count: 2, structural_audio_validated_count: 2,
+          structural_audio_validator_histogram: JSON.stringify({ "1": 2 }),
         }),
       ],
     })
@@ -453,6 +460,10 @@ describe("audio comes from the linked cue sheet", () => {
         progress("ep1", "file", "", { total_count: 646, filled_count: 600 }),
         progress("cues1", "file", "", {
           total_count: 548, audio_count: 548, audio_validated_count: 12,
+          // AQU-490: and the histogram it is read from — which on a dubbing
+          // unit must come off the SHEET's row (ps), like the counts beside
+          // it, and not the anchor's lane row.
+          audio_validator_histogram: JSON.stringify({ "0": 536, "1": 12 }),
         }),
       ],
     })

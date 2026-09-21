@@ -675,6 +675,58 @@ async function prefetchLastEditors(
   return editors
 }
 
+interface TakeKey extends CellKey {
+  audioId: string
+}
+
+const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: string) =>
+  `${projectId} ${fileId} ${cellId} ${audioId}`
+
+/**
+ * AQU-490: who RECORDED each take a batch is about to validate, for the audio
+ * self-validation check.
+ *
+ * The text twin above asks `cells.last_editor`, which a take has no equivalent
+ * of. `cell_audio.event_id` cannot stand in either: the transcription re-attach
+ * lands about 800ms after every recording and overwrites it, so a take would
+ * name whoever last touched it — meaning a reviewer who trimmed somebody's
+ * recording would become its recorder, and on a project with self-validation
+ * off would then be refused permission to validate it. Hence the dedicated
+ * `created_by` column, written fill-only and backfilled from the EARLIEST
+ * attach event.
+ *
+ * A NULL recorder — a take whose attach event is gone, or one on a project the
+ * rollout has not reached — is "unknown", never a match. It must not silently
+ * equal the caller.
+ */
+async function prefetchTakeRecorders(
+  db: AquillaDb,
+  takes: readonly TakeKey[],
+): Promise<Map<string, string | null>> {
+  const recorders = new Map<string, string | null>()
+  if (takes.length === 0) return recorders
+
+  const placeholders = takes.map(() => '(?, ?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const t of takes) binds.push(t.projectId, t.fileId, t.cellId, t.audioId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, audio_id, created_by FROM cell_audio
+       WHERE (project_id, file_id, cell_id, audio_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      audio_id: string; created_by: string | null
+    }>()
+
+  for (const r of results) {
+    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), r.created_by)
+  }
+  return recorders
+}
+
 /**
  * POST /events
  *
@@ -846,6 +898,7 @@ export async function handleEventsWriteRequest(
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
+  const validateTakes = new Map<string, TakeKey>()
   const foreignCommentIds = new Set<string>()
   for (const e of rawEvents) {
     if (typeof e.id === 'string') candidateIds.add(e.id)
@@ -878,15 +931,29 @@ export async function handleEventsWriteRequest(
     if (e.kind === 'cell.validate') {
       validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
     }
+    // AQU-490: the audio twin (see prefetchTakeRecorders), gathered on the
+    // same terms — before the project's allowSelfValidationAudio setting is
+    // known, because it is not known until the per-event loop below.
+    if (e.kind === 'cell.audio.validate') {
+      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
+      if (typeof audioId === 'string' && audioId) {
+        validateTakes.set(`${key}\u0000${audioId}`, {
+          projectId: e.projectId, fileId: e.fileId, cellId: e.cellId, audioId,
+        })
+      }
+    }
   }
-  const [existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors] =
-    await Promise.all([
+  const [
+    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors,
+    takeRecorders,
+  ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
       prefetchCellHeads(db, [...chainCells.values()]),
       prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
       prefetchCommentAuthors(db, foreignCommentIds),
       prefetchLastEditors(db, [...validateCells.values()]),
+      prefetchTakeRecorders(db, [...validateTakes.values()]),
     ])
 
   // PERF-2: project_settings is read at most once per (request, project) —
@@ -1341,6 +1408,105 @@ export async function handleEventsWriteRequest(
               reason: `self-validation is not allowed on this project`,
             })
             continue
+          }
+        }
+      }
+    }
+
+    // ── Audio validation config enforcement (AQU-490) ──────────────────────
+    // The same three gates as FRO-189 above, read from the project's SEPARATE
+    // audio keys: a project can want two ears on a recording and one on a
+    // translation, or trust a different set of people with each. The audio
+    // keys are never read as fallbacks for the text ones and vice versa —
+    // absent means unrestricted on both sides.
+    //
+    // Settings failure stays non-fatal here exactly as it is above: skip
+    // enforcement rather than block every validate in the project.
+    if (rawEvent.kind === 'cell.audio.validate' || rawEvent.kind === 'cell.audio.unvalidate') {
+      const parsed = await readProjectSettings(rawEvent.projectId)
+
+      // Stripping SOMEBODY ELSE'S vote is a maintainer act, and the only place
+      // it can be gated: by the time the event reaches the projection the
+      // question is settled, and the projection honours the field as written.
+      // A payload with no targetUsername means "remove my own", which anyone
+      // who could cast it may do.
+      if (rawEvent.kind === 'cell.audio.unvalidate') {
+        const target = (rawEvent.payload as { targetUsername?: unknown } | undefined)?.targetUsername
+        if (typeof target === 'string' && target.trim() && target.trim() !== callerUsername) {
+          if (callerRole < ROLE.MAINTAINER) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `only a maintainer can remove another user's audio validation`,
+            })
+            continue
+          }
+        }
+      }
+
+      if (rawEvent.kind === 'cell.audio.validate') {
+        let roleFloor: string | undefined
+        let namedUsers: string[] | undefined
+        let allowSelf: boolean | undefined
+        if (parsed) {
+          if (typeof parsed.validationRoleFloorAudio === 'string') {
+            roleFloor = parsed.validationRoleFloorAudio as string
+          }
+          if (Array.isArray(parsed.validationNamedUsersAudio)) {
+            namedUsers = parsed.validationNamedUsersAudio as string[]
+          }
+          if (typeof parsed.allowSelfValidationAudio === 'boolean') {
+            allowSelf = parsed.allowSelfValidationAudio
+          }
+        }
+
+        // 1. Role floor.
+        if (roleFloor != null) {
+          const FLOOR_MAP: Record<string, number> = {
+            reviewer: ROLE.REVIEWER,
+            project_lead: ROLE.PROJECT_LEAD,
+            maintainer: ROLE.MAINTAINER,
+          }
+          const floorLevel = FLOOR_MAP[roleFloor]
+          if (floorLevel != null && callerRole < floorLevel) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `role too low to validate audio (project requires ${roleFloor} or above)`,
+            })
+            continue
+          }
+        }
+
+        // 2. Named-user allowlist.
+        if (namedUsers != null && namedUsers.length > 0 && !namedUsers.includes(callerUsername)) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `user '${callerUsername}' is not in the project's audio validator allowlist`,
+          })
+          continue
+        }
+
+        // 3. Self-validation, against the take's RECORDER. A NULL recorder is
+        // unknown, not a match: a take whose attach event has been pruned must
+        // not become unvalidatable-by-everyone or validatable-by-anyone by
+        // accident. The strict === on two strings gives that for free, and it
+        // is the reason this reads the column rather than the event author.
+        if (allowSelf === false && rawEvent.fileId && rawEvent.cellId) {
+          const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
+          if (typeof audioId === 'string' && audioId) {
+            const recorder = takeRecorders.get(
+              takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId),
+            )
+            if (recorder != null && recorder === callerUsername) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating your own recording is not allowed on this project`,
+              })
+              continue
+            }
           }
         }
       }

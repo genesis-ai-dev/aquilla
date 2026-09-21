@@ -93,6 +93,20 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   validationRoleFloor: { kind: 'enum', values: ['reviewer', 'project_lead', 'maintainer'] },
   validationNamedUsers: { kind: 'string[]' },
   allowSelfValidation: { kind: 'boolean' },
+  // AQU-490: the audio twins. Separate keys rather than shared ones, by Sam's
+  // ruling — a project can reasonably want two ears on a recording and one on
+  // a translation, or trust a different set of people with each. A project
+  // that sets none of them gets the text defaults' behaviour, not the text
+  // project's settings: absent means unrestricted here exactly as it does
+  // above, and the two are never read as fallbacks for each other.
+  validationRoleFloorAudio: { kind: 'enum', values: ['reviewer', 'project_lead', 'maintainer'] },
+  validationNamedUsersAudio: { kind: 'string[]' },
+  allowSelfValidationAudio: { kind: 'boolean' },
+  // AQU-490: whether the audio validation control appears in the TEXT view's
+  // gutter beside the text one. Stamped false on every project that existed
+  // when 0096 ran, so "absent" means "made after this shipped" and reads as
+  // on-once-the-project-has-audio.
+  showAudioValidationInTextView: { kind: 'boolean' },
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },
   contributeToGlobalTm: { kind: 'boolean' },

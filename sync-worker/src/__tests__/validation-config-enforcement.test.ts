@@ -368,3 +368,211 @@ describe('cell.validate — combined settings', () => {
     expect(body.rejected).toHaveLength(0)
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-490 — the audio twin of everything above.
+//
+// The gates are the same three, read from SEPARATE keys. That separation is
+// the thing most worth pinning: a project can want two ears on a recording
+// and one on a translation, or trust a different set of people with each, so
+// neither set of keys may be read as a fallback for the other.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Attach a take to the seeded cell, recorded by `author`. */
+async function seedTake(db: AquillaDb, audioId: string, author: string): Promise<void> {
+  const token = await makeToken(400, author)
+  const evt: RawEvent<'cell.audio.attach'> = {
+    id: `evt-attach-${audioId}`,
+    schemaVersion: 1,
+    kind: 'cell.audio.attach',
+    projectId: 'proj-v',
+    fileId: 'file-v',
+    cellId: 'cell-v1',
+    parentId: null,
+    author,
+    payload: { audioId, url: `frontier-audio://${audioId}.wav`, slot: 'recording' },
+    clientTs: 150,
+  }
+  await postEvent(db, evt, token)
+}
+
+function makeAudioValidateEvent(id: string, author: string, audioId = 'take-1'): RawEvent<'cell.audio.validate'> {
+  return {
+    id, schemaVersion: 1, kind: 'cell.audio.validate',
+    projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1',
+    parentId: null, author, payload: { audioId }, clientTs: 200,
+  }
+}
+
+function makeAudioUnvalidateEvent(
+  id: string, author: string, payload: Record<string, unknown>,
+): RawEvent<'cell.audio.unvalidate'> {
+  return {
+    id, schemaVersion: 1, kind: 'cell.audio.unvalidate',
+    projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1',
+    parentId: null, author, payload, clientTs: 300,
+  } as RawEvent<'cell.audio.unvalidate'>
+}
+
+async function post(db: AquillaDb, event: RawEvent, token: string) {
+  const res = await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db))
+  return (await res!.json()) as any
+}
+
+describe('cell.audio.validate — audio validation config', () => {
+  it('accepts a reviewer with no settings row', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-1', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted).toHaveLength(1)
+  })
+
+  it('rejects a reviewer when the audio floor is project_lead', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+    await setProjectSettings(db, { validationRoleFloorAudio: 'project_lead' })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-2', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+    expect(body.rejected[0].reason).toMatch(/role too low to validate audio/)
+  })
+
+  it('rejects someone outside the audio allowlist', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+    await setProjectSettings(db, { validationNamedUsersAudio: ['carol'] })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-3', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected[0].reason).toMatch(/audio validator allowlist/)
+  })
+
+  // THE RECORDER, not the event author and not the cell's last editor. A take
+  // is re-attached routinely — the transcription lands ~800ms after every
+  // recording — so anything derived from the latest event would name whoever
+  // last touched it.
+  it('rejects the recorder validating their own take when self-validation is off', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'bob')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-4', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].reason).toMatch(/validating your own recording/)
+  })
+
+  it('still lets somebody else validate that take', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'bob')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-5', 'carol'), await makeToken(300, 'carol'))
+    expect(body.rejected).toHaveLength(0)
+  })
+
+  // A take whose attach event is gone — a pruned history, or a project the
+  // rollout script has not reached — has a NULL recorder. Unknown must not
+  // silently equal the caller, or self-validation-off would lock everyone out
+  // of exactly the oldest takes.
+  it('treats an unknown recorder as unknown, not as the caller', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'bob')
+    await db.prepare('UPDATE cell_audio SET created_by = NULL').bind().run()
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-6', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(0)
+  })
+
+  // THE SEPARATION, both directions.
+  it('does not let the TEXT policy gate an audio validate', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'bob')
+    await seedTake(db, 'take-1', 'alice')
+    await setProjectSettings(db, {
+      validationRoleFloor: 'maintainer',
+      validationNamedUsers: ['nobody'],
+      allowSelfValidation: false,
+    })
+
+    const body = await post(db, makeAudioValidateEvent('evt-av-7', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(0)
+  })
+
+  it('does not let the AUDIO policy gate a text validate', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, {
+      validationRoleFloorAudio: 'maintainer',
+      validationNamedUsersAudio: ['nobody'],
+      allowSelfValidationAudio: false,
+    })
+
+    const body = await post(db, makeValidateEvent('evt-tv-1', 'bob'), await makeToken(300, 'bob'))
+    expect(body.rejected).toHaveLength(0)
+  })
+})
+
+describe('cell.audio.unvalidate — removing somebody else’s vote', () => {
+  it('lets anyone who could vote remove their OWN', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+
+    const body = await post(
+      db, makeAudioUnvalidateEvent('evt-au-1', 'bob', { audioId: 'take-1' }), await makeToken(300, 'bob'),
+    )
+    expect(body.rejected).toHaveLength(0)
+  })
+
+  it('rejects a reviewer stripping another user’s vote', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+
+    const body = await post(
+      db,
+      makeAudioUnvalidateEvent('evt-au-2', 'bob', { audioId: 'take-1', targetUsername: 'carol' }),
+      await makeToken(300, 'bob'),
+    )
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+    expect(body.rejected[0].reason).toMatch(/only a maintainer/)
+  })
+
+  it('lets a maintainer strip another user’s vote', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+
+    const body = await post(
+      db,
+      makeAudioUnvalidateEvent('evt-au-3', 'mary', { audioId: 'take-1', targetUsername: 'carol' }),
+      await makeToken(600, 'mary'),
+    )
+    expect(body.rejected).toHaveLength(0)
+  })
+
+  // Naming yourself is not "somebody else's vote" — the gate reads the field,
+  // so it has to compare rather than merely check for presence.
+  it('lets a reviewer name themselves', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'alice')
+
+    const body = await post(
+      db,
+      makeAudioUnvalidateEvent('evt-au-4', 'bob', { audioId: 'take-1', targetUsername: 'bob' }),
+      await makeToken(300, 'bob'),
+    )
+    expect(body.rejected).toHaveLength(0)
+  })
+})

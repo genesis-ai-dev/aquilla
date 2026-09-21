@@ -5,6 +5,7 @@
 // Where the two could drift, the test says which way the mistake must fall.
 import { describe, it, expect } from "vitest"
 import {
+  audioEntryFromCell,
   audioValidationScope,
   audioValidationTakes,
   canValidateTake,
@@ -135,5 +136,44 @@ describe("audioValidationTakes", () => {
     expect(audioValidationTakes(e, {}, policy(), reason)[0]).toMatchObject({
       validatorCount: 0, validators: [], isGenerated: false, canValidate: true,
     })
+  })
+})
+
+describe("audioEntryFromCell", () => {
+  it("puts the audio id back, since the editor keeps it as the map key", () => {
+    const entry = audioEntryFromCell({
+      attachments: { "take-1": { slot: "recording", validatorCount: 2, validators: ["bo"] } },
+      selectedBySlot: { recording: "take-1" },
+      selectedAudioId: "take-1",
+    })!
+    expect(entry.attachments["take-1"].audioId).toBe("take-1")
+    expect(audioValidationTakes(entry, {}, policy(), reason)[0]).toMatchObject({
+      audioId: "take-1", validatorCount: 2, validators: ["bo"],
+    })
+  })
+
+  it("carries role through, so a source clip still does not count", () => {
+    const entry = audioEntryFromCell({
+      attachments: { src: { slot: "recording", role: "source" } },
+      selectedBySlot: { recording: "src" },
+      selectedAudioId: "src",
+    })!
+    expect(audioValidationTakes(entry, {}, policy(), reason)).toEqual([])
+  })
+
+  it("returns nothing for a cell that has no attachments at all", () => {
+    expect(audioEntryFromCell({})).toBeUndefined()
+    expect(audioEntryFromCell(undefined)).toBeUndefined()
+  })
+
+  // A hand-built cell stub (the recording modal makes one) has no slot on its
+  // attachment. Defaulting to the main track keeps it visible rather than
+  // parking it under a slot nothing selects.
+  it("defaults a slotless attachment to the main track", () => {
+    const entry = audioEntryFromCell({
+      attachments: { a: {} },
+      selectedBySlot: { recording: "a" },
+    })!
+    expect(entry.attachments.a.slot).toBe("recording")
   })
 })

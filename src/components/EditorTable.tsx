@@ -48,12 +48,12 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
@@ -133,6 +133,9 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
+import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import { showAudioValidationInTextView } from "@/lib/audio/text-view-audio-switch"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -6320,6 +6323,56 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
+  // AQU-490: the audio twin of emitValidationChange above. No lane — a
+  // recording is shared by every target language, so a vote on it is not
+  // per-lane and the wire carries none.
+  const emitAudioValidationChange = async (audioId: string, validated: boolean) => {
+    const kind = validated ? "cell.audio.validate" : "cell.audio.unvalidate"
+    if (!canPerform(kind, project.syncRole?.level ?? null)) {
+      console.warn("[audio-validate] aborting: role too low for", kind)
+      return false
+    }
+    if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
+      console.warn("[audio-validate] aborting: cell out of the caller's assigned scope")
+      return false
+    }
+    try {
+      const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
+      await emit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        audioId,
+        author: username,
+      })
+      return true
+    } catch (error) {
+      console.error("[audio-validate] emit failed", error)
+      return false
+    }
+  }
+
+  const audioValidationTakeList = audioValidationTakes(
+    audioEntryFromCell(cell),
+    project,
+    { roleLevel: project.syncRole?.level ?? null, username },
+    audioBlockedReason(t),
+  )
+  // Behind the project switch (AQU-490 slice 4): a team used to one circle in
+  // this gutter should not find a second one there one morning. The control
+  // draws nothing on a line with no recording anyway, so a text-only file in
+  // a project that HAS audio elsewhere still shows an empty column.
+  const audioValidationControl = showAudioValidationInTextView(project, audioValidationTakeList.length > 0) ? (
+    <AudioValidationControl
+      cellRef={cellRef}
+      takes={audioValidationTakeList}
+      currentUsername={username}
+      validationRequirement={readValidationCountAudio(project)}
+      canValidate={canValidate}
+      onValidationChange={emitAudioValidationChange}
+    />
+  ) : null
+
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :
@@ -6822,6 +6875,7 @@ function EditorRow({
                 so validating keeps the reviewer's gaze on the TARGET. */}
             <div className="flex flex-1 gap-1.5">
               {validationControl}
+              {audioValidationControl}
             <EditorTargetCellWell
               onClick={(event) => {
                 if (isEditorActive) return

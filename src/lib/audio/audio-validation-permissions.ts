@@ -21,6 +21,60 @@ const ROLE_FLOOR: Record<string, number> = {
   maintainer: 600,
 }
 
+/**
+ * The shape every surface actually holds: a row of the editor's `CellData`,
+ * whose attachments are keyed BY audio id rather than carrying one.
+ *
+ * Converting here rather than at five call sites keeps the difference between
+ * the wire shape and the editor's shape in one place — and it is a real
+ * difference, not a formality: the key is the id, so a converter that forgot
+ * to put it back would produce takes the control could name but never vote on.
+ */
+export interface CellLikeAudio {
+  attachments?: Record<string, {
+    slot?: string
+    label?: string | null
+    voiceId?: string
+    role?: "dub" | "source"
+    validatorCount?: number
+    validators?: string[]
+    recordedBy?: string | null
+  }>
+  selectedBySlot?: Record<string, string>
+  selectedAudioId?: string | null
+  selectedGeneratedVoiceAudioId?: string | null
+}
+
+export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEntry | undefined {
+  if (!cell?.attachments) return undefined
+  const attachments: Record<string, AudioAttachmentOut> = {}
+  for (const [audioId, att] of Object.entries(cell.attachments)) {
+    attachments[audioId] = {
+      audioId,
+      url: "",
+      slot: att.slot ?? "recording",
+      mimeType: null,
+      voiceId: att.voiceId ?? null,
+      referenceAudioId: null,
+      durationMs: null,
+      label: att.label ?? null,
+      trimStartMs: null,
+      trimEndMs: null,
+      ...(att.role ? { role: att.role } : {}),
+      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
+      ...(att.validators ? { validators: att.validators } : {}),
+      ...(att.recordedBy !== undefined ? { recordedBy: att.recordedBy } : {}),
+    }
+  }
+  return {
+    attachments,
+    selectedBySlot: cell.selectedBySlot,
+    selectedAudioId: cell.selectedAudioId ?? null,
+    selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+    audioTimings: {},
+  }
+}
+
 export interface AudioValidationPolicy {
   /** The viewer's project role level, or null for a local/git project. */
   roleLevel: number | null
@@ -115,4 +169,29 @@ export function audioValidationTakes(
       ...(verdict.reason ? { blockedReason: reasonText(verdict.reason) } : {}),
     }
   })
+}
+
+/**
+ * The refusal, as a sentence. Every surface needs the same three, so the
+ * mapping lives here rather than in five lambdas that could drift apart.
+ *
+ * `role` and `allowlist` deliberately say the SAME thing. A project's
+ * named-validator list is not the viewer's business — telling someone they
+ * are missing from a list they cannot see invites them to go asking about it,
+ * and the actionable half ("you cannot validate recordings here") is
+ * identical either way.
+ */
+type BlockedKey =
+  | "editor.audioValidation.ownRecordingTooltip"
+  | "editor.audioValidation.unavailableTooltip"
+
+export function audioBlockedReason(
+  // Narrowed to the two keys this uses rather than `(key: string) => string`:
+  // the app's `t` is typed against the whole catalogue, and a parameter typed
+  // as plain `string` is not something it can be passed to.
+  t: (key: BlockedKey) => string,
+): (reason: "role" | "allowlist" | "self") => string {
+  return (reason) => reason === "self"
+    ? t("editor.audioValidation.ownRecordingTooltip")
+    : t("editor.audioValidation.unavailableTooltip")
 }

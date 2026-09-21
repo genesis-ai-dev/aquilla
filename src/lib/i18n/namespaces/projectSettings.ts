@@ -500,6 +500,31 @@ export const projectSettings = defineNamespace({
       "threshold (AND'd with the role floor). Leave empty to allow any " +
       "sufficiently-privileged user.",
 
+    // ── AQU-490: the audio policy, beside the text policy rather than folded
+    // into it. Sam's ruling is that these are SEPARATE settings, so every
+    // label has to say which of the two it governs — "Minimum role to
+    // validate" alone, twice, would read as one rule stated twice.
+    "projectSettings.validation.minRoleAudioLabel": "Minimum role to validate recordings",
+    "projectSettings.validation.minRoleAudioDescription":
+      "Who may sign off a recording. Set separately from the text rule above — a " +
+      "project can want a higher bar for audio than for translations, or the other " +
+      "way round.",
+    "projectSettings.validation.allowSelfAudioLabel": "Allow validating your own recordings",
+    "projectSettings.validation.allowSelfAudioDescription":
+      "When off, whoever recorded a take cannot validate it — someone else has to " +
+      "listen. Takes whose recorder is not known are unaffected, so older " +
+      "recordings never become impossible to sign off.",
+    "projectSettings.validation.namedValidatorsAudioLabel": "Named recording validators",
+    "projectSettings.validation.namedValidatorsAudioDescription":
+      "When anyone is listed, only these people may validate recordings. Leave " +
+      "empty to allow anyone who meets the minimum role above.",
+    "projectSettings.validation.showInTextViewLabel": "Show recording validation in the text view",
+    "projectSettings.validation.showInTextViewDescription":
+      "Adds a second control beside the text one in the editor's margin, for " +
+      "signing off a line's recording. The Recording tab and the recorder always " +
+      "offer it, whatever this says — turning it off hides one surface, not the " +
+      "feature.",
+
     // ── DecaySettingsSection.tsx ──
     "projectSettings.decay.summary": "Retrieval support",
     "projectSettings.decay.description":

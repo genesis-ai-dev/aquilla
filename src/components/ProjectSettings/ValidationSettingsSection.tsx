@@ -46,6 +46,21 @@ interface Props {
   /** Named-user allowlist (usernames). Empty = any sufficiently-privileged user. */
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /**
+   * AQU-490: the audio policy. SEPARATE keys, never fallbacks for the text
+   * ones — a project can want two ears on a recording and one on a
+   * translation, or trust a different set of people with each.
+   */
+  validationRoleFloorAudio?: ValidationRoleFloor
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
+  /**
+   * AQU-490: does the audio validation control appear in the TEXT view's
+   * gutter? Undefined is NOT false — it means the project was made after
+   * audio validation shipped and resolves to on-once-there-is-audio, which is
+   * why the row renders its resolved state rather than a bare `false`.
+   */
+  showAudioValidationInTextView?: boolean
   /** When true, all inputs are disabled (role/offline gate). */
   disabled?: boolean
   /**
@@ -70,6 +85,10 @@ interface Props {
         | "validationRoleFloor"
         | "validationNamedUsers"
         | "allowSelfValidation"
+        | "validationRoleFloorAudio"
+        | "validationNamedUsersAudio"
+        | "allowSelfValidationAudio"
+        | "showAudioValidationInTextView"
       >
     >
   ) => void
@@ -95,6 +114,10 @@ export function ValidationSettingsSection({
   validationRoleFloor = "reviewer",
   validationNamedUsers = [],
   allowSelfValidation = true,
+  validationRoleFloorAudio = "reviewer",
+  validationNamedUsersAudio = [],
+  allowSelfValidationAudio = true,
+  showAudioValidationInTextView,
   disabled = false,
   disabledTooltip,
   structuralCellsRow,
@@ -239,6 +262,101 @@ export function ValidationSettingsSection({
           />
         </DisabledFieldTooltip>
       </SettingsRow>
+      {/* AQU-490: the audio policy, beside the text policy rather than folded
+          into it. Sam's ruling is that these are SEPARATE settings — a
+          project can want two ears on a recording and one on a translation,
+          or trust a different set of people with each — so the surface has to
+          make the separation visible rather than imply a shared rule. */}
+      <SettingsRow
+        label={<label htmlFor="validation-role-floor-audio">{t("projectSettings.validation.minRoleAudioLabel")}</label>}
+        description={t("projectSettings.validation.minRoleAudioDescription")}
+        control={
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+            <Select
+              items={ROLE_OPTIONS}
+              disabled={disabled}
+              value={validationRoleFloorAudio}
+              onValueChange={(v) =>
+                onChange({
+                  validationRoleFloorAudio: (v ?? validationRoleFloorAudio) as ValidationRoleFloor,
+                })
+              }
+            >
+              <SelectTrigger
+                id="validation-role-floor-audio"
+                className="w-48 bg-background"
+                aria-label={t("projectSettings.validation.minRoleAudioLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {ROLE_OPTIONS.map((o) => (
+                    <SelectItem key={`audio-${o.value}`} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </DisabledFieldTooltip>
+        }
+      />
+      <SettingsRow
+        label={<label htmlFor="allow-self-validation-audio">{t("projectSettings.validation.allowSelfAudioLabel")}</label>}
+        description={t("projectSettings.validation.allowSelfAudioDescription")}
+        control={
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+            <Switch
+              id="allow-self-validation-audio"
+              disabled={disabled}
+              checked={allowSelfValidationAudio}
+              onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
+              aria-label={t("projectSettings.validation.allowSelfAudioLabel")}
+            />
+          </DisabledFieldTooltip>
+        }
+      />
+      <SettingsRow
+        label={
+          <label htmlFor="validation-named-users-audio">
+            {t("projectSettings.validation.namedValidatorsAudioLabel")} <OptionalMark />
+          </label>
+        }
+        description={t("projectSettings.validation.namedValidatorsAudioDescription")}
+        block
+      >
+        <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+          <MemberMultiSelect
+            id="validation-named-users-audio"
+            members={namedUserItems}
+            value={validationNamedUsersAudio}
+            disabled={disabled}
+            placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
+            aria-label={t("projectSettings.validation.namedValidatorsAudioLabel")}
+            onValueChange={(next) => onChange({ validationNamedUsersAudio: next })}
+          />
+        </DisabledFieldTooltip>
+      </SettingsRow>
+      <SettingsRow
+        label={<label htmlFor="show-audio-validation-in-text-view">{t("projectSettings.validation.showInTextViewLabel")}</label>}
+        description={t("projectSettings.validation.showInTextViewDescription")}
+        control={
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+            <Switch
+              id="show-audio-validation-in-text-view"
+              disabled={disabled}
+              // The RESOLVED state, not the raw stored one. Undefined means
+              // "made after audio validation shipped", which reads as on once
+              // the project has audio — showing it unchecked there would be a
+              // switch that disagrees with the editor beside it.
+              checked={showAudioValidationInTextView ?? hasAnyAudioData}
+              onCheckedChange={(checked) => onChange({ showAudioValidationInTextView: checked })}
+              aria-label={t("projectSettings.validation.showInTextViewLabel")}
+            />
+          </DisabledFieldTooltip>
+        }
+      />
       {structuralCellsRow}
     </SettingsGroup>
   )

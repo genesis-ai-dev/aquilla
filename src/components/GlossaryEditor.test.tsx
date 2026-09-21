@@ -74,8 +74,16 @@ vi.mock("@/hooks/useProject", () => ({
   })),
 }))
 
+// The drill-down's inline editor is TipTap; the role-gating tests only need to
+// know whether it MOUNTED, so a marker keeps that assertion exact.
+vi.mock("@/components/TranslatedEditor", () => ({
+  TranslatedEditor: () => <div data-testid="inline-cell-editor" />,
+}))
+
 import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
+import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 function concept(p: Partial<Concept>): Concept {
   return {
@@ -284,5 +292,136 @@ describe("GlossaryEditor", () => {
       expect(screen.getByRole("textbox", { name: "Rendering 1 text" })).toHaveValue("alternate")
     })
     expect(screen.queryByRole("textbox", { name: "Rendering 2 text" })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-208: role gating on the LIVE terminology surface.
+//
+// The fixture is the real output of `minimalProjectRecord` — the shape every
+// server-resolved project arrives in, which never carries `origin` — with the
+// projection's concepts folded on the way ProjectWorkspace's `editorProject`
+// does. Both gates used to read "no origin" as "local project, allow
+// everything", so a viewer got Add term, Import, Export and an inline cell
+// editor. The hand-built fixture above has no role at all and only ever
+// exercised the fail-open path, which is how that shipped.
+describe("GlossaryEditor role gating (AQU-208)", () => {
+  const TERMBASE_CONTROLS = ["Suggest terms", "Import", "Export CSV", "Export TBX", "Add term"]
+
+  function hydrated(level: number, name: string, termbaseEditMinRole?: number): ProjectRecord {
+    return {
+      ...minimalProjectRecord({
+        id: "p1",
+        name: "P",
+        gitlabProjectId: null,
+        role: { level, name, source: "project" },
+        files: [{ id: "f1", name: "GEN.usfm", type: "usfm", cellCount: 1 }],
+        ...(termbaseEditMinRole === undefined ? {} : { termbaseEditMinRole }),
+      }),
+      terminology: [concept({})],
+    }
+  }
+
+  function renderAs(project: ProjectRecord, initialEntry = "/project/p1/terminology") {
+    return renderWithTooltips(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <GlossaryEditor project={project} patchSettings={patchSettings} />
+      </MemoryRouter>,
+    )
+  }
+
+  /** One occurrence of "grace" whose target is still empty — the exact cell the
+   *  QA walk opened an editor on as a viewer. */
+  function seedOccurrence() {
+    projectCellFiles = [{
+      id: "f1",
+      cells: [{
+        id: "cell-1",
+        fileId: "f1",
+        original: "by grace alone",
+        translated: "",
+        context: "GEN 1:8",
+        group: "GEN 1",
+        type: "text",
+        status: "unvalidated",
+        validationStatus: "none",
+        activeValidators: [],
+        validationHistory: [],
+        history: [],
+        threads: [],
+      }],
+    }]
+  }
+
+  it("hydrated records carry a role and no origin (the shape that escaped)", () => {
+    const record = hydrated(100, "viewer")
+    expect(record.origin).toBeUndefined()
+    expect(record.syncRole?.level).toBe(100)
+  })
+
+  it.each([
+    [100, "viewer", /Viewers cannot perform this action — you need at least Project lead access/],
+    [400, "contributor", /Contributors cannot perform this action — you need at least Project lead access/],
+  ])("keeps the termbase controls visible but disabled for level %i, with the role tooltip", async (level, name, tip) => {
+    renderAs(hydrated(level, name))
+
+    for (const control of TERMBASE_CONTROLS) {
+      expect(screen.getByRole("button", { name: control })).toBeDisabled()
+    }
+    await expectTooltip(screen.getByRole("button", { name: "Add term" }), tip)
+
+    // Disabled is not merely cosmetic: the create dialog cannot be opened.
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // The read-only surfaces stay reachable for every role.
+    expect(screen.getByRole("button", { name: "Violations" })).toBeEnabled()
+    expect(screen.getByText("grace")).toBeInTheDocument()
+  })
+
+  it("enables the termbase controls for a project lead", () => {
+    renderAs(hydrated(500, "project_lead"))
+
+    for (const control of TERMBASE_CONTROLS) {
+      expect(screen.getByRole("button", { name: control })).toBeEnabled()
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("follows an org floor lowered to contributor (AQU-822)", () => {
+    renderAs(hydrated(400, "contributor", 400))
+
+    for (const control of TERMBASE_CONTROLS) {
+      expect(screen.getByRole("button", { name: control })).toBeEnabled()
+    }
+  })
+
+  it("names the org's configured floor in the tooltip, not the default", async () => {
+    renderAs(hydrated(500, "project_lead", 600))
+
+    await expectTooltip(
+      screen.getByRole("button", { name: "Import" }),
+      /Project leads cannot perform this action — you need at least Maintainer access/,
+    )
+  })
+
+  it("keeps the drill-down's target cell read-only for a viewer", async () => {
+    seedOccurrence()
+    renderAs(hydrated(100, "viewer"), "/project/p1/terminology?concept=c1")
+
+    fireEvent.click(await screen.findByRole("button", { name: "(empty)" }))
+
+    expect(screen.queryByTestId("inline-cell-editor")).not.toBeInTheDocument()
+    // …and the rendering controls on the same page stay off too.
+    expect(screen.queryByRole("button", { name: /remove rendering favor/i })).not.toBeInTheDocument()
+  })
+
+  it("lets a contributor edit the drill-down's target cell but not the renderings", async () => {
+    seedOccurrence()
+    renderAs(hydrated(400, "contributor"), "/project/p1/terminology?concept=c1")
+
+    fireEvent.click(await screen.findByRole("button", { name: "(empty)" }))
+
+    expect(screen.getByTestId("inline-cell-editor")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /remove rendering favor/i })).not.toBeInTheDocument()
   })
 })

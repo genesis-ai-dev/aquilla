@@ -33,3 +33,9 @@ axum = { version = "0.8", features = ["json", "macros"] }
 tower-http = { version = "0.6", features = ["cors"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tauri-plugin-mcp-bridge = "0.2"
+tauri-plugin-wdio-webdriver = { version = "1.4", optional = true }
+
+[features]
+# Embedded WebDriver server for the e2e smoke suite (e2e/tauri/smoke.spec.ts). Debug-build-only
+# test harness — must never be enabled for the signed release binary tauri-action publishes.
+e2e-webdriver = ["dep:tauri-plugin-wdio-webdriver"]

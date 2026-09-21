@@ -25,6 +25,13 @@ pub fn run() {
         );
     }
 
+    // e2e/tauri/smoke.spec.ts's embedded WebDriver server. Gated behind the `e2e-webdriver`
+    // Cargo feature (never enabled for the signed release binary tauri-action publishes).
+    #[cfg(feature = "e2e-webdriver")]
+    {
+        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    }
+
     builder
         .on_window_event(shutdown_guard::handle_window_event)
         .setup(|app| {
@@ -55,25 +62,53 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            fs_bridge::fs_read_file,
-            fs_bridge::fs_write_file,
-            fs_bridge::fs_unlink,
-            fs_bridge::fs_mkdir,
-            fs_bridge::fs_rmdir,
-            fs_bridge::fs_readdir,
-            fs_bridge::fs_stat,
-            fs_bridge::fs_reset_repo,
-            keychain::get_token,
-            keychain::set_token,
-            keychain::clear_token,
-            keychain::get_refresh_token,
-            auth::open_auth_browser,
-            connectivity::get_connectivity,
-            llm_proxy::set_llm_config,
-            llm_proxy::get_llm_config,
-            shutdown_guard::confirm_offline_shutdown,
-        ])
+        .invoke_handler({
+            #[cfg(feature = "e2e-webdriver")]
+            {
+                tauri::generate_handler![
+                    fs_bridge::fs_read_file,
+                    fs_bridge::fs_write_file,
+                    fs_bridge::fs_unlink,
+                    fs_bridge::fs_mkdir,
+                    fs_bridge::fs_rmdir,
+                    fs_bridge::fs_readdir,
+                    fs_bridge::fs_stat,
+                    fs_bridge::fs_reset_repo,
+                    keychain::get_token,
+                    keychain::set_token,
+                    keychain::clear_token,
+                    keychain::get_refresh_token,
+                    auth::open_auth_browser,
+                    auth::simulate_deep_link_callback,
+                    connectivity::get_connectivity,
+                    llm_proxy::set_llm_config,
+                    llm_proxy::get_llm_config,
+                    shutdown_guard::confirm_offline_shutdown,
+                ]
+            }
+            #[cfg(not(feature = "e2e-webdriver"))]
+            {
+                tauri::generate_handler![
+                    fs_bridge::fs_read_file,
+                    fs_bridge::fs_write_file,
+                    fs_bridge::fs_unlink,
+                    fs_bridge::fs_mkdir,
+                    fs_bridge::fs_rmdir,
+                    fs_bridge::fs_readdir,
+                    fs_bridge::fs_stat,
+                    fs_bridge::fs_reset_repo,
+                    keychain::get_token,
+                    keychain::set_token,
+                    keychain::clear_token,
+                    keychain::get_refresh_token,
+                    auth::open_auth_browser,
+                    connectivity::get_connectivity,
+                    llm_proxy::set_llm_config,
+                    llm_proxy::get_llm_config,
+                    shutdown_guard::confirm_offline_shutdown,
+                ]
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(shutdown_guard::handle_run_event);

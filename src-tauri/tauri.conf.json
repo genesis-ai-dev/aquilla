@@ -21,6 +21,7 @@
       }
     ],
     "security": {
+      "capabilities": ["default"],
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",

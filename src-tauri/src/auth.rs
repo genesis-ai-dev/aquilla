@@ -74,6 +74,19 @@ fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> 
     keychain::store_tokens(app, token, refresh)
 }
 
+/// Test-only: lets e2e/tauri/smoke.spec.ts exercise `handle_callback_url`'s real wiring
+/// (parse -> keychain store -> `auth://token-received` emit) via WebDriver. Confirmed by hand
+/// against the embedded WebDriver service that `browser.tauri.triggerDeeplink()` only injects
+/// a JS-layer event and never reaches this Rust-side `on_open_url` handler in embedded/unbundled
+/// mode (see its own docs: "bypasses platform-specific single-instance IPC mechanisms... which
+/// don't work reliably with unbundled binaries") — this app has no JS-side deep-link listener,
+/// so there is no other way to reach this code path from WebDriver.
+#[cfg(feature = "e2e-webdriver")]
+#[tauri::command]
+pub fn simulate_deep_link_callback(app: tauri::AppHandle, url: String) {
+    handle_callback_url(&app, &url);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

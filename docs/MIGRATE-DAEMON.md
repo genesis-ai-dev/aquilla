@@ -179,8 +179,9 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   then run `systemctl daemon-reload`. Keep `DRY_RUN=1` for initial validation.
   Start the service only after the active-writer cutover is confirmed and the
   required credentials are in the environment file. Read logs with
-  `journalctl -u aquilla-migrate -f`. The unit launches `tsx` directly through
-  Node so systemd tracks and signals the daemon process itself during a drain.
+  `journalctl -u aquilla-migrate -f`. The unit loads `tsx` through Node's
+  `--import` flag, avoiding a CLI wrapper process so systemd tracks and signals
+  the daemon process itself during a drain.
   Roll later `dev` commits forward as root with
   `bash deploy/migrate-daemon/update-hetzner.sh`; it verifies a clean checkout,
   checks out the exact fetched `dev` commit using the repository deploy key,

@@ -84,7 +84,8 @@ def main():
             subprocess.run(["pnpm", "install", "--frozen-lockfile", "--store-dir=/tmp/qa-pnpm-store"],
                            cwd=directory, env=env, check=True)
         shutil.rmtree("/tmp/qa-pnpm-store", ignore_errors=True)
-    Path("/tmp/source.tar").unlink()
+    # docker cp owns this archive as root in sticky /tmp. Container removal
+    # deletes it; the unprivileged app does not need permission to unlink it.
     print(f"QA source/dependencies ready in {time.monotonic() - started:.1f}s; cached={cached}", flush=True)
     os.chdir(root)
     os.execvp("pnpm", ["pnpm", "exec", "tsx", "scripts/e2e-up.ts"])

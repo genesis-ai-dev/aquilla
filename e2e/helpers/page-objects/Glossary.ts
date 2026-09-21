@@ -100,6 +100,34 @@ export class Glossary {
     await expect(this.page.getByRole("button", { name: "Close detail" })).toBeVisible({ timeout: 10_000 })
   }
 
+  // ── Term detail → Forms section (AQU-1271) ─────────────────────────────────
+
+  /** The discovered-surface-form chips on the open term detail. */
+  formsChips(): Locator {
+    return this.page.getByTestId("discovered-forms").getByRole("button")
+  }
+
+  /** Drop a discovered surface form from matching; waits for the term.update flush. */
+  async excludeForm(surface: string): Promise<void> {
+    const saved = this.waitForTermEventFlush()
+    await this.page.getByRole("button", { name: `Exclude ${surface}`, exact: true }).click()
+    await this.expectTermEventFlushOk(saved)
+    await expect(
+      this.page.getByRole("button", { name: `Include ${surface}`, exact: true }),
+    ).toBeVisible({ timeout: 8_000 })
+  }
+
+  /** The chip for a surface form, in whichever toggle state it currently holds. */
+  formChip(surface: string, state: "included" | "excluded"): Locator {
+    const name = state === "included" ? `Exclude ${surface}` : `Include ${surface}`
+    return this.page.getByRole("button", { name, exact: true })
+  }
+
+  /** The term detail's "N occurrence(s)" summary line. */
+  occurrenceSummary(): Locator {
+    return this.page.getByText(/^\d+ occurrences?$/)
+  }
+
   async openViolations(): Promise<void> {
     await this.page.getByRole("button", { name: "Violations" }).click()
     await expect(this.page.getByRole("button", { name: "Back to terminology" })).toBeVisible({ timeout: 10_000 })

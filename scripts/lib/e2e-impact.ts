@@ -140,6 +140,11 @@ export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: s
     const file = normalize(rawFile)
     if (!file) continue
 
+    if (/^(?:smart-tests\/|scripts\/smart-tests\.ts$)/.test(file)) {
+      add(["e2e/specs/editor/import-and-edit.smoke.spec.ts"], `${file} affects smart testing`)
+      continue
+    }
+
     if (/^e2e\/specs\/.*\.smoke\.spec\.tsx?$/.test(file)) {
       add([file], `${file} changed`)
       continue

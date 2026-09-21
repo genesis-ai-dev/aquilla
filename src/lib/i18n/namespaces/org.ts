@@ -1234,6 +1234,7 @@ export const org = defineNamespace({
     // The inspector docked beside the board.
     "org.projectOverview.plan.inspectorAria": "Details for {unit}",
     "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
@@ -2504,6 +2505,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.inspectorAria": {
         description: "Screen-reader name for the detail panel docked beside the plan.",
         placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
+      },
+      "org.projectOverview.plan.openFile": {
+        description: "Link from the selected plan unit to its file in the translation editor.",
+        placeholders: { fileName: "The file's name. Not translated." },
       },
       "org.projectOverview.plan.previousUnit": {
         description: "Tooltip on the up arrow that steps to the previous unit.",

@@ -35,7 +35,7 @@ import { useConcepts } from "@/hooks/useConcepts"
 
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
   updateConcept,
@@ -138,7 +138,12 @@ export function GlossaryEditor({
 
   const [cellDataRequested, setCellDataRequested] = useState(false)
   const [cellLoadObserved, setCellLoadObserved] = useState(false)
-  const { files: cellFiles, isLoading: cellsLoading } = useProjectCells({
+  const {
+    files: cellFiles,
+    isLoading: cellsLoading,
+    revalidate: revalidateCells,
+    applyOptimisticTargetEdit,
+  } = useProjectCells({
     projectId: id ?? null,
     projectFiles,
     getToken,
@@ -202,10 +207,6 @@ export function GlossaryEditor({
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [optimisticTargets, setOptimisticTargets] = useState<
-    Record<string, { value: string; valueHtml?: string }>
-  >({})
-
   const allCells = useMemo(
     () => cellFiles.flatMap((file) => file.cells),
     [cellFiles],
@@ -217,15 +218,11 @@ export function GlossaryEditor({
     setCellLoadObserved(false)
   }, [id, projectFiles])
   const cellDataReady = projectFiles.length === 0 || allCells.length > 0 || (cellLoadObserved && !cellsLoading)
-  const detailCells = useMemo(
-    () => allCells.map((cell) => {
-      const patch = optimisticTargets[cell.id]
-      return patch
-        ? { ...cell, translated: patch.value, translatedHtml: patch.valueHtml }
-        : cell
-    }),
-    [allCells, optimisticTargets],
-  )
+  // AQU-206: the optimistic overlay now lives in useProjectCells, so it is keyed
+  // per (file, cell) and survives the outbox row being deleted on sync — the
+  // local Record<cellId, patch> this replaced reverted as soon as the write was
+  // accepted, snapping a just-fixed occurrence back to its old verdict.
+  const detailCells = allCells
   const selectedConcept = useMemo(
     () => concepts.find((concept) => concept.id === selectedConceptId) ?? null,
     [concepts, selectedConceptId],
@@ -303,6 +300,23 @@ export function GlossaryEditor({
     },
     [project, canManage, persist],
   )
+  // AQU-1271: the Forms section on the term detail. Both fields ride the same
+  // concept-delta write path as every other row edit, so an exclusion lands as
+  // a `term.update` event and survives a reload.
+  const onMatchChange = useCallback(
+    (cid: string, match: TermMatchOptions | undefined) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { match }))
+    },
+    [project, canManage, persist],
+  )
+  const onCaseSensitiveChange = useCallback(
+    (cid: string, caseSensitive: boolean) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { caseSensitive }))
+    },
+    [project, canManage, persist],
+  )
   const onArchive = useCallback(
     (cid: string) => {
       const p = guard()
@@ -362,7 +376,7 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const candidates = extractCandidates(corpus, { managed: serverConcepts, termMatching: project.termMatching })
     const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
@@ -450,10 +464,8 @@ export function GlossaryEditor({
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
         onClose={handleCloseDetails}
-        onCellCommitted={() => {}}
-        onOptimisticEdit={(cellId, patch) => {
-          setOptimisticTargets((current) => ({ ...current, [cellId]: patch }))
-        }}
+        onCellCommitted={revalidateCells}
+        onOptimisticEdit={applyOptimisticTargetEdit}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
         // The detail view owns add/status/remove for renderings; it hands us
@@ -461,6 +473,10 @@ export function GlossaryEditor({
         onRenderingsChange={(conceptId, renderings) =>
           onEditRenderings(conceptId, () => renderings)
         }
+        termMatching={project?.termMatching}
+        onMatchChange={onMatchChange}
+        onCaseSensitiveChange={onCaseSensitiveChange}
+        onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}
@@ -619,6 +635,7 @@ export function GlossaryEditor({
             <TerminologyViolationsInbox
               concepts={concepts}
               cells={detailCells}
+              termMatching={project?.termMatching}
               onJumpToCell={({ cellId, fileId }) => {
                 navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
               }}

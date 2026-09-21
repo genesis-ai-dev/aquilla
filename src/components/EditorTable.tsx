@@ -841,6 +841,9 @@ interface EditorTableProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -914,7 +917,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -2490,7 +2493,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+          canApproveConcept={canApproveConcept}
+          onSetUpAffixes={onSetUpAffixes}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -3550,6 +3554,9 @@ interface MemoizedRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3627,7 +3634,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3789,6 +3796,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
         canApproveConcept={canApproveConcept}
+        onSetUpAffixes={onSetUpAffixes}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3969,6 +3977,9 @@ interface EditorRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4762,7 +4773,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4789,6 +4800,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
@@ -6313,13 +6325,12 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // FRO-297: Accessible label for the target editor textbox.
-  // Format: "<ref> — <state>" so screen readers announce context on focus.
-  // Uses cell.context (the canonical reference like "GEN 1:1") when available,
-  // falls back to globalReferences[0], then rowIndex+1.
-  const cellRef = cell.context?.trim()
-    || cell.globalReferences?.[0]?.trim()
-    || `row ${rowIndex + 1}`
+  // Human references help people and DOM agents identify a cell. Importers
+  // also store opaque UUIDs as canonical refs; those carry no useful context.
+  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
+    .map((value) => value?.trim())
+    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
       cellRef={cellRef}
@@ -6335,11 +6346,14 @@ function EditorRow({
     />
   )
   const cellStateLabel =
-    cell.status === "validated" ? "validated" :
-    cell.status === "empty" ? "empty" :
-    cell.activeValidators.includes(username) ? "self-validated" :
-    "unvalidated"
-  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+    cell.status === "validated" ? t("editor.state.validated") :
+    cell.status === "empty" ? t("editor.state.empty") :
+    cell.activeValidators.includes(username) ? t("editor.state.selfValidated") :
+    t("editor.state.unvalidated")
+  const sourceExcerpt = cell.original.replace(/\s+/g, " ").trim().slice(0, 120)
+  const editorAriaLabel = sourceExcerpt
+    ? t("editor.row.translationAria", { ref: cellRef, source: sourceExcerpt, state: cellStateLabel })
+    : t("editor.row.editorAria", { ref: cellRef, state: cellStateLabel })
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -6657,7 +6671,10 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+                canApproveConcept={canApproveConcept}
+                cellStore={previewCellStore}
+                termMatching={project.termMatching}
+                onSetUpAffixes={onSetUpAffixes}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
@@ -6920,6 +6937,7 @@ function EditorRow({
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
                     terminologyConcepts={terminologyConcepts}
+                    termMatching={project.termMatching}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -6949,7 +6967,7 @@ function EditorRow({
                         : null)
                     }}
                     onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
+                      if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
                       requestTargetEdit()

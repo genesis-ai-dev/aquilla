@@ -1259,6 +1259,7 @@ export const editor = defineNamespace({
     "editor.row.cellAria": "{ref} cell",
     "editor.row.rowFallbackRef": "row {index}",
     "editor.row.editorAria": "{ref} — {state}",
+    "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
     // -- CellPresenceBadges: per-row live-collaborator chips --
@@ -4567,6 +4568,14 @@ export const editor = defineNamespace({
             "One of the state words: editor.state.validated, " +
             "editor.state.unvalidated, editor.state.selfValidated, " +
             "editor.state.empty — already translated.",
+        },
+      },
+      "editor.row.translationAria": {
+        description: "Accessible name of the translation activation button and editor, including source context.",
+        placeholders: {
+          ref: "Human reference or localized row number.",
+          source: "A short excerpt of the source text. Do not translate.",
+          state: "Already localized validation or empty state.",
         },
       },
       "editor.row.selectedTooltip": {

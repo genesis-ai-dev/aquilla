@@ -31,12 +31,16 @@ vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
   return {
     ...actual,
     readCellsCache: vi.fn(async () => null),
-    writeCellsCache: vi.fn(async () => undefined),
+    scheduleCellsCacheWrite: vi.fn(),
+    flushCellsCacheWrites: vi.fn(async () => undefined),
   }
 })
 
 import { fetchCellsByIds, fetchCellsDelta, streamFileCells } from "@/lib/sync/cells-read"
-import { writeCellsCache } from "@/lib/sync/cells-cache"
+import {
+  flushCellsCacheWrites,
+  scheduleCellsCacheWrite,
+} from "@/lib/sync/cells-cache"
 import { CellStore, useActiveCellStore } from "./useActiveCellStore"
 import { flushOutboxBatch, subscribeStaleSiblings } from "@/lib/sync/outbox-flush"
 import { enqueueOutboxEvent, resetOutboxConnectionForTests } from "@/lib/sync/outbox"
@@ -44,7 +48,8 @@ import { enqueueOutboxEvent, resetOutboxConnectionForTests } from "@/lib/sync/ou
 const streamMock = vi.mocked(streamFileCells)
 const byIdsMock = vi.mocked(fetchCellsByIds)
 const deltaMock = vi.mocked(fetchCellsDelta)
-const writeCacheMock = vi.mocked(writeCellsCache)
+const writeCacheMock = vi.mocked(scheduleCellsCacheWrite)
+const flushCacheMock = vi.mocked(flushCellsCacheWrites)
 
 function row(cellId: string, side: "source" | "target", value: string, over: Partial<CellRow> = {}): CellRow {
   return {
@@ -71,7 +76,7 @@ const FILE_ROWS = [row("c1", "source", "hello"), row("c1", "target", "hola", { e
 /** Default stream: serves FILE_ROWS for either side. */
 function serveStream(rows: CellRow[] = FILE_ROWS) {
   streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-    await onPage(rows.filter((r) => r.side === side), true)
+    await onPage(rows.filter((r) => !side || r.side === side), true)
   })
 }
 
@@ -91,6 +96,19 @@ function renderStore() {
       getToken: async () => "jwt",
       enabled: true,
     }),
+  )
+}
+
+function renderSwitchableStore() {
+  return renderHook(
+    ({ fileId }: { fileId: string }) => useActiveCellStore({
+      projectId: "p1",
+      fileId,
+      username: "alice",
+      getToken: async () => "jwt",
+      enabled: true,
+    }),
+    { initialProps: { fileId: "f1" } },
   )
 }
 
@@ -226,7 +244,7 @@ describe("I3: queue, don't drop", () => {
     streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
       streams++
       if (streams === 1) await gate.promise
-      await onPage(FILE_ROWS.filter((r) => r.side === side), true)
+      await onPage(FILE_ROWS.filter((r) => !side || r.side === side), true)
     })
     const { result } = renderStore()
     await waitFor(() => expect(streams).toBe(1))
@@ -237,17 +255,30 @@ describe("I3: queue, don't drop", () => {
     expect(streams).toBe(1)
 
     gate.resolve()
-    // Initial load = 2 stream calls (target + source). The stream mock reports
-    // no cursor, so the queued soft pass is a full re-stream: exactly one more
-    // pair (the two queued requests coalesce), then nothing.
-    await waitFor(() => expect(streams).toBe(4))
+    // One paired stream per load. No cursor means the queued soft pass
+    // re-streams once; the two queued requests coalesce.
+    await waitFor(() => expect(streams).toBe(2))
     await new Promise((r) => setTimeout(r, 20))
-    expect(streams).toBe(4)
+    expect(streams).toBe(2)
     expect(deltaMock).not.toHaveBeenCalled()
   })
 })
 
 describe("I4: cache hygiene", () => {
+  it("flushes the previous file on switch and all pending writes on page hide", async () => {
+    const { result, rerender, unmount } = renderSwitchableStore()
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    flushCacheMock.mockClear()
+
+    rerender({ fileId: "f2" })
+    await waitFor(() => expect(flushCacheMock).toHaveBeenCalledWith("p1", "f1"))
+
+    flushCacheMock.mockClear()
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    expect(flushCacheMock).toHaveBeenCalledWith()
+    unmount()
+  })
+
   it("skips the cells-cache write while an optimistic shadow exists, and writes once it is gone", async () => {
     const { result } = renderStore()
     await waitFor(() => expect(writeCacheMock).toHaveBeenCalledTimes(1))
@@ -311,11 +342,11 @@ describe("I4: cache hygiene", () => {
     serveStream()
     rerender({ fileId: "f2" })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // f2's own load — one stream pair.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    // f2's own load — one complete-row stream.
+    expect(streamMock).toHaveBeenCalledTimes(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
     // The old f1 retry never fires.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    expect(streamMock).toHaveBeenCalledTimes(2)
     expect(result.current.isError).toBe(false)
   })
 })

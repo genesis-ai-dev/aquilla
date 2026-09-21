@@ -28,6 +28,8 @@ describe("deriveNavIcon", () => {
     expect(deriveNavIcon("/orgs/7/archived/files")).toBe(NAV_PAGE_ICONS.archived)
     expect(deriveNavIcon("/orgs/7/settings")).toBe(NAV_PAGE_ICONS.settings)
     expect(navIconForLabel("Security")).toBe(deriveNavIcon("/orgs/7/settings/security"))
+    // AQU-1131 — org rules reuse the project rules icon, not the settings cog.
+    expect(deriveNavIcon("/orgs/7/settings/rules")).toBe(navIconForLabel("Checks & rules"))
     expect(deriveNavIcon("/admin")).toBe(NAV_PAGE_ICONS.admin)
     expect(deriveNavIcon("/shared")).toBe(NAV_PAGE_ICONS.shared)
   })

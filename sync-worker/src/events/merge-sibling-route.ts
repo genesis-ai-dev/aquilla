@@ -180,8 +180,8 @@ export async function mergeSibling(
   // its fresh lane, so there is nothing to compete with).
   const baseSeq = await allocateSeqRange(db, hostProjectId, eventRows.length)
   for (let i = 0; i < eventRows.length; i++) {
-    eventRows[i]!.serverSeq = baseSeq + i
-    persisted[i]!.serverSeq = baseSeq + i
+    eventRows[i].serverSeq = baseSeq + i
+    persisted[i].serverSeq = baseSeq + i
   }
 
   const allStmts: AquillaStatement[] = [buildBulkEventInsertStmt(db, eventRows)]
@@ -235,7 +235,7 @@ export async function handleMergeSiblingRequest(
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const hostId = decodeURIComponent(match[1]!)
+  const hostId = decodeURIComponent(match[1])
 
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null

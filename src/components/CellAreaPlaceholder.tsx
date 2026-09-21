@@ -13,7 +13,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 /** Matches EditorTable's default gridCols (the Text lens shape — the stacked
  *  media lens widens the gutter, but this skeleton always precedes text
  *  mode). Keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[84px_1fr_1fr]"
+const GRID_COLS = "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState
@@ -55,18 +55,47 @@ export function CellAreaPlaceholder({
   return <SkeletonRows />
 }
 
+/** Remains visible below usable rows until the rest of the file is known. */
+export function CellRowsLoadStatus({
+  loading,
+  error,
+  onRetryClick,
+}: {
+  loading: boolean
+  error: boolean
+  onRetryClick: () => void
+}) {
+  const t = useT()
+  if (!loading && !error) return null
+  return (
+    <div className="shrink-0 border-t" data-testid="cell-rows-load-status">
+      {loading ? (
+        <LoadingTemplate label={t("editor.file.loadingFromCloud")}>
+          <div className={`grid ${GRID_COLS} gap-3 px-4 py-3`}>
+            <Skeleton className="h-10 w-10" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </LoadingTemplate>
+      ) : <LoadError onRetryClick={onRetryClick} compact />}
+    </div>
+  )
+}
+
 function LoadError({
   fileName,
   onRetryClick,
+  compact,
 }: {
   fileName?: string
   onRetryClick?: () => void
+  compact?: boolean
 }) {
   const t = useT()
   return (
     <EmptyState
       variant="inline"
-      className="h-full p-8"
+      className={compact ? "p-4" : "h-full p-8"}
       icon={CloudOff}
       title={
         fileName

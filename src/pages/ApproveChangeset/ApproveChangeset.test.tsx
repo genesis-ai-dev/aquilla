@@ -109,6 +109,58 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("states an AddOrgMember change in plain language — who, which org, what role (AQU-1235)", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddOrgMember",
+        orgMemberUsername: "bob",
+        targetOrg: "Acme (id 10)",
+        orgMemberNewRole: "contributor",
+        orgMemberCurrentRole: "not a member",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    // The approver must be able to answer "who, where, what role" without
+    // reading the raw plan — a blind approval is the failure mode here.
+    expect(await screen.findByText("AddOrgMember")).toBeInTheDocument()
+    expect(screen.getByText("bob")).toBeInTheDocument()
+    expect(screen.getByText("Acme (id 10)")).toBeInTheDocument()
+    expect(screen.getByText("contributor")).toBeInTheDocument()
+    expect(screen.getByText(/org member new role/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  it("names the org and its incoming owner for a CreateOrg changeset (AQU-1221)", async () => {
+    // The human approving a tenant creation must be told WHAT is created and WHO
+    // ends up owning it — an org name alone is not enough to authorize on.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "CreateOrg",
+        orgName: "Partner Co",
+        orgOwner: "alice",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("CreateOrg")).toBeInTheDocument()
+    expect(screen.getByText(/org name/i)).toBeInTheDocument()
+    expect(screen.getByText("Partner Co")).toBeInTheDocument()
+    expect(screen.getByText(/org owner/i)).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-key settings previews for an UpdateProjectSettings changeset", async () => {
     const data = {
       ...APPROVAL_DATA,
@@ -129,6 +181,165 @@ describe("ApproveChangeset", () => {
     expect(screen.getByText("targetLanguage")).toBeInTheDocument()
     expect(screen.getByText("de")).toBeInTheDocument()
     expect(screen.getByText("validationCount")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  // AQU-1179: an EmitEvents changeset's whole effect is the `events` array,
+  // which the scalar-fact filter drops — so this page used to offer a reviewer
+  // "No changes summarized." above an Approve button that applied real writes.
+  it("renders an EmitEvents changeset as plain-language effect lines", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        events: [
+          { kind: "term.create", count: 2, testimony: false, label: "Add 2 glossary terms" },
+          {
+            kind: "term.approve",
+            count: 1,
+            testimony: false,
+            label: "Approve a glossary term — enforced for everyone on the project",
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("Add 2 glossary terms")).toBeInTheDocument()
+    expect(screen.getByText(/enforced for everyone on the project/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+    // The raw event kind is never what the reviewer is asked to consent to.
+    expect(screen.queryByText("term.approve")).not.toBeInTheDocument()
+  })
+
+  it("falls back to kind × count for a changeset staged before effect labels existed", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: { events: [{ kind: "comment.create", count: 4 }], warnings: [] },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("comment.create × 4")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  // AQU-1185: a role grant must never be approved blind — the page lists one
+  // plain-language line per membership change, straight from the server.
+  it("renders one line per change for a membership changeset", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "Membership",
+        projectId: "proj-1",
+        membershipChanges: [
+          "Add ana to proj-1 as contributor (400)",
+          "Remove pat from proj-1",
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Membership changes/i)).toBeInTheDocument()
+    expect(screen.getByText("Add ana to proj-1 as contributor (400)")).toBeInTheDocument()
+    expect(screen.getByText("Remove pat from proj-1")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  it("AQU-1184: names every staged validation with its cell and current text, not just a count", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        events: [
+          { kind: "cell.validate", count: 2, testimony: true },
+          { kind: "comment.create", count: 1, testimony: false },
+        ],
+        testimony: [
+          {
+            kind: "cell.validate",
+            fileId: "f1",
+            cellId: "GEN 1:1",
+            text: "En el principio creó Dios los cielos y la tierra",
+            truncated: false,
+          },
+          {
+            kind: "cell.validate",
+            fileId: "f1",
+            cellId: "GEN 1:2",
+            laneId: "pt",
+            text: "Y la tierra estaba desordenada y vacía",
+            truncated: true,
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    // The approver endorses specific sentences — each cell id and its text are on the page.
+    expect(await screen.findByText(/Validations to endorse \(2\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/cell\.validate · GEN 1:1/)).toBeInTheDocument()
+    expect(
+      screen.getByText("En el principio creó Dios los cielos y la tierra"),
+    ).toBeInTheDocument()
+    // Lane-qualified rows name their lane, and truncated text is marked as cut.
+    expect(screen.getByText(/cell\.validate · GEN 1:2 · pt/)).toBeInTheDocument()
+    expect(screen.getByText("Y la tierra estaba desordenada y vacía…")).toBeInTheDocument()
+    // The array must not leak into the flat fact list as "[object Object]".
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument()
+  })
+
+  it("AQU-1184: a changeset with no validations renders no testimony section", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: { events: [{ kind: "comment.create", count: 1, testimony: false }], warnings: [] },
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(data), { status: 200 })))
+
+    renderPage()
+
+    expect(await screen.findByText("Blackfoot")).toBeInTheDocument()
+    expect(screen.queryByText(/Validations to endorse/i)).not.toBeInTheDocument()
+  })
+
+  it("renders the entry path and content preview for a Living Memory changeset", async () => {
+    // AQU-1228: approving IS the memory review, so the human must see WHAT the
+    // entry says — "Command: AddDecision" alone is a blind approval.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddDecision",
+        projectId: "proj-1",
+        memoryWrites: [
+          {
+            path: "decisions/divine-name.md",
+            action: "add",
+            preview: "add decision: Render Lord as Господь, never Пан.",
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Living Memory changes/i)).toBeInTheDocument()
+    expect(screen.getByText("decisions/divine-name.md")).toBeInTheDocument()
+    expect(screen.getByText(/never Пан/)).toBeInTheDocument()
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 

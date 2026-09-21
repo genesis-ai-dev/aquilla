@@ -45,6 +45,23 @@ export function useRules(
    * filtered either way).
    */
   lane?: string,
+  /**
+   * This project's OWN concepts, read from the sync-worker projection via
+   * `useConcepts` (AQU-1006 follow-up).
+   *
+   * These used to come from `project.terminology` — a key in the
+   * project_settings JSON blob. That key is GONE: every add rewrote the whole
+   * array from the writer's stale snapshot, so concurrent adds silently
+   * destroyed each other. Do not reintroduce a read of `project.terminology`
+   * here; it no longer exists on the record.
+   *
+   * HAZARD, and the reason this is documented rather than defaulted quietly:
+   * omitting it compiles to ZERO terminology rules, which presents as every
+   * term check silently vanishing from the editor — indistinguishable, to a
+   * user, from the outage this whole change set exists to fix. Every caller
+   * that renders or evaluates terminology must pass it.
+   */
+  localConcepts?: Concept[],
 ) {
   // AQU-1104: a fresh `[]` per render gave `rules` a new identity on every
   // workspace render for projects without rules, which re-ran every consumer
@@ -52,7 +69,7 @@ export function useRules(
   const userRules = project?.rules ?? EMPTY_RULES
   const algorithmicChecks = project?.algorithmicChecks
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
-  const terminology = project?.terminology
+  const terminology = localConcepts
 
   // AQU-455: track the latest known-cumulative rules array ourselves rather
   // than trusting `patchProject`'s return value or the `project` prop as the
@@ -113,13 +130,18 @@ export function useRules(
   // first (higher precedence), then compiled together so they share the
   // identical derive-on-read path. Subscribed concepts are already in
   // subscription-priority order from useSubscribedConcepts.
+  //
+  // The CONSUMING project's affix inventory (project.termMatching) governs
+  // every compiled concept, subscribed org termbases included — matching runs
+  // against THIS project's source text, so the morphology that matters is the
+  // one of the language being worked on here, not the termbase's owner org.
   const terminologyRules = useMemo(
     () =>
-      compileConceptsToRules([
-        ...(subscribedConcepts ?? []),
-        ...(terminology ?? []),
-      ]),
-    [subscribedConcepts, terminology],
+      compileConceptsToRules(
+        [...(subscribedConcepts ?? []), ...(terminology ?? [])],
+        project?.termMatching,
+      ),
+    [subscribedConcepts, terminology, project?.termMatching],
   )
 
   // Order: builtins → org rules → project rules → terminology

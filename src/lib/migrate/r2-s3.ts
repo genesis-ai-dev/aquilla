@@ -140,6 +140,39 @@ export class R2Client {
     }
   }
 
+  /** Read a small object as text; null on 404. */
+  async getObject(bucket: string, key: string): Promise<string | null> {
+    const { url, headers } = this.sign("GET", `${bucket}/${key}`, {})
+    const res = await fetch(url, { method: "GET", headers })
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`GetObject ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+    return res.text()
+  }
+
+  /** Write a small text object. `ifNoneMatch` makes the PUT create-only (412
+   *  when the key already exists — R2 honours S3 conditional writes). */
+  async putObject(bucket: string, key: string, body: string, opts: { ifNoneMatch?: boolean } = {}): Promise<void> {
+    const extra: Record<string, string> = { "content-type": "application/json" }
+    if (opts.ifNoneMatch) extra["if-none-match"] = "*"
+    const { url, headers } = this.sign("PUT", `${bucket}/${key}`, extra)
+    const res = await fetch(url, { method: "PUT", headers, body })
+    if (!res.ok) {
+      const err = new Error(`PutObject ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`) as Error & {
+        status?: number
+      }
+      err.status = res.status
+      throw err
+    }
+  }
+
+  async deleteObject(bucket: string, key: string): Promise<void> {
+    const { url, headers } = this.sign("DELETE", `${bucket}/${key}`, {})
+    const res = await fetch(url, { method: "DELETE", headers })
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`DeleteObject ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+    }
+  }
+
   /** Page through a bucket prefix. Returns one page + the continuation token. */
   async listObjects(
     bucket: string,

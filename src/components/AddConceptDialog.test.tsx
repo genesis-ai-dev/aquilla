@@ -7,9 +7,43 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AddConceptPopover } from "./AddConceptDialog"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+
+function sourceRow(cellId: string, value: string): CellRow {
+  return {
+    cellId,
+    side: "source",
+    value,
+    valueHtml: null,
+    type: null,
+    canonicalRef: null,
+    anchorCellId: null,
+    eventId: `source-${cellId}`,
+    sourceEventId: null,
+    lastEditor: "alice",
+    lastEditAt: 1,
+    validated: false,
+    wordCount: 1,
+    endorsementCount: 0,
+  }
+}
+
+function seededStore(rows: CellRow[]): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: "p1",
+    fileId: "f1",
+    username: "alice",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(rows)
+  return store
+}
 
 function renderPopover(props: Partial<Parameters<typeof AddConceptPopover>[0]> = {}) {
   const defaults = {
@@ -70,7 +104,7 @@ describe("AddConceptPopover", () => {
 
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledOnce()
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "faith" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "faith", approve: false })
     })
     expect(screen.queryByLabelText(/source term for new concept/i)).not.toBeInTheDocument()
   })
@@ -81,7 +115,7 @@ describe("AddConceptPopover", () => {
     await openPopover()
     fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "love" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "love", approve: false })
     })
   })
 
@@ -92,7 +126,7 @@ describe("AddConceptPopover", () => {
     fireEvent.change(input, { target: { value: "Holy Spirit" } })
     fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "Holy Spirit" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "Holy Spirit", approve: false })
     })
   })
 
@@ -102,15 +136,71 @@ describe("AddConceptPopover", () => {
     renderPopover({ sourceTerm: "grace", onConfirm })
     await openPopover()
     await user.type(screen.getByLabelText(/rendering for new concept/i), "favor")
-    await user.click(screen.getByRole("checkbox", { name: /case insensitive/i }))
+    // AQU-1271: case sensitivity now lives inside the collapsed "Matching
+    // options" disclosure with the other matcher toggles, stated positively
+    // ("Match case exactly") rather than as a standalone inverted checkbox.
+    await user.click(screen.getByRole("button", { name: /matching options/i }))
+    await user.click(screen.getByRole("checkbox", { name: /match case exactly/i }))
     await user.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({
         sourceTerm: "grace",
         rendering: "favor",
         caseSensitive: true,
+        approve: false,
       })
     })
+  })
+
+  // ── AQU-1006 follow-up: suggest vs. approve ──────────────────────────────
+  // Terminology has two authority levels. A DRAFT compiles to no rules, so it
+  // binds nobody and any contributor may write one; APPROVING puts the term
+  // into force and takes the org's termbase floor. These pin that the client
+  // never asks for more than the user actually has.
+
+  it("defaults to suggesting, so a caller that omits canApprove cannot enforce", async () => {
+    // `canApprove` defaults to the RESTRICTIVE answer on purpose: a caller
+    // that forgets to pass it produces suggestions rather than silently
+    // writing enforced terminology on behalf of someone with no authority.
+    const onConfirm = vi.fn()
+    renderPopover({ sourceTerm: "mercy", onConfirm })
+    await openPopover()
+    await userEvent.setup().click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: false })
+    })
+  })
+
+  it("approves when the user may approve and leaves the toggle on", async () => {
+    const onConfirm = vi.fn()
+    renderPopover({ sourceTerm: "mercy", onConfirm, canApprove: true })
+    await openPopover()
+    await userEvent.setup().click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: true })
+    })
+  })
+
+  it("lets an approver choose to suggest instead", async () => {
+    const onConfirm = vi.fn()
+    const user = userEvent.setup()
+    renderPopover({ sourceTerm: "mercy", onConfirm, canApprove: true })
+    await openPopover()
+    await user.click(screen.getByRole("checkbox", { name: /approve now/i }))
+    await user.click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: false })
+    })
+  })
+
+  it("disables the approve toggle for a user who cannot approve", async () => {
+    renderPopover({ sourceTerm: "mercy", canApprove: false })
+    await openPopover()
+    // The base-ui Checkbox renders a span with aria-disabled rather than a
+    // native `disabled` attribute, so toBeDisabled() does not apply.
+    expect(screen.getByRole("checkbox", { name: /approve now/i }))
+      .toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText(/approving terms needs a higher role/i)).toBeInTheDocument()
   })
 
   it("submits on Enter in the rendering field", async () => {
@@ -119,8 +209,63 @@ describe("AddConceptPopover", () => {
     await openPopover()
     fireEvent.keyDown(screen.getByLabelText(/rendering for new concept/i), { key: "Enter" })
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace", approve: false })
     })
+  })
+
+  // WHY: the preview count and chips are how a user learns what the matcher
+  // will do BEFORE saving; an option toggle must re-count live, and a chip
+  // click must land in the submitted draft as an exclusion.
+  it("previews matches, toggles options live, and submits exclusions", async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "אֵת הָאָֽרֶץ׃"),
+      sourceRow("c", "nothing here"),
+    ]
+    const cellStore = seededStore(rows)
+    renderPopover({
+      sourceTerm: "הָאָ֗רֶץ",
+      cellStore,
+      termMatching: { prefixes: ["ו"], suffixes: [] },
+      canApprove: true,
+      onConfirm,
+    })
+    await openPopover()
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Exclude וְהָאָ֗רֶץ/ }))
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceTerm: "הָאָ֗רֶץ",
+          match: expect.objectContaining({ excludedForms: ["וְהָאָ֗רֶץ"] }),
+        }),
+      )
+    })
+  })
+
+  // WHY: stale-snapshot regression (AQU-1271 review). The preview used to be
+  // handed a cells array through the memoized editor row, so a commit anywhere
+  // else in the file left an OPEN popover counting against a dead snapshot.
+  // The popover subscribes to the store itself; a new matching cell must show
+  // up in the count without the popover being reopened.
+  it("re-counts while open when the file's cells change underneath", async () => {
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "nothing here"),
+    ]
+    const cellStore = seededStore(rows)
+    renderPopover({ sourceTerm: "הָאָ֗רֶץ", cellStore, termMatching: { prefixes: ["ו"], suffixes: [] } })
+    await openPopover()
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+
+    act(() => {
+      cellStore.replaceRows([...rows, sourceRow("c", "אֵת הָאָֽרֶץ׃")], { full: true })
+    })
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
   })
 
   it("closes on Cancel without calling onConfirm", async () => {

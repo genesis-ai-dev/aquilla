@@ -4,7 +4,8 @@
  * down to projects that need attention.
  */
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { MemoryRouter } from "react-router-dom"
 import { AdminProjectsSection } from "./AdminProjectsSection"
 import type { AdminProject } from "@/lib/frontier/admin"
@@ -50,14 +51,7 @@ const renderSection = () =>
 
 /** Base UI Select: options live in a portaled listbox. */
 async function pickLens(optionName: RegExp) {
-  fireEvent.click(screen.getByRole("combobox", { name: /filter projects/i }))
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
+  await pickSelectOption(/filter projects/i, optionName)
 }
 
 describe("AdminProjectsSection", () => {

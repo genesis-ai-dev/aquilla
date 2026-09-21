@@ -54,6 +54,7 @@ import { extractIdmlStrings } from "./parsers/idml"
 import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
 import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
+import { extractEblStrings } from "./parsers/biblica-ebl"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -100,6 +101,7 @@ import type {
   SourceArtifactFormat,
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
+import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -1102,6 +1104,7 @@ export async function importMacula(
       parserVersion: "macula-tsv-v1",
       sourceLanguage,
       bookCode,
+      corpusMarker: sourceLanguage === "hbo" ? "OT" : "NT",
     },
     cells,
     rawBytes,
@@ -1253,11 +1256,18 @@ export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
 export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
 
 /**
+ * Equipping Biblical Leaders is a fourth template — a training programme's
+ * facilitator and participant guides, divided by topic and lesson rather than
+ * by book, and holding no published scripture to set anything around.
+ */
+export const EBL_PROFILE_ID = "builtin:biblica-ebl"
+
+/**
  * Which Biblica title an IDML package is. Nothing in the package identifies the
- * edition, and the three templates disagree about what a paragraph style means,
+ * edition, and the four templates disagree about what a paragraph style means,
  * so the person importing it says which one this is.
  */
-export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life"
+export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life" | "ebl"
 
 /**
  * Sidebar folder per edition, so a project holding more than one Biblica title
@@ -1268,6 +1278,7 @@ const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
   "study-notes": "Biblica Study Notes",
   "treasure-hunt": "Treasure Hunt Bible",
   reach4life: "Reach 4 Life",
+  ebl: "Equipping Biblical Leaders",
 }
 
 export type BiblicaImportPhase = "parse" | "save"
@@ -1398,6 +1409,7 @@ const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
   "study-notes": BIBLICA_NOTES_PROFILE_ID,
   "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
   reach4life: REACH4LIFE_PROFILE_ID,
+  ebl: EBL_PROFILE_ID,
 }
 
 interface BiblicaParseOutcome {
@@ -1446,6 +1458,12 @@ async function parseBiblicaEdition(
       frontBackMatter: false,
     }
   }
+  if (edition === "ebl") {
+    // A guide is written material throughout, so nothing is skipped for being
+    // scripture and no one book owns the file.
+    const { strings } = await extractEblStrings(buffer, undefined, parseOptions)
+    return { strings, bookCodes: [], skippedScriptureCount: 0, frontBackMatter: false }
+  }
   const { strings, bookCodes, skipped, frontBackMatter } =
     await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
   return {
@@ -1473,10 +1491,17 @@ function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): s
       + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
       + "that this is a Reach 4 Life package."
   }
+  if (edition === "ebl") {
+    // Nothing is filtered out by edition here, so an empty result means the
+    // package carried no text at all rather than the wrong template.
+    return `${fileName} parsed successfully but contained no text. An EBL guide imports `
+      + "every text-bearing paragraph, so this package holds only artwork — check that "
+      + "this is the guide rather than a cover or plate volume."
+  }
   return `${fileName} parsed successfully but contained no study notes. `
     + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
-    + "document. If this is a Treasure Hunt Bible or a Reach 4 Life file, tick the matching "
-    + "box and import it again."
+    + "document. If this is a Treasure Hunt Bible, a Reach 4 Life or an EBL file, tick the "
+    + "matching box and import it again."
 }
 
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
@@ -1659,6 +1684,11 @@ export async function emitParsedFile(
   // need to mark the time-ordered case explicitly.
   const orderedBy: OrderedBy = orderedByForFileType(fileType)
 
+  // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
+  // after the whole payload has been chunked and uploaded. Check the same
+  // ceiling here so an unsplittable section fails immediately, naming itself.
+  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({
     projectId: ctx.projectId,
@@ -1678,6 +1708,7 @@ export async function emitParsedFile(
       targetTextDirection: ctx.targetTextDirection,
       orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
     },
     cells,
     rawSource: result.rawSource,
@@ -1712,6 +1743,7 @@ export async function emitParsedFile(
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
     },
     speakerPairs,
   }
@@ -2352,6 +2384,7 @@ export async function importParatextAsTarget(
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
           bookCode: bookPlan.bookId,
+          ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
         },
         cells,
         rawSource: bookPlan.rawSource,
@@ -2611,6 +2644,15 @@ export async function parseFile(
       throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
     case "custom":
       throw new Error("Custom formats must be prepared by the AI-assisted recipe service")
+    case "codex":
+    case "source":
+      // AQU-997: server-side file KINDS, not upload formats. They only ever
+      // arrive already-parsed — a migrated Codex notebook's cells come in as
+      // events (lib/migrate/map.ts), and "source" is the role fallback for a
+      // row carrying no kind at all. `detectFileType` returns neither, so
+      // nothing routes an upload here; this is the same defensive guard the
+      // media arms below are.
+      throw new Error("codex/source are server-side file kinds, not import formats")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

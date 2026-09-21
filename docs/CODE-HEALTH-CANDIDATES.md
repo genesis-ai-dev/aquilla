@@ -4,6 +4,34 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/ExportDialog.tsx` — `fmt === "..."` export-format ladder, ~930-1330+
+
+- **Found**: 2026-09-09 run, surveying complexity-reduction candidates (this run shipped the
+  smaller `dominantScript()` lookup-table conversion in `src/lib/timeline/cue-links.ts`
+  instead — see git history).
+- **Friction**: 9 branches keyed on export format (`usfm`, `docx`, `pptx`, `idml`,
+  `audio-by-character`, `audio-by-line`, `character-sheets`, `project-report`, `sdbh-xml`)
+  look like the same if/else-ladder-to-lookup-table smell, but each branch is 30-100+ lines
+  of async, side-effecting work (dynamic `import()`, toast lifecycle via `exportToastRef`,
+  shared mutable locals like `idmlTelemetryStartedAt`/`recoverableIdmlOriginal`, early
+  `return`s that abort the whole handler, PostHog telemetry).
+- **Why deferred**: a lookup-table dispatch would need each branch extracted into a
+  same-signature async handler capturing a dozen closure variables — a real refactor, not a
+  mechanical one. Spans 400+ lines (blows the ≤300-line budget on its own), no dedicated
+  unit test found for this component, and the risk of subtly changing early-return/toast-state
+  behavior is high for a routine that can't touch tests to pin the new behavior.
+- **Proof needed**: would need either a new characterization test (out of scope for this
+  routine) or a human-supervised manual QA pass per export format before/after, given no
+  existing test coverage to lean on.
+
+## `auth-worker/src/lib/contextual/tick.ts` — nested ternaries in `spanReasonCodes`/`eventOutcome`
+
+- **Found**: 2026-09-09 run, same survey as above.
+- **Friction**: deep nested-ternary logic, mechanically improvable to guard clauses.
+- **Why deferred**: this is the durable contextual-run engine with dense cross-function
+  invariants — too much blast radius for a routine cleanup pass without a human familiar
+  with the invariants reviewing the rewrite.
+
 ## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
 
 Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —
@@ -55,13 +83,11 @@ routine never modifies test files.
   `src/lib/sync/audit-stats-overlay.ts`, `src/lib/sync/project-settings.ts`,
   `src/lib/sync/file-projection.ts`, `src/lib/sync/events-emit.ts`,
   `src/lib/audio/transcribe.ts`, `src/lib/audio/timings.ts`, `src/lib/rules/edit-miner.ts`,
-  `src/lib/export/export-service.ts`.
-- **Remaining files**: `src/lib/frontier/members.ts:20` ("The D1 schema has no
-  gitlab_project_id column") and `src/lib/global-tm/index.ts:17` ("the Worker can back it
-  with D1/PG" — should just say "Postgres" since no worker binds D1 anymore) — both deferred
-  past the ≤8-file budget in the 2026-08-19 run. `src/lib/migrate/group-sync.ts:5` already
-  frames it as historical ("completing the D1→Neon cutover") — confirmed correct as-is,
-  leave alone.
+  `src/lib/export/export-service.ts`. The last two remaining files,
+  `src/lib/frontier/members.ts:21` and `src/lib/global-tm/index.ts:17`, were fixed in the
+  2026-09-02 run (reworded to "Postgres" — same treatment). `src/lib/migrate/group-sync.ts:5`
+  already frames it as historical ("completing the D1→Neon cutover") — confirmed correct
+  as-is, leave alone.
 - **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
   `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
   `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
@@ -69,34 +95,164 @@ routine never modifies test files.
   `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec
   tag). Also skip `AD-2 chain pointer... entry came from D1` at `src/lib/parsers/types.ts:723`
   only after re-reading in context (mixed usage nearby).
-- **Why deferred further**: only 2 files left, small enough to fold into the next
-  comment-drift-themed run alongside a fresh grep sweep (new drift may have landed since).
-- **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
-  (not historical "migrated from D1" framing, not the paragraph-model tag above) before
-  touching it.
+- **Remaining**: none known as of 2026-09-02 — a fresh repo-wide grep would be needed to
+  confirm before closing this entry outright.
 
-## "frontier-server" mentions in sync-worker
+## "frontier-server" mentions in sync-worker — done 2026-09-02
 
-- **Files**: `sync-worker/src/cors.ts:4`, `sync-worker/src/admin.ts:24`.
-- **Friction**: same drift as the `src/` "frontier-server" comments fixed by the
-  2026-08-11 comment/doc run — these describe the *current* auth flow in present tense
-  but name the retired frontier-server service.
-- **Why deferred**: touching `sync-worker/` requires running its own test suite
-  (`cd sync-worker && npm test`) per the routine — bundle with a sync-worker-scoped
-  pass rather than an `src/`-only comment run.
-- **Proof needed**: comment-only edits; sync-worker suite green.
+- **Status**: fixed in the 2026-09-02 run. `sync-worker/src/cors.ts:4` and
+  `sync-worker/src/events/role-policy.ts:3` reworded "frontier-server" → "auth-worker"
+  (confirmed via `grep -rn "SYNC_SECRET_KEY" auth-worker/src` that auth-worker, not any
+  retired service, is the actual server-to-server caller and role-hierarchy owner).
+  `sync-worker/.dev.vars.example:4-6` (not source code, but same drift) also reworded.
+  `sync-worker/src/admin.ts:24` — the entry that originally flagged this file no longer
+  applies; a fresh grep found no "frontier-server" text left in `admin.ts` (already fixed
+  or moved by an unrelated change since the candidate was logged).
+- **Left alone (correctly historical, not drift)**: `sync-worker/src/events/role-policy.ts`
+  is the only sync-worker hit that was live-framed. `src/lib/frontier/auth.ts:4` ("History:
+  this file previously fetched... legacy frontier-server... Phase D cuts that dependency")
+  and `src/lib/sync/sync-token.ts:7` ("old frontier-server still work" as an E2E-mock
+  fallback) both already use explicit historical/legacy framing — correct as-is, same
+  distinction the D1-comment-drift entries below already draw.
+- **Still blocked (test file, frozen zone)**: `src/lib/frontier/roles.test.ts:24` — see the
+  dedicated ledger entry below.
+- **Proof**: comment-only edits; sync-worker suite 130/130 files, 1543/1543 tests, both
+  baseline and after, byte-identical.
 
 ## Additional candidates from the 2026-08-11 component cleanup run
 
-- **`src/components/RulesPage.tsx`** and its test (671 lines total) — superseded by
-  `RulesSurface` in `ProjectWorkspace`; the old route’s removed UI is already documented
-  in the corresponding smoke spec. Confirm zero real importers before deletion.
+- **`src/components/RulesPage.tsx`** — done in the 2026-09-14 run. Confirmed zero real
+  importers (no route entry in `App.tsx`, no colocated test file, not brand-gated, not
+  imported by any e2e spec — `e2e/JOURNEYS.md` mentions it only in prose, which is a
+  frozen path left untouched). `RulesSurface` (mounted via `ProjectSettings/RulesSection.tsx`)
+  is the confirmed live replacement — it re-imports `BuiltinChecksList`, the same shared
+  child `RulesPage.tsx` used to render. Deleted the 347-line file plus its now-orphaned
+  `eslint-suppressions.json` entry, and fixed three directly-stale comments this deletion
+  caused (`src/lib/qa/checks.ts`, `src/hooks/useOrgSettings.ts`,
+  `src/components/onboarding/ProductTour.tsx` — all referenced `RulesPage.tsx` as a live
+  convention example). `pnpm test` full suite: 1070/1070 files passed after (baseline had
+  1 pre-existing failure, the known `AssignedToMe.test.tsx` full-suite-only flake — see the
+  issue #410 family below — which did not reproduce this run, consistent with intermittent).
+  It turned out **not** to have a colocated test (the original 2026-08-11 note guessed
+  "671 lines total" including a test file that doesn't actually exist).
 - **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
   by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
   its size; confirm no e2e spec still depends on it.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
-  live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
+  live `fetchAccessibleProjects` exists in `cloud-projects.ts`. **Blocked** by this
+  routine's "no test file may be modified" rule: its only real importer is its own test
+  file (`projects-read.test.ts`), and deleting the source without the test breaks the
+  suite — the test would need to be deleted too, which this routine cannot do. Needs a
+  human (or a non-code-health change) to remove the pairing together.
+
+## `rules.page.*` i18n keys — orphaned by the `RulesPage.tsx` deletion above (2026-09-14)
+
+- **Found**: while deleting `src/components/RulesPage.tsx` this run, confirmed via
+  `grep -rn "rules\.page\." src --include=*.tsx --include=*.ts | grep -v src/lib/i18n/`
+  (empty result) that 7 message keys under the `rules.page.*` namespace —
+  `rules.page.heading`, `rules.page.corpusLoadErrorPrefix`, `rules.page.readOnlySuffix`,
+  `rules.page.rulesCardTitle`, `rules.page.noRulesYet`, `rules.page.deleteRuleDialogTitle`,
+  `rules.page.deleteRuleAriaLabel` — defined in `src/lib/i18n/namespaces/rules.ts` (under
+  its `── RulesPage.tsx (standalone rules page) ──` section header, ~line 385) were used
+  by nothing else. (`rules.loadingLabel`, defined in the same block, is *not* orphaned —
+  `src/components/ProjectSettings/RulesSection.tsx:129` still uses it, so leave it alone.)
+- **Friction**: each key also has a translated entry in every locale message file under
+  `src/lib/i18n/messages/*.ts` (confirmed present in at least `mfa.ts`, `zh-Hans.ts`,
+  `zh-Hant.ts`, `ar.ts`, `my.ts`, `th.ts` — likely all ~14+ locales). Removing the 7 keys
+  cleanly means touching the base namespace file's `messages`/`context.keys` blocks *and*
+  every locale file's corresponding entries — easily 15-20 files, well past this run's
+  single-theme budget when it's already spent on the component deletion itself.
+- **Why deferred**: pure scope-control — orphaned translation strings are inert (unused
+  keys don't fail build/lint/test), so there's no urgency forcing this into the same PR as
+  the component deletion. A future type-tightening or dead-code run can pick this up as its
+  own single-file-family sweep.
+- **Proof needed**: re-confirm each key still has zero non-i18n-file references (code
+  moves), then delete the `messages`/`context.keys` entries in `rules.ts` plus the matching
+  key in every locale file under `src/lib/i18n/messages/`; `pnpm build` and `pnpm test`
+  should stay green throughout since nothing reads these strings.
+- **Grown by the 2026-09-18 run**: deleting `RuleCreateDialog.tsx` and `RuleSuggestDialog.tsx`
+  (the two dialogs `RulesPage.tsx` was the only render site for — see the entry below)
+  orphaned 18 more keys in the same namespace file and the same way: 15 under
+  `rules.createDialog.*` (`namePlaceholder`, `descriptionLabel`, `ruleTypeLabel`,
+  `checkType.sourceTargetMatch`, `checkType.sourceRequiresTarget`, `checkType.targetForbids`,
+  `patternRegexLabel`, `patternFieldHint.match`, `forbiddenPatternRegexLabel`,
+  `patternFieldHint.forbidden`, `sourcePatternRegexLabel`, `requiredTargetPatternRegexLabel`,
+  `testYourRuleHeading`, `testSourcePlaceholder`, `testTargetPlaceholder`, `testButton`) and
+  3 under `rules.suggestDialog.*` (`description`, `analyzeButton`, `analyzedSummary`).
+  Confirmed orphaned by `grep -rn "rules\.createDialog\.\|rules\.suggestDialog\." src e2e
+  scripts | grep -v src/lib/i18n/` (empty). The live in-shell surface uses the separate
+  `rules.surface.*` namespace, so nothing shares these. Their two
+  `── RuleCreateDialog.tsx ──` / `── RuleSuggestDialog.tsx ──` section-header comments in
+  `namespaces/rules.ts` now point at deleted files; they were deliberately left in place so
+  the still-present keys keep their provenance — remove the headers together with the keys,
+  not before. Whoever picks this up should sweep all three prefixes (`rules.page.*`,
+  `rules.createDialog.*`, `rules.suggestDialog.*`) in one pass: same files, same proof.
+
+## 2026-09-18 — `RulesPage.tsx` orphan follow-up shipped; rest of the zero-importer sweep deferred
+
+- **Done this run**: deleted `src/components/RuleCreateDialog.tsx` (459 lines) and
+  `src/components/RuleSuggestDialog.tsx` (281 lines), plus the now-unused
+  `eslint-suppressions.json` entry for the latter (4 `i18n/no-unkeyed-string` suppressions —
+  ESLint's `--report-unused-disable-directives` bookkeeping flags a stale entry, so it had to
+  go in the same commit). Both were imported by exactly one file ever,
+  `src/components/RulesPage.tsx` (lines 14-15 of the pre-deletion file, rendered at 203-204),
+  which the 2026-09-14 run deleted — so this is that run's leftover debris, not a new finding.
+  Both have shipped replacements rendered by the live `RulesSurface`: `RuleEditor` inside
+  `RulesSurface`'s own `createRuleDialog`/`createOrgRuleDialog` (workstream B of
+  `docs/plans/rules-revamp.md`, "Redesign `RuleCreateDialog` into an inline rule editor on the
+  surface") and `RuleSuggestFromEditsDialog` for the LLM-suggest path.
+- **On the `SWARM-TODO(memory-wiring)` in the deleted `RuleSuggestDialog`**: its props block
+  carried a SWARM-TODO asking `ProjectWorkspace.tsx` to thread a `cells` snapshot "wherever it
+  is rendered". Checked against the `useSubscribedConcepts.ts` precedent below (staged
+  scaffolding that must NOT be deleted) and judged different in kind: that TODO waits on a
+  server route that does not exist yet, whereas this one was satisfied by supersession —
+  `RulesSurface.tsx:256-261` already passes `cells` to the replacement
+  `RuleSuggestFromEditsDialog`, and `ProjectWorkspace.tsx` never rendered the old dialog at
+  all. Nothing forward-compat was erased.
+- **Deliberately left alone**: `src/lib/rules/rule-suggester.ts`. Deleting `RuleSuggestDialog`
+  leaves its `suggestRulesFromPairs` export with no production caller (only
+  `rule-suggester.test.ts` exercises it), but the module stays live for its other exports
+  (`RuleSuggestion`/`UsageCallback` types used by `RuleImportDialog`, `RuleImportReview`,
+  `rule-extractor.ts`, `brief-generator.ts`; `suggestRulesFromCandidates` used by
+  `RuleSuggestFromEditsDialog`). Removing just the one function would require editing its
+  test — a frozen path for this routine. Same shape as the `projects-read.ts` blocker below;
+  needs a human or a non-code-health change.
+
+## Zero-importer sweep leftovers — 2026-09-18
+
+A corrected repo-wide sweep this run (match `"…/<stem>"` in any import/export specifier
+across `src`, `e2e`, `scripts`, all four worker packages, `parity` and `index.html`) turned up
+these besides the two files deleted above. None were attempted — the run's budget was spent —
+and each needs its own zero-importer re-verification before deletion, since files move.
+
+- `src/components/CheckFileButton.tsx` (100 lines) — zero references anywhere in code; only
+  mentions are an i18n section-header comment and two historical docs
+  (`docs/superpowers/plans/2026-08-10-namespace-partition.md`). Likely the same
+  supersession story as the rules dialogs (`CheckFindingsDrawer` is the live surface), but
+  that was not verified this run.
+- `src/components/onboarding/checklist/AiProviderStep.tsx` (221 lines) — zero importers, and
+  `docs/superpowers/plans/2026-04-23-settings-state-model.md` (Task 5) explicitly plans
+  "Delete: `src/components/onboarding/checklist/AiProviderStep.tsx`", replaced by
+  `LlmSettingsForm compact` in `AiSetupDialog` and `SetupChecklistDrawer`. Reads like a
+  half-completed migration — confirm both call sites actually swapped before deleting.
+- `src/components/AudioRecorder/RecordingVideoStage.tsx` (134 lines) — zero references
+  anywhere in the repo, not even in docs. Note the neighbouring
+  `RecordingVideoSurface.test.tsx` is a known full-suite timing flake (see the issue #410
+  family above), so a deletion here needs extra care reading the before/after failure lists.
+- `src/lib/audio/browser-process-stub.ts` (14 lines) — a worker-only `process` stand-in for
+  phonemizer, with zero references including in `vite.config.ts`. Probably orphaned when an
+  alias was removed, but bundler shims are exactly the kind of thing a grep sweep gets wrong;
+  needs someone to confirm no build config reaches it by path before it goes.
+- `src/components/ui/{attachment,item,toggle-group,bar-spinner}.tsx` (537 lines total) —
+  unused shadcn/ui primitives. Deliberately NOT logged as dead code: `src/components/ui/` is
+  a vendored primitive library where "added ahead of first use" is normal, and `shadcn add`
+  would just re-create them. Only worth touching if a human says the repo prefers a
+  strictly-used-only `ui/` directory.
+- Known-and-blocked, unchanged this run: the 15-file `src/components/import/*` orphan cluster
+  (~3,900 lines, blocked on issue #410), `src/components/TerminologyPage.tsx` (1,535 lines,
+  plus the `src/lib/terminology/candidates-worker.ts` it lazily imports — 66 lines that become
+  dead with it), and `src/hooks/useSubscribedConcepts.ts` (looks dead, is not — see below).
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 
@@ -138,15 +294,34 @@ future pass (verify each still applies — code moves):
     flaky, not a regression), `pnpm lint` problem list byte-identical to baseline once
     accounting for an unrelated `packages/idml-roundtrip/dist` build-artifact warning
     (see new entry below), no test file touched.
-  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
-  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
-    `reach4life/notes.ts:153`
-  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
-    `src/lib/migrate/map.ts:245`
-  - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
-    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
-  - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
-    `src/lib/import/normalized-manifest.ts:471`
+  - **Status**: `src/lib/milestone-navigation.ts`, `src/lib/biblica/treasure-hunt/notes.ts`,
+    `src/lib/biblica/treasure-hunt/note-rules.ts`, `src/lib/biblica/reach4life/notes.ts`,
+    `src/lib/idml/completion.ts`, `src/lib/migrate/idml.ts`, `src/lib/migrate/map.ts`, and
+    `src/lib/export/exporters/vtt.ts` done in the 2026-09-07 run — all 17 array-index
+    non-null assertions across those 8 files removed (each site individually verified as a
+    loop invariant, a prior length guard, or a fixed-length array populated for every
+    index). `pnpm test` full-suite went from 1 pre-existing failure
+    (`RecordingVideoSurface.test.tsx`, a known timing flake — see the environment-note
+    section below) at baseline to 1016/1016 passing at final (the flake didn't reproduce
+    that run, consistent with intermittent), `pnpm lint` problem count byte-identical
+    (389: 13 errors, 376 warnings) once accounting for the `packages/idml-roundtrip/dist`
+    build-artifact noise below, no test file touched. Baseline and final were each run in
+    a fully isolated `git worktree`/checkout to rule out read races with the edits.
+  - **Status**: `src/lib/export/audio-bwf.ts`, `src/lib/export/audio-by-character.ts`,
+    `src/hooks/useActiveCellStore.ts`, `src/components/MultiProjectInviteDialog.tsx`, and
+    `src/lib/import/normalized-manifest.ts` done in the 2026-09-11 run — 5 redundant
+    array/index non-null assertions removed (each a loop-bounded array index or a
+    `Record<string, T>` index-signature read, both typed non-optional without
+    `noUncheckedIndexedAccess`). `src/lib/audio/whisper-worker.ts:186` was in this list but
+    turned out **not** redundant: `npx tsc -b` failed after removing it —
+    `c.timestamp` is `[number | null, number | null]` (an explicit nullable tuple, not an
+    inferred-non-optional index read), and the `!` narrows past a `.filter(c =>
+    c.timestamp[0] != null && ...)` guard that TS can't carry through the chained `.map()`.
+    Reverted that one site; left as a genuine assertion, not a candidate for a future pass.
+    `npx tsc -b --force` clean on the other 5, `pnpm lint` byte-identical to baseline (once
+    excluding `packages/idml-roundtrip/dist`, rebuilt as a side effect of `tsc -b` — see the
+    build-artifact-noise entry below), `pnpm test` 1058/1058 files identical pass count
+    before and after, no test file touched.
 - **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.
@@ -172,7 +347,11 @@ Docker/Wrangler setup was not reliable enough to complete the smoke suite. This 
 environment note, not a product regression. The 2026-08-12 and 2026-08-14 runs hit the
 same limitation (`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket,
 all 3 shards refuse to run rather than reset against a stale schema) — still an
-environment gap, not something a code-health PR should try to patch around.
+environment gap, not something a code-health PR should try to patch around. The 2026-09-18
+run hit it again, unchanged and with the same message; worth noting for anyone reading a
+red smoke result in one of these PRs that it fails at `[boot 2/8] resetting … postgres
+schema`, i.e. before Playwright loads a single spec, so it cannot be sensitive to the diff
+under test — it is a hard no-result, not a failing assertion.
 
 ## 2026-08-17 run — dead-code deletion blocked by a reproducible test-isolation flake
 
@@ -230,6 +409,19 @@ run until it's fixed.
 - **Proof needed when revisited**: same as this run — `grep -rn` zero-importer check per
   file, `pnpm test` green before and after, run at least twice each way given the
   demonstrated flake risk.
+- **More evidence, 2026-09-02 run** (comment-only diff, zero test-file-count change, so this
+  confirms the flake isn't specific to file-count churn): three full-suite `pnpm test` runs
+  against the *same* 5-file comment-only diff produced three different failure sets —
+  baseline 1 file/2 tests (`ArchivedProjects.test.tsx`), run 2 added
+  `RecordingVideoSurface.test.tsx` (2 files/3 tests), run 3 added
+  `AssignedToMe.test.tsx` instead (3 files/4 tests, `ArchivedProjects.test.tsx` present in
+  all three). All three newly-seen files pass 100% in isolation
+  (`pnpm test <file>`). None of the failing files import or relate to any file this run
+  touched (`sync-worker/src/cors.ts`, `sync-worker/src/events/role-policy.ts`,
+  `sync-worker/.dev.vars.example`, `src/lib/frontier/members.ts`,
+  `src/lib/global-tm/index.ts`) — same worker-sharding/ordering mechanism as the
+  `TeamsList.test.tsx` case above, just a wider set of affected files than previously
+  logged.
 
 ## 2026-08-31 run — reconfirmed the full `ImportDialog` orphan cluster; issue #410 still open
 

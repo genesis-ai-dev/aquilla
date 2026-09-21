@@ -3,6 +3,7 @@ import {
   DEFAULT_LOCALE,
   directionFor,
   isSupportedLocale,
+  LOCALE_ALIASES,
   LOCALES,
   normalizeLocale,
 } from "./locales"
@@ -25,8 +26,50 @@ describe("locale registry", () => {
   })
   it("isSupportedLocale reflects the registry", () => {
     expect(isSupportedLocale("my")).toBe(true)
-    expect(isSupportedLocale("mfa")).toBe(true)
+    expect(isSupportedLocale("ms")).toBe(true)
     expect(isSupportedLocale("zz")).toBe(false)
+  })
+})
+
+describe("Malay is offered under its real code, not Patani Malay's (AQU-1306)", () => {
+  it("does not offer a Patani Malay entry while the catalog is standard Malay", () => {
+    // The Pattani Malay team selected "Bahasa Melayu Patani" and got ordinary
+    // Bahasa Malaysia. A mislabelled locale is worse than a missing one, because
+    // the label is the only thing a speaker can check before trusting the UI.
+    expect(LOCALES.find((l) => l.code === "mfa")).toBeUndefined()
+    expect(LOCALES.map((l) => l.nativeName)).not.toContain("Bahasa Melayu Patani")
+    expect(LOCALES.map((l) => l.englishName)).not.toContain("Patani Malay")
+  })
+  it("registers the catalog as standard Malay with the matching endonym", () => {
+    const malay = LOCALES.find((l) => l.code === "ms")
+    expect(malay).toBeDefined()
+    expect(malay?.englishName).toBe("Malay")
+    expect(malay?.nativeName).toBe("Bahasa Melayu")
+    expect(malay?.dir).toBe("ltr")
+  })
+  it("ships the populated catalog under `ms`, with nothing left under `mfa`", () => {
+    expect(Object.keys(CATALOGS.ms ?? {}).length).toBeGreaterThan(4000)
+    expect(CATALOGS.mfa).toBeUndefined()
+  })
+  it("migrates a stored `mfa` preference to the same strings instead of English", () => {
+    // Anyone already on "Bahasa Melayu Patani" must keep the UI they had — the
+    // strings were always Malay. Dropping to English would read as the app
+    // losing their language rather than correcting its name.
+    expect(LOCALE_ALIASES.mfa).toBe("ms")
+    expect(normalizeLocale("mfa")).toBe("ms")
+    expect(detectInitialLocale("mfa", "en-US")).toBe("ms")
+  })
+  it("keeps aliases out of the switcher", () => {
+    // An alias is reachable from storage or Accept-Language, never offered as a
+    // choice — otherwise removing the false claim would just reintroduce it.
+    for (const retired of Object.keys(LOCALE_ALIASES)) {
+      expect(LOCALES.some((l) => l.code === retired)).toBe(false)
+    }
+  })
+  it("resolves every alias target to a real registered locale", () => {
+    for (const target of Object.values(LOCALE_ALIASES)) {
+      expect(isSupportedLocale(target)).toBe(true)
+    }
   })
 })
 

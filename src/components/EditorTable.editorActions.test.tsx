@@ -235,10 +235,70 @@ function renderTable(
 }
 
 describe("EditorTable — EditorActionsContext wiring", () => {
+  /**
+   * AQU-200: the rail keeps only AI-generate as a direct button; comments,
+   * history, record, play, TTS and footnote now live behind a single `⋯`.
+   * These tests are about the WIRING of those actions, not their placement, so
+   * they open the overflow first and assert the same behaviour as before.
+   * The popup portals to the document body, so query it off `screen`, not the
+   * row — at most one row's overflow is ever open.
+   */
+  async function openRailOverflow(row?: HTMLElement) {
+    const scope = row ? within(row) : screen
+    fireEvent.click(await scope.findByRole("button", { name: "More actions" }))
+  }
+
+  // ── AQU-200 regression guard ───────────────────────────────────────────────
+  //
+  // The rail grew to six-plus buttons plus a chevron and read as noise. The
+  // rule that keeps it calm: at most AI-generate stays a direct button (the
+  // row's other always-visible action, validate, lives in the left gutter),
+  // and everything else is reachable through exactly ONE `⋯`. A future feature
+  // that wants a rail button has to earn one of those two slots or go in the
+  // overflow — this test is what says so.
+  it("AQU-200: a focused row shows the AI-generate group and one ⋯ — no button per action", async () => {
+    renderTable({ onOpenComments: vi.fn(), onOpenHistory: vi.fn(), onOpenRecording: vi.fn() })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const rail = row.querySelector('[data-slot="cell-action-rail"]') as HTMLElement
+    expect(rail).not.toBeNull()
+
+    const directLabels = within(rail)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label") ?? "")
+
+    // ONE overflow trigger for the whole rail — not one per action group.
+    expect(directLabels.filter((l) => l === "More actions")).toHaveLength(1)
+
+    // The lower-frequency actions are NOT direct buttons any more. This is the
+    // half that regresses if someone promotes "just one" back onto the rail.
+    // The mic renders under its denied label in this fixture (no getUserMedia
+    // in happy-dom) — same button, same slot, just a different tooltip.
+    const MIC = "Microphone access blocked — click for help"
+    const collapsed = ["Add comment", "Edit history", MIC, "Upload audio file", "Add footnote"]
+    for (const label of collapsed) {
+      expect(directLabels).not.toContain(label)
+    }
+
+    // What's left is the AI-generate group (sparkle + regenerate) plus the two
+    // pieces of rail chrome — four at the absolute most, against the nine-odd
+    // buttons this rail used to grow to.
+    expect(directLabels.length).toBeLessThanOrEqual(4)
+    expect(directLabels).toContain("Open cell details")
+
+    // …and every collapsed action that this row's gates allow is still
+    // reachable, through that one ⋯.
+    await openRailOverflow(rail)
+    for (const label of ["Add comment", "Edit history", MIC]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+    }
+  })
+
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
     const onOpenComments = vi.fn()
     renderTable({ onOpenComments })
 
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
 
@@ -249,8 +309,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("does not render the comment affordance when onOpenComments is absent from context", async () => {
     renderTable({})
 
-    // A moment for the row to mount before asserting absence.
+    // Open the overflow first, or this would pass merely because the action is
+    // collapsed — the assertion is about the context gate, not the `⋯`.
     await screen.findByText("bonjour")
+    await openRailOverflow()
     expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
   })
 
@@ -258,6 +320,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     const onOpenHistory = vi.fn()
     renderTable({ onOpenHistory })
 
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Edit history" })
     fireEvent.click(button)
 
@@ -268,8 +331,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("does not render the history affordance when onOpenHistory is absent from context", async () => {
     renderTable({})
 
-    // A moment for the row to mount before asserting absence.
+    // Open the overflow first, or this would pass merely because the action is
+    // collapsed — the assertion is about the context gate, not the `⋯`.
     await screen.findByText("bonjour")
+    await openRailOverflow()
     expect(screen.queryByRole("button", { name: "Edit history" })).not.toBeInTheDocument()
   })
 
@@ -353,7 +418,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     fireEvent.click(within(firstRow!).getByRole("button", { name: "Translate with AI" }))
     await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!)
+    const activation = secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!
+    expect(activation).toHaveAttribute("role", "button")
+    expect(activation).toHaveAccessibleName(/Translation for .*: hello/)
+    fireEvent.keyDown(activation, { key: " " })
     await waitFor(() => expect(secondRow!.querySelector(".ProseMirror")).not.toBeNull())
     expect(secondRow).toContainElement(document.activeElement as HTMLElement)
 
@@ -513,13 +581,17 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("raises and unclamps the row while microphone-permission help is open", async () => {
     renderTable({ onOpenRecording: vi.fn() })
 
+    await openRailOverflow()
     const micButton = await screen.findByRole("button", {
       name: "Microphone access blocked — click for help",
     })
     fireEvent.click(micButton)
 
     expect(screen.getByText("Microphone blocked")).toBeInTheDocument()
-    expect(micButton.closest("[data-grid-row]")).toHaveClass("z-30", "overflow-visible")
+    // AQU-200: the mic now lives in the overflow popup, which portals out of
+    // the row — so reach the row through its content, not through the button.
+    const row = screen.getByText("bonjour").closest("[data-grid-row]")
+    expect(row).toHaveClass("z-30", "overflow-visible")
   })
   // ── 2026-08-07 (wire b): a plain row click points the timeline at the cell ──
 
@@ -542,6 +614,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("clicking an interactive control inside the row does not activate the timeline", async () => {
     const onMediaRowActivate = vi.fn()
     renderTable({ onOpenComments: vi.fn(), onMediaRowActivate })
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
     expect(onMediaRowActivate).not.toHaveBeenCalled()

@@ -275,3 +275,81 @@ describe("cells-read metadata passthrough (OBS attachments)", () => {
     expect(page.cells[0].metadata).toBeUndefined()
   })
 })
+
+// ── files listing pages of 100 ───────────────────────────────────────────────
+//
+// Why: the worker pages `files` before joining progress, which is what took the
+// listing from ~1.4 s to ~60 ms at 1000 files on PGlite. The SPA must ask for
+// pages (limit=100) and follow the cursor, or callers get a truncated project.
+describe("fetchProjectFiles — pages of 100", () => {
+  it("requests limit=100, follows nextCursor, dedupes a row that moved across pages", async () => {
+    const calls: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      calls.push(url)
+      const cursor = new URL(url).searchParams.get("cursor")
+      if (!cursor) return pageResponse({ files: [{ fileId: "a" }, { fileId: "b" }], nextCursor: "k1" })
+      // "b" was edited between fetches and sorts ahead of the cursor again.
+      return pageResponse({ files: [{ fileId: "b" }, { fileId: "c" }], nextCursor: null })
+    }))
+    const { fetchProjectFiles } = await import("./cells-read")
+    const files = await fetchProjectFiles("p1", "jwt")
+    expect(files.map((f) => f.fileId)).toEqual(["a", "b", "c"])
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toContain("limit=100")
+    expect(calls[1]).toContain("cursor=k1")
+  })
+
+  it("accepts a pre-paging worker response with no cursor as the whole listing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => pageResponse({ files: [{ fileId: "only" }] })))
+    const { fetchProjectFiles } = await import("./cells-read")
+    expect((await fetchProjectFiles("p1", "jwt")).map((f) => f.fileId)).toEqual(["only"])
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("complete-row streaming (AQU-1328)", () => {
+  it("publishes complete pages immediately and stops on cancellation", async () => {
+    const rows = [makeRow("a"), { ...makeRow("a"), side: "target", value: "Translation" }]
+    const fetchMock = vi.fn().mockResolvedValue(pageResponse({ cells: rows, nextCursor: "next", completeRows: true }))
+    vi.stubGlobal("fetch", fetchMock)
+    const onPage = vi.fn(() => false)
+    await streamFileCells("proj", "file", "jwt", onPage, undefined, undefined, undefined, true)
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("paired")).toBe("1")
+    expect(onPage).toHaveBeenCalledWith(rows, false)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it("buffers a legacy worker's columns until every page is known", async () => {
+    const source = makeRow("a")
+    const target = { ...source, side: "target", value: "Existing translation" }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [source], nextCursor: "targets" }))
+      .mockResolvedValueOnce(pageResponse({ cells: [target], nextCursor: null }))
+    vi.stubGlobal("fetch", fetchMock)
+    const onPage = vi.fn()
+    await streamFileCells("proj", "file", "jwt", onPage, undefined, undefined, undefined, true)
+    expect(onPage.mock.calls).toEqual([[[], false], [[source, target], true]])
+  })
+
+  it("does not reveal legacy source-only rows when a later read fails", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("a")], nextCursor: "targets" }))
+      .mockResolvedValueOnce(new Response("Forbidden", { status: 403 })))
+    const onPage = vi.fn()
+    await expect(streamFileCells("proj", "file", "jwt", onPage, undefined, undefined, undefined, true))
+      .rejects.toThrow("403")
+    expect(onPage.mock.calls).toEqual([[[], false]])
+  })
+
+  it("allows the combined source and target stream to exceed 100 pages", async () => {
+    let index = 0
+    vi.stubGlobal("fetch", vi.fn(async () => pageResponse({
+      cells: [makeRow(String(index))], completeRows: true,
+      nextCursor: ++index < 101 ? String(index) : null,
+    })))
+    const onPage = vi.fn()
+    await streamFileCells("proj", "file", "jwt", onPage, undefined, undefined, undefined, true)
+    expect(onPage).toHaveBeenCalledTimes(101)
+    expect(onPage.mock.lastCall?.[1]).toBe(true)
+  })
+})

@@ -106,6 +106,46 @@ describe("POST /api/v2/access-links (mint)", () => {
     const short = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "12" })
     expect(short.status).toBe(400)
   })
+
+  // [Pen test] Authorization & access control (2026-09-08): redemption mints a
+  // full, unscoped login session for the bound account (see the "mints a
+  // session..." test below) — so minting must not let a project_lead+ caller
+  // pick an arbitrary EXISTING account. Every user clears project_lead+ on
+  // their own personal project, so without this check any user could target
+  // any other user's real account and redeem a login as them.
+  it("rejects targeting an existing account that already has access elsewhere (account-takeover IDOR)", async () => {
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    // "victim" is an established user with their own, unrelated project —
+    // NOT a pre-provisioned translator account for proj-1.
+    await seedUser(2, "victim")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('victim-proj', 'Victim project', NULL, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('victim-proj', 2, 700, 2)",
+    ).run()
+
+    const res = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
+    expect(res.status).toBe(403)
+
+    // Confirm no membership was granted and no link was created for the attack.
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT 1 FROM project_members WHERE project_id = 'proj-1' AND user_id = 2",
+    ).first()
+    expect(member).toBeNull()
+  })
+
+  it("allows re-minting for a translator already a member of the SAME project", async () => {
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    await seedUser(2, "translator")
+    const first = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
+    expect(first.status).toBe(200)
+
+    // Re-mint (e.g. after revoking a leaked link) — the translator's only
+    // membership is proj-1 itself, so this must still be allowed.
+    const second = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "9999" })
+    expect(second.status).toBe(200)
+  })
 })
 
 describe("POST /api/v2/access-links/:token/redeem", () => {

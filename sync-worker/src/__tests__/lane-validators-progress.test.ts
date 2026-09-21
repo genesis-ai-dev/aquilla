@@ -220,11 +220,15 @@ describe('per-lane file/section progress', () => {
     for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
 
     const rows = await progress()
-    // Exactly one file row and one section row, both on the '' lane.
+    // Exactly one row per scope, all on the '' lane. AQU-1093 added the book
+    // row (this fixture is Scripture, so GEN rolls its chapters up); the point
+    // of this test is that N=1 produces ONE lane, which still holds.
     expect(rows.map((r) => [r.scope, r.section_key, r.target_lang, r.total_count, r.filled_count])).toEqual([
+      ['book', 'GEN', '', 2, 1],
       ['file', '', '', 2, 1],
       ['section', 'GEN 1', '', 2, 1],
     ])
+    expect(rows.every((r) => r.target_lang === '')).toBe(true)
   })
 
   it('materializes one row set per lane, always including "", sharing the source denominator', async () => {

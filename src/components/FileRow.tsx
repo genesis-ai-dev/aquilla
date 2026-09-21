@@ -40,6 +40,7 @@ interface FileRowProps {
   /** Opens the Export dialog for this file. */
   onExport?: () => void
   onExportSource?: () => void
+  onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
   /** Opens the Segmentation dialog for this file. */
@@ -53,7 +54,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onExportSource, onAssignWork, onSegmentation, onDelete,
+    onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
     onApplySuggestion,
   } = props
   const t = useT()
@@ -91,6 +92,7 @@ export function FileRow(props: FileRowProps) {
       onMove={onMove}
       onExport={onExport}
       onExportSource={onExportSource}
+      onDownloadOriginal={onDownloadOriginal}
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onDelete={onDelete}
@@ -118,7 +120,10 @@ export function FileRow(props: FileRowProps) {
               )}
               onClick={() => { if (!editing) onSelect() }}
               onKeyDown={(e) => {
-                if (editing) return
+                if (editing || e.target !== e.currentTarget) return
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault(); onSelect(); return
+                }
                 if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
                   e.preventDefault(); onStartRename()
                 }
@@ -157,6 +162,7 @@ export function FileRow(props: FileRowProps) {
             {editing ? (
               <input
                 ref={inputRef}
+                aria-label={file.name}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => onEditCommit(draft)}
@@ -172,7 +178,6 @@ export function FileRow(props: FileRowProps) {
               <AppTooltip content={fileNameTooltip} side="right">
                 <button
                   type="button"
-                  tabIndex={-1}
                   className="block w-full truncate text-left"
                   onClick={(e) => {
                     e.stopPropagation()

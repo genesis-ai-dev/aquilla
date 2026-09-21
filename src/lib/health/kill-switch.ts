@@ -1,23 +1,50 @@
-/**
- * Emergency kill switch for client-side health work: decay health, rule
- * infraction checks, the confidence overlay fetch, and the per-row health
- * ribbon. These are suspected of driving large memory spikes in the editor
- * (whole-file walks that retain per-cell signatures, inputs, and points).
- *
- * Flip `HEALTH_CALCULATIONS_DISABLED` to `false` to restore the feature. For
- * a one-off check on a single browser, `localStorage.setItem("health-calculations", "1")`
- * then reload re-enables the calculations without a rebuild.
- */
-const HEALTH_CALCULATIONS_DISABLED = true
+import { useSyncExternalStore } from "react"
 
-function resolve(): boolean {
-  if (!HEALTH_CALCULATIONS_DISABLED) return true
+/**
+ * User-controlled switch for client-side health work: decay health, rule
+ * infraction checks, the confidence overlay fetch, and the per-row health
+ * ribbon. These are whole-file walks that retain per-cell signatures, inputs,
+ * and points, so a user on a very large file can turn them off from the
+ * editor's view settings.
+ *
+ * On by default; the choice is per-browser (localStorage, `"0"` = off).
+ */
+export const HEALTH_CALCULATIONS_STORAGE_KEY = "health-calculations"
+
+const listeners = new Set<() => void>()
+
+/** Cached so useSyncExternalStore's getSnapshot stays cheap and stable. */
+let enabled = read()
+
+function read(): boolean {
   try {
-    return localStorage.getItem("health-calculations") === "1"
+    return localStorage.getItem(HEALTH_CALCULATIONS_STORAGE_KEY) !== "0"
   } catch {
-    return false
+    return true
   }
 }
 
-/** Read once at module load; a reload picks up the localStorage override. */
-export const HEALTH_CALCULATIONS_ENABLED = resolve()
+export function isHealthCalculationsEnabled(): boolean {
+  return enabled
+}
+
+export function setHealthCalculationsEnabled(next: boolean): void {
+  try {
+    localStorage.setItem(HEALTH_CALCULATIONS_STORAGE_KEY, next ? "1" : "0")
+  } catch {
+    // Private-mode / storage-disabled browsers keep the in-memory choice only.
+  }
+  if (enabled === next) return
+  enabled = next
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+/** Live read — flipping the view-settings toggle re-renders consumers. */
+export function useHealthCalculationsEnabled(): boolean {
+  return useSyncExternalStore(subscribe, isHealthCalculationsEnabled, () => true)
+}

@@ -48,6 +48,7 @@ def command(args, log=None, timeout=900, env=None, check=True, input=None):
                     selector.unregister(key.fileobj)
                     continue
                 log.write(chunk[:remaining])
+                log.flush()
                 remaining = max(0, remaining - len(chunk))
         code = process.wait(timeout=max(1, deadline - time.monotonic()))
         if check and code:
@@ -136,7 +137,6 @@ def execute(config, job):
         raise ValueError("Invalid trusted harness")
     harness = "aquilla-qa-harness:" + harness_sha
     prefix = f"aquilla-qa-{job_id}-"
-    image = "aquilla-qa-app:" + sha
     directory = Path("/var/lib/aquilla-qa-jobs") / str(job_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     source = directory / "source.tar"
@@ -145,14 +145,6 @@ def execute(config, job):
     try:
         report(config, pr, sha, "running")
         download(config, sha, source)
-        shutil.copyfile(CODE / "Dockerfile.app", directory / "Dockerfile")
-        with (directory / "build.log").open("wb") as log:
-            command(["docker", "build", "--network=" + NETWORK,
-                     "--cgroup-parent=aquillaqa.slice", "--memory=2300m",
-                     "--memory-swap=2600m", "--cpu-period=100000", "--cpu-quota=150000",
-                     "--build-arg", "HARNESS_IMAGE=" + harness, "-t", image, str(directory)],
-                    log, env={**os.environ, "DOCKER_BUILDKIT": "0"}, timeout=1200)
-        source.unlink()
         if not current(config, pr, sha):
             return "superseded"
         command(["docker", "run", "-d", "--name", prefix + "db", *COMMON,
@@ -168,8 +160,21 @@ def execute(config, job):
             time.sleep(1)
         else:
             raise RuntimeError("Database readiness timeout")
-        command(["docker", "run", "-d", "--name", prefix + "app", *COMMON,
-                 "--network=container:" + prefix + "db", image], timeout=60)
+        # Reuse installed dependencies without building/copying a multi-GB image
+        # for every commit. All PR extraction and install hooks stay sandboxed.
+        command(["docker", "create", "--name", prefix + "app", *COMMON,
+                 "--network=container:" + prefix + "db",
+                 "-e", "E2E_SERVE_ONLY=1", "-e", "HUSKY=0",
+                 "-e", "E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres",
+                 harness, "python3", "/tmp/app_bootstrap.py"], timeout=60)
+        # The enclosing job directory is root-only; the archive must be readable
+        # by the unprivileged container user after docker cp.
+        source.chmod(0o644)
+        command(["docker", "cp", str(source), prefix + "app:/tmp/source.tar"], timeout=120)
+        command(["docker", "cp", str(CODE / "app_bootstrap.py"),
+                 prefix + "app:/tmp/app_bootstrap.py"])
+        source.unlink()
+        command(["docker", "start", prefix + "app"], timeout=60)
         for _ in range(480):
             if command(["docker", "exec", prefix + "app", "test", "-f",
                         "/tmp/aquilla-stack-ready.json"], check=False).returncode == 0:
@@ -220,8 +225,6 @@ def execute(config, job):
             with (directory / (suffix + ".log")).open("wb") as log:
                 command(["docker", "logs", prefix + suffix], log, check=False, timeout=30)
         cleanup_containers(prefix)
-        command(["docker", "image", "rm", image], check=False, timeout=60)
-        command(["docker", "image", "prune", "-f"], check=False, timeout=60)
         if source.exists():
             source.unlink()
         outbox = dict(suite=suite, url=artifact_url, status=status)

@@ -19,8 +19,11 @@ comment deliveries retry from an outbox without rerunning the tests.
 - `aquilla-qa-runner.service` runs reviewed controller code from
   `/opt/aquilla-qa`. It holds a GitHub credential in root-only
   `/etc/aquilla-qa/runner.json`. It never imports PR code on the host.
-- The controller downloads the exact PR archive. A fixed Dockerfile installs
-  dependencies inside a disposable build container with no credentials.
+- The controller downloads the exact PR archive into a fresh app container.
+  A reviewed bootstrap replaces all app source. It reuses installed dependencies
+  only when manifests and lockfiles match exactly. Patches, custom configuration,
+  and install hooks disable reuse. Changed dependencies install inside that
+  credential-free container. No per-PR Docker image build or dependency copy runs.
 - The app runs in a disposable container with synthetic database credentials.
   A fresh Postgres container owns that run's database. No host directories,
   SSH keys, Docker socket, or provider/GitHub credentials enter either container.
@@ -49,7 +52,7 @@ addresses. Host Node and the existing application service remain unchanged.
 The suite already supports four isolated stacks on a larger machine through
 `SMART_TEST_SHARDS=4`. This host deliberately runs one stack. Starting four
 stacks on 4 GB would compete for memory and CPU. Measure test time separately
-from image preparation, dependency installation, and app build time before
+from source preparation, dependency installation, and app build time before
 increasing concurrency. A second PR waits in the queue.
 
 ## Installation and reviewed updates
@@ -63,8 +66,8 @@ Modern Docker keeps its containerd image store outside `DockerRootDir`; the
 script places both stores on the bounded filesystem and adds boot ordering.
 It requires a QA-only Docker installation with no existing containers.
 
-Copy the reviewed Python controller, webhook, report helper, and fixed
-Dockerfiles into `/opt/aquilla-qa`. Copy `scripts/smart-test-comment.mjs` beside
+Copy the reviewed Python controller, webhook, `app_bootstrap.py`, report helper,
+and harness Dockerfile into `/opt/aquilla-qa`. Copy `scripts/smart-test-comment.mjs` beside
 `report.mjs`. Build `Dockerfile.smart` using a `git archive` of a reviewed
 commit, named `source.tar`; tag it `aquilla-qa-harness:<commit>`.
 Build with `DOCKER_BUILDKIT=0`, network `aquilla-qa`, the `aquillaqa.slice`

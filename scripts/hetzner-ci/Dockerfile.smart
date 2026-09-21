@@ -9,17 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && /opt/uv/bin/pip install --no-cache-dir uv==0.9.9
 COPY source.tar /tmp/source.tar
 WORKDIR /work
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 RUN tar -xf /tmp/source.tar -C /work && rm /tmp/source.tar \
     && pnpm install --frozen-lockfile \
     && pnpm --dir auth-worker install --frozen-lockfile \
     && pnpm --dir sync-worker install --frozen-lockfile \
     && /opt/uv/bin/uv sync --project smart-tests --frozen \
     && pnpm exec playwright install --with-deps chromium \
-    && chmod -R a+rX /root/.local /root/.cache /work/smart-tests/.venv
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-RUN mv /root/.cache/ms-playwright /opt/browsers \
-    && mkdir -p /opt/python \
-    && cp -a /root/.local/share/uv/python/. /opt/python/ \
+    && chmod -R a+rX /root/.local /root/.cache /work/smart-tests/.venv \
     && chmod o+x /root /root/.local /root/.local/share \
     && chown -R node:node /work /opt/browsers
 USER node

@@ -166,7 +166,7 @@ Absence of a completed report matching the commit means NOT VERIFIED.
 
 The standalone [Hetzner webhook runner](../docs/runbooks/smart-testing-webhook.md)
 executes same-repository PRs without GitHub Actions compute. A signed webhook
-feeds a durable queue. The controller builds PR code in a disposable container,
+feeds a durable queue. Fresh containers reuse exact dependency inputs and build PR code,
 then runs a separately pinned, reviewed harness against it. GitHub credentials
 stay in the controller; model credentials enter only the trusted harness.
 PR code cannot replace the deployed outcome checks. Reports identify both

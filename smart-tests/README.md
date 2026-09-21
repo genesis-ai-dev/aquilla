@@ -36,6 +36,8 @@ TYPESAFE_API_KEY=<decision-provider-key>
 TYPESAFE_URL=https://openrouter.ai/api/alpha/decisions
 TYPESAFE_MODEL=typesafe/jev-1.13
 TEXT_MODEL_API_KEY=<text-provider-key>
+TEXT_MODEL_BASE_URL=https://openrouter.ai/api/v1
+TEXT_MODEL_REASONING=none
 TEXT_MODEL=inception/mercury-2.5
 ```
 

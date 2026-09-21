@@ -40,6 +40,22 @@ class RunnerTests(unittest.TestCase):
             pull["head"]["repo"]["id"] = 1
             self.assertFalse(runner.current({}, 716, "a" * 40))
 
+    def test_provider_settings_never_fall_back_to_another_endpoint(self):
+        settings = {"TYPESAFE_API_KEY": "test-decision", "TEXT_MODEL_API_KEY": "test-text",
+                    "TYPESAFE_URL": "https://openrouter.ai/api/alpha/decisions",
+                    "TYPESAFE_MODEL": "typesafe/jev-1.13", "TEXT_MODEL": "inception/mercury-2.5",
+                    "TEXT_MODEL_BASE_URL": "https://openrouter.ai/api/v1", "TEXT_MODEL_REASONING": "none"}
+        self.assertEqual(runner.model_environment({"model_env": settings}), settings)
+        for key in settings:
+            missing = {name: value for name, value in settings.items() if name != key}
+            with self.assertRaises(ValueError):
+                runner.model_environment({"model_env": missing})
+        for url in ["https://api.deepseek.com/v1", "http://openrouter.ai/api/v1",
+                    "https://openrouter.ai.evil.example/api/v1", "https://user@openrouter.ai/api/v1",
+                    "https://openrouter.ai/api/v1?redirect=other"]:
+            with self.assertRaises(ValueError):
+                runner.model_environment({"model_env": {**settings, "TEXT_MODEL_BASE_URL": url}})
+
     def test_reporting_credentials_never_enter_command_arguments(self):
         token = "synthetic-test-token"
         with patch.object(runner, "command") as command:

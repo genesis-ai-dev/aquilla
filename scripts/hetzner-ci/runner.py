@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from webhook import REPO, REPO_ID, STATE, database
 
@@ -121,6 +122,25 @@ def download(config, sha, destination):
             out.write(chunk)
 
 
+
+def model_environment(config):
+    required = {"TYPESAFE_API_KEY", "TEXT_MODEL_API_KEY", "TYPESAFE_URL",
+                "TYPESAFE_MODEL", "TEXT_MODEL", "TEXT_MODEL_BASE_URL",
+                "TEXT_MODEL_REASONING"}
+    supplied = config.get("model_env", {})
+    if any(not isinstance(supplied.get(key), str) or not supplied[key] for key in required):
+        raise ValueError("Explicit provider settings are required; no upstream defaults")
+    # This deployment is provisioned for OpenRouter. A missing/wrong base URL
+    # must fail before any credential can reach another model provider.
+    for key, path in (("TYPESAFE_URL", "/api/alpha/decisions"),
+                      ("TEXT_MODEL_BASE_URL", "/api/v1")):
+        url = urlsplit(supplied[key])
+        if (url.scheme != "https" or url.netloc != "openrouter.ai"
+                or url.path.rstrip("/") != path or url.query or url.fragment):
+            raise ValueError("Unapproved model provider endpoint")
+    return {key: supplied[key] for key in required}
+
+
 def cleanup_containers(prefix):
     for suffix in ("tests", "app", "db"):
         command(["docker", "rm", "-f", prefix + suffix], check=False, timeout=30)
@@ -132,6 +152,7 @@ def execute(config, job):
         raise ValueError("Invalid persisted job")
     if not current(config, pr, sha):
         return "superseded"
+    provider_env = model_environment(config)
     harness_sha = config["harness_sha"]
     if not SHA.fullmatch(harness_sha):
         raise ValueError("Invalid trusted harness")
@@ -189,9 +210,7 @@ def execute(config, job):
             return "superseded"
         # Fixed trusted test image, separate mount/PID namespace, no host mounts.
         # Only the network namespace is shared to preserve localhost safeguards.
-        test_env = {key: value for key, value in config["model_env"].items()
-                    if key in {"TYPESAFE_API_KEY", "TEXT_MODEL_API_KEY", "TYPESAFE_URL",
-                               "TYPESAFE_MODEL", "TEXT_MODEL"}}
+        test_env = dict(provider_env)
         test_env.update(CI="1", SMART_TEST_APP_SHA=sha, SMART_TEST_HARNESS_SHA=harness_sha,
                         SMART_TEST_RUN_ID="server", E2E_BASE_URL="http://127.0.0.1:6173",
                         E2E_DATABASE_URL="postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e",

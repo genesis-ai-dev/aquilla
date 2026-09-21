@@ -77,8 +77,10 @@ Provision these files without putting secrets in command arguments or logs:
 
 - `/etc/aquilla-qa/webhook.json`: `secret`, readable by `aquillaqa` only.
 - `/etc/aquilla-qa/runner.json`: `github_token`, `author`, `harness_sha`, and
-  `model_env`. Root only. `model_env` holds the same five provider settings as
-  the local smart-test environment file. No Cloudflare or production DB keys.
+  `model_env`. Root only. `model_env` holds all seven provider settings from
+  the local smart-test environment file, including `TEXT_MODEL_BASE_URL` and
+  `TEXT_MODEL_REASONING`. The controller rejects missing settings and URLs
+  outside the explicitly provisioned OpenRouter endpoints before execution. No Cloudflare or production DB keys.
 
 Run `scripts/hetzner-ci/install-smart-https.sh` to add a separate nginx virtual
 host for `aquilla-qa.5-161-201-46.sslip.io`.

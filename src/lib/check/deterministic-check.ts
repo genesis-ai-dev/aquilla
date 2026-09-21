@@ -29,9 +29,8 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import { effectiveSourceText } from "@/lib/cell-text"
-import { buildTermRegex } from "@/lib/terminology/match"
-import { buildConceptRegex } from "@/lib/terminology/concept-match"
+import { semanticSourceText } from "@/lib/semantic-source-text"
+import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { CheckableCell, TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
 
@@ -123,7 +122,11 @@ export function scanTermConsistency(
 
     for (const cell of cells) {
       if (cell.status === "empty" || !cell.translated.trim()) continue
-      if (!sourceRe.test(effectiveSourceText(cell))) continue
+      // `semanticSourceText`, not `effectiveSourceText`: a `CheckableCell` types
+      // `medium` as a plain string (the sync-worker row shape), which the SPA's
+      // `SegmentMedium`-typed entry point rejects. Same rule either way — this
+      // is the call the shared scan in term-consistency-scan.ts makes.
+      if (!sourceRe.test(semanticSourceText(cell))) continue
       totalOccurrences++
 
       let matchedAny = false

@@ -23,8 +23,7 @@
 
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { Concept, TermMatchingSettings } from "./types"
-import { termToRegexSource } from "./match"
-import { conceptToRegexSource } from "./concept-match"
+import { conceptToRegexSource, termToRegexSource } from "./match"
 import { t } from "@/lib/i18n/standalone"
 
 // AQU-1271's source-form matcher (`conceptToRegexSource`, below) reaches

@@ -40,7 +40,7 @@ changes. A dedicated GitHub App installation credential can replace it later.
 
 ## Resource limits and parallelism
 
-This host also serves Koine Greek. QA uses a separate 16 GB Docker filesystem,
+This host also serves Koine Greek. QA uses a separate 24 GB container filesystem,
 a shared cgroup capped at 1.5 CPUs and 2500 MB RAM, and at most 512 MB swap.
 Containers have process limits, bounded logs, no Linux capabilities, and no
 privilege escalation. The QA bridge cannot reach host or private-network
@@ -58,6 +58,10 @@ Install Ubuntu's `docker.io` package without upgrading host Node. Then run
 `scripts/hetzner-ci/install-smart-host.sh` as root. It refuses to place a
 filesystem over Docker storage that contains existing images or containers.
 It adds service definitions and network limits; it does not start testing.
+Run `scripts/hetzner-ci/bound-containerd-storage.sh` before building images.
+Modern Docker keeps its containerd image store outside `DockerRootDir`; the
+script places both stores on the bounded filesystem and adds boot ordering.
+It requires a QA-only Docker installation with no existing containers.
 
 Copy the reviewed Python controller, webhook, report helper, and fixed
 Dockerfiles into `/opt/aquilla-qa`. Copy `scripts/smart-test-comment.mjs` beside

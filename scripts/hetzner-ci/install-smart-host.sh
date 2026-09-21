@@ -13,7 +13,7 @@ if ! mountpoint -q /var/lib/docker; then
   test -z "$(docker images -q)"
   systemctl stop docker.service docker.socket
   test ! -e /var/lib/aquilla-qa-docker.ext4
-  fallocate -l 16G /var/lib/aquilla-qa-docker.ext4
+  fallocate -l 24G /var/lib/aquilla-qa-docker.ext4
   mkfs.ext4 -q /var/lib/aquilla-qa-docker.ext4
   printf '%s\n' '/var/lib/aquilla-qa-docker.ext4 /var/lib/docker ext4 loop,defaults 0 0' >> /etc/fstab
   mount /var/lib/docker

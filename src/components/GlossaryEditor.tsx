@@ -441,6 +441,11 @@ export function GlossaryEditor({
         }}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
+        // The detail view owns add/status/remove for renderings; it hands us
+        // the whole next list, which `persist` turns into one term.* event.
+        onRenderingsChange={(conceptId, renderings) =>
+          onEditRenderings(conceptId, () => renderings)
+        }
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}

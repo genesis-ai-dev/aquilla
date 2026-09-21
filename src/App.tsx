@@ -93,6 +93,9 @@ const OrgSettingsProviders = lazy(() =>
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
 )
+const OrgSettingsRules = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRules })),
+)
 const OrgSettingsKnowledge = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
 )
@@ -381,6 +384,9 @@ function AppRoutes() {
           <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/terminology" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/providers" element={<OrgLazyRoute><OrgSettingsProviders /></OrgLazyRoute>} />
+          {/* AQU-1131: org rules are a top-level Settings section, not a
+              project's Living Memory pane. */}
+          <Route path="settings/rules" element={<OrgLazyRoute><OrgSettingsRules /></OrgLazyRoute>} />
           <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
         </Route>

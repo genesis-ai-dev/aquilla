@@ -88,6 +88,25 @@ export interface AttachmentOut {
   recordedBy: string | null
 }
 
+/**
+ * `ARRAY_AGG` comes back as a real array through some drivers and as Postgres's
+ * own literal — `{ana,bo}`, or `{}` when empty — through others. Measured on
+ * the live dev worker it was the literal, so a reader doing
+ * `validators.includes(me)` on it would be asking a STRING whether it contains
+ * a substring: false for "ana" and true for "a", which is worse than useless.
+ *
+ * Normalised here rather than at the readers, because there are five of them.
+ */
+function normalizeValidators(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string")
+  if (typeof raw !== "string") return []
+  const inner = raw.trim().replace(/^\{/, "").replace(/\}$/, "")
+  if (inner === "") return []
+  // Usernames cannot contain a comma or a quote, so a plain split is enough;
+  // the quotes Postgres adds around awkward values are stripped anyway.
+  return inner.split(",").map((v) => v.trim().replace(/^"|"$/g, "")).filter(Boolean)
+}
+
 export interface CellAudioOut {
   attachments: Record<string, AttachmentOut>
   /**
@@ -145,7 +164,7 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       // value the schema's CHECK could not produce still lands on 'dub' — the
       // safe side, since 'source' is what excludes a take from being counted.
       validatorCount: Number(r.validator_count ?? 0) || 0,
-      validators: r.validators ?? [],
+      validators: normalizeValidators(r.validators),
       role: r.role === "source" ? "source" : "dub",
       recordedBy: r.created_by ?? null,
     }

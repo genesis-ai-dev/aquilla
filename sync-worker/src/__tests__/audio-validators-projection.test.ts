@@ -12,6 +12,7 @@ import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { handleCellAudioReadRequest } from '../events/cell-audio-read-route'
+import { collapseCellAudioRows } from '../events/cell-audio-collapse'
 import type { EventKind } from '../events/types'
 
 const P = 'proj-1'
@@ -485,5 +486,50 @@ describe('the audio-attachments read carries votes', () => {
 
     expect((await read(db)).cells[C].attachments.src.role).toBe('source')
     await close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The validators array, as it actually arrives.
+//
+// ARRAY_AGG comes back as a real array through some drivers and as Postgres's
+// own literal — `{ana,bo}`, or `{}` when empty — through others. Measured on
+// the LIVE dev worker it was the literal, which no unit test had caught
+// because PGlite hands back a parsed array. A reader doing
+// `validators.includes(me)` against the literal is asking a STRING whether it
+// contains a substring: false for "ana" and true for "a".
+// ---------------------------------------------------------------------------
+
+describe('the validator list survives either driver', () => {
+  const row = (validators: unknown) => ({
+    cell_id: C, audio_id: 'a1', slot: 'recording', url: 'u', mime_type: null,
+    voice_id: null, reference_audio_id: null, duration_ms: null, label: null,
+    trim_start_ms: null, trim_end_ms: null, target_offset_ms: null,
+    timings_json: null, selected: 1, created_ts: 1, validator_count: 2,
+    validators,
+  }) as unknown as Parameters<typeof collapseCellAudioRows>[0][number]
+
+  const names = (validators: unknown) =>
+    collapseCellAudioRows([row(validators)])[C].attachments.a1.validators
+
+  it('parses a Postgres array literal', () => {
+    expect(names('{ana,bo}')).toEqual(['ana', 'bo'])
+  })
+
+  it('reads an empty literal as an empty list, not as one blank name', () => {
+    expect(names('{}')).toEqual([])
+  })
+
+  it('strips the quotes Postgres adds around awkward values', () => {
+    expect(names('{"ana b",bo}')).toEqual(['ana b', 'bo'])
+  })
+
+  it('passes a real array straight through', () => {
+    expect(names(['ana', 'bo'])).toEqual(['ana', 'bo'])
+  })
+
+  it('treats a missing list as nobody', () => {
+    expect(names(undefined)).toEqual([])
+    expect(names(null)).toEqual([])
   })
 })

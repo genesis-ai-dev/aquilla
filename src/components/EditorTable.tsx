@@ -376,11 +376,30 @@ export function applyRowOverlays(
         // fell through to whole-clip transcription for every section.
         ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
         ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        // AQU-646/AQU-490: THE SECOND COPY OF THIS LIST.
+        //
+        // `mergeCellsWithAudio` rebuilds attachments field by field and so
+        // does this, and the editor's rows go through THIS one. Both are
+        // all-optional on both sides, so a field added to one and not the
+        // other is dropped silently with no type error — which is exactly
+        // what happened: the audio validation control drew an empty gutter on
+        // every line of a fully recorded file, because `role` never arrived
+        // and every take read as a source clip.
+        //
+        // `slot` and `selectedBySlot` were missing here for the same reason,
+        // which left an added-track take unreachable from the text view even
+        // after the rest of that blind spot was fixed.
+        ...(attachment.slot ? { slot: attachment.slot } : {}),
+        ...(attachment.validatorCount != null ? { validatorCount: attachment.validatorCount } : {}),
+        ...(attachment.validators ? { validators: attachment.validators } : {}),
+        ...(attachment.role ? { role: attachment.role } : {}),
+        ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
       }
     }
     next = {
       ...next,
       attachments,
+      selectedBySlot: options.audioEntry.selectedBySlot,
       selectedAudioId: options.audioEntry.selectedAudioId ?? undefined,
       selectedGeneratedVoiceAudioId: options.audioEntry.selectedGeneratedVoiceAudioId ?? undefined,
       audioTimings: options.audioEntry.audioTimings as NonNullable<CellData["audioTimings"]>,

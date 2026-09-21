@@ -66,6 +66,12 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
       lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
         "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,
         "", `Provider-reported model cost: $${cost.toFixed(6)} (${costReported}/${modelCalls} calls report cost; excludes runner compute).`)
+      if (suite.parallel) {
+        const timing = suite.parallel
+        lines.push("", `Parallel execution: ${Number(timing.shards)} isolated stacks; `
+          + `${(Number(timing.wallMs) / 1000).toFixed(1)} s including setup; `
+          + `${(Number(timing.longestShardTestMs) / 1000).toFixed(1)} s for the slowest test shard.`)
+      }
     }
   }
   if (runUrl) lines.push("", `[Run logs and downloadable evidence](${runUrl}).`)

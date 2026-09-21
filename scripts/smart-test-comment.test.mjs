@@ -24,6 +24,10 @@ describe("truthful outcome report", () => {
     expect(report).toContain("No outcome has passed yet")
     expect(report).not.toContain("VERIFIED PASS")
   })
+  it("reports elapsed parallel time rather than adding overlapping test durations", () => {
+    const value = { ...suite(), parallel: { shards: 4, wallMs: 51000, longestShardTestMs: 30000 } }
+    expect(render(value)).toContain("4 isolated stacks; 51.0 s including setup; 30.0 s for the slowest test shard")
+  })
   for (const [name, change] of [
     ["dirty checkout", (s) => { s.dirty = true }],
     ["wrong commit", (s) => { s.build = "b".repeat(40) }],

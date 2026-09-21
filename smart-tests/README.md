@@ -55,6 +55,35 @@ a fresh browser, unchanged identities, and unchanged translation content.
 The comment goal names the row's More actions menu; it does not establish
 unguided discovery of that workflow. See [the initial evidence](./QUALIFICATION.md).
 
+### Parallel runs
+
+```sh
+SMART_TEST_SHARDS=4 SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart
+# Same exact-commit PR reporting, with merged evidence:
+SMART_TEST_SHARDS=4 SMART_TEST_ENV_FILE=.env.smart-tests.local \
+  pnpm test:smart:pr -- <PR-number>
+```
+
+Choose one to four stacks; the default stays one until machine capacity is
+known. Parallel runs reserve E2E slots 9–12, beyond the smoke runner's maximum
+eight slots. Each owns its database, ports, Wrangler state, frontend build,
+browser, auth-state namespace, and evidence directory. Each stack still runs
+one test at a time. Increasing Playwright workers within a shared database
+would race destructive fixture resets, so the parallel launcher rejects that
+override. Do not overlap two parallel smart-suite processes on one machine.
+
+The launcher collects the full selected test manifest before starting shards.
+Missing, duplicate, interrupted, or wrong-build shard evidence fails the merged
+suite; a successful subset never becomes a whole-suite pass. Per-shard results
+remain available beside the merged directory. Existing run IDs cannot be reused.
+
+An initial four-stack local run completes all eight checks in 51.3 seconds
+including setup; its slowest test shard takes 29.6 seconds. The earlier serial
+test phase took roughly 70 seconds excluding setup. These are individual runs,
+not a stability study or a Hetzner capacity measurement. More parallelism can
+increase CPU, Postgres, browser, and provider contention. Measure both setup
+and test time on the target host before raising the cap or changing defaults.
+
 The launcher reserves E2E stack four: database `aquilla_e2e_s3`, app port
 6473, identity port 10087, sync port 10088. It runs one journey at a time.
 Do not start two smart-suite processes on the same machine. The existing

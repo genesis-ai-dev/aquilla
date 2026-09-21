@@ -9,6 +9,7 @@ export default class SmartReporter implements Reporter {
   private planned: string[] = []
   private build = ""
   private dirty = true
+  private started = Date.now()
   private readonly results: {
     title: string; status: string; durationMs: number; evidence: Record<string, unknown>;
   }[] = []
@@ -17,6 +18,11 @@ export default class SmartReporter implements Reporter {
 
   onBegin(_config: FullConfig, suite: Suite) {
     this.planned = suite.allTests().map((test) => test.title)
+    this.started = Date.now()
+    if (process.env.SMART_TEST_COLLECT_ONLY === "1") {
+      console.log(`SMART_PLAN=${JSON.stringify(this.planned)}`)
+      return
+    }
     this.build = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
     this.dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
     this.save("running")
@@ -34,6 +40,7 @@ export default class SmartReporter implements Reporter {
   }
 
   onEnd(result: FullResult) {
+    if (process.env.SMART_TEST_COLLECT_ONLY === "1") return
     this.save(result.status)
     console.log(`Smart-testing evidence: ${path.join(this.directory, "suite.json")}`)
   }
@@ -43,6 +50,7 @@ export default class SmartReporter implements Reporter {
     writeFileSync(path.join(this.directory, "suite.json"), JSON.stringify({
       schemaVersion: 2, build: this.build, dirty: this.dirty,
       planned: this.planned, status, tests: this.results,
+      testWallMs: Date.now() - this.started,
     }, null, 2))
     const rows = this.results.map((result) => `| ${result.title} | ${result.status} | ${(result.durationMs / 1000).toFixed(1)} s |`)
     writeFileSync(path.join(this.directory, "summary.md"), [

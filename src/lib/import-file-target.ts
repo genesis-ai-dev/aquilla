@@ -33,6 +33,44 @@ export interface FileTargetCellRef extends SourceCellRef {
   endMs?: number
 }
 
+/** The slice of an editor cell summary the file-scoped target import reads.
+ *  `CellSummary` (hooks/useActiveCellStore) satisfies it. */
+export interface FileTargetCellSource {
+  id: string
+  fileId: string
+  targetEventId?: string
+  sourceEventId?: string
+  translated?: string
+  group?: string
+  original: string
+  /** Cue timing in SECONDS — the cell view's unit (`useCells` divides the
+   *  server's `start_ms` by 1000). */
+  startTime?: number
+  endTime?: number
+}
+
+/** The open file's cells, in display order, as the matchers want them.
+ *
+ *  This is the seconds → milliseconds seam. Cell views carry cue timings in
+ *  seconds while `TargetRow` timings are milliseconds; handing the seconds
+ *  through unconverted put every cell within the first few ms of the file, so
+ *  overlap matching (AQU-1143) found no counterpart for any cue and a subtitle
+ *  target import matched 0 rows. */
+export function toFileTargetCells(summaries: readonly FileTargetCellSource[]): FileTargetCellRef[] {
+  return summaries.map((c) => ({
+    cellId: c.id,
+    fileId: c.fileId,
+    targetEventId: c.targetEventId,
+    sourceEventId: c.sourceEventId,
+    translated: c.translated ?? "",
+    canonicalRef: c.group,
+    original: c.original,
+    ...(c.startTime !== undefined && c.endTime !== undefined
+      ? { startMs: Math.round(c.startTime * 1000), endMs: Math.round(c.endTime * 1000) }
+      : {}),
+  }))
+}
+
 /** One incoming translation row, from USFM or a mapped spreadsheet. */
 export interface TargetRow {
   /** Canonical ref when the format carries one (USFM, ref-mapped sheets), or

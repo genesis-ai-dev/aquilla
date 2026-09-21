@@ -98,6 +98,7 @@ import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import type { TimebaseCorrection } from "@/lib/import/timebase"
+import { toFileTargetCells } from "@/lib/import-file-target"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
   shouldPatchSystemPrompt,
@@ -4350,18 +4351,8 @@ export function ProjectWorkspace() {
   // subtitle file is aligned by timecode overlap rather than raw row order —
   // one inserted or deleted cue then can't cascade every later translation
   // onto the wrong cell. Cells without timings simply keep order matching.
-  const fileTargetCells = useMemo(() => cellSummaries.map((c) => ({
-    cellId: c.id,
-    fileId: c.fileId,
-    targetEventId: c.targetEventId,
-    sourceEventId: c.sourceEventId,
-    translated: c.translated ?? "",
-    canonicalRef: c.group,
-    original: c.original,
-    ...(c.startTime !== undefined && c.endTime !== undefined
-      ? { startMs: c.startTime, endMs: c.endTime }
-      : {}),
-  })), [cellSummaries])
+  // toFileTargetCells owns the seconds → ms conversion.
+  const fileTargetCells = useMemo(() => toFileTargetCells(cellSummaries), [cellSummaries])
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage

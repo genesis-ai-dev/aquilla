@@ -1251,6 +1251,27 @@ export const editor = defineNamespace({
     "editor.validation.noValidatorsOnState": "No validators on this state",
     "editor.validation.you": "(you)",
 
+    // — Audio validation (AQU-490): the same control, one vote per TAKE ——
+    "editor.audioValidation.notValidatedTooltip": "Recording not validated — click to validate",
+    "editor.audioValidation.notRecordedTooltip": "Nothing recorded on this line yet",
+    "editor.audioValidation.outOfScopeTooltip": "Outside your assigned files",
+    "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
+    "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
+    "editor.audioValidation.ariaValidated":
+      "Recording validated — {ref}. Click to remove your validation.",
+    "editor.audioValidation.ariaPartlyValidated":
+      "{done} of {total} takes validated — {ref}. Click to validate the rest.",
+    "editor.audioValidation.ariaNotValidated": "Recording not validated — {ref}. Click to validate.",
+    "editor.audioValidation.takesHeading": "Takes on this line",
+    "editor.audioValidation.takeFraction": "{done}/{total}",
+    "editor.audioValidation.needsMore": plural({
+      one: "{count} more validator needed",
+      other: "{count} more validators needed",
+    }),
+    "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.generatedTake": "Generated voice",
+    "editor.audioValidation.defaultTrack": "Main",
+
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
     "editor.row.noTimingBadge": "no timing",
@@ -4484,6 +4505,94 @@ export const editor = defineNamespace({
           "Marker appended after the current user's own name in validator lists, so " +
           "they can spot themselves. Parenthesised, second person.",
         maxLength: 12,
+      },
+      "editor.audioValidation.notValidatedTooltip": {
+        description:
+          "Tooltip on the audio validation control when the line's recording has not " +
+          "been signed off yet. The word is 'validate', never 'approve'.",
+      },
+      "editor.audioValidation.notRecordedTooltip": {
+        description:
+          "Tooltip when the line has no recording to validate. Note this means no DUB " +
+          "was recorded — on an imported film the shared programme audio is attached " +
+          "to every line and deliberately does not count.",
+      },
+      "editor.audioValidation.outOfScopeTooltip": {
+        description:
+          "Tooltip when the viewer may validate audio in general but not in this file. " +
+          "No lane clause, unlike the text twin: a recording is shared by every target " +
+          "language, so audio validation is never per-language.",
+      },
+      "editor.audioValidation.unavailableTooltip": {
+        description:
+          "Tooltip when the viewer's role or the project's named-validator list does " +
+          "not let them validate recordings at all.",
+      },
+      "editor.audioValidation.ownRecordingTooltip": {
+        description:
+          "Tooltip when the viewer recorded this take themselves and the project has " +
+          "turned self-validation off for audio. States who must act instead.",
+      },
+      "editor.audioValidation.ariaValidated": {
+        description:
+          "Screen-reader name of the audio validation button once the viewer has " +
+          "validated. {ref} is the line's reference, e.g. 'GEN 1:1'.",
+        placeholders: { ref: "The line's reference, e.g. 'GEN 1:1'." },
+      },
+      "editor.audioValidation.ariaPartlyValidated": {
+        description:
+          "Screen-reader name when a line carries takes on more than one track and " +
+          "some are validated. Every track holding a chosen take must be validated " +
+          "before the line counts, so this says how far along it is.",
+        placeholders: {
+          done: "How many of the line's takes have reached the required number of validators.",
+          total: "How many takes the line has, one per track.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaNotValidated": {
+        description: "Screen-reader name of the audio validation button before anyone validates.",
+        placeholders: { ref: "The line's reference, e.g. 'GEN 1:1'." },
+      },
+      "editor.audioValidation.takesHeading": {
+        description:
+          "Heading of the popover listing a line's takes with each one's validators. " +
+          "Shown only when the line has more than one take.",
+        maxLength: 28,
+      },
+      "editor.audioValidation.takeFraction": {
+        description:
+          "The badge beside the audio validation icon on a line with several takes: " +
+          "how many are validated out of how many exist. Digits and a slash only — it " +
+          "sits in a very small space beside the icon.",
+        placeholders: {
+          done: "How many takes have reached the required number of validators.",
+          total: "How many takes the line has.",
+        },
+        maxLength: 6,
+      },
+      "editor.audioValidation.needsMore": {
+        description:
+          "In the take popover: how many further people must validate this take before " +
+          "it counts. The project sets the required number.",
+        placeholders: { count: "How many more validators are needed." },
+        maxLength: 34,
+      },
+      "editor.audioValidation.noValidators": {
+        description: "Shown for a take in the popover that nobody has validated yet.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.generatedTake": {
+        description:
+          "Labels a take in the popover that was produced by text-to-speech rather than " +
+          "recorded by a person. Such takes are never validated automatically.",
+        maxLength: 20,
+      },
+      "editor.audioValidation.defaultTrack": {
+        description:
+          "Name of the line's main audio track in the take popover, used when a take " +
+          "has no name of its own. Extra tracks carry their own names.",
+        maxLength: 14,
       },
       "editor.row.noTimingAria": {
         description:

@@ -110,8 +110,8 @@ export function GlossaryEditor({
   const { session: frontierSession } = useFrontierSession()
   const importInputRef = useRef<HTMLInputElement>(null)
 
-  // Cells are needed only for candidate mining ("Suggest terms"). Wire the
-  // token fetcher exactly like TerminologyPage so useProjectCells can fetch.
+  // Cells are needed only for candidate mining ("Suggest terms"). Wire a
+  // file-scoped token fetcher so useProjectCells can fetch.
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null

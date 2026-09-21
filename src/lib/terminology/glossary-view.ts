@@ -65,9 +65,16 @@ export function partitionConcepts(concepts: Concept[]): GlossaryPartition {
 export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500
 
 /**
- * May the user add/edit/delete/archive concepts? Local projects (no origin)
- * and not-yet-cached cloud roles are optimistically allowed; the server
- * enforces the real gate. Mirrors the rule previously local to TerminologyPage.
+ * May the user add/edit/delete/archive concepts? A role that isn't known yet
+ * (record still loading, or a local project that never resolves one) is
+ * optimistically allowed; the server enforces the real gate.
+ *
+ * AQU-208: a KNOWN role is always enforced. This used to short-circuit to
+ * "allowed" for any record without `origin`, on the premise that no origin
+ * meant a local project — but server-hydrated records never carry `origin`
+ * (see `minimalProjectRecord`), so on the live surface every role, viewers
+ * included, passed. `syncRole` is the cloud discriminator, the same one
+ * `resolveEditorCapabilities` and `canPerform` key off.
  *
  * AQU-822: `minRole` is the org's configured termbase-edit floor
  * (`ProjectRecord.termbaseEditMinRole`), letting an org drop termbase
@@ -78,10 +85,8 @@ export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500
  */
 export function canEditTermbase(
   syncRole?: { level: number } | null,
-  hasOrigin?: boolean,
   minRole?: number | null,
 ): boolean {
-  if (!hasOrigin) return true
   if (!syncRole) return true
   return syncRole.level >= resolveTermbaseEditFloor(minRole)
 }
@@ -95,16 +100,10 @@ export function canEditTermbase(
  * keeps the two surfaces from drifting when a floor moves, and inherits the
  * mirror's fail-open rule — an unknown role is optimistically allowed and the
  * server stays authoritative — which is also what `canEditTermbase` above
- * does. Reading the level with `?? 0` instead (the shape this replaced) made
- * the same page pessimistic about cells and optimistic about definitions, so a
- * contributor whose cached project record had no `syncRole` yet saw the
- * drill-down as read-only while the termbase controls were live.
+ * does. Like it, a known role is always enforced: there is no `origin`
+ * escape hatch, which is what let a viewer open the inline editor.
  */
-export function canEditTermCells(
-  syncRole?: { level: number } | null,
-  hasOrigin?: boolean,
-): boolean {
-  if (!hasOrigin) return true
+export function canEditTermCells(syncRole?: { level: number } | null): boolean {
   return canPerform("target.cell.commit", syncRole?.level ?? null)
 }
 

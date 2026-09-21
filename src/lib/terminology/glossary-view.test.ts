@@ -90,39 +90,44 @@ describe("partitionConcepts", () => {
 })
 
 describe("canEditTermbase", () => {
-  it("allows local projects regardless of role", () => {
-    expect(canEditTermbase(null, false)).toBe(true)
-    expect(canEditTermbase({ level: 100 }, false)).toBe(true)
+  it("allows when no role is known yet (record loading, or a local project)", () => {
+    expect(canEditTermbase(null)).toBe(true)
+    expect(canEditTermbase(undefined)).toBe(true)
   })
-  it("allows when role not yet cached on a cloud project", () => {
-    expect(canEditTermbase(null, true)).toBe(true)
+  it("requires level >= 500 by default", () => {
+    expect(canEditTermbase({ level: 400 })).toBe(false)
+    expect(canEditTermbase({ level: 500 })).toBe(true)
   })
-  it("requires level >= 500 on a cloud project", () => {
-    expect(canEditTermbase({ level: 400 }, true)).toBe(false)
-    expect(canEditTermbase({ level: 500 }, true)).toBe(true)
+  // AQU-208: this helper used to take a `hasOrigin` flag and allow everything
+  // when it was false. Server-hydrated records never carry `origin`, so the
+  // live glossary handed a viewer every termbase control. A known role is the
+  // whole question — there is no second argument that can waive it.
+  it("enforces a known role for a viewer / commenter / reviewer / contributor", () => {
+    for (const level of [100, 200, 300, 400]) {
+      expect(canEditTermbase({ level })).toBe(false)
+    }
   })
 
   // AQU-822: the floor is org-configurable (termbaseEditMinRole), so BGP can
   // let translators own terminology while other orgs keep the default.
   it("honours an org floor lowered to contributor (400)", () => {
-    expect(canEditTermbase({ level: 400 }, true, 400)).toBe(true)
-    expect(canEditTermbase({ level: 300 }, true, 400)).toBe(false)
+    expect(canEditTermbase({ level: 400 }, 400)).toBe(true)
+    expect(canEditTermbase({ level: 300 }, 400)).toBe(false)
   })
   it("honours an org floor raised to maintainer (600)", () => {
-    expect(canEditTermbase({ level: 500 }, true, 600)).toBe(false)
-    expect(canEditTermbase({ level: 600 }, true, 600)).toBe(true)
+    expect(canEditTermbase({ level: 500 }, 600)).toBe(false)
+    expect(canEditTermbase({ level: 600 }, 600)).toBe(true)
   })
   it("falls back to the 500 default for an absent or out-of-ladder floor", () => {
-    expect(canEditTermbase({ level: 400 }, true, undefined)).toBe(false)
-    expect(canEditTermbase({ level: 400 }, true, null)).toBe(false)
+    expect(canEditTermbase({ level: 400 }, undefined)).toBe(false)
+    expect(canEditTermbase({ level: 400 }, null)).toBe(false)
     // A misconfigured floor must be a no-op, never an open door.
-    expect(canEditTermbase({ level: 400 }, true, 0)).toBe(false)
-    expect(canEditTermbase({ level: 400 }, true, 9999)).toBe(false)
-    expect(canEditTermbase({ level: 500 }, true, 9999)).toBe(true)
+    expect(canEditTermbase({ level: 400 }, 0)).toBe(false)
+    expect(canEditTermbase({ level: 400 }, 9999)).toBe(false)
+    expect(canEditTermbase({ level: 500 }, 9999)).toBe(true)
   })
-  it("keeps the local-project and unknown-role escape hatches under any floor", () => {
-    expect(canEditTermbase({ level: 100 }, false, 600)).toBe(true)
-    expect(canEditTermbase(null, true, 600)).toBe(true)
+  it("keeps the unknown-role escape hatch under any floor", () => {
+    expect(canEditTermbase(null, 600)).toBe(true)
   })
 })
 
@@ -131,26 +136,23 @@ describe("canEditTermbase", () => {
 // same page, so they are asserted against the same role ladder here.
 describe("canEditTermCells", () => {
   it("lets a contributor (400) edit cells in the drill-down", () => {
-    expect(canEditTermCells({ level: 400 }, true)).toBe(true)
+    expect(canEditTermCells({ level: 400 })).toBe(true)
   })
   it("keeps the drill-down read-only for a viewer / commenter / reviewer", () => {
-    expect(canEditTermCells({ level: 100 }, true)).toBe(false)
-    expect(canEditTermCells({ level: 200 }, true)).toBe(false)
-    expect(canEditTermCells({ level: 300 }, true)).toBe(false)
+    expect(canEditTermCells({ level: 100 })).toBe(false)
+    expect(canEditTermCells({ level: 200 })).toBe(false)
+    expect(canEditTermCells({ level: 300 })).toBe(false)
   })
   it("allows a project_lead and above", () => {
-    expect(canEditTermCells({ level: 500 }, true)).toBe(true)
-    expect(canEditTermCells({ level: 700 }, true)).toBe(true)
+    expect(canEditTermCells({ level: 500 })).toBe(true)
+    expect(canEditTermCells({ level: 700 })).toBe(true)
   })
-  it("keeps the local-project and unknown-role escape hatches", () => {
-    // Local (no origin): nothing to authorize against.
-    expect(canEditTermCells({ level: 100 }, false)).toBe(true)
-    // Cloud project whose cached record has no syncRole yet — optimistic, the
-    // same way canEditTermbase is, so the two gates on this page agree. The
-    // server (and the outbox's own role-policy mirror) still refuses a commit
-    // the caller may not make.
-    expect(canEditTermCells(null, true)).toBe(true)
-    expect(canEditTermCells(undefined, true)).toBe(true)
+  it("keeps the unknown-role escape hatch", () => {
+    // No syncRole yet — optimistic, the same way canEditTermbase is, so the
+    // two gates on this page agree. The server (and the outbox's own
+    // role-policy mirror) still refuses a commit the caller may not make.
+    expect(canEditTermCells(null)).toBe(true)
+    expect(canEditTermCells(undefined)).toBe(true)
   })
 })
 

@@ -177,7 +177,7 @@ async function readPlan(
   db: AquillaDb,
   projectId: string,
   lane: string,
-): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
+): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; validationCountAudio: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
   const [validationCount, countStructural, validationCountAudio] = await Promise.all([
     readValidationCount(db, projectId),
     // AQU-1083: the board reads the same policy every other progress surface
@@ -206,7 +206,7 @@ async function readPlan(
     }
   })
   withBook.sort((x, y) => compareUnits(x.unit, y.unit, x.book, y.book))
-  return { units: withBook.map((x) => x.unit), revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt }
+  return { units: withBook.map((x) => x.unit), revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt }
 }
 
 export async function handlePlanRequest(
@@ -232,7 +232,7 @@ export async function handlePlanRequest(
   const lane = (url.searchParams.get('lane') ?? '').trim()
 
   if (request.method === 'GET') {
-    const { units, revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt } =
+    const { units, revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt } =
       await readPlan(db, projectId, lane)
     // THREE CLOCKS, because none of them alone moves for every change worth
     // re-reading. `revision` tracks the event sequence; plan writes never
@@ -252,8 +252,15 @@ export async function handlePlanRequest(
     // against its subtitle count instead of its cue sheet, and every file in
     // one "All files" folder, for as long as nothing in the project changes.
     // s1 = the shape before AQU-1278; s2 = these three fields.
+    //
+    // AQU-490 needs both halves again. `va` joins the key because every
+    // unit's audioValidatedCount is now measured against the AUDIO threshold,
+    // so raising it changes the body with no data write to move any of the
+    // three timestamps. And s3 because that field kept its name and its type
+    // and changed its question — the one kind of change none of the DATA
+    // parts of this key can ever express.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:s2${structuralTag}"`
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:va${validationCountAudio}:s3${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }

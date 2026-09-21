@@ -246,14 +246,21 @@ describe("GET .../plan — caching and auth", () => {
       file_section_progress: [progress("f1", "file", "")],
     })
     const etag = (await get(db)).headers.get("ETag")!
-    expect(etag).toContain(":s2")
+    expect(etag).toContain(":s3")
 
     // And the marker is load-bearing: a caller holding the same key from
     // before the shape changed does NOT get a 304.
-    const previousShape = etag.replace(":s2", "")
+    const previousShape = etag.replace(":s3", "")
     expect(previousShape).not.toBe(etag)
     const res = await get(db, { headers: { "If-None-Match": previousShape } })
     expect(res.status).toBe(200)
+
+    // AQU-490: nor does one from the shape immediately before this — the live
+    // case at deploy. audioValidatedCount kept its name and its type and
+    // changed its question, which nothing else in the key can express.
+    const s2Era = etag.replace(":va1:s3", ":s2")
+    expect(s2Era).not.toBe(etag)
+    expect((await get(db, { headers: { "If-None-Match": s2Era } })).status).toBe(200)
   })
 
   it("moves when the validation threshold or the headings policy changes", async () => {
@@ -288,6 +295,16 @@ describe("GET .../plan — caching and auth", () => {
     expect(excluded).not.toBe(raised)
     expect(excluded).toContain(":nostruct")
     expect((await get(db, { headers: { "If-None-Match": raised } })).status).toBe(200)
+
+    // AQU-490: and the AUDIO threshold, for the same reason. Every unit's
+    // audioValidatedCount is read from the audio histogram against it, so
+    // raising it changes the board with no data write to move any clock.
+    await db.prepare("UPDATE project_settings SET settings = ? WHERE project_id = ?")
+      .bind(JSON.stringify({ validationCount: 2, countStructuralCells: false, validationCountAudio: 2 }), P).run()
+    const audioRaised = (await get(db)).headers.get("ETag")!
+    expect(audioRaised).not.toBe(excluded)
+    expect(audioRaised).toContain(":va2:")
+    expect((await get(db, { headers: { "If-None-Match": excluded } })).status).toBe(200)
   })
 
   it("moves when a cue sheet is REMOVED, which changes every audio number", async () => {

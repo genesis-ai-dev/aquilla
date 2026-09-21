@@ -439,20 +439,47 @@ export class Workspace {
     return target
   }
 
-  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
-    // Blurring commits immediately. Register the response waiter before the
-    // blur so a fast local worker cannot complete the request first.
-    const committed = this.page.waitForResponse((response) => {
-      if (response.request().method() !== "POST" || !response.ok()) return false
+  private async commitTargetCellEdit(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    const isEventsPost = (url: string, method: string): boolean => {
+      if (method !== "POST") return false
       try {
-        return new URL(response.url()).pathname.endsWith("/events")
+        return new URL(url).pathname.endsWith("/events")
       } catch {
         return false
       }
+    }
+    // Blurring commits immediately. Register waiters before the blur so a
+    // fast local worker cannot complete the request first.
+    const committed = this.page.waitForResponse((response) => {
+      return response.ok() && isEventsPost(response.url(), response.request().method())
     }, { timeout: 20_000 })
+    let requestAt = 0
+    const requestSeen = this.page.waitForRequest((request) => {
+      return isEventsPost(request.url(), request.method())
+    }, { timeout: 20_000 }).then(() => {
+      requestAt = Date.now()
+    })
+    const blurStarted = Date.now()
     await this.page.locator("aside").click()
-    await committed
+    const response = await committed
+    await requestSeen
+    const ackedAt = Date.now()
+    // Cell-write latency is request-sent → ack (the AQU-1005 seq-lock convoy
+    // shows up here). Blur→ack also includes TipTap idle debounce and
+    // Playwright protocol delay across many contexts — that is not the lock.
+    const timing = response.request().timing()
+    const timedRoundTrip =
+      timing.responseEnd >= 0 && timing.requestStart >= 0
+        ? Math.round(timing.responseEnd - timing.requestStart)
+        : 0
+    const writeMs = timedRoundTrip > 0
+      ? timedRoundTrip
+      : (requestAt > 0 ? ackedAt - requestAt : ackedAt - blurStarted)
     await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+    return { writeMs, ackedAt }
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -470,6 +497,16 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /** Like `editCell`, but returns blur → `POST /events` ack timing. */
+  async editCellMeasuringWrite(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    await this.activateTargetCell(index)
+    await this.page.keyboard.type(text)
+    return this.commitTargetCellEdit(index, text)
   }
 
   /**

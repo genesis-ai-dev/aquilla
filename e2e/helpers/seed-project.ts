@@ -28,14 +28,27 @@ import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { gunzipSync } from "node:zlib"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
+import {
+  parseHelloaoComplete,
+  type HelloaoComplete,
+} from "../../src/lib/parsers/helloao"
 import { readPersistedSession } from "./auth-state"
 import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/** Matches `src/lib/sync/bulk-import.ts` CHUNK so a whole-Bible upload uses
+ * the same per-request write txn size as production. */
+const IMPORT_CHUNK = 1500
+const HELLOAO_BSB_FIXTURE = path.resolve(
+  __dirname,
+  "../fixtures/helloao/BSB.complete.json.gz",
+)
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 const SYNC_BASE = `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
@@ -90,6 +103,147 @@ export async function readSeededFileEvents(
   return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
+interface ImportString {
+  id: string
+  original: string
+  originalHtml?: string
+  type?: string
+  group?: string
+  paragraphStart?: boolean
+}
+
+function cellsFromStrings(strings: ImportString[]) {
+  let prevCellId: string | null = null
+  const cells = strings.map((str, seq) => {
+    const cell = {
+      id: randomUUID(),
+      cellId: str.id,
+      anchorCellId: prevCellId,
+      value: str.original,
+      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      ...(str.type !== undefined ? { type: str.type } : {}),
+      ...(str.group ? { canonicalRef: str.group } : {}),
+      sequenceIndex: seq,
+      // useCells reads paragraphStart from `source.metadata.paragraphStart`
+      // (src/hooks/useCells.ts), not the top-level field — mirror
+      // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
+      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+    }
+    prevCellId = str.id
+    return cell
+  })
+  return { cells, cellIds: strings.map((s) => s.id) }
+}
+
+interface ImportFileMeta {
+  name: string
+  fileType: string
+  kind: string
+  importFormat: string
+  parserVersion: string
+}
+
+/** POST `/import` in production-sized chunks (file.create on the first). */
+async function importCellsIntoProject(
+  jwt: string,
+  projectId: string,
+  cells: ReturnType<typeof cellsFromStrings>["cells"],
+  file: ImportFileMeta,
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const fileId = randomUUID()
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const importHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
+  const fileRow = { id: randomUUID(), role: "source", ...file }
+  for (let offset = 0; offset === 0 || offset < cells.length; offset += IMPORT_CHUNK) {
+    const chunk = cells.slice(offset, offset + IMPORT_CHUNK)
+    await postIdempotentJson({
+      url: `${SYNC_BASE}/import`,
+      headers: importHeaders,
+      body: {
+        projectId,
+        fileId,
+        cells: chunk,
+        clientTs: Date.now(),
+        ...(offset === 0 ? { file: fileRow } : {}),
+      },
+      operation: `bulk import chunk ${offset / IMPORT_CHUNK + 1}`,
+    })
+  }
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
+    headers: importHeaders,
+    body: { projectId, fileId, cells: [], complete: true },
+    operation: "import finalize",
+  })
+  return { fileId, cellIds: cells.map((c) => c.cellId) }
+}
+
+/** Bulk-import markdown as a new file on an existing project (same `/import`
+ * path as `seedProjectWithFile`). */
+export async function importMarkdownIntoProject(
+  jwt: string,
+  projectId: string,
+  markdown: string,
+  fileName: string,
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const { cells, cellIds } = cellsFromStrings(extractMarkdownStrings(markdown))
+  const imported = await importCellsIntoProject(jwt, projectId, cells, {
+    name: fileName,
+    fileType: "md",
+    kind: "md",
+    importFormat: "md",
+    parserVersion: "workspace-import-v1",
+  })
+  return { fileId: imported.fileId, cellIds }
+}
+
+/** Load the checked-in helloao BSB `complete.json` snapshot and parse it with
+ * the same producer as the import dialog (`parseHelloaoComplete`). Does not
+ * hit the network. Refresh: see `e2e/fixtures/helloao/README.md`. */
+export async function loadHelloaoBsbFixture(): Promise<{
+  name: string
+  id: string
+  strings: ReturnType<typeof parseHelloaoComplete>
+}> {
+  let gz: Buffer
+  try {
+    gz = await fs.readFile(HELLOAO_BSB_FIXTURE)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT") {
+      throw new Error(
+        `Missing ${HELLOAO_BSB_FIXTURE}. Snapshot it with the curl in e2e/fixtures/helloao/README.md — this spec must not fetch bible.helloao.org at runtime.`,
+      )
+    }
+    throw error
+  }
+  const complete = JSON.parse(gunzipSync(gz).toString("utf8")) as HelloaoComplete
+  const name = complete.translation.englishName || complete.translation.name || "BSB"
+  return { name, id: complete.translation.id, strings: parseHelloaoComplete(complete) }
+}
+
+/** Import a helloao translation as a source file in production-sized chunks.
+ * Load the fixture with {@link loadHelloaoBsbFixture} first so parse is not
+ * confused with write-path latency. */
+export async function importHelloaoStringsIntoProject(
+  jwt: string,
+  projectId: string,
+  parsed: { name: string; id: string; strings: ReturnType<typeof parseHelloaoComplete> },
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const { cells, cellIds } = cellsFromStrings(parsed.strings)
+  const imported = await importCellsIntoProject(jwt, projectId, cells, {
+    name: `${parsed.name} (${parsed.id})`,
+    fileType: "helloao",
+    kind: "helloao",
+    importFormat: "helloao",
+    parserVersion: "workspace-import-v1",
+  })
+  return { fileId: imported.fileId, cellIds }
+}
+
 /** Create a project and import a markdown fixture entirely server-side.
  * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
@@ -112,61 +266,22 @@ export async function seedProjectWithFile(
     })
   }
 
-  const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE
   const fileName = path.basename(fixturePath)
-  const strings = extractMarkdownStrings(await fs.readFile(fixturePath, "utf8"))
+  const imported = await importMarkdownIntoProject(
+    jwt,
+    projectId,
+    await fs.readFile(fixturePath, "utf8"),
+    fileName,
+  )
 
-  // Mirror src/lib/import.ts buildBulkCells: chain via anchorCellId, thread
-  // sequenceIndex + paragraphStart, keep the parser-minted cell ids.
-  let prevCellId: string | null = null
-  const cells = strings.map((str, seq) => {
-    const cell = {
-      id: randomUUID(),
-      cellId: str.id,
-      anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
-      ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
-      sequenceIndex: seq,
-      // useCells reads paragraphStart from `source.metadata.paragraphStart`
-      // (src/hooks/useCells.ts), not the top-level field — mirror
-      // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
-      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
-    }
-    prevCellId = str.id
-    return cell
-  })
-
-  const token = await mintSyncToken(jwt, projectId, fileId)
-  const importHeaders = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
+  return {
+    projectId,
+    projectName,
+    fileId: imported.fileId,
+    fileName,
+    cellIds: imported.cellIds,
   }
-  const file = {
-    id: randomUUID(),
-    name: fileName,
-    fileType: "md",
-    role: "source",
-    kind: "md",
-    importFormat: "md",
-    parserVersion: "workspace-import-v1",
-  }
-  await postIdempotentJson({
-    url: `${SYNC_BASE}/import`,
-    headers: importHeaders,
-    body: { projectId, fileId, file, cells, clientTs: Date.now() },
-    operation: "bulk import",
-  })
-  await postIdempotentJson({
-    url: `${SYNC_BASE}/import`,
-    headers: importHeaders,
-    body: { projectId, fileId, cells: [], complete: true },
-    operation: "import finalize",
-  })
-
-  return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
 }
 
 /** The projected-row fields specs assert on; the route returns more. */

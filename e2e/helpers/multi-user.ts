@@ -1,6 +1,6 @@
 import { test as base, expect, type Browser, type Page } from "@playwright/test"
 import { resetBackend } from "./seed"
-import { ensureAuthState, injectSession } from "./auth"
+import { ensureAuthState, injectSession, type PersistedSession } from "./auth"
 import { getMyOrg } from "./frontier-api"
 
 export interface AuthedPage extends Page {
@@ -21,13 +21,15 @@ export function orgRoute(page: Pick<AuthedPage, "orgId">, rest = ""): string {
   return `/orgs/${page.orgId}${suffix}`
 }
 
-async function makeAuthedPage(
+/** Open a fresh browser context already signed in as `session`.
+ *
+ * Used by the alice/bob/carol fixtures and by specs that register extra users
+ * in-test (AQU-1060 six-editor load) without expanding the global seed set. */
+export async function openAuthedPage(
   browser: Browser,
-  username: "alice" | "bob" | "carol",
-  baseURL?: string,
-): Promise<AuthedPage> {
-  const session = await ensureAuthState(username)
-  const ownOrg = await getMyOrg(session.jwt)
+  session: PersistedSession,
+  opts: { baseURL?: string; pinOrgId?: number } = {},
+): Promise<Page> {
   const ctx = await browser.newContext()
   // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
   // scripts/e2e-up.ts). GET /api/v2/orgs without query params is memberships
@@ -35,23 +37,23 @@ async function makeAuthedPage(
   // her own org as active so she lands on a concrete org rather than the
   // all-organizations aggregate (which has no "+ New Project" button).
   // The guard keeps this a one-time default that in-test org switches can
-  // still override. Only alice needs this: bob/carol see multiple orgs only
-  // via genuine memberships, where the all-orgs default is the correct,
-  // realistic behavior (and orgs/members.smoke depends on it).
-  if (username === "alice") {
+  // still override. Callers gate pinOrgId to the users that need it (alice
+  // in the alice/bob/carol fixtures; any extra in-test users that need the
+  // same treatment for the AQU-1060 six-editor load spec).
+  if (opts.pinOrgId != null) {
     await ctx.addInitScript((orgId) => {
       // Always pin alice to her personal org — path-scoped `/orgs/:id` resume
       // via localStorage must not retain a stale id from a prior document in
       // this context (or "all"), or RootRedirect / Dashboard.goto land on
       // OrgRouteGate's not-found shell (no "+ New Project", no account menu).
       localStorage.setItem("org:active", String(orgId))
-    }, ownOrg.id)
+    }, opts.pinOrgId)
   }
   // AppEntry redirects a fresh unsigned context away from "/" before session
   // injection finishes. Pre-set the hint cookie so the SPA stays put while
   // the IndexedDB session is seeded.
   await ctx.addCookies([
-    { name: "aq_hint", value: "1", url: baseURL ?? "http://127.0.0.1:5173" },
+    { name: "aq_hint", value: "1", url: opts.baseURL ?? "http://127.0.0.1:5173" },
   ])
   // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
@@ -69,6 +71,31 @@ async function makeAuthedPage(
   const page = await ctx.newPage()
   await page.goto("/")
   await injectSession(page, session)
+  return page
+}
+
+async function makeAuthedPage(
+  browser: Browser,
+  username: "alice" | "bob" | "carol",
+  baseURL?: string,
+): Promise<AuthedPage> {
+  const session = await ensureAuthState(username)
+  const ownOrg = await getMyOrg(session.jwt)
+  // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
+  // scripts/e2e-up.ts), so GET /api/v2/orgs returns *every* org in the tenancy
+  // (viaPlatformAdmin), not just her memberships. Once a second user's personal
+  // org exists (the bob/carol fixtures), her org list has >1 entry with no
+  // active selection, so the app defaults to the "All organizations" aggregate
+  // — which has no "+ New Project" button, hanging Dashboard.createProject()
+  // until the test times out. Seed her own org as active so she lands on a
+  // concrete org. Only alice needs this: bob/carol see multiple orgs only via
+  // genuine memberships, where the all-orgs default is the correct, realistic
+  // behavior (and orgs/members.smoke depends on it). The guard keeps this a
+  // one-time default that in-test org switches can still override.
+  const page = await openAuthedPage(browser, session, {
+    baseURL,
+    pinOrgId: username === "alice" ? ownOrg.id : undefined,
+  })
   return Object.assign(page, { username, orgId: ownOrg.id }) as AuthedPage
 }
 

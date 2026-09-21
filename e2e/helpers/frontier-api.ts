@@ -193,6 +193,25 @@ export async function addProjectMember(
   if (!r.ok) throw new Error(`addProjectMember failed: HTTP ${r.status} — ${await r.text()}`)
 }
 
+/** POST /api/v2/auth/register — mint a throwaway account for specs that need
+ * more than the alice/bob/carol seed (AQU-1060). Does not persist a sidecar. */
+export async function registerAccount(args: {
+  username: string
+  email: string
+  password: string
+}): Promise<{ jwt: string; username: string; email: string }> {
+  const r = await fetch(`${FRONTIER_BASE}/api/v2/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  })
+  if (!r.ok) {
+    throw new Error(`registerAccount failed: HTTP ${r.status} — ${await r.text()}`)
+  }
+  const body = (await r.json()) as { access_token: string }
+  return { jwt: body.access_token, username: args.username, email: args.email }
+}
+
 /** Convenience: create project server-side AND add another user as a
  * contributor in one call. Returns the project id. */
 export async function bootstrapSharedProject(

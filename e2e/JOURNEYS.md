@@ -117,6 +117,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
 | Agent-import sandbox | `e2e/specs/agent-import.spec.ts` |
 | Account switch cross-tab | `e2e/specs/orgs/account-switch-cross-tab.spec.ts` |
+| Six simultaneous editors (write + live-update latency under whole-BSB helloao import) | `e2e/specs/collab/six-editor-concurrency.spec.ts` |
 | Session-expired banner | `e2e/specs/auth/session-expired-banner.smoke.spec.ts` |
 
 ## Covered in RTL

@@ -18,6 +18,7 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
 import { timeoutSignal } from "./fetch-timeout"
+import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import posthog from "@/lib/posthog"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
 
@@ -351,7 +352,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     // AbortError is caught below and treated as transient (no budget burn).
     // Feature-detected (B3): AbortSignal.timeout is missing on older WebKit —
     // calling it unconditionally threw here BEFORE the fetch, bricking writes.
-    res = await fetchFn(url, {
+    res = await observedSyncFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -359,7 +360,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       },
       body: JSON.stringify({ events }),
       signal: timeoutSignal(15_000),
-    })
+    }, fetchFn)
   } catch (err) {
     // RES-2: network throws (including AbortError/timeout) are transient — do NOT
     // burn the attempt budget. Use stampOutboxError (same policy as token-mint
@@ -418,7 +419,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
 
   let body: PostBody
   try {
-    body = (await res.json()) as PostBody
+    body = await readSyncJson<PostBody>(res)
   } catch {
     await markOutboxAttempt(
       batch.map((r) => r.id),

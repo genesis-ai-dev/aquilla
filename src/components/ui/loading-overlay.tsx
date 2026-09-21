@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
@@ -78,8 +78,28 @@ function BlockingLoadingOverlay({
 }: Omit<React.ComponentProps<"div">, "children"> & {
   label?: string
 }) {
+  const ref = useRef<HTMLDivElement>(null)
+  // AQU-1332: pointer input is already swallowed by the scrim, but keyboard
+  // focus, screen readers, and DOM-driven agents could still reach every
+  // control on the source screen React keeps mounted during the transition —
+  // a page full of live-looking controls that do nothing. Make the rest of
+  // <body> inert for the overlay's lifetime so every input path sees the
+  // same thing: one busy status and nothing else to act on.
+  useEffect(() => {
+    const own = ref.current
+    const made: Element[] = []
+    for (const el of Array.from(document.body.children)) {
+      if (el === own || el.hasAttribute("inert")) continue
+      el.setAttribute("inert", "")
+      made.push(el)
+    }
+    return () => {
+      for (const el of made) el.removeAttribute("inert")
+    }
+  }, [])
   return createPortal(
     <div
+      ref={ref}
       role="status"
       aria-busy="true"
       aria-label={label}

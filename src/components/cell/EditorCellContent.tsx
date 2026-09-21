@@ -14,6 +14,8 @@ import {
   segmentUsfmForDisplay,
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
+import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
+import type { Concept } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export function UsfmNoteChip({
@@ -63,16 +65,32 @@ export function SanitizedRichHtml({
   html,
   idmlStyleCatalog,
   idmlParagraphStyleId,
+  concepts,
 }: {
   html: string
   idmlStyleCatalog?: IdmlStyleCatalog
   idmlParagraphStyleId?: string
+  /**
+   * AQU-1135: managed terminology for this project. When supplied, every
+   * active-concept match is wrapped in the shared `.term-chip-host
+   * [data-source-term]` highlight so a FORMATTED source cell gets the same key
+   * terms — and the same clickable lookup — a plain-text one already had.
+   * Omitted by callers with no terminology surface (the agent workbench).
+   */
+  concepts?: Concept[]
 }) {
+  const t = useT()
   const safeHtml = useMemo(
-    () => looksLikeIdmlHtml(html)
-      ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
-      : sanitizeSourceDisplayHtml(html),
-    [html, idmlParagraphStyleId, idmlStyleCatalog],
+    () => {
+      const sanitized = looksLikeIdmlHtml(html)
+        ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
+        : sanitizeSourceDisplayHtml(html)
+      // Strictly after sanitizing — the source sanitizer drops data-* attrs.
+      return decorateTermsInHtml(sanitized, concepts, {
+        label: (term) => t("editor.term.managed", { term }),
+      })
+    },
+    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t],
   )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 

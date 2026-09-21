@@ -19,15 +19,29 @@ export interface DownloadSourceArgs {
   getToken: (fileId: string) => Promise<string | null>
   /** Target-language lane to overlay. Empty/omitted selects the legacy lane. */
   targetLang?: string
+  /**
+   * AQU-1148: overlay only translations meeting the project's validation
+   * threshold. A verse whose target is an unvalidated draft keeps the client's
+   * own original words instead of shipping as approved text. Omitted/false is
+   * today's contract: every current translation, validated or not.
+   */
+  validatedOnly?: boolean
 }
 
-function sourceExportUrl(projectId: string, fileId: string, targetLang?: string, mode?: "raw"): string {
+function sourceExportUrl(
+  projectId: string,
+  fileId: string,
+  targetLang?: string,
+  mode?: "raw",
+  validatedOnly?: boolean,
+): string {
   const base =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/source`
   const params = new URLSearchParams()
   if (targetLang) params.set("lane", targetLang)
   if (mode) params.set("mode", mode)
+  if (validatedOnly) params.set("validated", "1")
   const qs = params.toString()
   return qs ? `${base}?${qs}` : base
 }
@@ -58,7 +72,7 @@ export interface DownloadSourceResult {
 export async function downloadSourceFile(args: DownloadSourceArgs): Promise<DownloadSourceResult> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
-  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang, undefined, args.validatedOnly)
 
   const res = await fetch(url, {
     method: "GET",
@@ -198,7 +212,7 @@ export async function fetchInjectedSourceText(
 ): Promise<string> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
-  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang, undefined, args.validatedOnly)
 
   const res = await fetch(url, {
     method: "GET",
@@ -237,6 +251,8 @@ export interface DownloadProjectZipArgs {
   onProgress?: (done: number, total: number) => void
   /** Target-language lane to overlay in every exported USFM file. */
   targetLang?: string
+  /** AQU-1148: overlay only validated translations in every exported file. */
+  validatedOnly?: boolean
 }
 
 const EXPORTABLE = new Set(["usfm"])
@@ -273,6 +289,7 @@ export async function downloadProjectZip(
         fileId: file.id,
         getToken: args.getToken,
         targetLang: args.targetLang,
+        validatedOnly: args.validatedOnly,
       })
       zip.file(downloadName, text)
     } catch (e) {

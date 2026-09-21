@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { CellData } from "./useCells"
-import { buildCellData } from "./useCells"
+import { buildCellData, PAINT_COALESCE_MS } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -135,33 +135,6 @@ export interface CellFootnoteDetails {
   sourceCount: number
   targetCount: number
   hasFootnotes: boolean
-}
-
-export interface CellDetailsSummary {
-  id: string
-  fileId: string
-  index: number
-  sourceText: string
-  targetText: string
-  sourceHtml?: string
-  targetHtml?: string
-  status: CellData["status"]
-  validationStatus: CellData["validationStatus"]
-  activeValidators: string[]
-  hasTargetText: boolean
-  endorsementCount?: number
-  sourceEventId?: string
-  targetEventId?: string
-  targetSourceEventId?: string | null
-  lastEditAt?: number
-  startTime?: number
-  endTime?: number
-  sequenceIndex?: number
-  medium?: CellData["medium"]
-  sourceFootnoteCount: number
-  targetFootnoteCount: number
-  hasSourceFootnotes: boolean
-  hasTargetFootnotes: boolean
 }
 
 export interface CellBacktranslationState {
@@ -618,47 +591,6 @@ export class CellStore {
       this.ctx.username,
       this.ctx.requiredValidations,
     )
-  }
-
-  getCellDetailsSummary(cellId: string): CellDetailsSummary | null {
-    const index = this.indexById.get(cellId)
-    if (index == null) return null
-    const source = this.sourceById.get(cellId)
-    const target = this.targetById.get(cellId)
-    if (!source && !target) return null
-    const sourceText = source?.value ?? ""
-    const targetText = target?.value ?? ""
-    const audit = this.ctx.auditStats.get(cellId)
-    const activeValidators = audit?.activeValidators ?? []
-    const validated = target?.validated ?? false
-    const status = deriveStatus(targetText, validated)
-    const footnotes = this.getCellFootnotes(cellId)
-    return {
-      id: cellId,
-      fileId: this.ctx.fileId ?? "",
-      index,
-      sourceText,
-      targetText,
-      ...(source?.valueHtml ? { sourceHtml: source.valueHtml } : {}),
-      ...(target?.valueHtml ? { targetHtml: target.valueHtml } : {}),
-      status,
-      validationStatus: deriveValidationStatus(status, activeValidators, this.ctx.username, this.ctx.requiredValidations),
-      activeValidators,
-      hasTargetText: targetText.trim().length > 0,
-      endorsementCount: target?.endorsementCount ?? source?.endorsementCount,
-      sourceEventId: source?.eventId,
-      targetEventId: target?.eventId,
-      targetSourceEventId: target?.sourceEventId,
-      lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
-      startTime: target?.startMs ?? source?.startMs ?? undefined,
-      endTime: target?.endMs ?? source?.endMs ?? undefined,
-      sequenceIndex: target?.sequenceIndex ?? source?.sequenceIndex ?? undefined,
-      medium: (target?.medium ?? source?.medium ?? undefined) as CellData["medium"],
-      sourceFootnoteCount: footnotes.sourceCount,
-      targetFootnoteCount: footnotes.targetCount,
-      hasSourceFootnotes: footnotes.sourceCount > 0,
-      hasTargetFootnotes: footnotes.targetCount > 0,
-    }
   }
 
   getCellBacktranslationState(
@@ -2116,6 +2048,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
     const effectiveSoft = soft || usedCache
     setIsError(false)
+    let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
       const token = tokenFetcher ? await tokenFetcher(fid) : null
       if (!token) {
@@ -2172,8 +2105,19 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const buffer: CellRow[] = []
       const hardRows: CellRow[] = []
+      // Every page contains complete rows; coalesce their publication while
+      // keeping soft refetches atomic and preserving in-flight local edits.
       let paintedFirstPage = false
-      const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
+      let lastPaintAt = 0
+      const paintRows = () => {
+        if (paintTimer) clearTimeout(paintTimer)
+        paintTimer = undefined
+        if (generationRef.current !== gen) return
+        paintedFirstPage = true
+        lastPaintAt = Date.now()
+        store.replaceRows(store.mergeProtectedRows(hardRows, startSeq).rows, { full: true })
+      }
+      const pushRows = (rows: CellRow[]): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (effectiveSoft) {
@@ -2181,10 +2125,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           return
         }
         for (const row of rows) hardRows.push(row)
-        if (rebuild && !paintedFirstPage) {
-          paintedFirstPage = true
-          store.replaceRows(hardRows, { full: true })
-        }
+        const remaining = PAINT_COALESCE_MS - (Date.now() - lastPaintAt)
+        if (!paintedFirstPage || remaining <= 0) paintRows()
+        else paintTimer ??= setTimeout(paintRows, remaining)
       }
 
       const startSeq = store.getWriteSeq()
@@ -2213,9 +2156,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
 
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, false), "target", trackStreamMeta())
-      if (generationRef.current !== gen) return
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, true), "source", trackStreamMeta())
+      await streamFileCells(pid, fid, token, pushRows, undefined, trackStreamMeta(), undefined, true)
       if (generationRef.current !== gen) return
 
       let discardedProtected = false
@@ -2265,6 +2206,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }, FETCH_RETRY_DELAYS_MS[attempt])
       }
     } finally {
+      if (paintTimer) clearTimeout(paintTimer)
       if (generationRef.current === gen) {
         inFlightRef.current = false
         if (pendingSoftRefetchRef.current) {

@@ -83,6 +83,19 @@
 > hard lockout that rejects valid tokens from a shared egress IP, and by its own
 > DB-load rationale likely costs more round trips than it saves — reported to
 > that PR, not patched here).
+> `docs/OPSEC-REVIEW-2026-09-17.md` covers the sixth pass on API security &
+> data exposure, reviewing the large batch of Agent API surface (cell comments,
+> Living Memory reads, membership/changeset/cell commands) that landed since
+> the 09-10 pass. OPS-33: the cell-comments read route (AQU-1233) keyed
+> identity solely off the credential's own `pii` flag and never consulted a
+> project's `agentAuthorship: 'none'` opt-out — the opposite of `pii.ts`'s
+> documented "project setting wins over the token flag" invariant — so an
+> opted-out project's comment authors still leaked, pseudonymously by default
+> or as real usernames on a `pii` credential. OPS-34: the Living Memory read
+> route (AQU-1229) ran its own independent pseudonymizer that honored neither
+> the `'none'` opt-out nor a `pii: true` credential. Both routes now delegate
+> to `pii.ts`'s shared `resolveAuthorshipPolicy`/`mapAuthor` instead of
+> reimplementing identity scrubbing locally.
 >
 > **Numbering note:** OPS-n is assigned at write time, and three passes have now
 > run concurrently on separate branches, so the numbers are *not* in date order.

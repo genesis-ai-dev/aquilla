@@ -2,9 +2,24 @@ import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { vi } from "vitest"
 
-import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
+import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 
 describe("CellAreaPlaceholder", () => {
+  it("keeps unresolved rows inert, supports retry, and disappears when complete", () => {
+    const retry = vi.fn()
+    const { rerender } = render(<CellRowsLoadStatus loading error={false} onRetryClick={retry} />)
+    const status = screen.getByRole("status", { name: "Loading file from the cloud" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[inert]")).not.toBeNull()
+    expect(status.querySelectorAll("[data-slot='skeleton']")).toHaveLength(3)
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+    rerender(<CellRowsLoadStatus loading={false} error onRetryClick={retry} />)
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading file" }))
+    expect(retry).toHaveBeenCalledOnce()
+    rerender(<CellRowsLoadStatus loading={false} error={false} onRetryClick={retry} />)
+    expect(screen.queryByTestId("cell-rows-load-status")).not.toBeInTheDocument()
+  })
+
   it("keeps the editor-shaped template and shows explicit progress while cells hydrate", () => {
     render(
       <CellAreaPlaceholder

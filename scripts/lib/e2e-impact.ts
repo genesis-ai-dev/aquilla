@@ -20,7 +20,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   },
   {
     source: /^(?:src\/(?:pages|components|lib)\/(?:org|team|preferences)|auth-worker\/.*(?:org|team|member))/i,
-    sentinels: ["e2e/specs/orgs/account-switcher.smoke.spec.ts"],
+    sentinels: [
+      "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+      "e2e/specs/orgs/members.smoke.spec.ts",
+    ],
   },
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
@@ -136,6 +139,11 @@ export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: s
   for (const rawFile of changedFiles) {
     const file = normalize(rawFile)
     if (!file) continue
+
+    if (/^(?:smart-tests\/|scripts\/smart-tests\.ts$)/.test(file)) {
+      add(["e2e/specs/editor/import-and-edit.smoke.spec.ts"], `${file} affects smart testing`)
+      continue
+    }
 
     if (/^e2e\/specs\/.*\.smoke\.spec\.tsx?$/.test(file)) {
       add([file], `${file} changed`)

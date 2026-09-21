@@ -61,7 +61,10 @@ describe("SourceSelectionToolbar", () => {
     const sourceInput = await screen.findByLabelText(/source term for new concept/i)
     expect((sourceInput as HTMLInputElement).value).toBe("Holy Spirit")
     expect(screen.getByLabelText(/rendering for new concept/i)).toBeInTheDocument()
-    expect(screen.getByRole("checkbox", { name: /case insensitive/i })).toBeChecked()
+    // AQU-1271: case sensitivity moved into the collapsed "Matching options"
+    // disclosure, stated positively — unchecked = the case-insensitive default.
+    fireEvent.click(screen.getByRole("button", { name: /matching options/i }))
+    expect(screen.getByRole("checkbox", { name: /match case exactly/i })).not.toBeChecked()
     expect(document.querySelector('[data-slot="popover-content"]')).not.toBeNull()
   })
 

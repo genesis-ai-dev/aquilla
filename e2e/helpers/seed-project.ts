@@ -199,6 +199,32 @@ export async function readProjectedCells(
   return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
 }
 
+/** The projected-concept fields specs assert on; the route returns more. */
+export interface ProjectedConceptRow {
+  conceptId: string
+  sourceTerm: string
+  renderings: Array<{ rendering: string; status: string }>
+  notes: string | null
+  status: "active" | "draft" | "deprecated"
+}
+
+/** Read a project's LIVE (non-tombstoned) termbase straight from the
+ * sync-worker projection, as the JWT's user — the same read every other member's
+ * glossary hydrates from, so it proves a term.* write landed for them too and
+ * is not just the writer's optimistic state. */
+export async function readProjectedConcepts(
+  jwt: string,
+  projectId: string,
+): Promise<ProjectedConceptRow[]> {
+  // Any file scope works — the route verifies the project only (see useConcepts).
+  const token = await mintSyncToken(jwt, projectId, "any")
+  const r = await fetch(`${SYNC_BASE}/api/v1/projects/${encodeURIComponent(projectId)}/concepts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!r.ok) throw new Error(`concepts read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { concepts: ProjectedConceptRow[] }).concepts
+}
+
 /** One event on a cell's chain as returned by the per-cell history route
  * (sync-worker `cell-history-read-route.ts`), newest-first. */
 export interface CellHistoryEventRow {

@@ -214,6 +214,8 @@ export default defineConfig(({ mode }) => ({
       ".claude/worktrees/**",
       ".claire/**",
       "e2e/**",
+      "smart-tests/journeys/**",
+      "smart-tests/.venv/**",
       // Each worker has its own vitest config + local node_modules. Running
       // their tests from root pulls in worker-local deps the root install
       // doesn't have. deploy-workers.yml runs each worker's tests in its

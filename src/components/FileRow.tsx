@@ -120,7 +120,10 @@ export function FileRow(props: FileRowProps) {
               )}
               onClick={() => { if (!editing) onSelect() }}
               onKeyDown={(e) => {
-                if (editing) return
+                if (editing || e.target !== e.currentTarget) return
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault(); onSelect(); return
+                }
                 if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
                   e.preventDefault(); onStartRename()
                 }
@@ -159,6 +162,7 @@ export function FileRow(props: FileRowProps) {
             {editing ? (
               <input
                 ref={inputRef}
+                aria-label={file.name}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => onEditCommit(draft)}
@@ -174,7 +178,6 @@ export function FileRow(props: FileRowProps) {
               <AppTooltip content={fileNameTooltip} side="right">
                 <button
                   type="button"
-                  tabIndex={-1}
                   className="block w-full truncate text-left"
                   onClick={(e) => {
                     e.stopPropagation()

@@ -54,6 +54,11 @@ const withSections = (sections: ReturnType<typeof section>[]) => {
 }
 
 describe("access adapts the content", () => {
+  it("offers a file editor link independently of planning permission", () => {
+    renderInspector(unit(), false)
+    expect(screen.getByRole("link", { name: "Open Mark in editor" }))
+      .toHaveAttribute("href", "/project/p1/editor/file/f1")
+  })
   it("gives a maintainer the date control and the Done button", () => {
     renderInspector(unit())
     expect(screen.getByTestId("plan-mark-done")).toBeInTheDocument()

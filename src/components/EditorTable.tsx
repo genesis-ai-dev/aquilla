@@ -130,6 +130,7 @@ import {
   SanitizedRichHtml,
   TargetIdmlHtml,
   TargetRichHtml,
+  UsfmMarkedText,
   UsfmNoteChip,
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
@@ -4291,13 +4292,14 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
       return
     }
     parts.push(
-      <SourceWithTermLookup
-        key={`t-${i}`}
-        {...props}
-        inline
-        text={seg.text}
-        ranges={clipRangesToSegment(props.ranges, seg)}
-      />,
+      <UsfmMarkedText key={`t-${i}`} marks={seg.marks}>
+        <SourceWithTermLookup
+          {...props}
+          inline
+          text={seg.text}
+          ranges={clipRangesToSegment(props.ranges, seg)}
+        />
+      </UsfmMarkedText>,
     )
   })
 
@@ -4553,15 +4555,16 @@ function TargetReadText({
       return
     }
     parts.push(
-      <TargetDecoratedText
-        key={`t-${i}`}
-        text={seg.text}
-        concepts={concepts}
-        ranges={clipRangesToSegment(ranges, seg)}
-        onRangeClick={onRangeClick}
-        onTermChipClick={onTermChipClick}
-        showKeyTermHighlights={showKeyTermHighlights}
-      />,
+      <UsfmMarkedText key={`t-${i}`} marks={seg.marks}>
+        <TargetDecoratedText
+          text={seg.text}
+          concepts={concepts}
+          ranges={clipRangesToSegment(ranges, seg)}
+          onRangeClick={onRangeClick}
+          onTermChipClick={onTermChipClick}
+          showKeyTermHighlights={showKeyTermHighlights}
+        />
+      </UsfmMarkedText>,
     )
   })
 

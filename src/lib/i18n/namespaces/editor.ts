@@ -1271,6 +1271,10 @@ export const editor = defineNamespace({
     "editor.audioValidation.ariaPartlyValidated":
       "{done} of {total} takes validated — {ref}. Click to validate the rest.",
     "editor.audioValidation.ariaNotValidated": "Recording not validated — {ref}. Click to validate.",
+    "editor.audioValidation.ariaYoursMoreNeeded": plural({
+      one: "You have validated this recording — {ref}. {count} more validator needed.",
+      other: "You have validated this recording — {ref}. {count} more validators needed.",
+    }),
     "editor.audioValidation.takesHeading": "Takes on this line",
     "editor.audioValidation.takeFraction": "{done}/{total}",
     "editor.audioValidation.needsMore": plural({
@@ -4578,6 +4582,17 @@ export const editor = defineNamespace({
       "editor.audioValidation.ariaNotValidated": {
         description: "Screen-reader name of the audio validation button before anyone validates.",
         placeholders: { ref: "The line's reference, e.g. 'GEN 1:1'." },
+      },      "editor.audioValidation.ariaYoursMoreNeeded": {
+        description:
+          "Screen-reader name when the viewer HAS validated but the project asks "
+          + "for more validators than the recording has. Without it the button "
+          + "announces plain 'validated' while the icon beside it shows a single "
+          + "check rather than the double check that means finished — the label "
+          + "and the picture would disagree.",
+        placeholders: {
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+          count: "How many further validators the recording still needs.",
+        },
       },
       "editor.audioValidation.takesHeading": {
         description:

@@ -113,6 +113,19 @@ describe("the readout", () => {
     expect(fraction()).toBeNull()
   })
 
+  // Found in the browser at a threshold of two: the button announced
+  // "Recording validated" on a line whose icon was still a single check. The
+  // label and the picture have to agree.
+  it("says how many more are needed when the viewer has validated but the line has not", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })], { validationRequirement: 3 })
+    expect(button()).toHaveAccessibleName(/you have validated.*GEN 1:1.*2 more validators needed/i)
+  })
+
+  it("says plainly validated once the threshold is met", () => {
+    draw([take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] })], { validationRequirement: 2 })
+    expect(button()).toHaveAccessibleName(/^Recording validated/i)
+  })
+
   it("names its state for a screen reader, with the line's reference", () => {
     draw([
       take({ audioId: "a", validatorCount: 1, validators: ["ana"] }),

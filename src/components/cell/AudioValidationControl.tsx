@@ -158,7 +158,18 @@ export function AudioValidationControl({
           ? t("editor.audioValidation.outOfScopeTooltip")
           : t("editor.audioValidation.unavailableTooltip"))
 
-  const ariaLabel = allMine
+  // The shortest distance any take still is from the threshold, so the label
+  // can say "one more needed" rather than a bare "validated" while the icon
+  // beside it is still a single check. Found in the browser: at a threshold of
+  // two the button announced "Recording validated" on a line that visibly was
+  // not, which is the picture and the words disagreeing.
+  const shortBy = displayed.reduce(
+    (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
+    0,
+  )
+  const ariaLabel = allMine && shortBy > 0
+    ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
+    : allMine
     ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
     : showFraction
       ? t("editor.audioValidation.ariaPartlyValidated", {

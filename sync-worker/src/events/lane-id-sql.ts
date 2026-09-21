@@ -51,6 +51,29 @@ export function laneIdResolveFromColSql(
 }
 
 /**
+ * artifact_bindings resolution (slice 8): a 'source' binding_role -> the
+ * project's single source lane; any other role -> the target lane whose
+ * legacy_tag matches target_lang. Mirrors the backfill's ARTIFACT_BINDINGS
+ * rule (scripts/neon-backfill-lanes.ts). Returns NULL until the project's
+ * lanes exist. The caller MUST splice {@link laneIdResolveBindingBinds}.
+ */
+export function laneIdResolveBindingSql(): string {
+  return `(SELECT id FROM public.lanes WHERE project_id = ?
+    AND ( (? = 'source' AND role = 'source')
+       OR (? <> 'source' AND role = 'target' AND legacy_tag = ?) )
+    LIMIT 1)`
+}
+
+/** Binds for {@link laneIdResolveBindingSql}: projectId, role, role, targetLang. */
+export function laneIdResolveBindingBinds(
+  projectId: string,
+  bindingRole: string,
+  targetLang: string,
+): unknown[] {
+  return [projectId, bindingRole, bindingRole, targetLang]
+}
+
+/**
  * Dual-read match for a target-lane tag: prefer opaque `lane_id` once
  * backfill has populated it; fall back to `target_lang` while `lane_id` is
  * still NULL.

@@ -156,8 +156,12 @@ describe('GET cells dual-read', () => {
 describe('GET cell-validators dual-read', () => {
   it('filters by lane_id when populated and by target_lang when NULL', async () => {
     const { db } = await makeTestDb({
+      // Both lanes must exist: slice-8 cell_validators_lane_id_fkey rejects a
+      // dangling lane_id. The 'fr' row is here to prove it is excluded from the
+      // ?lane=es query, not to test a missing lane.
       lanes: [
         { id: ES_LANE, project_id: PROJECT, role: 'target', name: 'Spanish', lang_code: 'es', legacy_tag: 'es' },
+        { id: FR_LANE, project_id: PROJECT, role: 'target', name: 'French', lang_code: 'fr', legacy_tag: 'fr' },
       ],
       cell_validators: [
         {

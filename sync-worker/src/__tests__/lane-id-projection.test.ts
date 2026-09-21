@@ -20,6 +20,7 @@ import {
   type PersistedEvent,
 } from '../events/event-projection'
 import { fullProgressRecomputeStmts } from '../events/progress-projection'
+import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from '../events/lane-id-sql'
 import type { EventKind } from '../events/types'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -146,13 +147,32 @@ describe('lane_id resolution — canonical per-event projection', () => {
     expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
   })
 
-  it('never regresses a resolved lane_id back to NULL if lanes later disappear', async () => {
+  it('the composite FK forbids orphaning a resolved lane_id, and COALESCE guards NULL-writes', async () => {
     await seedLanes(t)
     await project(t, [SOURCE, LEGACY_TARGET])
     expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
 
-    await t.pg.query(`DELETE FROM lanes WHERE project_id = $1`, [PROJECT])
-    await project(t, [ev({ kind: 'target.cell.commit', id: 'tc-3', parentId: 'tc-legacy', payload: { value: 'Coucou' } })])
+    // Slice 8: with cells_lane_id_fkey in place, a lane can no longer "disappear"
+    // out from under the rows that resolved it — the FK rejects the delete. This
+    // is strictly stronger than the COALESCE guard the pre-FK test relied on.
+    await expect(
+      t.pg.query(`DELETE FROM lanes WHERE project_id = $1`, [PROJECT]),
+    ).rejects.toThrow(/foreign key constraint/i)
+    expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
+
+    // COALESCE still guards the other direction: a lanes-unaware write that
+    // supplies NULL must not regress an already-resolved id. Re-run the exact
+    // ON CONFLICT clause the projection uses, forcing excluded.lane_id = NULL.
+    await t.pg.query(
+      `INSERT INTO cells
+         (project_id, file_id, cell_id, side, target_lang, value, event_id,
+          last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
+       VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
+       ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+         value   = excluded.value,
+         lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
+      [PROJECT, FILE],
+    )
     expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE) // COALESCE keeps it
   })
 })
@@ -253,5 +273,42 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
       { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
       { target_lang: 'es', lane_id: ES_LANE },
     ])
+  })
+})
+
+describe('lane_id resolution — artifact_bindings resolver (slice 8)', () => {
+  async function resolveBinding(role: string, tag: string): Promise<string | null> {
+    const row = await t.db
+      .prepare(`SELECT ${laneIdResolveBindingSql()} AS id`)
+      .bind(...laneIdResolveBindingBinds(PROJECT, role, tag))
+      .first<{ id: string | null }>()
+    return row?.id ?? null
+  }
+
+  it('source role -> source lane; support/target role -> target lane by tag', async () => {
+    await seedLanes(t)
+    // A 'source' binding ignores target_lang and lands on the source lane.
+    expect(await resolveBinding('source', '')).toBe(SOURCE_LANE)
+    expect(await resolveBinding('source', 'es')).toBe(SOURCE_LANE)
+    // Non-source roles resolve the target lane whose legacy_tag matches.
+    expect(await resolveBinding('target', 'es')).toBe(ES_LANE)
+    expect(await resolveBinding('support', '')).toBe(DEFAULT_TARGET_LANE)
+    // No matching lane -> NULL (behavior-neutral until the lane exists).
+    expect(await resolveBinding('target', 'zz')).toBeNull()
+  })
+})
+
+describe('lane_id composite FK (slice 8)', () => {
+  it('rejects a cells row whose (project_id, lane_id) has no lanes match', async () => {
+    await seedLanes(t)
+    await expect(
+      t.pg.query(
+        `INSERT INTO cells
+           (project_id, file_id, cell_id, side, target_lang, value, event_id,
+            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
+         VALUES ($1, $2, 'ghost', 'target', '', 'x', 'e-ghost', 'alice', 1, 0, 1, 'h', 'no-such-lane')`,
+        [PROJECT, FILE],
+      ),
+    ).rejects.toThrow(/foreign key constraint/i)
   })
 })

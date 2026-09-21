@@ -52,8 +52,8 @@ SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart -- \
   --repeat-each=5
 ```
 
-The default command runs eleven checks: eight live journeys, the DOM audit,
-and two oracle qualifications. The additional journeys rename a project,
+The default command runs twelve checks: eight live journeys, two DOM
+audits, and two oracle qualifications. The additional journeys rename a project,
 rename a file, post one comment on the intended cell, and sign off on one
 finished translation. Each checks server state, a fresh browser, unchanged
 identities, and unchanged translation content.
@@ -166,7 +166,7 @@ For a reviewed local checkout matching an open PR's exact head, run:
 SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart:pr -- <PR-number>
 ```
 
-The command posts one starting comment, runs all eight checks, and updates
+The command posts one starting comment, runs all twelve checks, and updates
 that comment with the results. Commit and push changes first. It refuses a
 dirty checkout or a mismatched PR head. Authenticate `gh` before running it.
 Evidence stays under `smart-tests/results/pr-<number>-<timestamp>/` locally.

@@ -69,6 +69,29 @@ provide advisory evidence; they do not silently replace a release check.
 | Reject an unsigned file and a misplaced sign-off, accept a real validation | Model-free oracle qualification | `smart-tests/journeys/qualification.spec.ts` |
 | Expose meaningful controls to Jev's actual DOM reader, and activate a target before offering fill | Eight initial route surfaces and editor activation | `smart-tests/journeys/dom-audit.spec.ts` |
 
+### Planned smart journeys
+
+The backlog, highest value first. Each row needs a synthetic starting state,
+a goal free of test selectors, an authoritative oracle, and a realistic
+adverse condition before it is written. Add a journey only when its oracle
+can fail a broken build; a green run against a working build proves nothing
+on its own. Move a row into the table above when it lands, and record what
+the covered outcome actually is rather than what it was meant to be.
+
+| # | Outcome a user cares about | Authoritative oracle | Adverse condition | Why adaptive |
+| --- | --- | --- | --- | --- |
+| 1 | A reviewer withdraws a sign-off they gave in error, and the row stops counting as approved | `cell_validators` projection plus the event log holding both a `cell.validate` and its `cell.unvalidate` | Withdraw immediately after granting, before the first flush | The withdraw control lives inside a popover the sign-off journey never opens |
+| 2 | Two people edit the same cell offline and both edits survive reconcile, with one winning head | Per-cell history: both commits logged, exactly one projected head, loser reported in `stale[]` | Partition one writer, edit both, then rejoin | The parent-chain rule is the core architecture claim and has no adaptive coverage |
+| 3 | A translator finds and replaces a term across a file without touching unmatched cells | Projection: every matched cell changed, every unmatched cell's value and chain head identical | Navigate away mid-replace | Replace is destructive at scale; a wrong match set is invisible in the UI |
+| 4 | An invited member joins and sees exactly the projects their role allows | `projects` read as the invitee, plus a denied read on an unshared project | Accept the invite in a second browser session | Permission leaks are the highest-severity failure and need a real second identity |
+| 5 | An export round-trips: what a user downloads re-imports to the same cells | Re-import the downloaded bytes and compare projections cell by cell | Export while one cell has an unflushed edit | Byte-level fidelity is what the product promises publishers |
+| 6 | A staged agent changeset only reaches translations after a human approves it | Projection unchanged while staged; changed only after approval; changeset row's status | Reject one changeset, approve another | The approval gate is a safety property; it must fail closed |
+| 7 | A source re-import updates source text and leaves every human translation intact | Projection: source values change, target values and target heads do not | Re-import while a target edit is in flight | The destructive path most likely to silently lose human work |
+| 8 | A contributor records audio on a cell and it plays back after a reload | R2 object plus the cell's audio projection | Reload before the upload completes | Media upload has no adaptive coverage and fails differently from text |
+
+Rows 1 and 3 are the cheapest to add next: both reuse the existing seeded
+file and need no second identity or media fixture.
+
 ## Journeys moved to another repository
 
 | Area | Journey | Current owner |

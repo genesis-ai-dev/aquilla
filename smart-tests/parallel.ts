@@ -9,7 +9,10 @@ export interface SuiteEvidence {
 }
 
 export function shardCount(value = "1"): number {
-  if (!/^[1-4]$/.test(value)) throw new Error("SMART_TEST_SHARDS must be 1, 2, 3, or 4")
+  // Six is the point where a balanced split of today's suite reaches its
+  // longest journey; more stacks cannot finish it any sooner, and each one
+  // costs a database, a build, and a browser. The default stays one.
+  if (!/^[1-6]$/.test(value)) throw new Error("SMART_TEST_SHARDS must be 1 to 6")
   return Number(value)
 }
 
@@ -18,7 +21,7 @@ export function shardLayout(count: number) {
   return Array.from({ length: count }, (_, index) => ({
     shard: `${index + 1}/${count}`,
     // Existing smoke uses slots 1–8; serial smart testing uses slot 4.
-    // Parallel smart stacks reserve 9–12, including DBs and inspector ports.
+    // Parallel smart stacks reserve 9–14, including DBs and inspector ports.
     stack: `${index + 9}/${count + 8}`,
     suffix: `shard-${index + 1}`,
   }))
@@ -54,4 +57,47 @@ export function mergeSuites(
       })),
     },
   }
+}
+
+/**
+ * Longest-processing-time assignment. Playwright's own `--shard` splits the
+ * manifest into contiguous blocks with no idea what anything costs, so one
+ * stack can hold every slow journey. Starting the longest journeys first and
+ * backfilling short ones around them keeps the suite's wall time close to its
+ * single longest journey instead of its serial total.
+ *
+ * A journey with no recorded duration is assumed to be the slowest known one.
+ * A new journey therefore claims its own stack rather than being appended to
+ * an already loaded one, and an under-estimate can only cost wall time — it
+ * can never drop a test, because `mergeSuites` still checks the full manifest.
+ */
+export function balanceShards(
+  planned: string[], count: number, durationsMs: Record<string, number>,
+): string[][] {
+  const known = Object.values(durationsMs).filter((value) => value > 0)
+  const unknown = known.length ? Math.max(...known) : 1
+  const shards = Array.from({ length: Math.max(1, Math.min(count, planned.length)) },
+    () => ({ titles: [] as string[], load: 0 }))
+  const ordered = [...planned].sort((left, right) =>
+    (durationsMs[right] ?? unknown) - (durationsMs[left] ?? unknown)
+    || left.localeCompare(right))
+  for (const title of ordered) {
+    const lightest = shards.reduce((best, shard) => shard.load < best.load ? shard : best)
+    lightest.titles.push(title)
+    lightest.load += durationsMs[title] ?? unknown
+  }
+  return shards.map((shard) => shard.titles)
+}
+
+/** Record what each journey actually cost, so the next split is better. */
+export function recordDurations(
+  previous: Record<string, number>,
+  tests: { title: string; status: string; durationMs: number }[],
+): Record<string, number> {
+  const next = { ...previous }
+  for (const test of tests) {
+    // An interrupted or crashed test's duration says nothing about its cost.
+    if (test.status === "passed" || test.status === "failed") next[test.title] = test.durationMs
+  }
+  return Object.fromEntries(Object.entries(next).sort(([left], [right]) => left.localeCompare(right)))
 }

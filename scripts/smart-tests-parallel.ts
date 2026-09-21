@@ -1,8 +1,15 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { mergeSuites, shardLayout, type SuiteEvidence } from "../smart-tests/parallel"
+import {
+  balanceShards, mergeSuites, recordDurations, shardLayout, type SuiteEvidence,
+} from "../smart-tests/parallel"
 import { killChildTree } from "./lib/spawn-worker"
+
+/** Playwright --grep is a JS regex; a journey title is literal text. */
+function escapeForGrep(title: string): string {
+  return title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
 
 export async function runParallel(root: string, count: number, args: string[]) {
   if (args.some((arg) => /^--(?:workers|shard|reporter|config)(?:=|$)|^-[jc]/.test(arg))) {
@@ -28,7 +35,20 @@ export async function runParallel(root: string, count: number, args: string[]) {
   if (!Array.isArray(planned) || !planned.length || planned.some((title) => typeof title !== "string")) {
     throw new Error("Smart test manifest is empty or invalid")
   }
-  const layouts = shardLayout(Math.min(count, planned.length))
+  // Split by measured cost, not by Playwright's duration-blind contiguous
+  // --shard. The aim is a suite that finishes with its longest journey.
+  const durationsPath = path.join(root, "smart-tests/durations.json")
+  let durations: Record<string, number> = {}
+  try {
+    durations = JSON.parse(readFileSync(durationsPath, "utf8")) as Record<string, number>
+  } catch { /* No baseline yet: every journey is costed as the slowest. */ }
+  const assignments = balanceShards(planned, count, durations)
+  // The caller's own --grep already narrowed the collected manifest. Drop it
+  // from the child argv so the last --grep is this stack's assignment.
+  const passthrough = args.filter((arg, index) =>
+    !/^--grep(?:-invert)?(?:=|$)/.test(arg)
+    && !/^--grep(?:-invert)?$/.test(args[index - 1] ?? ""))
+  const layouts = shardLayout(assignments.length)
   if (layouts.some((layout) => existsSync(`${directory}-${layout.suffix}`))) {
     throw new Error("Use a new SMART_TEST_RUN_ID; shard evidence already exists")
   }
@@ -42,10 +62,13 @@ export async function runParallel(root: string, count: number, args: string[]) {
   process.once("SIGINT", stop)
   process.once("SIGTERM", stop)
   try {
-    const results = await Promise.all(layouts.map(async (layout) => {
+    const results = await Promise.all(layouts.map(async (layout, index) => {
       const childId = `${id}-${layout.suffix}`
+      // Select this stack's assigned titles explicitly. --shard would
+      // re-split the manifest and undo the balancing.
+      const selection = `^(?:${assignments[index].map(escapeForGrep).join("|")})$`
       const child = spawn("pnpm", ["exec", "tsx", "scripts/e2e-up.ts", "--",
-        `--shard=${layout.shard}`, "--workers=1", ...args], {
+        "--shard=1/1", "--workers=1", ...passthrough, "--grep", selection], {
         cwd: root, stdio: "inherit", env: {
           ...process.env, E2E_SHARD: layout.stack, E2E_CONFIG: "smart-tests/config.ts",
           SMART_TEST_RUN_ID: childId,
@@ -71,6 +94,11 @@ export async function runParallel(root: string, count: number, args: string[]) {
       `${(suite.parallel.longestShardTestMs / 1000).toFixed(1)} seconds for the slowest test shard.`,
       "", ...suite.tests.map((test) => `- ${test.title}: ${test.status}`), "",
     ].join("\n"))
+    // Feed the next split. Only a complete run can retrain the baseline.
+    if (suite.parallel.complete) {
+      writeFileSync(durationsPath,
+        JSON.stringify(recordDurations(durations, suite.tests), null, 2) + "\n")
+    }
     console.log(`Smart-testing evidence: ${path.join(directory, "suite.json")}`)
     console.log(JSON.stringify(suite.parallel))
     return suite.status === "passed" ? 0 : 1

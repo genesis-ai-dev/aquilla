@@ -46,17 +46,13 @@ const streamMeta: {
 } = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
-const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
+const pagesMock: { queue: CellRow[][] } = {
   queue: [],
-  pendingResolvers: [],
 }
 
-// The editor loads in two passes per fetch — target side first (tiny), then
-// source — so translations aren't hidden behind the full source stream on
-// large files. Tests still provide ONE combined dataset; cache it on the
-// target pass and reuse on the source pass so a `mockResolvedValueOnce` is
-// consumed once per load (call counts unchanged) and each pass gets its side.
-let sideCache: CellRow[] | null = null
+// Hold later complete pages behind an explicit gate.
+let pageGate: Promise<void> | null = null
+let releasePages: (() => void) | null = null
 
 type OnPage = (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>
 
@@ -81,15 +77,9 @@ vi.mock("@/lib/sync/cells-read", () => ({
       })
     }
     if (pagesMock.queue.length > 0) {
-      // Streaming/pagination fixtures are source pages; the target pass yields
-      // nothing so the source pass drains the queue.
-      if (side === "target") {
-        fireMeta(0)
-        await onPage([], true)
-        return
-      }
       const pages = pagesMock.queue.splice(0)
       for (let i = 0; i < pages.length; i++) {
+        if (i > 0 && pageGate) await pageGate
         fireMeta(i)
         const cont = await onPage(pages[i], i === pages.length - 1)
         if (cont === false) return
@@ -97,13 +87,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
       return
     }
     fireMeta(0)
-    let rows: CellRow[]
-    if (side === "source" && sideCache !== null) {
-      rows = sideCache
-    } else {
-      rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
-      sideCache = rows
-    }
+    const rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
     const filtered = side ? rows.filter((r) => r.side === side) : rows
     await onPage(filtered, true)
   },
@@ -213,8 +197,8 @@ beforeEach(() => {
   fetchByIdsMock.mockResolvedValue([])
   fetchDeltaMock.mockReset()
   pagesMock.queue = []
-  pagesMock.pendingResolvers = []
-  sideCache = null
+  pageGate = null
+  releasePages = null
   cacheEntry.value = null
   cacheWrites.length = 0
   delete streamMeta.maxServerSeq
@@ -285,11 +269,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
   })
 
-  it("loads the target side first so translations aren't hidden behind the source stream", async () => {
-    // Regression: on a 30k-cell file with a few translations, the combined
-    // read returns all source rows before any target row, so translations
-    // only appeared after the entire file streamed in — committed edits
-    // looked lost on reload. The hook now fetches the target side first.
+  it("loads both sides together (AQU-1328)", async () => {
     fetchAllMock.mockResolvedValue([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "tgt" }),
@@ -298,10 +278,9 @@ describe("useCells (Phase 2a, D1-backed)", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
     await waitFor(() => expect(result.current.cells).toHaveLength(1))
-    expect(result.current.cells[0].translated).toBe("tgt")
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("tgt"))
     expect(result.current.cells[0].original).toBe("src")
-    // The very first read pass targets the (small) target side.
-    expect(fetchAllMock.mock.calls[0][3]).toBe("target")
+    expect(fetchAllMock.mock.calls[0][3]).toBeUndefined()
   })
 
   it("revalidate() triggers a refetch and reflects new data", async () => {
@@ -432,6 +411,30 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(result.current.cells).toHaveLength(4))
     expect(result.current.cells.map((c) => c.id)).toEqual(["p1a", "p1b", "p2a", "p3a"])
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it("paints complete rows while later rows are still loading (AQU-1328)", async () => {
+    pageGate = new Promise<void>((resolve) => { releasePages = resolve })
+    pagesMock.queue = [
+      [makeRow({ cellId: "s1", side: "source", value: "Source 1" }),
+       makeRow({ cellId: "s1", side: "target", value: "Translated 1" }),
+       makeRow({ cellId: "empty", side: "source", value: "Untranslated" })],
+      [makeRow({ cellId: "s2", side: "source", value: "Source 2" }),
+       makeRow({ cellId: "s2", side: "target", value: "Translated 2" })],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells.map((c) => [c.id, c.translated])).toEqual([
+      ["s1", "Translated 1"], ["empty", ""],
+    ])
+    expect(result.current.isLoading).toBe(true)
+    await act(async () => { releasePages?.() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells.map((c) => [c.id, c.translated])).toEqual([
+      ["s1", "Translated 1"], ["empty", ""], ["s2", "Translated 2"],
+    ])
   })
 
   it("does not rebuild the whole cell list on every page of a hard stream (no O(N^2) first open)", async () => {
@@ -1436,7 +1439,6 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     fetchAllMock.mockReset()
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
-    sideCache = null
   })
 
   it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
@@ -1614,7 +1616,6 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     fetchAllMock.mockReset()
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
-    sideCache = null
     peekOutboxBatchCallCount = 0
   })
 

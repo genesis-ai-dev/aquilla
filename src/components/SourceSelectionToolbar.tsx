@@ -5,6 +5,8 @@
 import { useMemo } from "react"
 import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+import { SOURCE_SELECTION_RAIL_Z } from "@/lib/editor/source-cell-layers"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -69,7 +71,14 @@ export function SourceSelectionToolbar({
 
   return (
     <div
-      className="absolute right-1 top-0 z-20 flex items-center gap-0.5 rounded-md bg-card p-1"
+      // AQU-1134: the rail overlaps the source cell's menu trigger and must
+      // paint in front of it. The layer is owned by source-cell-layers.ts —
+      // don't hand-edit it here (both were z-10 once, and DOM order then put
+      // the menu on top).
+      className={cn(
+        "absolute right-1 top-0 flex items-center gap-0.5 rounded-md bg-card p-1",
+        SOURCE_SELECTION_RAIL_Z,
+      )}
       dir="ltr"
       onMouseUp={(e) => {
         e.stopPropagation()

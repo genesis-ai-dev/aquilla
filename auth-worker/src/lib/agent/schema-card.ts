@@ -120,8 +120,8 @@ All tables carry project_id; ALWAYS filter with :project.
 - cell_backtranslations (project_id, file_id, cell_id, target_event_id, bt_text, polished 0/1, author, created_at).
 - cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected 0/1, deleted 0/1).
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.
-- comments (comment_id, project_id, scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at).
-- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id).
+- comments (PK (project_id, comment_id) — comment_id is unique per project only; scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at). Always filter by project_id.
+- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed — count assignment_cells joined to live source cells for a true total.
 - project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
 - users (id, username, display_name, email), project_members (project_id, user_id, role_level).
 - information_schema is queryable WITHOUT :project — your escape hatch when a column/table is not documented here.`

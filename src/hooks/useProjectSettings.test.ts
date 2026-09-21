@@ -30,6 +30,15 @@ vi.mock("@/lib/store/project-index", () => ({
 
 beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
+  // AQU-1277: the read-path tests don't mock the write, but the hook pushes
+  // local settings when the server row looks absent — that PATCH went to
+  // production identity for real. Tests that exercise the write path install
+  // their own spy over this default.
+  vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+    kind: "error",
+    status: 0,
+    message: "patchProjectSettings not mocked by this test",
+  })
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -352,6 +361,101 @@ describe("useProjectSettings — write path", () => {
       expect(sameCall.kind).toBe("blocked")
       expect(mixedCall.kind).toBe("blocked")
       expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  // AQU-1086: the project-language keys are the second org-configurable scope.
+  // Its default is MAINTAINER, so with no org setting nothing below changes.
+  describe("language-only carve-out (AQU-1086)", () => {
+    it("lets a project lead change languages when the org floor is 500", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { targetLanguage: "de" } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.canEditLanguages).toBe(true)
+      // The hook-wide floor is untouched — everything else stays locked.
+      expect(result.current.canEdit).toBe(false)
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanguage: "de" })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("covers the extra-lane keys so the two cards agree", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { targetLanes: ["sw"] } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanes: ["sw"], archivedLanes: [] })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("still blocks a project lead's language write at the default floor (600)", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.canEditLanguages).toBe(false)
+      expect(result.current.languageEditFloor).toBe(600)
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanguage: "de" })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key when the floor is lowered", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let mixedCall!: PatchOutcome
+      await act(async () => {
+        otherKey = await result.current.patch({ validationCount: 3 })
+        // Bundling a language key with another key is NOT language-only — it
+        // keeps the maintainer floor.
+        mixedCall = await result.current.patch({ targetLanguage: "de", validationCount: 3 })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(mixedCall.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("clamps an out-of-ladder org floor back to the maintainer default", async () => {
+      mockSettingsFetch(null)
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 42 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.languageEditFloor).toBe(600)
+      expect(result.current.canEditLanguages).toBe(false)
     })
   })
 

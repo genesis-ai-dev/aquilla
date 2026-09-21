@@ -8,6 +8,7 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import type { AiDraftProvenance } from '../events/types'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -24,6 +25,11 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  draftCellsFloor,
+  validateDraftCellsCommand,
+  type DraftCellsCommand,
+} from './commands-draft-cells'
 import {
   cellFieldsFloor,
   isCellFieldCommand,
@@ -52,10 +58,20 @@ import {
   type ProjectLifecycleCommand,
 } from './commands-project-lifecycle'
 import {
+  PROJECT_SETUP_REQUIRED_ROLE,
+  validateProjectSetupCommand,
+  type ProjectSetupCommand,
+} from './commands-project-setup'
+import {
   SET_BRIEF_REQUIRED_ROLE,
   validateSetBriefCommand,
   type SetBriefCommand,
 } from './commands-set-brief'
+import {
+  REGENERATE_BRIEF_REQUIRED_ROLE,
+  validateRegenerateBriefSummaryCommand,
+  type RegenerateBriefSummaryCommand,
+} from './commands-regenerate-brief'
 import {
   isOrgMemberCommand,
   validateOrgMemberCommand,
@@ -85,6 +101,7 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { DraftCellsCommand } from './commands-draft-cells'
 export type {
   CellFieldCommand,
   SetSourceCommand,
@@ -108,6 +125,7 @@ export type {
   UnarchiveProjectCommand,
 } from './commands-project-lifecycle'
 export type { SetBriefCommand } from './commands-set-brief'
+export type { RegenerateBriefSummaryCommand } from './commands-regenerate-brief'
 export type {
   AddOrgMemberCommand,
   OrgMemberCommand,
@@ -145,6 +163,13 @@ export interface SetTranslationCommand {
    *  lane. Prepare rejects an unregistered lane — register it with
    *  UpdateProjectSettings first. */
   laneId?: string
+  /** SERVER-MINTED (AQU-1186). Set only by the DraftCells prepare path when it
+   *  materializes the copilot's output into SetTranslation commands; it makes
+   *  the compiled commit carry `ai_suggestion` + `ai_draft`, so the cell lands
+   *  as `ai_drafted` and a human reviews it as AI work. `validateCommands`
+   *  rebuilds every command from known keys only, so a caller CANNOT set this
+   *  on a hand-written SetTranslation — provenance is never self-asserted. */
+  aiDraft?: AiDraftProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -256,11 +281,14 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | DraftCellsCommand
   | CellFieldCommand
   | MembershipCommand
   | RenameFileCommand
   | ProjectLifecycleCommand
   | SetBriefCommand
+  | RegenerateBriefSummaryCommand
+  | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
 
@@ -741,6 +769,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'DraftCells') {
+      const cmd = validateDraftCellsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     // AQU-1183 cell-field commands (SetSource / SetTranscription / SetTiming /
     // SetTrackOverride) — one validator for the family.
     if (isCellFieldKind(c.kind)) {
@@ -769,6 +802,16 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
     }
     if (c.kind === 'SetBrief') {
       const cmd = validateSetBriefCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'RegenerateBriefSummary') {
+      const cmd = validateRegenerateBriefSummaryCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'ProjectSetup') {
+      const cmd = validateProjectSetupCommand(c, index, issues)
       if (cmd) commands.push(cmd)
       return
     }
@@ -822,12 +865,17 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
  * from role-policy.ts (the single source of truth). SetTranslation compiles to
  * target.cell.commit (CONTRIBUTOR); PlanImport compiles to file.create +
  * source.cell.create, and the max keeps it at file.create's PROJECT_LEAD even
- * now that source.cell.create's static floor is CONTRIBUTOR (the app-side
- * `allowLineCreation` carve-out — see line-creation-authority.ts — which this
- * surface deliberately does not extend). Staging a plan you could never commit
- * leaks the server-computed effect summary, so prepare enforces this too.
+ * now that source.cell.create's static floor is COMMENTER. The project's
+ * `cellEditingFloor` tier plays no part here: it is a product rule enforced at
+ * the app's buttons, never at this perimeter, and this surface was exempt from
+ * it even while it was checked server-side (see authorize.ts). Staging a plan
+ * you could never commit leaks the server-computed effect summary, so prepare
+ * enforces this too.
  */
-export function requiredRoleForCommand(c: Command): number {
+export function requiredRoleForCommand(
+  c: Command,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
+): number {
   if (c.kind === 'PlanImport') {
     return Math.max(REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
@@ -859,15 +907,30 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'SetBrief') {
     return SET_BRIEF_REQUIRED_ROLE
   }
+  // RegenerateBriefSummary (AQU-1282) rewrites the L1 half of the same key.
+  if (c.kind === 'RegenerateBriefSummary') {
+    return REGENERATE_BRIEF_REQUIRED_ROLE
+  }
+  // AQU-1294 ProjectSetup: a composite plan taking its own prepare/commit path,
+  // where the floor is re-resolved live as the MAX of the blocks it carries
+  // (incl. the org termbase/language floors). MAINTAINER is the honest static
+  // value for index filtering — it is every constituent command's own floor.
+  if (c.kind === 'ProjectSetup') {
+    return PROJECT_SETUP_REQUIRED_ROLE
+  }
   // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
   // floors its compiled events hit at the /events perimeter (dynamic bumps,
   // e.g. foreign unvalidate → maintainer, are enforced in its prepare path).
   if (c.kind === 'EmitEvents') {
-    return emitEventsFloor(c)
+    return emitEventsFloor(c, assignmentMinRole)
   }
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  if (c.kind === 'DraftCells') {
+    // Expands at prepare into SetTranslation → target.cell.commit.
+    return draftCellsFloor()
   }
   // AQU-1183: the cell-field family. Each command's floor is the max
   // REQUIRED_ROLE across the events it compiles to — PROJECT_LEAD for a source
@@ -921,4 +984,18 @@ export function requiredRoleForCommand(c: Command): number {
     return structureCommandFloor()
   }
   return REQUIRED_ROLE['target.cell.commit']
+}
+
+/** Whether a plan's dynamic authority depends on the org assignment floor. */
+export function commandsContainAssignmentEvents(commands: readonly Command[]): boolean {
+  return commands.some(
+    (command) =>
+      command.kind === 'EmitEvents' &&
+      command.events.some(
+        (event) =>
+          event.kind === 'assignment.create' ||
+          event.kind === 'assignment.reassign' ||
+          event.kind === 'assignment.unassign',
+      ),
+  )
 }

@@ -20,7 +20,7 @@
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
 // purely a downstream interpretation.
 //
-// TWO keys are permission-scoped rather than dumb-stored:
+// THREE keys are permission-scoped rather than dumb-stored:
 //
 //   AQU-822  `terminology` (the project's termbase concepts). A write whose
 //            only *changed* key is `terminology` is gated by the org's
@@ -28,13 +28,20 @@
 //            500) instead of the maintainer floor below, so an org can let its
 //            translators own terminology without also handing them AI config,
 //            health thresholds, or languages.
+//   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
+//            `targetLanes`, `archivedLanes`). A write whose only *changed*
+//            keys are language keys is gated by the org's configurable
+//            `languageEditMinRole` floor (default maintainer 600, i.e. today's
+//            behaviour) so an org can let its project leads correct a wrong or
+//            reset language without also handing them AI config, validation,
+//            or health.
 //   AQU-1246 `autopilotEnabled` (the project-wide opt-in to the experimental
 //            Autopilot surface). An autopilot-only write is admitted at
 //            project_lead 500 — whether your own project tries an experiment
 //            is a lead's call.
 //
-// Everything else keeps the maintainer gate, unchanged. Both carve-outs are
-// scoped to a write that changes NOTHING ELSE, so neither widens access to
+// Everything else keeps the maintainer gate, unchanged. All three carve-outs
+// are scoped to a write that changes NOTHING ELSE, so none widens access to
 // any other key.
 
 import { Hono } from "hono"
@@ -43,7 +50,10 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
-import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
+import {
+  getTermbaseEditMinRoleForProject,
+  getLanguageEditMinRoleForProject,
+} from "../services/org-permissions"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { loadProjectSettings, updateProjectSettingsShared } from "../../../db/shared/projects"
 
@@ -54,13 +64,28 @@ const projectSettings = new Hono<AuthHonoEnv>()
 // customize-ai-settings, monitor-project-health, validate-translation).
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
-/** The one settings key with its own (org-configurable) write floor. */
+/** The termbase key — its own (org-configurable) write floor. */
 const TERMINOLOGY_KEY = "terminology"
 
 /**
+ * AQU-1086: the project-language keys, gated by the org's configurable
+ * `languageEditMinRole` (default maintainer 600) rather than the flat
+ * maintainer floor. The default target language and the extra-lane registry
+ * are one scope on purpose: a lead who can change the default target must be
+ * able to add/archive a lane too, or the Project Info and Languages cards
+ * disagree (AQU-898).
+ */
+const LANGUAGE_KEYS = new Set([
+  "sourceLanguage",
+  "targetLanguage",
+  "targetLanes",
+  "archivedLanes",
+])
+
+/**
  * AQU-1246: the project-wide opt-in to the experimental Autopilot surface.
- * The second key below the maintainer floor — a write whose only *changed*
- * key is this one is admitted at project_lead(500)+.
+ * A write whose only *changed* key is this one is admitted at
+ * project_lead(500)+.
  *
  * Before this ticket the whole gate was a device-local browser switch, so any
  * member of any project could reveal the experiment in one click and the
@@ -151,23 +176,49 @@ projectSettings.on(
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
-      // AQU-822: below the maintainer floor, the ONLY write allowed is a
-      // terminology-only one, and only when the org's configured
-      // termbaseEditMinRole permits it. Any other changed key falls through
-      // to the maintainer 403 — lowering the termbase floor must never widen
-      // write access to AI config, health, languages, or anything else.
+      // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
+      // allowed are a terminology-only one (gated by the org's configured
+      // termbaseEditMinRole) or a language-only one (gated by the org's
+      // configured languageEditMinRole). Any other changed key falls through
+      // to the maintainer 403 — lowering either floor must never widen write
+      // access to AI config, health, validation, or anything else.
+      //
+      // The scopes are tested in this order because a no-op write (nothing
+      // changed) satisfies both vacuously; keeping terminology first preserves
+      // the pre-AQU-1086 behaviour for that case exactly.
       const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
       const changed = changedSettingsKeys(stored.settings, body.settings)
       const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
+      const languageOnly = changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
-      if (!terminologyOnly && !autopilotOnly) {
+      if (!terminologyOnly && !languageOnly && !autopilotOnly) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
         )
       }
-      if (autopilotOnly) {
+      if (terminologyOnly) {
+        const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
+        if (role.level < termbaseFloor) {
+          return c.json(
+            {
+              error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
+            },
+            403,
+          )
+        }
+      } else if (languageOnly) {
+        const languageFloor = await getLanguageEditMinRoleForProject(c.env, projectId)
+        if (role.level < languageFloor) {
+          return c.json(
+            {
+              error: `role >= ${languageFloor} required to change this project's languages (org languageEditMinRole)`,
+            },
+            403,
+          )
+        }
+      } else if (autopilotOnly) {
         // AQU-1246: this is the gate that decides whether the experimental
         // Autopilot surface exists for the project at all. A lead owns that
         // call for their own project; nobody below does. The check is here,
@@ -176,16 +227,6 @@ projectSettings.on(
         if (role.level < AUTOPILOT_WRITE_MIN_ROLE) {
           return c.json(
             { error: `role >= project_lead (${AUTOPILOT_WRITE_MIN_ROLE}) required to change the Autopilot opt-in` },
-            403,
-          )
-        }
-      } else {
-        const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
-        if (role.level < termbaseFloor) {
-          return c.json(
-            {
-              error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
-            },
             403,
           )
         }

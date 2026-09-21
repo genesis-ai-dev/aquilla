@@ -36,6 +36,7 @@ import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -89,6 +90,7 @@ export function OrgProjectsDataTable({
   author,
   viewerUsername = null,
   allowSelfAssignment = false,
+  assignmentMinRole = ROLE.PROJECT_LEAD,
   callerUserId = null,
   onLanesChanged,
   toolbarLeading,
@@ -134,6 +136,7 @@ export function OrgProjectsDataTable({
    */
   viewerUsername?: string | null
   allowSelfAssignment?: boolean
+  assignmentMinRole?: number
   callerUserId?: number | null
   /** Called after an assign/staff lane action, so the parent can refetch the
    * portfolio (per-lane rollups changed). */
@@ -172,7 +175,17 @@ export function OrgProjectsDataTable({
 
   const tableData = useMemo(() => projects, [projects])
 
-  const canAssign = Boolean(jwt && author != null) && !embedded
+  const canAssignProject = useCallback(
+    (projectId: string) =>
+      Boolean(jwt && author != null) &&
+      !embedded &&
+      canOpenAssignUi(
+        roleByProjectId?.get(projectId)?.level ?? null,
+        allowSelfAssignment,
+        assignmentMinRole,
+      ),
+    [jwt, author, embedded, roleByProjectId, allowSelfAssignment, assignmentMinRole],
+  )
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => {
@@ -528,6 +541,7 @@ export function OrgProjectsDataTable({
         })}
         rowClassName="group"
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
+        rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
         searchValue={searchValue}
@@ -569,7 +583,9 @@ export function OrgProjectsDataTable({
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
-                      canAssign ? (lane) => setAssignTarget({ projectId: p.id, lane }) : undefined
+                      canAssignProject(p.id)
+                        ? (lane) => setAssignTarget({ projectId: p.id, lane })
+                        : undefined
                     }
                     onStaffed={onLanesChanged}
                   />
@@ -580,7 +596,7 @@ export function OrgProjectsDataTable({
             ? undefined
             : (p) => (
                 <>
-                  {canAssign && (
+                  {canAssignProject(p.id) && (
                     <MenuItem
                       onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                     >
@@ -652,10 +668,11 @@ export function OrgProjectsDataTable({
             defaultLaneLabelByProjectId?.get(assignTarget.projectId),
           )}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
-          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
+          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}
           jwt={jwt}
           author={author}
           allowSelfAssignment={allowSelfAssignment}
+          assignmentMinRole={assignmentMinRole}
           callerUserId={callerUserId}
           onAssigned={() => {
             onLanesChanged?.()

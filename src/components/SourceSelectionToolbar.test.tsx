@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import type { Concept } from "@/lib/terminology/types"
+import {
+  SOURCE_CELL_LAYERS,
+  SOURCE_CELL_MENU_Z,
+  SOURCE_SELECTION_RAIL_Z,
+} from "@/lib/editor/source-cell-layers"
 
 const noConcepts = { concepts: [] }
 
@@ -111,6 +116,9 @@ describe("SourceSelectionToolbar", () => {
     expect(viewTerm).not.toHaveAttribute("role")
   })
 
+  // AQU-1134: the rail and the source cell menu trigger overlap in the source
+  // cell's corner. Assert against the shared layer contract rather than a
+  // literal class, so bumping one side without the other fails here.
   it("renders in front of the source edit control", () => {
     const { container } = render(
       <SourceSelectionToolbar
@@ -120,6 +128,8 @@ describe("SourceSelectionToolbar", () => {
       />,
     )
 
-    expect(container.firstElementChild).toHaveClass("z-20")
+    expect(container.firstElementChild).toHaveClass(SOURCE_SELECTION_RAIL_Z)
+    expect(container.firstElementChild).not.toHaveClass(SOURCE_CELL_MENU_Z)
+    expect(SOURCE_CELL_LAYERS.selectionRail).toBeGreaterThan(SOURCE_CELL_LAYERS.cellMenu)
   })
 })

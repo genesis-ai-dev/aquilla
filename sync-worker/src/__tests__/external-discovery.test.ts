@@ -65,6 +65,10 @@ describe('discovery root', () => {
     expect(body.quickstart.length).toBeGreaterThan(0)
     expect(body.mcp.endpoint).toBe('/api/v1/external/mcp')
     expect(Object.keys(body.endpoints)).toContain('GET /api/v1/external/me')
+    expect(body.endpoints['GET /api/v1/external/me']).toContain('credentialId')
+    expect(body.endpoints['GET /api/v1/external/me']).not.toMatch(/userId, username/)
+    expect(body.privacy.note).toContain('AQU-1180')
+    expect(body.orgScopedReads.maxProjectsPerSearch).toBe(10)
     expect(body.errors.codes.confirmation_required).toBeDefined()
     // AQU-538: the map teaches the multi-target-language (lanes) workflow —
     // register targetLanes, write SetTranslation.laneId, read ?lane=.
@@ -111,7 +115,10 @@ describe('REST bootstrap: /me and /projects', () => {
     )
     expect(res!.status).toBe(200)
     const body = (await res!.json()) as any
-    expect(body.username).toBe('alice')
+    // AQU-1180: /me answers "which token", not "which human". A default
+    // credential must not carry the minting user's handle into an AI console.
+    expect(body.username).toBeUndefined()
+    expect(body.userId).toBeUndefined()
     expect(body.mode).toBe('ask')
     expect(body.credentialId).toBe(CRED_1)
     expect(body.hints.mode).toContain('approvalUrl')
@@ -193,11 +200,14 @@ describe('get_capabilities quickstart', () => {
     )
     const body = (await res!.json()) as any
     const payload = JSON.parse(body.result.content[0].text)
-    expect(payload.quickstart).toHaveLength(6)
-    expect(payload.quickstart[0]).toContain('get_identity_and_scope')
-    expect(payload.quickstart[4]).toContain('confirm_changeset')
+    expect(payload.quickstart).toHaveLength(7)
+    // AQU-1294: step 0 sends a partner-setup agent to the skill before anything else.
+    expect(payload.quickstart[0]).toContain('get_skill')
+    expect(payload.quickstart[0]).toContain('project-setup')
+    expect(payload.quickstart[1]).toContain('get_identity_and_scope')
+    expect(payload.quickstart[5]).toContain('confirm_changeset')
     // The path ends where the work ends: pulling the deliverable back out (AQU-858).
-    expect(payload.quickstart[5]).toContain('export_file')
+    expect(payload.quickstart[6]).toContain('export_file')
   })
 })
 

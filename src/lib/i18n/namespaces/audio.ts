@@ -213,9 +213,11 @@ export const audio = defineNamespace({
     "audio.recordingModal.formatCompressedAriaLabel":
       "Recording format: compressed — click to record in WAV",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
-    "audio.recordingModal.autoAdvanceTitle": "Move on after saving",
-    "audio.recordingModal.autoAdvanceOnDescription": "Jumps to the next line",
-    "audio.recordingModal.autoAdvanceOffDescription": "Stays on this line",
+    "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
+    "audio.recordingModal.autoAdvanceOnDescription":
+      "Saved recordings jump to the next line. Uploaded files stay here.",
+    "audio.recordingModal.autoAdvanceOffDescription":
+      "Saved recordings stay on this line, and so do uploaded files.",
     "audio.recordingModal.countdownTitle": "Countdown",
     "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
     "audio.recordingModal.countdownOffDescription": "Starts recording straight away",

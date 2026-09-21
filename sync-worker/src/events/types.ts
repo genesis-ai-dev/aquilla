@@ -603,6 +603,12 @@ export interface EventPayloads {
     // client can render the "Translation changed since this thread was created"
     // badge. Root threads only; null/absent = unknown baseline (no badge).
     createdForTranslated?: string | null
+    // AQU-1233: the comment was written by a tool acting for the author, not by
+    // the author typing it. Set SERVER-SIDE by the Agent API compile step only
+    // (the external payload validator drops a caller-supplied value), so a
+    // credential cannot post an unmarked comment. author_id stays the minting
+    // user — this only changes the label reviewers read.
+    viaAgent?: boolean
   }
   'comment.edit': {
     commentId: string

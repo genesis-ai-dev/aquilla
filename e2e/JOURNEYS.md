@@ -27,7 +27,7 @@ not a micro-spec farm.
 | Orgs | Billing & usage shows the Field Plan CTA and agent-credit meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
-| Editor | Import markdown, edit cell, persists across reload | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Editor | Import markdown, edit cell, persists across reload; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
@@ -44,7 +44,7 @@ not a micro-spec farm.
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob after cold import setup on a throttled renderer | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
 | Collab | Same-parent commits held behind a request barrier on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
-| Collab | One editor's successive commits chain linearly (same focus session, across a reload, and from a second tab of the same user) so ordinary typing is never refused as bumped | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
+| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
 | Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
@@ -96,7 +96,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/editor/import-ebl.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
-| Org access lifecycle (multi-path revoke) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
+| Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
@@ -115,6 +115,7 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
@@ -124,11 +125,16 @@ UI chrome that used to be one smoke file per click is covered under
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
 - Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
-- Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Section jumps into the paged view — a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
+- Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
 - New-voice Kokoro speaker dropdown grouped by project target language, with a playable sample per voice (`NewVoiceModal.test.tsx`)
 - AI model consent dialog: Just Kokoro starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
+- Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
+
+Parallel Bibles missing-reference empty state is covered in RTL:
+`src/components/ParallelBiblesSidebar.test.tsx` (absent/book-only references,
+version picker access, and recovery when a valid reference appears).

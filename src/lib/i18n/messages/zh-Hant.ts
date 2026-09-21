@@ -3480,8 +3480,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.shared.nameHint": "會顯示在整個工作區與專案清單中。",
   "projectSettings.timeline.lockLabel": "鎖定時間安排，避免被拖曳更動",
   "projectSettings.timeline.lockHint": "預設為開啟，且對所有人都開啟 — 包括專案負責人。這些時間來自客戶自己的檔案，一旦有人拖曳某個區塊，就等於為整個團隊移動了那一行，事後也無從比對。開啟期間，所有匯入的行與提示行都不會有拖曳控點；在這裡新增的行仍然可以移動，錄音也仍然可以照常對到各自的行上。只有維護者可以關閉它，而只要一關閉，時間軸就會一直標示出這一點。",
-  "projectSettings.timeline.addLinesLabel": "允許他人在時間軸的空檔中新增行",
-  "projectSettings.timeline.addLinesHint": "預設為關閉。開啟後，時間軸上每一段沒有任何行涵蓋的空檔上方都會出現一支鉛筆，旁邊還有一個麥克風，可以建立一行並直接開始錄音。若檔案已有匯入的音訊提示行，就絕不會提供這個選項 — 那些提示行已經指明了各行的位置。無論是否開啟，都可以刪除他人新增的空白行，因此把它關回去絕不會留下孤立的行。",
   "projectSettings.field.temperature": "溫度",
   "projectSettings.field.healthPenalty": "健康度扣分",
   "projectSettings.field.examplesRetrieved": "檢索到的範例數",

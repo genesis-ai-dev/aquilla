@@ -1,7 +1,7 @@
 # Automatic Jev PR testing on the shared Hetzner host
 
 The service runs independently of GitHub Actions. Its webhook endpoint is
-`https://koinegreek.app/aquilla-qa/github`. It accepts signed `pull_request`
+`https://aquilla-qa.5-161-201-46.sslip.io/aquilla-qa/github`. It accepts signed `pull_request`
 events for `genesis-ai-dev/aquilla` only. Drafts, forks, closed PRs, unrelated
 events, and duplicate PR/commit pairs do not run. GitHub's ping is acknowledged.
 
@@ -9,7 +9,8 @@ A SQLite queue survives restarts. One suite runs at a time. Before setup,
 before tests, and before each report, the controller checks the current PR
 head through GitHub. A stale run cannot publish a pass for a newer commit.
 No automatic test retries turn failures into passes. A restart marks an
-interrupted run inconclusive instead of rerunning it silently.
+interrupted run inconclusive instead of rerunning it silently. Failed final
+comment deliveries retry from an outbox without rerunning the tests.
 
 ## Trust boundary
 
@@ -72,6 +73,10 @@ Provision these files without putting secrets in command arguments or logs:
   `model_env`. Root only. `model_env` holds the same five provider settings as
   the local smart-test environment file. No Cloudflare or production DB keys.
 
+Run `scripts/hetzner-ci/install-smart-https.sh` to add a separate nginx virtual
+host for `aquilla-qa.5-161-201-46.sslip.io`.
+This hostname resolves directly to the server without changing application DNS.
+Issue its own certificate with Certbot webroot authentication and retain renewal.
 Add an exact `/aquilla-qa/` nginx prefix that proxies to `127.0.0.1:9086`.
 Limit requests to 1 MB, disable access logging for artifact bearer URLs,
 validate nginx configuration, and reload nginx without restarting the app.
@@ -93,7 +98,8 @@ Each PR receives a starting comment, then the same comment updates with
 verified outcomes, inconclusive checks, failures, model cost, both commits,
 and elapsed time. JSON evidence lives under `/var/lib/aquilla-qa-evidence`.
 Its URL contains a random 256-bit bearer token, has no directory listing,
-and expires after seven days. Treat the link as private; GitHub comment
+and expires after seven days. The controller retains at most 200 job and
+artifact directories; build and test logs stop recording at 8 MB each. Treat the link as private; GitHub comment
 access controls do not apply once someone shares that link.
 
 Disable new execution with `systemctl stop aquilla-qa-runner`. Stop the webhook

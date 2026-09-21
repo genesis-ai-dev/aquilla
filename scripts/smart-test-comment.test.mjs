@@ -14,7 +14,7 @@ function suite() {
 const render = (value) => renderReport({ sha, phase: "finished", suite: value })
 describe("truthful outcome report", () => {
   it("allows only scoped opaque Hetzner evidence links", () => {
-    const url = `https://koinegreek.app/aquilla-qa/artifacts/${"a".repeat(64)}/suite.json`
+    const url = `https://aquilla-qa.5-161-201-46.sslip.io/aquilla-qa/artifacts/${"a".repeat(64)}/suite.json`
     const report = renderReport({ sha, phase: "finished", suite: suite(), runUrl: url })
     expect(report).toContain("expires after seven days")
     for (const runUrl of ["https://evil.example/suite.json", url + "?redirect=evil", url.replace("https:", "http:")]) {

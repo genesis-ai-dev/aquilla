@@ -3,6 +3,8 @@ import json
 import os
 import re
 import secrets
+import selectors
+import tarfile
 import shutil
 import subprocess
 import time
@@ -21,10 +23,51 @@ COMMON = ["--init", "--cgroup-parent=aquillaqa.slice", "--cpus=1.5",
           "--log-opt=max-size=5m", "--log-opt=max-file=1"]
 
 
+class ReportPending(Exception):
+    pass
+
+
 def command(args, log=None, timeout=900, env=None, check=True, input=None):
-    return subprocess.run(args, input=input, stdout=log or subprocess.PIPE,
-                          stderr=log or subprocess.PIPE, timeout=timeout,
-                          env=env, check=check)
+    if log is None:
+        return subprocess.run(args, input=input, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=timeout,
+                              env=env, check=check)
+    # PR install scripts may emit arbitrary output. Drain it without allowing
+    # their build logs to exhaust the host filesystem outside Docker's quota.
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          env=env) as process, selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        deadline, remaining = time.monotonic() + timeout, 8 * 1024 * 1024
+        while selector.get_map():
+            if time.monotonic() > deadline:
+                process.kill()
+                raise subprocess.TimeoutExpired(args, timeout)
+            for key, _ in selector.select(0.5):
+                chunk = os.read(key.fd, 65536)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                log.write(chunk[:remaining])
+                remaining = max(0, remaining - len(chunk))
+        code = process.wait(timeout=max(1, deadline - time.monotonic()))
+        if check and code:
+            raise subprocess.CalledProcessError(code, args)
+        return subprocess.CompletedProcess(args, code)
+
+
+def read_suite(container):
+    # Stream one bounded regular file; never extract container tar paths on host.
+    args = ["docker", "cp", container + ":/work/smart-tests/results/server/suite.json", "-"]
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        try:
+            with tarfile.open(fileobj=process.stdout, mode="r|*") as archive:
+                member = archive.next()
+                if not member or not member.isfile() or member.size > 5_000_000:
+                    raise ValueError("Invalid evidence archive")
+                return json.load(archive.extractfile(member))
+        finally:
+            process.kill()
+            process.wait()
 
 
 def github(config, path):
@@ -158,12 +201,7 @@ def execute(config, job):
         args += [harness, "pnpm", "exec", "playwright", "test", "--config", "smart-tests/config.ts"]
         with (directory / "tests.log").open("wb") as log:
             result = command(args, log, timeout=960, check=False, env={**os.environ, **test_env})
-        command(["docker", "cp", prefix + "tests:/work/smart-tests/results/server/suite.json",
-                 str(directory / "suite.json")])
-        suite_path = directory / "suite.json"
-        if suite_path.stat().st_size > 5_000_000:
-            raise RuntimeError("Oversized evidence")
-        suite = json.loads(suite_path.read_text())
+        suite = read_suite(prefix + "tests")
         if suite.get("build") != sha or suite.get("harnessBuild") != harness_sha:
             raise RuntimeError("Evidence identity mismatch")
         suite["runner"] = {"host": "hetzner", "wallMs": round((time.monotonic() - started) * 1000),
@@ -174,7 +212,7 @@ def execute(config, job):
         artifact.mkdir(parents=True, mode=0o755)
         (artifact / "suite.json").write_text(json.dumps(suite, indent=2))
         (artifact / "suite.json").chmod(0o644)
-        artifact_url = f"https://koinegreek.app/aquilla-qa/artifacts/{artifact_id}/suite.json"
+        artifact_url = f"https://aquilla-qa.5-161-201-46.sslip.io/aquilla-qa/artifacts/{artifact_id}/suite.json"
         return "completed" if status == "success" else "failed"
     finally:
         # Logs remain root-only. The public endpoint exposes only allowlisted evidence.
@@ -186,7 +224,12 @@ def execute(config, job):
         command(["docker", "image", "prune", "-f"], check=False, timeout=60)
         if source.exists():
             source.unlink()
-        report(config, pr, sha, "finished", suite, artifact_url, status)
+        outbox = dict(suite=suite, url=artifact_url, status=status)
+        (directory / "report.json").write_text(json.dumps(outbox))
+        try:
+            report(config, pr, sha, "finished", **outbox)
+        except Exception as error:
+            raise ReportPending() from error
 
 
 def main():
@@ -205,9 +248,12 @@ def main():
         if interrupted:
             cleanup_containers(f"aquilla-qa-{interrupted[0]}-")
             try:
-                report(config, interrupted[1], interrupted[2], "finished")
+                outbox_path = Path("/var/lib/aquilla-qa-jobs") / str(interrupted[0]) / "report.json"
+                outbox = json.loads(outbox_path.read_text()) if outbox_path.exists() else {}
+                report(config, interrupted[1], interrupted[2], "finished", **outbox)
+                status = "completed" if outbox.get("status") == "success" else "failed"
                 with database() as db:
-                    db.execute("UPDATE jobs SET status='failed',updated=? WHERE id=?", (time.time(), interrupted[0]))
+                    db.execute("UPDATE jobs SET status=?,updated=? WHERE id=?", (status, time.time(), interrupted[0]))
             except Exception as error:
                 print("Interrupted report:", type(error).__name__, flush=True)
             time.sleep(5)
@@ -217,6 +263,8 @@ def main():
             continue
         try:
             status = execute(config, job)
+        except ReportPending:
+            status = "interrupted"
         except Exception as error:
             status = "failed"
             print(f"Job {job[0]} failed: {type(error).__name__}", flush=True)
@@ -225,8 +273,10 @@ def main():
         print(f"Job {job[0]} {status}", flush=True)
         for root in (Path("/var/lib/aquilla-qa-jobs"), Path("/var/lib/aquilla-qa-evidence")):
             if root.exists():
-                for child in root.iterdir():
-                    if child.is_dir() and time.time() - child.stat().st_mtime > 7 * 86400:
+                children = sorted((child for child in root.iterdir() if child.is_dir()),
+                                  key=lambda child: child.stat().st_mtime, reverse=True)
+                for index, child in enumerate(children):
+                    if index >= 200 or time.time() - child.stat().st_mtime > 7 * 86400:
                         shutil.rmtree(child)
 
 

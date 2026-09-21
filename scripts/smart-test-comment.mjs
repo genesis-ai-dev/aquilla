@@ -10,7 +10,7 @@ const escape = (value) => String(value).replace(/[&<>|`\r\n]/g, (char) =>
 export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
   if (!["running", "finished"].includes(phase)) throw new Error("Invalid report phase")
-  const hostedEvidence = /^https:\/\/koinegreek\.app\/aquilla-qa\/artifacts\/[a-f0-9]{64}\/suite\.json$/.test(runUrl ?? "")
+  const hostedEvidence = /^https:\/\/aquilla-qa\.5-161-201-46\.sslip\.io\/aquilla-qa\/artifacts\/[a-f0-9]{64}\/suite\.json$/.test(runUrl ?? "")
   if (runUrl && !hostedEvidence && !/^https:\/\/github\.com\/genesis-ai-dev\/aquilla\/actions\/runs\/\d+$/.test(runUrl)) {
     throw new Error("Invalid workflow URL")
   }

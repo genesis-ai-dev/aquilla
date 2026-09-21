@@ -33,7 +33,11 @@ fi
 git_ssh="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS"
 sudo -u aquilla-migrate env GIT_SSH_COMMAND="$git_ssh" \
   git -C "$APP_DIR" fetch --depth 1 origin dev
-sudo -u aquilla-migrate git -C "$APP_DIR" merge --ff-only FETCH_HEAD
+# A depth-one fetch of a GitHub merge commit may omit the local commit's
+# ancestry, so merge --ff-only can report unrelated histories. The checkout is
+# already required to be clean; point its local dev ref at the exact fetched
+# origin/dev commit instead.
+sudo -u aquilla-migrate git -C "$APP_DIR" checkout -B dev FETCH_HEAD
 sudo -u aquilla-migrate env PATH="$NODE_BIN:/usr/local/bin:/usr/bin:/bin" \
   "$NODE_BIN/pnpm" --dir "$APP_DIR" install --frozen-lockfile \
     --ignore-scripts --network-concurrency=4 --child-concurrency=1

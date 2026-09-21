@@ -76,6 +76,37 @@ describe("POST /api/v2/credentials + validateApiCredential", () => {
     expect(await validateApiCredential(env.AQUILLA_PG, "")).toBeNull()
   })
 
+  it("throttles invalid-credential attempts per source IP, without punishing other IPs or opted-out callers", async () => {
+    await seedUser(1, "alice")
+    const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+
+    const attackerIp = "203.0.113.7"
+    // Exhaust the per-IP invalid-attempt budget with garbage tokens.
+    for (let i = 0; i < 30; i++) {
+      expect(await validateApiCredential(env.AQUILLA_PG, "aqk_" + "0".repeat(40), attackerIp)).toBeNull()
+    }
+    // The budget is now spent — even a genuinely valid token from that IP is
+    // rejected without a DB lookup, since the whole point is to stop the flood
+    // regardless of whether any individual guess would have succeeded.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token, attackerIp)).toBeNull()
+
+    // A different source IP was never recorded against and isn't throttled.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token, "198.51.100.9")).not.toBeNull()
+
+    // Callers that don't pass an IP (e.g. legacy call sites) skip throttling
+    // entirely rather than sharing one global bucket.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token)).not.toBeNull()
+  })
+
+  it("never throttles repeated attempts with the correct token", async () => {
+    await seedUser(1, "alice")
+    const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+    const ip = "203.0.113.8"
+    for (let i = 0; i < 40; i++) {
+      expect(await validateApiCredential(env.AQUILLA_PG, body.token, ip)).not.toBeNull()
+    }
+  })
+
   it("rejects an expired credential", async () => {
     await seedUser(1, "alice")
     const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse

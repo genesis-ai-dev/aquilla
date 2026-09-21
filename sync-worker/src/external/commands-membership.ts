@@ -162,7 +162,7 @@ export function validateMembershipCommand(
 }
 
 /** One plain-language line per command for the /approve page. */
-function describeChange(cmd: MembershipCommand): string {
+export function describeChange(cmd: MembershipCommand): string {
   if (cmd.kind === 'InviteMember') {
     return `Add ${cmd.username} to ${cmd.projectId} as ${roleName(cmd.role)} (${cmd.role})`
   }
@@ -172,14 +172,14 @@ function describeChange(cmd: MembershipCommand): string {
   return `Remove ${cmd.username} from ${cmd.projectId}`
 }
 
-interface TargetUser {
+export interface TargetUser {
   id: string
   username: string
 }
 
 /** Look the target up by username, case-insensitively (mirrors auth-worker's
  *  lookupUserByUsername, which the members UI uses). */
-async function lookupUser(db: AquillaDb, username: string): Promise<TargetUser | null> {
+export async function lookupUser(db: AquillaDb, username: string): Promise<TargetUser | null> {
   const row = await db
     .prepare(`SELECT id::text AS id, username FROM users WHERE lower(username) = lower(?)`)
     .bind(username)
@@ -189,7 +189,7 @@ async function lookupUser(db: AquillaDb, username: string): Promise<TargetUser |
 
 /** The target's DIRECT project_members role level, or null when they hold no
  *  direct row (they may still have access via org / group / creator). */
-async function directRoleLevel(
+export async function directRoleLevel(
   db: AquillaDb,
   projectId: string,
   userId: string,
@@ -213,7 +213,7 @@ async function effectiveRoleLevel(
 }
 
 /** A gate outcome: the resolved target, or the denial to return verbatim. */
-type GateResult =
+export type GateResult =
   | { ok: true; target: TargetUser; directLevel: number | null }
   | { ok: false; response: Response }
 
@@ -223,7 +223,7 @@ type GateResult =
  * checked already, because the caller's role, the target's role, and the
  * membership rows can all move in the hour a changeset stays staged.
  */
-async function gateOne(
+export async function gateOne(
   db: AquillaDb,
   cred: ApiCredentialContext,
   callerLevel: number,
@@ -289,7 +289,7 @@ async function gateOne(
 }
 
 /** Resolve the caller's live role and enforce the MAINTAINER floor. */
-async function callerLevelOrDenial(
+export async function callerLevelOrDenial(
   db: AquillaDb,
   cred: ApiCredentialContext,
   projectId: string,
@@ -401,7 +401,7 @@ export async function prepareMembership(
 }
 
 /** Live state of one pinned target at commit time. */
-interface CommitTarget {
+export interface CommitTarget {
   cmd: MembershipCommand
   userId: string
   username: string
@@ -503,6 +503,37 @@ export async function commitMembership(
   const gate = await receiptOnlyGates(db, cs)
   if (gate instanceof Response) return gate
 
+  const applied = await applyMembershipRows(db, env, cred, projectId, targets, ctx)
+
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel,
+    changesetId: cs.id,
+    command: 'Membership',
+    appliedAt: new Date().toISOString(),
+    projectId,
+    membership: applied,
+  }
+  await writeCommittedReceipt(db, cs.id, receipt, gate.confirmationId)
+  return Response.json({ receipt })
+}
+
+/**
+ * Write the `project_members` rows for a gated batch and report what changed.
+ *
+ * Extracted (AQU-1294) so the ProjectSetup composite command's members step
+ * applies membership through the SAME rows, the same upsert, and the same DO
+ * notifications as a Membership changeset. Assumes every target has already
+ * passed `gateOne` against the caller's LIVE role — it authorizes nothing.
+ */
+export async function applyMembershipRows(
+  db: AquillaDb,
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  targets: readonly CommitTarget[],
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<MembershipReceiptEntry[]> {
   const applied: MembershipReceiptEntry[] = []
   for (const target of targets) {
     const { cmd, userId, username, directLevel } = target
@@ -531,18 +562,7 @@ export async function commitMembership(
     applied.push({ kind: cmd.kind, userId, username, role: cmd.role, previousRole: directLevel })
     notifyRoleChangeBestEffort(env, projectId, userId, username, cmd.role, ctx)
   }
-
-  const receipt: ReceiptOnlyReceipt = {
-    credentialId: cred.credentialId,
-    channel,
-    changesetId: cs.id,
-    command: 'Membership',
-    appliedAt: new Date().toISOString(),
-    projectId,
-    membership: applied,
-  }
-  await writeCommittedReceipt(db, cs.id, receipt, gate.confirmationId)
-  return Response.json({ receipt })
+  return applied
 }
 
 /** Detach a DO notify so a live socket picks the change up immediately. Never

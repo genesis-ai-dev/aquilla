@@ -571,6 +571,37 @@ describe('structure commands — guards', () => {
     expect(await cells(tdb, 'source')).toHaveLength(3)
   })
 
+  it('allows structural edits on a PlanImport file, whose locators are positional not slot-addressed', async () => {
+    // REGRESSION (QA on AQU-1234): the guard tested whether `sourceLocator`
+    // EXISTED, but every import stamps one — PlanImport gives plain content a
+    // synthetic `{ kind: 'sequence' }`. So the three commands were refused on
+    // every file an agent can create through the API, which is the entire
+    // surface they exist to serve. Only slot-addressed kinds may refuse.
+    await tdb.pg.query(
+      `UPDATE cells SET metadata = $3::jsonb
+        WHERE project_id = $1 AND file_id = $2 AND side = 'source'`,
+      [
+        PROJECT,
+        FILE,
+        JSON.stringify({
+          aquillaImport: {
+            version: 1,
+            kind: 'segment',
+            fidelity: 'content-only',
+            profileId: 'agent:txt',
+            address: { scheme: 'sequence', index: 1 },
+            sourceLocator: { kind: 'sequence', index: 1 },
+          },
+        }),
+      ],
+    )
+    const token = await memberToken(tdb, ROLE.PROJECT_LEAD)
+    for (const [kind, command] of Object.entries(commands)) {
+      const { res } = await prepare(env, token, command)
+      expect(res.status, `${kind} should be allowed on a sequence-located file`).toBe(200)
+    }
+  })
+
   it('requires project lead — a contributor credential is denied', async () => {
     const token = await memberToken(tdb, ROLE.CONTRIBUTOR)
     for (const [kind, command] of Object.entries(commands)) {

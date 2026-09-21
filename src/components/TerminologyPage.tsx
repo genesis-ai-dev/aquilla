@@ -48,7 +48,7 @@ import { emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTe
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { humanRoleName } from "@/lib/frontier/roles"
-import { canEditTermbase, resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
+import { canEditTermbase, canEditTermCells, resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
 import { isAudioCueFile } from "@/lib/parsers/types"
@@ -756,14 +756,15 @@ export function TerminologyPage() {
   // Role-gating: AQU-822 — the floor is the org's configured
   // termbaseEditMinRole (project_lead 500 unless the org lowered or raised it),
   // carried on the project record and re-enforced server-side on every write.
-  const hasOrigin = Boolean(project?.origin)
   const termbaseEditFloor = resolveTermbaseEditFloor(project?.termbaseEditMinRole)
-  const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin, project?.termbaseEditMinRole)
+  const canManageTermbase = canEditTermbase(project?.syncRole, project?.termbaseEditMinRole)
   const termbaseGateTip = `Requires ${humanRoleName(termbaseEditFloor)} role or higher to manage term base definitions.`
 
-  // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
-  // or always for local (no-origin) projects.
-  const canEditCells = !hasOrigin || (project?.syncRole?.level ?? 0) >= 400
+  // Cell editing in the drill-down is allowed for contributor+ (level >= 400).
+  // AQU-208: asked through the role-policy mirror so this agrees with the
+  // editor's own gate on the same `target.cell.commit` event, and with
+  // `canManageTermbase` above on how an unknown role is treated.
+  const canEditCells = canEditTermCells(project?.syncRole)
 
   // ── Project-wide cells (derived-on-read source for stats + drill-down) ──────
   const { session: frontierSession } = useFrontierSession()

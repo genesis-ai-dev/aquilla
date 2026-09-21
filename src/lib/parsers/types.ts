@@ -462,16 +462,25 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
-  /** AQU-646: may people add lines into the timeline's silences? Off unless
-   *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
-   *  Deleting an empty added line is not gated on it. */
-  allowLineCreation?: boolean
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
    *  on top of the maintainer floor, so with it off the write is refused even
    *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
-   *  sibling above on stranding. */
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup

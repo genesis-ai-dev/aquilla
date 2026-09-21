@@ -197,8 +197,22 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, testimony, membershipChanges, memoryWrites, structure, ...facts } =
-    data.summary
+  const {
+    warnings,
+    settingsChanges,
+    events,
+    testimony,
+    membershipChanges,
+    memoryWrites,
+    structure,
+    ...facts
+  } = data.summary
+  // AQU-1179: EmitEvents changesets carry their effect as a per-kind array,
+  // which the scalar filter above drops — so before this they rendered as
+  // "no changes summarized" and a reviewer approved a blank plan. Each entry
+  // arrives with a server-computed plain-language `label`; older changesets
+  // (staged before the label existed) fall back to `kind × count`.
+  const eventEntries = Array.isArray(events) ? events : []
   // AQU-1184: validations are testimony — the approver must see every cell and
   // its current text, never just a count.
   const testimonyEntries = Array.isArray(testimony) ? testimony : []
@@ -255,11 +269,19 @@ function ApprovalSummaryView({
         <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
         {factEntries.length === 0 &&
         settingsEntries.length === 0 &&
+        eventEntries.length === 0 &&
         membershipEntries.length === 0 &&
         memoryEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
+            {eventEntries.map((entry) => (
+              <li key={entry.kind}>
+                <span className="font-medium text-foreground">
+                  {entry.label ?? `${entry.kind} × ${entry.count}`}
+                </span>
+              </li>
+            ))}
             {factEntries.map(([key, value]) => (
               <li key={key}>
                 {humanizeKey(key)}: <span className="font-medium text-foreground">{String(value)}</span>

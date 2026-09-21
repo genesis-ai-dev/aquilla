@@ -336,7 +336,7 @@ export const org = defineNamespace({
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
     "org.teamDetail.roleDescriptionViewer":
-      "Viewer (100) — can read all org projects. No edit or management actions.",
+      "Viewer (100) — read-only access. No edit or management actions. Org membership at this level does not open projects until the person is added to a project or team.",
     "org.teamDetail.roleDescriptionCommenter":
       "Commenter (200) — can read and leave comments. Cannot edit content.",
     "org.teamDetail.roleDescriptionReviewer":
@@ -377,7 +377,9 @@ export const org = defineNamespace({
     }),
     "org.memberAccessPanel.orgRoleOnlyNote": "org-role only; no project overrides",
     "org.memberAccessPanel.orgRoleLabel": "Org role:",
-    "org.memberAccessPanel.orgRoleAppliesNote": "— applies to every project in this org.",
+    "org.memberAccessPanel.orgRoleAppliesNote": "— can see every project in this org.",
+    "org.memberAccessPanel.orgRoleNoProjectAccessNote":
+      "— does not grant project access. Add them to a project or team.",
     "org.memberAccessPanel.noOrgRole": "No org-wide role.",
     "org.memberAccessPanel.noGrantsNote": "No direct, team, or creator grants on any project.",
     "org.memberAccessPanel.resolvedLabel": "resolved:",
@@ -544,7 +546,7 @@ export const org = defineNamespace({
     // tooltip. Distinct from the shorter common.role.*Description blurbs used
     // by MembersMatrixCellEditor/ProjectMembersPage/SharePanel — both are
     // real, separately-live UI copy; see the ROLE_INFO doc comment. --
-    "org.role.descriptionViewer": "Can read all org projects. No edit or management actions.",
+    "org.role.descriptionViewer": "Read-only access. No edit or management actions.",
     "org.role.descriptionCommenter": "Can read and leave comments. Cannot edit content.",
     "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
     "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
@@ -736,10 +738,12 @@ export const org = defineNamespace({
 
     // -- OrgMembersTable: org roster table and member-management dialogs --
     "org.membersPage.orgTable.changeRoleDescription":
-      "This updates their organization-level role across every project.",
+      "Maintainer and Owner can see every project in the organization. Contributor and below cannot see projects until added to a project or team.",
     "org.membersPage.orgTable.addMemberTitle": "Add a member",
     "org.membersPage.orgTable.addMemberDescription":
-      "Grant an org-wide role, or invite someone by email who doesn't have an account yet.",
+      "Add someone to this organization, or invite them by email if they don't have an account yet.",
+    "org.membersPage.orgTable.projectAccessNote":
+      "Contributor, Project lead, and Viewer join the organization but cannot see or open projects until they are added to a specific project or team. Only Maintainer and Owner can see every project.",
     "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
     "org.membersPage.orgTable.addMembersTab": "Add members",
     "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
@@ -872,7 +876,7 @@ export const org = defineNamespace({
       "A role inherited because a group this person belongs to has access to this project. Edit the group's membership to change or remove this grant.",
     "org.accessModelLegend.orgWide.label": "Org-wide",
     "org.accessModelLegend.orgWide.description":
-      "A role that applies to every project in this org because of the person's org-level role. Change the org membership to affect all projects at once.",
+      "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
     "org.accessModelLegend.creator.label": "Creator",
     "org.accessModelLegend.creator.description":
       "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
@@ -941,7 +945,7 @@ export const org = defineNamespace({
       "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
     "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
-      "This role is granted org-wide and applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
+      "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
     "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
@@ -953,10 +957,10 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, their org-wide role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
-      "Access on every project comes from org-wide role; no per-project overrides.",
+      "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",
 
     // -- MembersPanel: shared roster list (per-project and org membership) --
     // "via org" badge → org.membersPage.sourceViaOrg (identical text)
@@ -976,6 +980,10 @@ export const org = defineNamespace({
     "org.multiProjectInviteDialog.emailModeHint":
       "They'll receive one email per selected project with a single-use invite link.",
     "org.multiProjectInviteDialog.projectsFieldLabel": "Projects",
+    // AQU-1150: filter box above the project checklist.
+    "org.multiProjectInviteDialog.searchPlaceholder": "Search projects…",
+    "org.multiProjectInviteDialog.searchProjectsAriaLabel": "Search projects",
+    // "No projects match your search." → org.orgProjectsDataTable.noSearchMatch (identical text)
     "org.multiProjectInviteDialog.selectProjectAriaLabel": "Select {name}",
     "org.multiProjectInviteDialog.noProjectsAvailable":
       "No projects available — create one first or check back when sync completes.",
@@ -985,6 +993,16 @@ export const org = defineNamespace({
     }),
     "org.multiProjectInviteDialog.rolesSuffix": " — roles: {roles}",
     "org.multiProjectInviteDialog.sendInvitesButton": "Send invites",
+    // AQU-1149: page-level confirmation. The in-dialog "added"/"invited" row
+    // badges stay; these outlive the dialog so the outcome survives closing it.
+    "org.multiProjectInviteDialog.addedToast": plural({
+      one: "Added {username} to {count} project",
+      other: "Added {username} to {count} projects",
+    }),
+    "org.multiProjectInviteDialog.invitedToast": plural({
+      one: "Invite sent to {email} for {count} project",
+      other: "Invites sent to {email} for {count} projects",
+    }),
 
     // -- RemoveOrgMemberDialog: confirm-and-optionally-cascade org removal --
     "org.removeOrgMemberDialog.title": "Remove {username} from {orgName}?",
@@ -1646,6 +1664,10 @@ export const org = defineNamespace({
           "Summary shown next to a member's name in the effective-access panel, counting projects with an explicit (direct/team/creator) grant beyond their org role.",
         placeholders: { count: "How many projects the member has explicit access to; also selects the plural form." },
       },
+      "org.memberAccessPanel.orgRoleNoProjectAccessNote": {
+        description:
+          "Trailing clause after 'Org role: Contributor' (or Viewer / Project lead) on the member access panel (AQU-1107). Explains that this org membership does not open projects; the next sentence tells the owner to add the person to a project or team.",
+      },
       "org.memberAccessPanel.teamGrantLabel": {
         description:
           "Label prefix on a per-project access badge, naming the team whose grant contributes to the resolved role. Followed by the role name (e.g. 'team Translators: Contributor').",
@@ -2048,6 +2070,18 @@ export const org = defineNamespace({
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
       },
+      "org.membersPage.orgTable.addMemberDescription": {
+        description:
+          "Dialog subtitle on the org Members 'Add a member' dialog. Explains that the action adds someone to the organization (or invites by email), not that it grants project access.",
+      },
+      "org.membersPage.orgTable.projectAccessNote": {
+        description:
+          "Helper paragraph under the add-member dialog subtitle (AQU-1107). States the rule that Contributor/Project lead/Viewer org membership does not open projects, and that only Maintainer and Owner see every project. Role names stay in this sentence as English role vocabulary matching the picker — they are not placeholders.",
+      },
+      "org.membersPage.orgTable.changeRoleDescription": {
+        description:
+          "Dialog subtitle when an org owner changes a member's organization-level role. Same access rule as org.membersPage.orgTable.projectAccessNote: Maintainer/Owner see every project; Contributor and below do not until added to a project or team.",
+      },
       "org.membersPage.orgTable.copyEmailAriaLabel": {
         description:
           "Accessible name for the small copy-to-clipboard icon button beside a member's " +
@@ -2297,6 +2331,19 @@ export const org = defineNamespace({
           "dialog's project checklist.",
         placeholders: { name: "The project's name — not translated." },
       },
+      "org.multiProjectInviteDialog.searchPlaceholder": {
+        description:
+          "Placeholder in the filter box above the multi-project invite dialog's " +
+          "project checklist. Typing narrows the visible rows to projects whose " +
+          "name contains what was typed; it never changes what is already checked.",
+        maxLength: 24,
+      },
+      "org.multiProjectInviteDialog.searchProjectsAriaLabel": {
+        description:
+          "Accessible name for that same filter box. The input has no visible " +
+          "label, only the placeholder, so this is what a screen reader announces. " +
+          "No trailing ellipsis — punctuation is read aloud.",
+      },
       "org.multiProjectInviteDialog.projectsSelectedCount": {
         description:
           "Status line under the project checklist in the multi-project invite dialog, counting how many projects are currently checked.",
@@ -2306,6 +2353,22 @@ export const org = defineNamespace({
         description:
           "Trailing clause appended after org.multiProjectInviteDialog.projectsSelectedCount, only when more than one project is checked, listing the distinct roles chosen across them. Leading space is deliberate — it continues the preceding sentence rather than starting a new one.",
         placeholders: { roles: "Comma-joined list of the distinct, already-localized role names chosen across the checked projects." },
+      },
+      "org.multiProjectInviteDialog.addedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog grants an existing user membership, naming who was added and to how many projects. Counts only the projects that succeeded — when some fail, the failures stay as inline errors in the dialog and are not named here.",
+        placeholders: {
+          username: "The added person's username — not translated.",
+          count: "How many projects the grant succeeded on; also selects the plural form.",
+        },
+      },
+      "org.multiProjectInviteDialog.invitedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog sends email invites, naming the recipient address and how many project invites went out. Counts only the invites that were sent — failures stay as inline errors in the dialog.",
+        placeholders: {
+          email: "The recipient's email address — not translated.",
+          count: "How many project invites were sent; also selects the plural form.",
+        },
       },
       "org.removeOrgMemberDialog.title": {
         description: "Confirmation-dialog title naming who is being removed from which organization.",

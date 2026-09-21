@@ -18,6 +18,7 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
 import { timeoutSignal } from "./fetch-timeout"
+import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import posthog from "@/lib/posthog"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
 
@@ -134,7 +135,16 @@ export interface FlushDeps {
   onRejected?: (entries: RejectedEntry[]) => void
   /** Called before a permanent 403 is quarantined. Foreground committers use
    *  the exact event ids to clear optimistic state and avoid chaining future
-   *  writes onto a head the server refused. */
+   *  writes onto a head the server refused.
+   *
+   *  AQU-1068: `onRejected` deliberately skips this class (see its note),
+   *  which was fine while every optimistic write was a value edit a refetch
+   *  would correct. It is not fine for a write that changes the SHAPE of the
+   *  file: an optimistic insert or removal carries a freshness floor, so no
+   *  correcting fetch can undo it, and the caller has to. A permission
+   *  refusal is also the ONLY status the cell-editing gate ever returns, so a
+   *  rollback wired to `onRejected` alone can never fire for the one case it
+   *  exists for. */
   onForbidden?: (entries: ForbiddenEntry[]) => void
 }
 
@@ -342,7 +352,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     // AbortError is caught below and treated as transient (no budget burn).
     // Feature-detected (B3): AbortSignal.timeout is missing on older WebKit —
     // calling it unconditionally threw here BEFORE the fetch, bricking writes.
-    res = await fetchFn(url, {
+    res = await observedSyncFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -350,7 +360,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       },
       body: JSON.stringify({ events }),
       signal: timeoutSignal(15_000),
-    })
+    }, fetchFn)
   } catch (err) {
     // RES-2: network throws (including AbortError/timeout) are transient — do NOT
     // burn the attempt budget. Use stampOutboxError (same policy as token-mint
@@ -409,7 +419,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
 
   let body: PostBody
   try {
-    body = (await res.json()) as PostBody
+    body = await readSyncJson<PostBody>(res)
   } catch {
     await markOutboxAttempt(
       batch.map((r) => r.id),

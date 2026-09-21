@@ -25,6 +25,10 @@ import { defineNamespace } from "./types"
 export const settings = defineNamespace({
   keys: {
     // ── AssignmentAuthoritySection (org settings → security) ──
+    "settings.assignmentAuthority.floorLabel": "Who can assign work",
+    "settings.assignmentAuthority.floorDescription":
+      "Minimum project role required to assign, reassign, or unassign file, " +
+      "chapter, target-lane, and AI review tasks. Defaults to Project lead.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.description":
       "When on, a member (contributor and above) can claim a book/chapter/take " +

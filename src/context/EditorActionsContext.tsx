@@ -101,6 +101,41 @@ export interface EditorActionsContextValue {
   audioHomeFor?: (
     cell: import("@/hooks/useCells").CellData,
   ) => readonly import("@/hooks/useCells").CellData[] | null
+  /**
+   * AQU-1068 item 5: the source cell's menu — the structural actions behind
+   * its entries, and the two facts about timing it has to know.
+   *
+   * These are HERE rather than on the row for the reason this module exists.
+   * The reasons an entry is unavailable are per-row and travel down as plain
+   * strings, which React.memo compares happily; the actions are the same
+   * three functions for every row in the file, and threading a fresh closure
+   * per row through `MemoizedRow` would re-render every rendered row on every
+   * store bump — the whole-file churn round 6 of this PR went into removing.
+   *
+   * The workspace keeps all five identity-stable.
+   */
+  /** Insert a line into a silence on a TIMED file — the span comes from the
+   *  gap the row is offering, already filtered and floored. */
+  onAddLineAt?: (startSec: number, endSec: number) => void
+  /** Insert a cell beside this one on a file with no clock, where the anchor
+   *  chain is the order and there is always room. */
+  onInsertCellBeside?: (cellId: string, position: "above" | "below") => void
+  /** Take this cell out, after the confirmation its inventory earns. */
+  onRemoveCell?: (cellId: string) => void
+  /** Retime one line. The workspace's handler owns the lock check and the
+   *  media-vs-text choice of event, so the menu adds nothing to it. */
+  onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void
+  /**
+   * AQU-646's project-wide lock on imported timings, and whether this person
+   * can lift it. Scalars that change about once a session, so they cost the
+   * subtree nothing to read here — the same argument `myScopes` above makes.
+   */
+  timingLocked?: boolean
+  canUnlockTiming?: boolean
+  /** Takes a maintainer to the setting that holds the lock. Deliberately not
+   *  a toggle: the lock is project-wide, so they should see its scope before
+   *  changing it (Sam, 2026-09-09). */
+  onOpenTimingSettings?: () => void
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

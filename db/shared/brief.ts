@@ -48,6 +48,24 @@ export function isBriefFieldId(id: string): boolean {
 /** The settings key the brief lives under. */
 export const BRIEF_SETTINGS_KEY = 'translationBrief'
 
+/** L1 summary cap — mirrors `L1_MAX_CHARS` in src/lib/brief/schema.ts. The L1
+ *  is injected into every copilot prompt, so the cap is a token budget, not a
+ *  display nicety (AQU-1282). */
+export const BRIEF_L1_MAX_CHARS = 1600
+
+/** The prompt the in-app builder uses to render the L1 (mirrors
+ *  `L1_SYSTEM_PROMPT` in src/lib/brief/brief-generator.ts). Duplicated here so
+ *  the server-side render (auth-worker's brief-summary endpoint, AQU-1282)
+ *  produces the same kind of summary a human gets from "Regenerate summary". */
+export const BRIEF_L1_SYSTEM_PROMPT = `You are condensing a Bible/translation project's full translation brief into a SHORT, practical, actionable summary for an AI translation assistant.
+
+Write direct instructions the assistant can apply on every draft: who the audience is, the purpose, the register and level of literalness, key-term and naturalness preferences, and anything it must avoid. Be concrete and imperative ("Translate for…", "Prefer…", "Avoid…").
+
+Rules:
+- Under ${BRIEF_L1_MAX_CHARS} characters. Tighter is better.
+- No preamble, no headings, no markdown — just the guidance prose.
+- Only include what the brief states; do not invent constraints.`
+
 /** Structural mirror of the SPA's `TranslationBrief` (src/lib/brief/types.ts).
  *  Declared here rather than imported so this module stays dependency-free. */
 export interface TranslationBriefRecord {
@@ -171,6 +189,38 @@ export function applyBriefPatch(
   }
   next.l2Markdown = assembleBriefL2Markdown(next)
   return next
+}
+
+/** Number of interview sections holding non-blank text. */
+export function briefFilledSectionCount(brief: TranslationBriefRecord): number {
+  return BRIEF_FIELD_SPECS.filter((f) => (brief.parameters[f.id] ?? '').trim() !== '').length
+}
+
+/** Does the brief hold anything an L1 render could summarize? */
+export function briefHasContent(brief: TranslationBriefRecord | null): brief is TranslationBriefRecord {
+  return brief !== null && (briefFilledSectionCount(brief) > 0 || brief.freeformNotes.trim() !== '')
+}
+
+/** Mirrors the SPA's `isL1Stale` (src/lib/brief/brief.ts): no summary, or the
+ *  sections moved after it was rendered. */
+export function isBriefL1Stale(brief: TranslationBriefRecord): boolean {
+  if (!brief.l1Summary || !brief.l1GeneratedAt) return true
+  return brief.updatedAt > brief.l1GeneratedAt
+}
+
+/**
+ * Pure: the brief with a freshly rendered L1. `updatedAt` and `version` are
+ * deliberately NOT touched — the sections did not change, and the SPA's
+ * `isL1Stale` compares updatedAt against l1GeneratedAt, so bumping updatedAt
+ * here would make the summary read as stale the moment it was written.
+ */
+export function applyBriefL1Summary(
+  prev: TranslationBriefRecord,
+  summary: string,
+  modelId: string,
+  now: string,
+): TranslationBriefRecord {
+  return { ...prev, l1Summary: summary, l1GeneratedAt: now, l1ModelId: modelId }
 }
 
 /**

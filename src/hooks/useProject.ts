@@ -21,6 +21,7 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
+import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -64,7 +65,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
-  assign("allowLineCreation", settings.allowLineCreation)
+  assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
@@ -162,7 +163,10 @@ export interface UseProjectOptions {
 
 export function useProject(projectId: string, options?: UseProjectOptions) {
   const enabled = options?.enabled ?? true
-  const initialProject = options?.initialProject ?? null
+  // AQU-1325: fall back to the record a previous resolve of this project
+  // produced in this tab, so overview → editor (and back) paints the chrome
+  // and name immediately and revalidates instead of blanking on a cold fetch.
+  const initialProject = options?.initialProject ?? readResolvedProjectSeed(projectId)
   const [project, setProject] = useState<ProjectRecord | null>(initialProject)
   const [status, setStatus] = useState<ProjectLoadStatus>(initialProject ? "ready" : "loading")
   // AQU-334: the caller's role as returned by THIS load's GET /:projectId (or
@@ -234,6 +238,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       }
       const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
       if (cancelled) return
+      rememberResolvedProject(hydrated)
       setProject(hydrated)
       setRoleLevel(result.project.role.level)
       setPm(result.project.pm ?? null)

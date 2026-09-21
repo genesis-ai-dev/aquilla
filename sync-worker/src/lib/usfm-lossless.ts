@@ -50,7 +50,23 @@ const PARATEXT_KINDS: Record<string, "heading" | "paratext"> = {
   "iot": "heading",
 }
 
-export interface UsfmVerse {
+/**
+ * AQU-1068: where this span's own MARKER starts — the offset of the backslash
+ * in `\v 5` or `\s1`, as opposed to `textStart`, which is the first character
+ * AFTER it.
+ *
+ * Needed to REMOVE a span. Skipping one by its text offsets alone strips the
+ * words and leaves a bare, dangling `\v 5` behind, which is not valid USFM.
+ * The value is computed while parsing and used to be discarded; it cannot be
+ * recovered afterwards, because the previous verse's `textEnd` is the start of
+ * whatever terminated it, and a heading between two verses makes that the
+ * heading's marker rather than the `\v`.
+ */
+interface MarkedSpan {
+  markerStart: number
+}
+
+export interface UsfmVerse extends MarkedSpan {
   number: string
   chapter: number
   book: string
@@ -60,7 +76,7 @@ export interface UsfmVerse {
   textEnd: number
 }
 
-export interface UsfmHeading {
+export interface UsfmHeading extends MarkedSpan {
   marker: string
   kind: "heading" | "paratext"
   book: string
@@ -158,6 +174,7 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
         text: raw.slice(textStart, textEnd),
         textStart,
         textEnd,
+        markerStart: m.start,
       })
       continue
     }
@@ -179,6 +196,7 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
         text: m.rest,
         textStart,
         textEnd,
+        markerStart: m.start,
       })
       continue
     }
@@ -187,9 +205,39 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
   return { bookId, raw, verses, headings }
 }
 
+/**
+ * AQU-1068: what the editor did to this file beyond translating it.
+ *
+ * Both halves are keyed by the ref of an EXISTING span, because that is the
+ * only address this format has. A cell added in the app carries no verse
+ * number of its own — Ryder's rule is that nothing renumbers — so its text
+ * rides the verse it follows.
+ */
+export interface UsfmEdits {
+  /**
+   * Extra text to emit immediately after a span's own content, in the same
+   * paragraph and with no marker of its own. Several additions on one anchor
+   * keep their given order.
+   *
+   * Deliberately NOT folded into `overrides`: an empty or absent override is
+   * this serializer's "fall back to the original text" signal, so appending
+   * through that map would erase the client's own words wherever the anchor
+   * verse is untranslated. Emitting here, after the text is written, is
+   * correct whichever branch produced it.
+   */
+  appendAfter?: Map<string, readonly string[]>
+  /**
+   * Refs whose span leaves the file entirely, marker included. A removal is
+   * otherwise indistinguishable from an untranslated verse, so without this
+   * every removal is silently undone at export.
+   */
+  remove?: ReadonlySet<string>
+}
+
 export function serializeUsfmLossless(
   doc: UsfmDocument,
   overrides?: Map<string, string> | Record<string, string>,
+  edits?: UsfmEdits,
 ): string {
   const get = (ref: string): string | undefined => {
     if (!overrides) return undefined
@@ -197,10 +245,10 @@ export function serializeUsfmLossless(
     return Object.prototype.hasOwnProperty.call(overrides, ref) ? overrides[ref] : undefined
   }
 
-  type Span = { ref: string; text: string; textStart: number; textEnd: number }
+  type Span = { ref: string; text: string; textStart: number; textEnd: number; markerStart: number }
   const spans: Span[] = [
-    ...doc.verses.map((v) => ({ ref: v.ref, text: v.text, textStart: v.textStart, textEnd: v.textEnd })),
-    ...doc.headings.map((h) => ({ ref: h.ref, text: h.text, textStart: h.textStart, textEnd: h.textEnd })),
+    ...doc.verses.map((v) => ({ ref: v.ref, text: v.text, textStart: v.textStart, textEnd: v.textEnd, markerStart: v.markerStart })),
+    ...doc.headings.map((h) => ({ ref: h.ref, text: h.text, textStart: h.textStart, textEnd: h.textEnd, markerStart: h.markerStart })),
   ].sort((a, b) => a.textStart - b.textStart)
 
   if (spans.length === 0) return doc.raw
@@ -209,21 +257,53 @@ export function serializeUsfmLossless(
   const parts: string[] = []
   let cursor = 0
   for (const s of spans) {
+    // A removed span takes its own marker with it. The gap before it is
+    // emitted only as far as that marker, and the cursor resumes past the
+    // span's text — so `\v 5 …` disappears whole and the verses around it are
+    // untouched. Nothing renumbers, because USFM numbers are written out.
+    if (edits?.remove?.has(s.ref)) {
+      // Guard against a heading whose marker sits before the previous span's
+      // end (never true today, but a negative slice would silently duplicate
+      // text rather than fail).
+      if (s.markerStart >= cursor) parts.push(raw.slice(cursor, s.markerStart))
+      cursor = s.textEnd
+      continue
+    }
     parts.push(raw.slice(cursor, s.textStart))
     const override = get(s.ref)
+    // Build this span's own output as one string, so an addition below can be
+    // spliced into it rather than pushed after it — see why in the block after.
+    let body: string
     if (override === undefined || override === "") {
-      parts.push(s.text)
+      body = s.text
     } else {
       const priorChar = s.textStart > 0 ? raw[s.textStart - 1] : ""
-      if (priorChar !== " " && priorChar !== "\t" && priorChar !== "\n" && priorChar !== "\r") {
-        parts.push(" ")
-      }
-      parts.push(override)
+      const lead =
+        priorChar !== " " && priorChar !== "\t" && priorChar !== "\n" && priorChar !== "\r" ? " " : ""
       const nextChar = s.textEnd < raw.length ? raw[s.textEnd] : ""
-      if (nextChar === "\\" && !/[\s]$/.test(override)) {
-        parts.push("\n")
+      const trail = nextChar === "\\" && !/[\s]$/.test(override) ? "\n" : ""
+      body = lead + override + trail
+    }
+    // Content the editor added under this verse. It belongs to the verse, so it
+    // goes INSIDE the span's text, not after it.
+    //
+    // A verse's span runs right up to the next marker's backslash, so `body`
+    // almost always ends with the newline that separates it from `\v 5`.
+    // Appending past that would put the addition on the next line, where a
+    // re-parse reads it as part of the FOLLOWING verse — the file would still
+    // look right and the content would be attributed to the wrong verse. So
+    // split the trailing whitespace off, insert, and put it back.
+    const additions = edits?.appendAfter?.get(s.ref)
+    if (additions && additions.length > 0) {
+      const texts = additions.map((a) => a.trim()).filter((a) => a !== "")
+      if (texts.length > 0) {
+        const trailing = /\s*$/.exec(body)?.[0] ?? ""
+        const content = body.slice(0, body.length - trailing.length)
+        const separator = content === "" ? "" : " "
+        body = content + separator + texts.join(" ") + trailing
       }
     }
+    parts.push(body)
     cursor = s.textEnd
   }
   parts.push(raw.slice(cursor))

@@ -63,7 +63,7 @@ function authHeaders(jwt: string): HeadersInit {
 export async function fetchMemberScopes(
   jwt: string,
   projectId: string,
-  userId: number,
+  userId: number | "me",
   apiUrl: string = AUTH_API_URL,
 ): Promise<MemberScope[] | null> {
   try {

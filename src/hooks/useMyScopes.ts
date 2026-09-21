@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "./useFrontierSession"
-import { useProjectMembers } from "./useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 
 /**
@@ -8,20 +7,23 @@ import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
  * can gate the Validate affordance on out-of-scope cells (mirroring the
  * sync-worker's enforceScopes) instead of offering a guaranteed-403 action.
  *
- * The frontier session has no numeric userId, and `/members/:id/scopes` is
- * keyed by id, so we resolve the caller's id from the project roster by
- * username. Returns `[]` (unscoped → no gating) while loading, when the roster
- * is unavailable, or when the scopes fetch fails — the server stays
- * authoritative and a genuine refusal still surfaces via the outbox 403 path,
- * so a permissive fallback never hides an allowed action.
+ * AQU-581: this asks the server for `me` rather than resolving the caller's
+ * numeric id from the project roster. The roster route is gated by the org's
+ * `rosterViewMinRole`, which defaults to MAINTAINER (600) — so for a
+ * CONTRIBUTOR (400) it 403s, the id came back null, and this hook returned []
+ * without ever calling the scopes endpoint. That was invisible for AQU-633
+ * (where [] means "unscoped", i.e. permissive) but wrong for the AQU-581 lane
+ * delegate grant (where [] means "no lanes", i.e. no assign UI at all) — the
+ * feature was unusable by exactly the below-lead role it exists to serve.
+ *
+ * Returns `[]` while loading and when the scopes fetch fails. Note that the
+ * two consumers read that empty value in OPPOSITE directions, so a caller that
+ * treats scopes as a GRANT rather than a RESTRICTION must not assume `[]` is
+ * safe — the server stays authoritative either way.
  */
 export function useMyScopes(projectId: string | null): MemberScope[] {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const username = session?.username ?? null
-  const { members } = useProjectMembers(projectId)
-  const myUserId =
-    username != null ? (members.find((m) => m.username === username)?.userId ?? null) : null
 
   const [scopes, setScopes] = useState<MemberScope[]>([])
   const aliveRef = useRef(true)
@@ -35,20 +37,18 @@ export function useMyScopes(projectId: string | null): MemberScope[] {
   useEffect(() => {
     let cancelled = false
     // Resolve asynchronously (never a synchronous setState in the effect body):
-    // when any input is missing, this collapses to [] — the unscoped/permissive
-    // fallback — and also resets stale scopes on a project/account switch.
+    // when any input is missing, this collapses to [] and also resets stale
+    // scopes on a project/account switch.
     const load = async () => {
       const next =
-        !jwt || !projectId || myUserId == null
-          ? []
-          : (await fetchMemberScopes(jwt, projectId, myUserId)) ?? []
+        !jwt || !projectId ? [] : ((await fetchMemberScopes(jwt, projectId, "me")) ?? [])
       if (!cancelled && aliveRef.current) setScopes(next)
     }
     void load()
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, myUserId])
+  }, [jwt, projectId])
 
   return scopes
 }

@@ -30,6 +30,7 @@ import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
 import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
@@ -73,11 +74,16 @@ admin.use("*", requirePlatformAdmin)
 admin.get("/me", async (c) => {
   const user = c.get("user")
   const hardened = adminElevationRequired(c.env)
+  // OPS-35: scoped to this session's own grant, matching requireAdminElevation
+  // — otherwise the SPA would report `elevated: true` on a session that the
+  // gate below then 403s, which is exactly the account-vs-session confusion
+  // that finding is about.
   const row = hardened
     ? await c.env.AQUILLA_PG.prepare(
-        `SELECT elevated_until FROM admin_elevations WHERE user_id = ? AND elevated_until > now()`,
+        `SELECT elevated_until FROM admin_elevations
+          WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
       )
-        .bind(user.id)
+        .bind(user.id, c.get("sessionKey"))
         .first<{ elevated_until: string }>()
     : null
   return c.json({
@@ -121,10 +127,23 @@ admin.post("/elevation/request", async (c) => {
   const code = randomSixDigitCode()
   const ttlMin = Number(c.env.ELEVATION_TTL_MINUTES ?? 10)
   const expiresAt = new Date(Date.now() + ttlMin * 60_000).toISOString()
+  // [Pen test] Auth & session mgmt (2026-09-21, OPS-36): stored as a scrypt
+  // digest, never in the clear. Migration 0047 built this table as a "clone of
+  // password_reset_tokens" — but it cloned the PRE-hardening shape and never
+  // followed that table through OPS-20 (0080, hash the token) or OPS-31 (0087,
+  // drop the plaintext column), leaving the second factor for cross-tenant
+  // god-mode as the last readable-credential table in the schema.
+  //
+  // scrypt rather than a bare SHA-256 or an HMAC because the plaintext is a
+  // 6-digit code: a 10^6 keyspace falls to an offline sweep instantly under a
+  // fast hash, and an HMAC would rest on SECRET_KEY, which prod and dev still
+  // share (V7/SEC-1, open). Same helper the access-link PIN uses for the same
+  // reason — a short numeric secret needs a slow KDF, not a fast digest.
+  const codeHash = await hashPasswordWerkzeugScrypt(code)
   await c.env.AQUILLA_PG.prepare(
-    `INSERT INTO admin_elevation_codes (user_id, code, expires_at) VALUES (?, ?, ?)`,
+    `INSERT INTO admin_elevation_codes (user_id, code_hash, expires_at) VALUES (?, ?, ?)`,
   )
-    .bind(user.id, code, expiresAt)
+    .bind(user.id, codeHash, expiresAt)
     .run()
 
   const sent = await sendAdminElevationCodeEmail(c.env, user.email, code, ttlMin)
@@ -163,13 +182,33 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
     )
   }
 
-  const match = await c.env.AQUILLA_PG.prepare(
-    `SELECT id FROM admin_elevation_codes
-      WHERE user_id = ? AND code = ? AND expires_at > now()
-      ORDER BY id DESC LIMIT 1`,
+  // OPS-36: the digest can't be looked up by equality, so pull this user's
+  // live codes and verify against each. Bounded by the 5/hour mint cap above
+  // (and by the TTL), so this is a handful of scrypt calls on a rare
+  // operator-only route — not a hot path.
+  const live = await c.env.AQUILLA_PG.prepare(
+    `SELECT id, code_hash FROM admin_elevation_codes
+      WHERE user_id = ? AND code_hash IS NOT NULL AND expires_at > now()
+      ORDER BY id DESC`,
   )
-    .bind(user.id, code)
-    .first<{ id: number }>()
+    .bind(user.id)
+    .all<{ id: number; code_hash: string }>()
+
+  let match: { id: number } | null = null
+  for (const row of live.results ?? []) {
+    let ok = false
+    try {
+      ok = await verifyPasswordWerkzeugScrypt(code, row.code_hash)
+    } catch (err) {
+      // A corrupt stored digest is an ops problem, not a caller-visible one
+      // — same posture as the access-link PIN verify.
+      console.error("[admin] elevation code verify failed:", err)
+    }
+    if (ok) {
+      match = { id: row.id }
+      break
+    }
+  }
   if (!match) {
     await recordAuthEvent(c.env.AQUILLA_PG, "admin_elevation_verify", identifier, false)
     return c.json(
@@ -183,13 +222,32 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
     .bind(user.id)
     .run()
 
+  // OPS-35: elevations are now one row per (user, session) rather than one per
+  // user, so lapsed rows no longer get overwritten by the next grant. Prune
+  // this operator's expired rows here — the same opportunistic-cleanup posture
+  // `pruneOldEvents` takes in utils/rate-limit.ts, and for the same reason
+  // (no scheduled job to hang it off).
+  await c.env.AQUILLA_PG.prepare(
+    `DELETE FROM admin_elevations WHERE user_id = ? AND elevated_until <= now()`,
+  )
+    .bind(user.id)
+    .run()
+
+  // OPS-35: the grant belongs to the credential that redeemed the code, so a
+  // second session (including one on a stolen token) gets nothing from this.
+  // The key is per-token, so an operator using two browsers simply elevates
+  // twice rather than one silently de-elevating the other — which the old
+  // `ON CONFLICT (user_id)` upsert would now do if we kept a single row.
+  const sessionKey = c.get("sessionKey")
   const hours = Number(c.env.ELEVATION_SESSION_HOURS ?? 6)
   const until = new Date(Date.now() + hours * 3_600_000).toISOString()
   await c.env.AQUILLA_PG.prepare(
-    `INSERT INTO admin_elevations (user_id, elevated_until, updated_at) VALUES (?, ?, now())
-     ON CONFLICT (user_id) DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now()`,
+    `INSERT INTO admin_elevations (user_id, session_key, elevated_until, updated_at)
+     VALUES (?, ?, ?, now())
+     ON CONFLICT (user_id, session_key)
+       DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now()`,
   )
-    .bind(user.id, until)
+    .bind(user.id, sessionKey, until)
     .run()
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, 'elevation.grant', ?)`,

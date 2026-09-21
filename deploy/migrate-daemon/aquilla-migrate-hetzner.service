@@ -12,7 +12,7 @@ EnvironmentFile=/etc/aquilla-migrate/env
 Environment=PATH=/opt/node22/bin:/usr/local/bin:/usr/bin:/bin
 Environment=NODE_OPTIONS=--max-old-space-size=2048
 Environment=MIGRATE_HOME=/var/lib/aquilla-migrate
-ExecStart=/opt/node22/bin/node /opt/aquilla-migrate/app/node_modules/tsx/dist/cli.mjs scripts/migrate-daemon/main.ts daemon
+ExecStart=/opt/node22/bin/node --import tsx scripts/migrate-daemon/main.ts daemon
 Restart=always
 RestartSec=10
 MemoryHigh=2600M

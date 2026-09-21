@@ -53,6 +53,7 @@
 //   GET  /api/v2/admin/activity    (ADMIN_EMAILS only)
 //   GET  /api/v2/health
 //   POST /api/v2/contact/book-call (public — marketing homepage form)
+//   POST /api/v2/contact/newsletter (public — partner-letter request form)
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
 //   POST /__dev__/login  (WRANGLER_LOCAL only)
@@ -226,6 +227,7 @@ app.get("/", (c) =>
       "/api/v2/invites/*",
       "/api/v2/admin/*",
       "/api/v2/contact/book-call",
+      "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
@@ -293,7 +295,8 @@ app.route("/api/v2/projects", projectKnowledge)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
-// Public contact surface (marketing homepage "book a call" form) — no auth;
+// Public contact surface (marketing homepage "book a call" + partner-letter
+// request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).

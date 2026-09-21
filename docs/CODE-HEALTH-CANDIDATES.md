@@ -135,9 +135,27 @@ routine never modifies test files.
   issue #410 family below — which did not reproduce this run, consistent with intermittent).
   It turned out **not** to have a colocated test (the original 2026-08-11 note guessed
   "671 lines total" including a test file that doesn't actually exist).
-- **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
-  by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
-  its size; confirm no e2e spec still depends on it.
+- **`src/components/TerminologyPage.tsx`** — done 2026-09-21 (`chore/aqu-1335-remove-dead-terminology-page`, AQU-1335).
+  Zero importers since the 2026-07-08 glossary-editor swap: `/project/:id/terminology`
+  renders `GlossaryEditor`, lazily mounted by `ProjectWorkspace.tsx`. It had stopped being
+  harmless — PR #540 (AQU-208) applied its role-gating fix here, so the fix never reached
+  users and the QA walk failed twice. Deleted the 1,535-line page plus everything only it
+  reached: `TerminologyMergeDialog.tsx` (351), `TerminologyReviewQueue.tsx` (210),
+  `CandidateTermsPanel.tsx` (151), `src/lib/terminology/candidates-worker.ts` (66, its
+  `?worker` lazy import) and `src/lib/terminology/stats.ts` + `stats.test.ts` (206 + 230, the
+  `LibraryStatsHeader` model). Like `RulesPage.tsx` it had no colocated test, and no e2e spec
+  or page object referenced any of its test ids. On `CandidateTermsPanel`'s
+  `SWARM-TODO(glue): mount this in the terminology view`: satisfied by supersession, not
+  erased — the glossary-editor spec folds the review-queue and candidates panels into the
+  surface, and `GlossaryEditor`'s "Suggest terms" calls `extractCandidates` itself and lands
+  the results as draft rows. **Not** superseded: merge-duplicates. The spec keeps it ("mergeable
+  via multi-select into the existing `TerminologyMergeDialog`") and the plan lists
+  re-surfacing it as a follow-up, but nothing on the live surface has offered it since the
+  swap. `mergeConcepts()` in `store.ts` and its tests are deliberately kept so that
+  follow-up only needs UI; the dialog is recoverable from git (`git show
+  707287dfd:src/components/TerminologyMergeDialog.tsx`). Kept because `GlossaryEditor` still
+  uses them: `TerminologyTermDetail`, `TerminologyViolationsInbox`, `candidates.ts`,
+  `csv.ts`, `tbx.ts`, `store.ts`.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
   live `fetchAccessibleProjects` exists in `cloud-projects.ts`. **Blocked** by this
@@ -188,6 +206,73 @@ routine never modifies test files.
   the still-present keys keep their provenance — remove the headers together with the keys,
   not before. Whoever picks this up should sweep all three prefixes (`rules.page.*`,
   `rules.createDialog.*`, `rules.suggestDialog.*`) in one pass: same files, same proof.
+
+## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
+
+- **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
+  component-cleanup entry above) left 65 of the 239 keys in
+  `src/lib/i18n/namespaces/terminology.ts` with no reader. Proof: for every key in the
+  namespace's `messages` block, search all tracked `src`/`e2e`/`scripts`/`worker`/`tools`
+  source outside `src/lib/i18n/` for the quoted key, then keep only the misses that the
+  deleted files *did* reference. No live code builds a `terminology.*` key dynamically
+  (no `` `terminology.…${ `` template anywhere), so a literal search is sufficient.
+  - `terminology.page.*` (17): `editConceptAria`, `deleteConceptAria`,
+    `reviewQueueCountLabel`, `candidateTermsCountLabel`, `addConceptButton`,
+    `editConceptTitle`, `deleteConcept`, `deleteNamedConcept`, `mergeDuplicatesButton`,
+    `reviewQueueHeading`, `candidateTermsHeading`, `conceptsHeading`, `noConceptsTitle`,
+    `noConceptsDescription`, `addFirstConceptButton`, `renderingsColumnHeader`,
+    `deleteConceptDialogTitle`
+  - `terminology.mergeDialog.*` (12): `title`, `selectDescription`, `survivorBadge`,
+    `mergeFailed`, `previewMergeButton`, `previewDescription`, `survivorLabel`,
+    `mergedRenderingsLabel`, `combinedNotesLabel`, `conceptsToRemoveLabel`, `merging`,
+    `confirmMerge`
+  - `terminology.candidates.*` (11): `emptyTitle`, `emptyDescription`, `countRankedByNc`,
+    `ncTooltip`, `cTooltip`, `g2Tooltip`, `promoteButton`, `minedFromSummary`,
+    `corpusScopeFull`, `corpusScopeCapped`, `miningLabel`
+  - `terminology.libraryStats.*` (7): `heading`, `noActiveConcepts`, `activeConceptsLabel`,
+    `enforcedLabel`, `infringedLabel`, `cellsAnalyzedLabel`, `mostInfringedLabel`
+  - `terminology.reviewQueue.*` (6): `approveAria`, `rejectAria`, `readOnlyTooltip`,
+    `emptyTitle`, `emptyDescription`, `awaitingReviewCount`
+  - `terminology.importDialog.*` (6): `title`, `parsing`, `dropZoneText`,
+    `chooseFileButton`, `csvColumnsHint`, `tbxDialectsHint`
+  - `terminology.common.*` (4): `noRenderings`, `managed`, `notesLabel`, `statusLabel`
+  - `terminology.conceptDialog.*` (2): `renderingPlaceholder`, `targetRenderingsLabel`
+- **Already orphaned before that deletion** (same search, but the deleted files never
+  referenced them either — 6 keys): `terminology.editor.loadingTermDetails`,
+  `terminology.editor.errorConflict`, `terminology.editor.errorOffline`,
+  `terminology.lookup.applyAria`, `terminology.lookup.applyButton`,
+  `terminology.addConcept.description`.
+- **Friction** — same shape as the `rules.*` entry above, plus two things that entry did
+  not hit:
+  - `Catalog` is `Partial<Record<MessageKey, MessageValue>>`, so a key dropped from the
+    base namespace becomes an excess-property **tsc error** in every locale catalog that
+    still carries it. The removal is therefore all-or-nothing across
+    `namespaces/terminology.ts` (`messages` + `context.keys`, ~105 lines), the six
+    generated catalogs under `src/lib/i18n/messages/` (62-65 lines each, and their header
+    says "Do not hand-edit"), and `src/lib/i18n/source-hashes.json` (~378 lines).
+  - `no-duplicates.test.ts` rejects a documented exception whose key no longer collides.
+    Four of the orphans carry entries in `namespaces/duplicate-exceptions.ts`
+    (`terminology.libraryStats.enforcedLabel`, `…libraryStats.infringedLabel`,
+    `…conceptDialog.renderingPlaceholder`, `…common.statusLabel`); those must go in the
+    same commit, and the *other* half of each pair needs a re-check for an exception that
+    just became stale.
+- **Why deferred**: orphaned strings are inert (nothing fails on an unused key), while the
+  removal is ~900 lines across 10 high-churn files — three open PRs (#540, #547, #657)
+  were in flight against this namespace's surface when the page was deleted, and #657 adds
+  ~96 lines to `namespaces/terminology.ts` itself. Do it once those land, in the same
+  single pass as the three `rules.*` prefixes above: same files, same proof.
+- **Section headers**: the `── TerminologyPage.tsx: … ──`, `── TerminologyMergeDialog.tsx ──`,
+  `── TerminologyReviewQueue.tsx ──` and `── CandidateTermsPanel.tsx ──` comments in
+  `namespaces/terminology.ts` now name deleted files. Left in place on purpose, following
+  the `rules.ts` precedent — they are the only provenance the still-present keys have.
+  Remove the headers together with the keys, not before.
+- **Also stale, not touched**: 28 of the 32 `T-*` rows in `docs/FEATURE-STORIES.csv` (all
+  but T-16, T-24, T-30, T-31) cite the deleted files as their code pointers, and the early
+  ones describe the retired tabbed page. Most have a live
+  equivalent in `GlossaryEditor`, but T-02 (library statistics header) and T-26/T-27 (merge
+  duplicate concepts) describe features nothing renders any more while still marked
+  `Implemented`. Re-pointing them is a feature-by-feature check against the live surface,
+  not a mechanical path swap.
 
 ## 2026-09-18 — `RulesPage.tsx` orphan follow-up shipped; rest of the zero-importer sweep deferred
 
@@ -250,9 +335,9 @@ and each needs its own zero-importer re-verification before deletion, since file
   would just re-create them. Only worth touching if a human says the repo prefers a
   strictly-used-only `ui/` directory.
 - Known-and-blocked, unchanged this run: the 15-file `src/components/import/*` orphan cluster
-  (~3,900 lines, blocked on issue #410), `src/components/TerminologyPage.tsx` (1,535 lines,
-  plus the `src/lib/terminology/candidates-worker.ts` it lazily imports — 66 lines that become
-  dead with it), and `src/hooks/useSubscribedConcepts.ts` (looks dead, is not — see below).
+  (~3,900 lines, blocked on issue #410) and `src/hooks/useSubscribedConcepts.ts` (looks dead,
+  is not — see below). (`TerminologyPage.tsx` and its `candidates-worker.ts` were listed here
+  too; both went on 2026-09-21 — see the component-cleanup entry above.)
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 

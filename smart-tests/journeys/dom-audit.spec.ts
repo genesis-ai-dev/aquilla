@@ -29,6 +29,10 @@ test("DOM audit: project surfaces and editor activation use Jev's actual snapsho
     const label = await activation.getAttribute("aria-label")
     expect(label).toContain("Translation for row 1: Welcome to the translation project.")
     const before = await observeDom(page)
+    // This entry point must exist before hover/focus. The first comment
+    // journey exposed an otherwise invisible action rail.
+    expect(before.actions.some((action) => action.kind === "click"
+      && action.label === `More actions · ${label}`)).toBe(true)
     expect(before.actions.some((action) => action.kind === "click" && action.label === label)).toBe(true)
     expect(before.actions.some((action) => action.kind === "fill" && action.label === label)).toBe(false)
     await activation.press("Space")

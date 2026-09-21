@@ -79,7 +79,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockProjectCells.mockReturnValue({
     files: [], isLoading: false, isTruncated: false,
-  } as ReturnType<typeof useProjectCells>)
+    revalidate: vi.fn(), applyOptimisticTargetEdit: vi.fn(),
+  })
 })
 
 describe("ExportDialog — what a native round-trip does with added and removed content", () => {

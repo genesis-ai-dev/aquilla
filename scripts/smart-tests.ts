@@ -24,7 +24,7 @@ const child = spawn("pnpm", [
     ...process.env,
     E2E_SHARD: "4/4",
     E2E_CONFIG: "smart-tests/config.ts",
-    SMART_TEST_RUN_ID: new Date().toISOString().replace(/[:.]/g, "-"),
+    SMART_TEST_RUN_ID: process.env.SMART_TEST_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, "-"),
   },
 })
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

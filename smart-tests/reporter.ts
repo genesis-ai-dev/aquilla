@@ -1,15 +1,26 @@
-import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter"
+import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from "@playwright/test/reporter"
+import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 /** Persist only our allowlisted JSON evidence, including successful runs. */
 export default class SmartReporter implements Reporter {
+  private planned: string[] = []
+  private build = ""
+  private dirty = true
   private readonly results: {
     title: string; status: string; durationMs: number; evidence: Record<string, unknown>;
   }[] = []
   private readonly directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
     "results", (process.env.SMART_TEST_RUN_ID ?? new Date().toISOString()).replace(/[^\w-]/g, "-"))
+
+  onBegin(_config: FullConfig, suite: Suite) {
+    this.planned = suite.allTests().map((test) => test.title)
+    this.build = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    this.dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
+    this.save("running")
+  }
 
   onTestEnd(test: TestCase, result: TestResult) {
     const evidence: Record<string, unknown> = {}
@@ -30,7 +41,8 @@ export default class SmartReporter implements Reporter {
   private save(status: string) {
     mkdirSync(this.directory, { recursive: true })
     writeFileSync(path.join(this.directory, "suite.json"), JSON.stringify({
-      schemaVersion: 1, status, tests: this.results,
+      schemaVersion: 2, build: this.build, dirty: this.dirty,
+      planned: this.planned, status, tests: this.results,
     }, null, 2))
     const rows = this.results.map((result) => `| ${result.title} | ${result.status} | ${(result.durationMs / 1000).toFixed(1)} s |`)
     writeFileSync(path.join(this.directory, "summary.md"), [

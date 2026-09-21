@@ -140,7 +140,10 @@ export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: s
     const file = normalize(rawFile)
     if (!file) continue
 
-    if (/^(?:smart-tests\/|scripts\/smart-tests\.ts$)/.test(file)) {
+    if (file === "src/components/CellActionRail.tsx") {
+      add(["e2e/specs/editor/comments.smoke.spec.ts"], `${file} exposes the cell comment menu`)
+    }
+    if (/^(?:smart-tests\/|scripts\/smart-tests(?:-pr)?\.(?:ts|mjs)$|scripts\/smart-test-comment\.mjs$)/.test(file)) {
       add(["e2e/specs/editor/import-and-edit.smoke.spec.ts"], `${file} affects smart testing`)
       continue
     }

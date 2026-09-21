@@ -48,8 +48,12 @@ SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart -- \
   --repeat-each=5
 ```
 
-The default command runs all five checks: the audit, three live conditions,
-and oracle qualification. See [the initial evidence](./QUALIFICATION.md).
+The default command runs eight checks: six live journeys, the DOM audit,
+and oracle qualification. The additional journeys rename a project, rename a
+file, and post one comment on the intended cell. Each checks server state,
+a fresh browser, unchanged identities, and unchanged translation content.
+The comment goal names the row's More actions menu; it does not establish
+unguided discovery of that workflow. See [the initial evidence](./QUALIFICATION.md).
 
 The launcher reserves E2E stack four: database `aquilla_e2e_s3`, app port
 6473, identity port 10087, sync port 10088. It runs one journey at a time.
@@ -111,6 +115,35 @@ and the target activation transition; it is an inventory, not proof of every
 control's behavior.
 
 ## CI and release confidence
+
+For a reviewed local checkout matching an open PR's exact head, run:
+
+```sh
+SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart:pr -- <PR-number>
+```
+
+The command posts one starting comment, runs all eight checks, and updates
+that comment with the results. Commit and push changes first. It refuses a
+dirty checkout or a mismatched PR head. Authenticate `gh` before running it.
+Evidence stays under `smart-tests/results/pr-<number>-<timestamp>/` locally.
+The comment reports model cost, each outcome, and missing checks. It never
+accepts a provider's DONE verdict as verification. A newer PR commit makes
+an older run's comment update a no-op. Interrupted runs may retain a starting
+comment; that is never a completed pass.
+
+The existing automatic Cloudflare preview comment now points reviewers to
+these reports and explicitly says that preview deployment does not run Jev.
+Absence of a completed report matching the commit means NOT VERIFIED.
+
+**Automatic live PR execution is not activated.** On 2026-09-21, GitHub
+reports zero registered runners and blocks hosted jobs because of account
+billing. Provider secrets are also absent from GitHub Actions. Restoring
+billing or supplying a Linux host addresses compute, but execution still
+needs a boundary between PR code and model/reporting credentials. Do not
+attach the local PR command to an untrusted webhook or put provider keys
+into a persistent runner executing arbitrary PR heads. Use disposable test
+environments and a trusted model/report controller, or require review before
+a credential-bearing run. The reporting script needs no model of its own.
 
 The existing **E2E (Hetzner)** dispatch accepts `smart`, `smart-qualify`, and
 `smart-audit`. Live mode uses repository secrets `TYPESAFE_API_KEY` and

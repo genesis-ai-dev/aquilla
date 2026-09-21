@@ -112,6 +112,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
+| Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |

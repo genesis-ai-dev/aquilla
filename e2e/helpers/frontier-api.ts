@@ -110,6 +110,21 @@ export async function createProjectServerSide(
   return (await r.json()) as CreatedProject
 }
 
+/** GET /api/v2/projects/:projectId/settings — the stored shared-settings blob,
+ * for specs asserting that a UI save actually reached auth-worker. */
+export async function readProjectSettings(
+  jwt: string,
+  projectId: string,
+): Promise<Record<string, unknown>> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!r.ok) throw new Error(`read settings failed: HTTP ${r.status} — ${await r.text()}`)
+  const stored = (await r.json()) as { settings?: Record<string, unknown> }
+  return stored.settings ?? {}
+}
+
 /** PUT /api/v2/projects/:projectId/settings — merge keys into a project's
  * settings. Caller needs maintainer+ (the route's own floor). */
 export async function updateProjectSettings(

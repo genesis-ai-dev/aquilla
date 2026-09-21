@@ -35,7 +35,7 @@ import { useConcepts } from "@/hooks/useConcepts"
 
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
   updateConcept,
@@ -300,6 +300,23 @@ export function GlossaryEditor({
     },
     [project, canManage, persist],
   )
+  // AQU-1271: the Forms section on the term detail. Both fields ride the same
+  // concept-delta write path as every other row edit, so an exclusion lands as
+  // a `term.update` event and survives a reload.
+  const onMatchChange = useCallback(
+    (cid: string, match: TermMatchOptions | undefined) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { match }))
+    },
+    [project, canManage, persist],
+  )
+  const onCaseSensitiveChange = useCallback(
+    (cid: string, caseSensitive: boolean) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { caseSensitive }))
+    },
+    [project, canManage, persist],
+  )
   const onArchive = useCallback(
     (cid: string) => {
       const p = guard()
@@ -359,7 +376,7 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const candidates = extractCandidates(corpus, { managed: serverConcepts, termMatching: project.termMatching })
     const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
@@ -456,6 +473,10 @@ export function GlossaryEditor({
         onRenderingsChange={(conceptId, renderings) =>
           onEditRenderings(conceptId, () => renderings)
         }
+        termMatching={project?.termMatching}
+        onMatchChange={onMatchChange}
+        onCaseSensitiveChange={onCaseSensitiveChange}
+        onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}
@@ -614,6 +635,7 @@ export function GlossaryEditor({
             <TerminologyViolationsInbox
               concepts={concepts}
               cells={detailCells}
+              termMatching={project?.termMatching}
               onJumpToCell={({ cellId, fileId }) => {
                 navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
               }}

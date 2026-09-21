@@ -70,7 +70,7 @@ import {
 } from "@/lib/richtext/editor-content"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
@@ -396,6 +396,12 @@ interface TranslatedEditorProps {
    */
   terminologyConcepts?: Concept[]
   /**
+   * AQU-1271: project-level source-matching defaults (mark folding, affix
+   * inventory). Chips resolve each concept's match options against this, so a
+   * highlight covers exactly the surface forms the rule engine enforces.
+   */
+  termMatching?: TermMatchingSettings
+  /**
    * AQU-204: Called when the user clicks a managed-term highlight in the editor.
    * Receives the sourceTerm string and the highlight DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
@@ -456,6 +462,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onDiscardLocal,
   onNavigateCell,
   terminologyConcepts,
+  termMatching,
   onTermChipClick,
   footnoteNumberOffset = 0,
   showFootnoteTooltips = true,
@@ -509,6 +516,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   })
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
+  const latestTermMatchingRef = useRef<TermMatchingSettings | undefined>(termMatching)
 
   const preparedIdmlContent = useMemo(
     () => idmlConfiguration
@@ -737,7 +745,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
-        ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        ? [createTerminologyChipExtension(
+            () => latestTerminologyConceptsRef.current,
+            () => latestTermMatchingRef.current,
+          )]
         : []),
       ...(idmlContext
         ? idmlEditorExtensions({
@@ -1585,10 +1596,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   useEffect(() => {
     latestTerminologyConceptsRef.current = terminologyConcepts ?? []
+    latestTermMatchingRef.current = termMatching
     if (editor && terminologyConcepts !== undefined) {
       editor.view.dispatch(editor.state.tr.setMeta(terminologyChipPluginKey, "rebuild"))
     }
-  }, [editor, terminologyConcepts])
+  }, [editor, terminologyConcepts, termMatching])
 
   useEffect(() => {
     if (!editor) return

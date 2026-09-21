@@ -7,7 +7,8 @@ import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { SOURCE_SELECTION_RAIL_Z } from "@/lib/editor/source-cell-layers"
-import type { Concept, ConceptDraft } from "@/lib/terminology/types"
+import type { CellStore } from "@/hooks/useActiveCellStore"
+import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { TermLookupPopover } from "./TermLookupPopover"
 import { AddConceptPopover } from "./AddConceptDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -20,6 +21,13 @@ export interface SourceSelectionToolbarProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: the open file's cell store; the add-popover subscribes to it
+   *  for its live match preview. */
+  cellStore?: CellStore
+  /** Project affix inventory + fold defaults feeding that preview. */
+  termMatching?: TermMatchingSettings
+  /** Open project settings so the user can configure prefixes/suffixes. */
+  onSetUpAffixes?: () => void
   onAddOpenChange?: (open: boolean) => void
   onViewConcept?: (conceptId: string) => void
   /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
@@ -35,6 +43,9 @@ export function SourceSelectionToolbar({
   onAddToTermbase,
   addConceptBlockedReason,
   canApproveConcept,
+  cellStore,
+  termMatching,
+  onSetUpAffixes,
   onAddOpenChange,
   onViewConcept,
   onToolbarMouseDown,
@@ -99,6 +110,9 @@ export function SourceSelectionToolbar({
           sourceTerm={sourceSelection}
           blockedReason={addConceptBlockedReason}
           canApprove={canApproveConcept}
+          cellStore={cellStore}
+          termMatching={termMatching}
+          onSetUpAffixes={onSetUpAffixes}
           onConfirm={onAddToTermbase}
           onOpenChange={onAddOpenChange}
         >

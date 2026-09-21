@@ -5397,6 +5397,10 @@ export function ProjectWorkspace() {
         // that silence was the demo's other complaint.
         status: draft.approve ? "active" : "draft",
         ...(draft.caseSensitive ? { caseSensitive: true } : {}),
+        // AQU-1271: the popover's matching options (excluded forms, fold/affix
+        // overrides) are part of the term, not popover-local UI state — drop
+        // them here and the chips the user just clicked would do nothing.
+        ...(draft.match ? { match: draft.match } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -5876,6 +5880,7 @@ export function ProjectWorkspace() {
         cells: getActiveCells(),
         rules,
         concepts: localConcepts,
+        termMatching: project?.termMatching,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -5884,7 +5889,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7193,6 +7198,7 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
+    cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
     // AQU-1068 item 5: the source cell's menu. Its REASONS are per-row and
     // travel as strings; these are the same functions for every row, so they
     // ride the context and stay out of React.memo's compare surface.
@@ -7203,7 +7209,7 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -12095,6 +12101,13 @@ export function ProjectWorkspace() {
             // keyword), where the field is edited (server enforces the role floor).
             onEditTargetLanguage={() =>
               navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
+            }
+            // AQU-1271: the add-to-terminology popover offers this when the
+            // project has no prefix/suffix inventory for its matcher yet.
+            onSetUpAffixes={() =>
+              navigate(`/project/${projectId}/settings?q=terminology`, {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }

@@ -173,16 +173,18 @@ export function ValidationSettingsSection({
             : t("projectSettings.validation.requiredAudioDisabledNote")
         }
         control={
-          <DisabledFieldTooltip
-            disabled={disabled || !hasAnyAudioData}
-            tooltip={disabled ? (disabledTooltip ?? null) : null}
-          >
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
               id="validation-count-audio"
               type="number"
               min={1}
               max={15}
-              disabled={disabled || !hasAnyAudioData}
+              // AQU-490: never gated on "audio exists". That gate read a
+              // device-local latch and locked a fully dubbed project's
+              // threshold on any browser that had not itself recorded; the
+              // number is a policy the projection applies at read time and
+              // is harmless to set before the first take.
+              disabled={disabled}
               value={validationCountAudio}
               onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
               className="w-24 bg-background"

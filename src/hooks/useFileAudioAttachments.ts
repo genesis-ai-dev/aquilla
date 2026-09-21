@@ -459,6 +459,7 @@ export function mergeCellsWithAudio(
         // because every one of them is optional on both sides. The symptom
         // would be a gutter reading "nobody has validated this" on a take the
         // server says two people signed off, and nothing at all in a log.
+        ...(a.label != null ? { label: a.label } : {}),
         ...(a.validatorCount != null ? { validatorCount: a.validatorCount } : {}),
         ...(a.validators ? { validators: a.validators } : {}),
         ...(a.role ? { role: a.role } : {}),

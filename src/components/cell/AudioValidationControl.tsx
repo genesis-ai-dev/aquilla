@@ -229,13 +229,31 @@ export function AudioValidationControl({
     </button>
   )
 
-  // A line with nothing recorded draws NOTHING, rather than a disabled
-  // control. The gutter already carries the text validator, and a second dead
-  // circle beside it on every unrecorded line would read as a broken button.
+  // A line with nothing recorded. Inline surfaces (the take block, the strip,
+  // the voice panel) are about ONE take and draw nothing here. The GUTTER
+  // draws a placeholder — Sam's call, 2026-09-21: once audio validation is on
+  // for a file the column reads as three states, not two. A missing icon
+  // meant "nothing here" and "not recorded" at once; the faint mic says
+  // "not recorded" on its own, and lets a reviewer scan a chapter for the
+  // lines nobody has voiced yet. Not a button: there is nothing to press,
+  // and a disabled button would swallow the tooltip that explains it.
   if (state === "empty") {
-    return variant === "inline"
-      ? null
-      : <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1" />
+    if (variant === "inline") return null
+    const notRecorded = t("editor.audioValidation.notRecordedTooltip")
+    return (
+      <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">
+        <AppTooltip content={notRecorded}>
+          <span
+            role="img"
+            aria-label={notRecorded}
+            data-testid="audio-validation-empty"
+            className="flex h-6 w-6 items-center justify-center text-muted-foreground/25"
+          >
+            <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </span>
+        </AppTooltip>
+      </div>
+    )
   }
 
   const body = (

@@ -135,7 +135,7 @@ import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellAct
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
-import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { selectedDubTakes, slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { showAudioValidationInTextView } from "@/lib/audio/text-view-audio-switch"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
@@ -390,6 +390,7 @@ export function applyRowOverlays(
         // which left an added-track take unreachable from the text view even
         // after the rest of that blind spot was fixed.
         ...(attachment.slot ? { slot: attachment.slot } : {}),
+        ...(attachment.label != null ? { label: attachment.label } : {}),
         ...(attachment.validatorCount != null ? { validatorCount: attachment.validatorCount } : {}),
         ...(attachment.validators ? { validators: attachment.validators } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
@@ -1251,6 +1252,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
+  // AQU-490: is audio validation ON for this file's gutter? One answer for
+  // the whole table, not one per row — the switch is a project setting, and
+  // its derived form ("on once there is audio") has to look at the FILE, not
+  // the cell, or a line with no take could never show the placeholder that
+  // says so. "Has audio" means a selected DUB take somewhere in the file: an
+  // imported film's programme clip is on every cell and is not a recording.
+  const audioValidationEnabled = useMemo(() => {
+    let hasDub = false
+    for (const entry of audioByCellId.values()) {
+      if (selectedDubTakes(entry).length > 0) { hasDub = true; break }
+    }
+    return showAudioValidationInTextView(project, hasDub)
+  }, [audioByCellId, project])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2440,6 +2454,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeLane={activeLane}
           editable={canEdit}
           canValidate={canValidate}
+          audioValidationEnabled={audioValidationEnabled}
           canEditSource={canEditSource}
           sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
@@ -3452,6 +3467,8 @@ interface MemoizedRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** AQU-490: draw the audio validation control in this row (file-level switch). */
+  audioValidationEnabled: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
   canEditSource: boolean
@@ -3635,7 +3652,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onActivateEditor,
     getEditorActivationVersion,
     onDeactivateEditor,
-    project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, audioValidationEnabled, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
     insertAboveReason, insertBelowReason, removeReason,
@@ -3745,6 +3762,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         activeLane={activeLane}
         editable={editable}
         canValidate={canValidate}
+        audioValidationEnabled={audioValidationEnabled}
         canEditSource={canEditSource}
         sourceReadOnlyReason={sourceReadOnlyReason}
         isStaleSource={isStaleSource}
@@ -3869,6 +3887,8 @@ interface EditorRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
+  /** AQU-490: draw the audio validation control in this row (file-level switch). */
+  audioValidationEnabled: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
    *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
@@ -4755,7 +4775,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
-  username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, audioValidationEnabled, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
@@ -5841,6 +5861,27 @@ function EditorRow({
    * every-track-must-be-validated rule cannot mean anything while the text
    * view cannot see those tracks.
    */
+  /**
+   * AQU-490: the selected dub takes on slots OTHER than the two named ones,
+   * for the Recording tab to list. Excludes the default track (shown by the
+   * block keyed on `selectedAudioId`), the generated voice (its own block),
+   * and the imported programme clip (role 'source', never a performance).
+   */
+  const extraTrackTakes = useMemo(() => {
+    const out: Array<{ audioId: string; label: string | null }> = []
+    const selections = slotSelections({
+      selectedBySlot: cell.selectedBySlot,
+      selectedAudioId: cell.selectedAudioId ?? null,
+      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+    })
+    for (const [slot, audioId] of Object.entries(selections)) {
+      if (slot === "recording" || slot === "generatedVoice") continue
+      const att = cell.attachments?.[audioId]
+      if (!att || att.isDeleted || (att.role ?? "dub") !== "dub") continue
+      out.push({ audioId, label: att.label ?? null })
+    }
+    return out
+  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const hasAnyTrackAudio = useMemo(() => {
     const selections = slotSelections({
       selectedBySlot: cell.selectedBySlot,
@@ -6404,11 +6445,13 @@ function EditorRow({
     { roleLevel: project.syncRole?.level ?? null, username },
     audioBlockedReason(t),
   )
-  // Behind the project switch (AQU-490 slice 4): a team used to one circle in
-  // this gutter should not find a second one there one morning. The control
-  // draws nothing on a line with no recording anyway, so a text-only file in
-  // a project that HAS audio elsewhere still shows an empty column.
-  const audioValidationControl = showAudioValidationInTextView(project, audioValidationTakeList.length > 0) ? (
+  // Behind the project switch (AQU-490 slice 4), resolved once for the whole
+  // file at the table level: a team used to one circle in this gutter should
+  // not find a second one there one morning. When it IS on, every row draws
+  // the control — a line with no recording gets the placeholder mic, so the
+  // column reads as not-recorded / recorded / validated rather than as a
+  // gap that could mean either of the first two (Sam, 2026-09-21).
+  const audioValidationControl = audioValidationEnabled ? (
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationTakeList}
@@ -7679,6 +7722,36 @@ function EditorRow({
                       onCommitted={onCellCommitted}
                     />
                   )}
+                  {/* AQU-490 / AQU-646: takes on ADDED target-audio tracks.
+                      The block above shows the default track's take and the
+                      one below the generated voice; a take on any other slot
+                      had no block at all, so a line whose only recording sat
+                      on track 2 opened to an EMPTY panel — the attention dot
+                      said audio, the panel said nothing. Sam hit exactly that
+                      on 2026-09-21. Every selected dub take that is not on the
+                      two named slots gets its own block here, named by the
+                      take's label or its track. */}
+                  {extraTrackTakes.map((take) => (
+                    <CellTakeBlock
+                      key={take.audioId}
+                      project={project}
+                      owner={cell}
+                      audioId={take.audioId}
+                      timings={cell.audioTimings?.[take.audioId]}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                      header={
+                        <span className="text-[11px] text-muted-foreground">
+                          {take.label ?? t("editor.audio.addedTrackTakeHint")}
+                        </span>
+                      }
+                    />
+                  ))}
                   {hasGeneratedVoice && (
                     // A synthesized voice is nobody's performance: it can be
                     // recorded over, but not transcribed or cleaned up.

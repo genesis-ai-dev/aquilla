@@ -81,11 +81,22 @@ describe("takeState / lineState", () => {
 // ── What the line draws ───────────────────────────────────────────────────
 
 describe("the readout", () => {
-  it("draws nothing at all on a line with no recording", () => {
+  // Sam, 2026-09-21: the gutter column reads as THREE states once audio
+  // validation is on — not recorded, recorded, validated. So an unrecorded
+  // line gets a faint placeholder mic rather than a gap, but never a button:
+  // there is nothing to press.
+  it("draws a not-recorded placeholder on a line with no recording, not a button", () => {
     draw([])
     expect(button()).toBeNull()
-    // The gutter slot survives so the column keeps its width.
-    expect(screen.getByTestId("audio-validation-gutter")).toBeEmptyDOMElement()
+    const placeholder = screen.getByTestId("audio-validation-empty")
+    expect(placeholder).toHaveAccessibleName(/nothing recorded on this line/i)
+    expect(placeholder.tagName).toBe("SPAN")
+  })
+
+  it("draws nothing inline for a line with no recording", () => {
+    draw([], { variant: "inline" })
+    expect(button()).toBeNull()
+    expect(screen.queryByTestId("audio-validation-empty")).toBeNull()
   })
 
   it("shows no fraction on an ordinary one-take line", () => {

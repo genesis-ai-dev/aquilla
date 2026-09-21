@@ -122,6 +122,10 @@ export interface CodexCellAttachment {
   validators?: string[];
   role?: "dub" | "source";
   recordedBy?: string | null;
+  /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
+   *  rename). Carried so the Recording tab can head an added-track take with
+   *  its own name rather than its track id. */
+  label?: string | null;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

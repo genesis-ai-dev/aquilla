@@ -86,6 +86,22 @@ describe("ValidationSettingsSection — the audio policy", () => {
   })
 })
 
+// Sam, 2026-09-21: a fully dubbed project's audio threshold could not be
+// edited because the "audio exists" signal was a device-local latch. The field
+// is a policy number the projection applies at read time; nothing depends on
+// a take existing first, so it is never gated on one.
+describe("the audio threshold input", () => {
+  it("is editable even when this device has never seen audio", () => {
+    draw({ hasAnyAudioData: false })
+    expect(screen.getByLabelText(/Required validators \(audio\)/i)).toBeEnabled()
+  })
+
+  it("still respects the role/offline gate", () => {
+    draw({ hasAnyAudioData: false, disabled: true })
+    expect(screen.getByLabelText(/Required validators \(audio\)/i)).toBeDisabled()
+  })
+})
+
 describe("the Text-view switch", () => {
   // ABSENT IS NOT FALSE. Undefined means the project was made after audio
   // validation shipped, which resolves to on-once-there-is-audio. Rendering

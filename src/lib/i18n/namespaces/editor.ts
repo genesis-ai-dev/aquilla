@@ -1284,6 +1284,7 @@ export const editor = defineNamespace({
     "editor.audioValidation.noValidators": "Nobody has validated this take",
     "editor.audioValidation.generatedTake": "Generated voice",
     "editor.audioValidation.defaultTrack": "Main",
+    "editor.audio.addedTrackTakeHint": "Take on an added track",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
@@ -4627,6 +4628,13 @@ export const editor = defineNamespace({
           "Labels a take in the popover that was produced by text-to-speech rather than " +
           "recorded by a person. Such takes are never validated automatically.",
         maxLength: 20,
+      },
+      "editor.audio.addedTrackTakeHint": {
+        description:
+          "Header over a take in the Recording tab that lives on an extra "
+          + "target-audio track rather than the line's main track, when the take "
+          + "has no name of its own.",
+        maxLength: 30,
       },
       "editor.audioValidation.defaultTrack": {
         description:

@@ -29,14 +29,14 @@ vi.mock("@/hooks/useFileAudioAttachments", () => ({
 }))
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({ generateCellVoice: vi.fn(async () => true) }))
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 1000) }))
-const inject = vi.hoisted(() => vi.fn())
+const inject = vi.hoisted(() => vi.fn((..._args: unknown[]) => undefined))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: vi.fn(),
   injectOptimisticAudioAttachment: (...a: unknown[]) => inject(...a),
   injectOptimisticAudioRemove: vi.fn(),
 }))
-const emitValidate = vi.hoisted(() => vi.fn(async () => "evt-validate"))
-const emitAttach = vi.hoisted(() => vi.fn(async () => "evt-attach"))
+const emitValidate = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-validate"))
+const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...a: unknown[]) => emitAttach(...a),

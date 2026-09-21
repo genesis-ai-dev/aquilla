@@ -180,6 +180,7 @@ import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -840,6 +841,9 @@ interface EditorTableProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -913,7 +917,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -2489,7 +2493,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+          canApproveConcept={canApproveConcept}
+          onSetUpAffixes={onSetUpAffixes}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -3241,10 +3246,12 @@ function CellSourceMenu({
               onClick={(e) => e.stopPropagation()}
               className={cn(
                 // AQU-1134: the term action rail pops up over this corner and
-                // used to render BEHIND it. The rail sits at z-20, so the
-                // menu's own button has to stay below that — it was z-10 as
-                // the pencil and stays there.
-                "absolute end-1 top-1 z-10 flex size-6 shrink-0 items-center justify-center rounded-md",
+                // must render in FRONT of it. Both layers are owned by
+                // source-cell-layers.ts — don't hand-edit this one, the bug
+                // was the two being equal (z-10 each), which handed the
+                // painting order to DOM order and put this button on top.
+                "absolute end-1 top-1 flex size-6 shrink-0 items-center justify-center rounded-md",
+                SOURCE_CELL_MENU_Z,
                 "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
                 // Present but quiet until the row is reached for, exactly as
                 // the pencil was. `open` pins it so the trigger does not fade
@@ -3547,6 +3554,9 @@ interface MemoizedRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3624,7 +3634,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3786,6 +3796,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
         canApproveConcept={canApproveConcept}
+        onSetUpAffixes={onSetUpAffixes}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3966,6 +3977,9 @@ interface EditorRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4759,7 +4773,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4786,6 +4800,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
@@ -6310,13 +6325,12 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // FRO-297: Accessible label for the target editor textbox.
-  // Format: "<ref> — <state>" so screen readers announce context on focus.
-  // Uses cell.context (the canonical reference like "GEN 1:1") when available,
-  // falls back to globalReferences[0], then rowIndex+1.
-  const cellRef = cell.context?.trim()
-    || cell.globalReferences?.[0]?.trim()
-    || `row ${rowIndex + 1}`
+  // Human references help people and DOM agents identify a cell. Importers
+  // also store opaque UUIDs as canonical refs; those carry no useful context.
+  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
+    .map((value) => value?.trim())
+    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
       cellRef={cellRef}
@@ -6332,11 +6346,14 @@ function EditorRow({
     />
   )
   const cellStateLabel =
-    cell.status === "validated" ? "validated" :
-    cell.status === "empty" ? "empty" :
-    cell.activeValidators.includes(username) ? "self-validated" :
-    "unvalidated"
-  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+    cell.status === "validated" ? t("editor.state.validated") :
+    cell.status === "empty" ? t("editor.state.empty") :
+    cell.activeValidators.includes(username) ? t("editor.state.selfValidated") :
+    t("editor.state.unvalidated")
+  const sourceExcerpt = cell.original.replace(/\s+/g, " ").trim().slice(0, 120)
+  const editorAriaLabel = sourceExcerpt
+    ? t("editor.row.translationAria", { ref: cellRef, source: sourceExcerpt, state: cellStateLabel })
+    : t("editor.row.editorAria", { ref: cellRef, state: cellStateLabel })
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -6654,7 +6671,10 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+                canApproveConcept={canApproveConcept}
+                cellStore={previewCellStore}
+                termMatching={project.termMatching}
+                onSetUpAffixes={onSetUpAffixes}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
@@ -6740,11 +6760,41 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml
-                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
-                idmlStyleCatalog={idmlStyleCatalog}
-                idmlParagraphStyleId={idmlParagraphStyleId}
-              />
+              // AQU-1135: a formatted source cell renders as sanitized HTML, so
+              // it cannot host the per-match TermLookupPopover triggers the
+              // plain-text path builds. It gets the highlights as decorated
+              // markup instead, and the click is delegated here — the same
+              // `.term-chip-host[data-source-term]` contract TranslatedEditor
+              // uses for the target lane, landing on the same popover.
+              <div
+                onClick={(event) => {
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+              >
+                <SanitizedRichHtml
+                  html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                  idmlStyleCatalog={idmlStyleCatalog}
+                  idmlParagraphStyleId={idmlParagraphStyleId}
+                  concepts={terminologyConcepts}
+                />
+              </div>
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6887,6 +6937,7 @@ function EditorRow({
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
                     terminologyConcepts={terminologyConcepts}
+                    termMatching={project.termMatching}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -6916,7 +6967,7 @@ function EditorRow({
                         : null)
                     }}
                     onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
+                      if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
                       requestTargetEdit()

@@ -1450,6 +1450,8 @@ describe("plan board on the overview", () => {
     expect(inspector).toBeInTheDocument()
     // Not inside a dialog: the page stays interactive behind it.
     expect(inspector.closest('[role="dialog"]')).toBeNull()
+    expect(within(inspector).getByRole("link", { name: /in editor$/ }))
+      .toHaveAttribute("href", "/project/p1/editor/file/f1")
   })
 
   it("withholds the planning controls from someone below maintainer", async () => {

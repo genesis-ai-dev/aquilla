@@ -79,6 +79,20 @@ function scrolledGroup(): HTMLElement {
 }
 
 describe("ExpandableFileList — OT/NT grouping on a fresh device (AQU-1084)", () => {
+  it("exposes a named corpus rename field outside the collapse button", () => {
+    const onRenameCorpus = vi.fn()
+    renderList([file("Intro", { corpusMarker: "Season 1" })], { onRenameCorpus })
+    const rename = screen.getByRole("button", { name: "Rename Season 1" })
+    expect(rename).not.toHaveClass("opacity-0")
+    fireEvent.click(rename)
+    const input = screen.getByRole("textbox", { name: "Rename Season 1" })
+    expect(input.closest("button")).toBeNull()
+    fireEvent.change(input, { target: { value: "Season 2" } })
+    fireEvent.blur(input)
+    expect(onRenameCorpus).toHaveBeenCalledWith("Season 1", "Season 2")
+    expect(headerToggle("Season 1")).toHaveAttribute("aria-expanded", "true")
+  })
+
   it("groups book-coded files into OT and NT when corpusMarker is missing", () => {
     renderList(FRESH_BIBLE)
     expect(headerToggle("OT")).toHaveAttribute("aria-expanded", "true")

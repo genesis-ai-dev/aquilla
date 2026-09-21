@@ -19,7 +19,8 @@
  * (matching compile.ts behaviour).
  */
 
-import type { Concept } from "./types"
+import type { Concept, TermMatchingSettings } from "./types"
+import { matchesConcept } from "./match"
 import { effectiveSourceText } from "@/lib/cell-text"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -103,9 +104,13 @@ function termRegex(term: string): RegExp {
 function evaluateCell(
   concept: Concept,
   cell: CellPair,
+  termMatching?: TermMatchingSettings,
 ): "enforced" | "infringed" | "na" {
-  const sourceRe = termRegex(concept.sourceTerm)
-  if (!sourceRe.test(effectiveSourceText(cell))) return "na"
+  // AQU-1271: the SOURCE side goes through the shared concept matcher so the
+  // glossary's "enforced" count sees the same surface forms (wildcards,
+  // mark-folding, project affixes, extra forms, exclusions) the rule engine
+  // and the editor chips do. Target-side rendering checks are unchanged.
+  if (!matchesConcept(effectiveSourceText(cell), concept, termMatching)) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",
@@ -146,6 +151,7 @@ function evaluateCell(
 export function computeTerminologyStats(
   concepts: Concept[],
   cells: CellPair[],
+  termMatching?: TermMatchingSettings,
 ): TerminologyStats {
   const active = concepts.filter((c) => c.status === "active")
 
@@ -159,7 +165,7 @@ export function computeTerminologyStats(
     let infringed = 0
 
     for (const cell of cells) {
-      const result = evaluateCell(concept, cell)
+      const result = evaluateCell(concept, cell, termMatching)
       if (result === "na") continue
       occurrences++
       if (result === "enforced") enforced++

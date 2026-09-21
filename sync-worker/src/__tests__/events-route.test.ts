@@ -428,6 +428,64 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     expect(tables.cells).toHaveLength(1)
     expect(tables.cells[0].event_id).toBe('evt-create-001')
   })
+
+  for (const sameEvent of [true, false]) {
+    it(`overlapping ${sameEvent ? 'retries remain idempotent' : 'different edits retain conflict arbitration'}`, async () => {
+      const token = await makeToken()
+      const database = await makeTestDb()
+      const { db, snapshot } = database
+      try {
+        await handleEventsWriteRequest(
+          await makeRequest([targetCreate()], token), makeEnv(db),
+        )
+        // Both real requests finish their pre-checks before either writes.
+        // PGlite then executes the unchanged production SQL transactions.
+        let release!: () => void
+        const bothPrepared = new Promise<void>((resolve) => { release = resolve })
+        const batch = db.batchPipelined!.bind(db)
+        let batches = 0
+        vi.spyOn(db, 'batchPipelined').mockImplementation(async (stmts) => {
+          if (++batches <= 2) {
+            if (batches === 2) release()
+            await bothPrepared
+          }
+          return batch(stmts)
+        })
+        const first = targetCommit({ id: 'evt-overlap-a' })
+        const second = sameEvent ? first : targetCommit({
+          id: 'evt-overlap-b', payload: { value: 'competing text' },
+        })
+        const requests = await Promise.all([
+          makeRequest([first], token), makeRequest([second], token),
+        ])
+        const responses = await Promise.all(requests.map((request) =>
+          handleEventsWriteRequest(request, makeEnv(db))))
+        const bodies = await Promise.all(responses.map((response) =>
+          response!.json() as Promise<{
+            accepted: Array<{ id: string }>
+            rejected: unknown[]
+            stale: Array<{ id: string }>
+            applied: Array<{ id: string }>
+          }>))
+        for (const body of bodies) {
+          expect(body.accepted).toHaveLength(1)
+          expect(body.rejected).toEqual([])
+        }
+        const stale = bodies.flatMap((body) => body.stale)
+        expect(stale).toHaveLength(sameEvent ? 0 : 1)
+        const tables = await snapshot()
+        expect(tables.events).toHaveLength(sameEvent ? 2 : 3)
+        if (sameEvent) {
+          expect(bodies.flatMap((body) => body.applied)).toHaveLength(1)
+          expect(tables.cells[0].event_id).toBe(first.id)
+        } else {
+          expect(tables.cells[0].event_id).not.toBe(stale[0].id)
+        }
+      } finally {
+        await database.close()
+      }
+    })
+  }
 })
 
 // ── AQU-538 lane/side-qualified arbitration in the ROUTE pre-check ──────

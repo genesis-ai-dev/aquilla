@@ -161,3 +161,59 @@ export function trackDeleteGate(
     reason: refused?.lastError?.reason ?? null,
   }
 }
+
+/** AQU-1326: the deferral gate's state. `open` is what the secondary per-file
+ *  hooks read; `file` and `sawLoad` exist only so the reducer can tell the
+ *  three "not loading" situations apart. */
+export interface PaintGate {
+  /** The file this gate describes, so a switch re-closes it. */
+  file: string | null
+  /** True once a load for `file` has actually been observed in flight. */
+  sawLoad: boolean
+  /** True once the secondary per-file reads may start. */
+  open: boolean
+}
+
+/**
+ * AQU-1326: decides when the workspace's secondary per-file reads (validation
+ * stats, comments, audio attachments, the sidebar progress rollup) may start.
+ * They must wait for the editor's own first cell page, so the cell stream gets
+ * the connection to itself on open.
+ *
+ * The subtlety this exists for: the cell store's `isLoading` starts FALSE and
+ * only flips true once its fetch gets past an async cache read. So "not
+ * loading" at mount is indistinguishable from "finished loading", and gating
+ * on it directly opens the gate on the first commit — before the cell stream
+ * has even been requested, which is the exact fan-out being prevented. A
+ * finished load therefore only counts once a load was actually seen.
+ *
+ * The three releases that are NOT a first paint are all real and all needed:
+ * no file open (nothing to wait behind), a failed load (no rows are coming),
+ * and a load that finished with zero rows (an empty file must not strand these
+ * hooks forever).
+ */
+export function nextPaintGate(
+  prev: PaintGate,
+  input: {
+    fileId: string | null
+    cellCount: number
+    cellsError: boolean
+    cellsLoading: boolean
+  },
+): PaintGate {
+  const file = input.fileId
+  const freshFile = prev.file !== file
+  const sawLoad = (freshFile ? false : prev.sawLoad) || input.cellsLoading
+  // On a file switch the cell count can still describe the PREVIOUS file for a
+  // render, so it is not trusted until the gate has settled on this file. The
+  // other two releases are trusted immediately: suppressing them on a fresh
+  // file risks latching the gate shut, because nothing would necessarily
+  // change again to re-run this.
+  const open = !file
+    ? true
+    : input.cellsError
+      || (sawLoad && !input.cellsLoading)
+      || (!freshFile && input.cellCount > 0)
+  if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
+  return { file, sawLoad, open }
+}

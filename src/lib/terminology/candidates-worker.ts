@@ -6,13 +6,14 @@
 
 /// <reference lib="webworker" />
 import { extractCandidates, type CandidateTerm } from "./candidates"
-import type { Concept } from "./types"
+import type { Concept, TermMatchingSettings } from "./types"
 
 interface MineRequest {
   type: "mine"
   requestId: string
   corpus: string[]
   managed?: Concept[]
+  termMatching?: TermMatchingSettings
   minTermFreq?: number
   maxResults?: number
   maxCorpusStrings?: number
@@ -42,6 +43,7 @@ self.onmessage = (e: MessageEvent<MineRequest>) => {
         : msg.corpus.length
     const candidates = extractCandidates(msg.corpus, {
       managed: msg.managed,
+      termMatching: msg.termMatching,
       minTermFreq: msg.minTermFreq,
       maxResults: msg.maxResults,
       maxCorpusStrings: msg.maxCorpusStrings,

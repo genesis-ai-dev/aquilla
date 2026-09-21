@@ -213,6 +213,7 @@ export function AssignedToMe() {
               onRowClick={(a) => {
                 navigate(assignmentHref(a))
               }}
+              rowLink={{ columnId: "assignment", to: assignmentHref }}
               initialSorting={[{ id: "deadline", desc: false }]}
               searchPlaceholder="Search assignments…"
               globalFilterFn={(row, _columnId, filterValue) => {

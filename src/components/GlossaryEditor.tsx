@@ -35,7 +35,7 @@ import { useConcepts } from "@/hooks/useConcepts"
 
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
   updateConcept,
@@ -46,7 +46,11 @@ import {
   partitionConcepts,
   setPrimaryRendering,
   canEditTermbase,
+  canEditTermCells,
+  resolveTermbaseEditFloor,
 } from "@/lib/terminology/glossary-view"
+import { denialMessage } from "@/lib/permissions/denial"
+import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
@@ -134,7 +138,12 @@ export function GlossaryEditor({
 
   const [cellDataRequested, setCellDataRequested] = useState(false)
   const [cellLoadObserved, setCellLoadObserved] = useState(false)
-  const { files: cellFiles, isLoading: cellsLoading } = useProjectCells({
+  const {
+    files: cellFiles,
+    isLoading: cellsLoading,
+    revalidate: revalidateCells,
+    applyOptimisticTargetEdit,
+  } = useProjectCells({
     projectId: id ?? null,
     projectFiles,
     getToken,
@@ -169,10 +178,21 @@ export function GlossaryEditor({
     conceptsRef.current = serverConcepts
     setOptimisticConcepts(null)
   }, [serverConcepts])
-  const hasOrigin = Boolean(project?.origin)
   // AQU-822: the floor is the org's configured termbaseEditMinRole (carried on
   // the project record), not a hardcoded project_lead level.
-  const canManage = canEditTermbase(project?.syncRole, hasOrigin, project?.termbaseEditMinRole)
+  const canManage = canEditTermbase(project?.syncRole, project?.termbaseEditMinRole)
+  // AQU-208: below the floor the termbase controls stay visible but disabled,
+  // and the hover names the caller's role and the one that owns the termbase.
+  const termbaseDenial = canManage
+    ? null
+    : denialMessage(
+        t,
+        resolveTermbaseEditFloor(project?.termbaseEditMinRole),
+        project?.syncRole?.level,
+      )
+  // The drill-down commits through `target.cell.commit`, so it asks the same
+  // role-policy question the editor does.
+  const canEditCells = canEditTermCells(project?.syncRole)
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(concepts),
@@ -187,10 +207,6 @@ export function GlossaryEditor({
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [optimisticTargets, setOptimisticTargets] = useState<
-    Record<string, { value: string; valueHtml?: string }>
-  >({})
-
   const allCells = useMemo(
     () => cellFiles.flatMap((file) => file.cells),
     [cellFiles],
@@ -202,15 +218,11 @@ export function GlossaryEditor({
     setCellLoadObserved(false)
   }, [id, projectFiles])
   const cellDataReady = projectFiles.length === 0 || allCells.length > 0 || (cellLoadObserved && !cellsLoading)
-  const detailCells = useMemo(
-    () => allCells.map((cell) => {
-      const patch = optimisticTargets[cell.id]
-      return patch
-        ? { ...cell, translated: patch.value, translatedHtml: patch.valueHtml }
-        : cell
-    }),
-    [allCells, optimisticTargets],
-  )
+  // AQU-206: the optimistic overlay now lives in useProjectCells, so it is keyed
+  // per (file, cell) and survives the outbox row being deleted on sync — the
+  // local Record<cellId, patch> this replaced reverted as soon as the write was
+  // accepted, snapping a just-fixed occurrence back to its old verdict.
+  const detailCells = allCells
   const selectedConcept = useMemo(
     () => concepts.find((concept) => concept.id === selectedConceptId) ?? null,
     [concepts, selectedConceptId],
@@ -288,6 +300,23 @@ export function GlossaryEditor({
     },
     [project, canManage, persist],
   )
+  // AQU-1271: the Forms section on the term detail. Both fields ride the same
+  // concept-delta write path as every other row edit, so an exclusion lands as
+  // a `term.update` event and survives a reload.
+  const onMatchChange = useCallback(
+    (cid: string, match: TermMatchOptions | undefined) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { match }))
+    },
+    [project, canManage, persist],
+  )
+  const onCaseSensitiveChange = useCallback(
+    (cid: string, caseSensitive: boolean) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { caseSensitive }))
+    },
+    [project, canManage, persist],
+  )
   const onArchive = useCallback(
     (cid: string) => {
       const p = guard()
@@ -347,7 +376,7 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const candidates = extractCandidates(corpus, { managed: serverConcepts, termMatching: project.termMatching })
     const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
@@ -431,14 +460,12 @@ export function GlossaryEditor({
         concept={selectedConcept}
         cells={detailCells}
         examplesLoading={!cellDataReady}
-        canEdit={!hasOrigin || (project?.syncRole?.level ?? 0) >= 400}
+        canEdit={canEditCells}
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
         onClose={handleCloseDetails}
-        onCellCommitted={() => {}}
-        onOptimisticEdit={(cellId, patch) => {
-          setOptimisticTargets((current) => ({ ...current, [cellId]: patch }))
-        }}
+        onCellCommitted={revalidateCells}
+        onOptimisticEdit={applyOptimisticTargetEdit}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
         // The detail view owns add/status/remove for renderings; it hands us
@@ -446,6 +473,10 @@ export function GlossaryEditor({
         onRenderingsChange={(conceptId, renderings) =>
           onEditRenderings(conceptId, () => renderings)
         }
+        termMatching={project?.termMatching}
+        onMatchChange={onMatchChange}
+        onCaseSensitiveChange={onCaseSensitiveChange}
+        onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}
@@ -459,42 +490,59 @@ export function GlossaryEditor({
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
         <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
-        {canManage && (
-          <>
-            <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggestRequested}>
-              <Sparkles data-icon="inline-start" />{" "}
-              {suggestRequested
-                ? t("terminology.editor.findingTerms")
-                : t("terminology.editor.suggestTerms")}
-            </Button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,.tsv,.tbx"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) handleImport(f)
-                e.target.value = ""
-              }}
-            />
-            <Button variant="outline" size="sm" onClick={() => importInputRef.current?.click()}>
-              <Upload data-icon="inline-start" /> {t("nav.workspaceActions.import")}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
-            >
-              <Download data-icon="inline-start" /> {t("terminology.editor.exportCsv")}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
-            >
-              <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
-            </Button>
-          </>
-        )}
+        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSuggest}
+            disabled={!canManage || suggestRequested}
+          >
+            <Sparkles data-icon="inline-start" />{" "}
+            {suggestRequested
+              ? t("terminology.editor.findingTerms")
+              : t("terminology.editor.suggestTerms")}
+          </Button>
+        </DisabledFieldTooltip>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,.tsv,.tbx"
+          className="hidden"
+          disabled={!canManage}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) handleImport(f)
+            e.target.value = ""
+          }}
+        />
+        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!canManage}
+            onClick={() => importInputRef.current?.click()}
+          >
+            <Upload data-icon="inline-start" /> {t("nav.workspaceActions.import")}
+          </Button>
+        </DisabledFieldTooltip>
+        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <Button
+            variant="outline"
+            disabled={!canManage}
+            onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
+          >
+            <Download data-icon="inline-start" /> {t("terminology.editor.exportCsv")}
+          </Button>
+        </DisabledFieldTooltip>
+        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <Button
+            variant="outline"
+            disabled={!canManage}
+            onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
+          >
+            <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
+          </Button>
+        </DisabledFieldTooltip>
         <Button
           variant={view === "violations" ? "secondary" : "outline"}
           aria-pressed={view === "violations"}
@@ -509,11 +557,18 @@ export function GlossaryEditor({
             : t("terminology.violations.title")}
         </Button>
         {/* i18n-exempt "glossary" is a view token, not copy */}
-        {canManage && view === "glossary" && (
-          <Button size="sm" onClick={() => setAddOpen(true)} aria-label={t("terminology.editor.addTerm")}>
-            <Plus data-icon="inline-start" />
-            {t("terminology.editor.addTerm")}
-          </Button>
+        {view === "glossary" && (
+          <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+            <Button
+              size="sm"
+              disabled={!canManage}
+              onClick={() => setAddOpen(true)}
+              aria-label={t("terminology.editor.addTerm")}
+            >
+              <Plus data-icon="inline-start" />
+              {t("terminology.editor.addTerm")}
+            </Button>
+          </DisabledFieldTooltip>
         )}
       </header>
 
@@ -580,6 +635,7 @@ export function GlossaryEditor({
             <TerminologyViolationsInbox
               concepts={concepts}
               cells={detailCells}
+              termMatching={project?.termMatching}
               onJumpToCell={({ cellId, fileId }) => {
                 navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
               }}

@@ -47,6 +47,7 @@ import { loadProjectSettings } from "../../../db/shared/projects"
 import { externalError } from "./errors"
 import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 import { paginate, parsePageParams } from "./pagination"
+import { mapAuthor, resolveAuthorshipPolicy, type AuthorshipPolicy } from "./pii"
 
 const MEMORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/memory$/
 const CELL_MEMORY_RE =
@@ -58,64 +59,42 @@ const STATUSES: readonly MemoryStatus[] = ["proposed", "approved", "rejected", "
 const KINDS: readonly MemoryKind[] = ["example", "decision", "note", "observation", "other"]
 
 // ---------------------------------------------------------------------------
-// PII: pseudonymous author identities (AQU-1180 default)
+// PII: author identities, delegated to external/pii.ts (AQU-1180)
 // ---------------------------------------------------------------------------
 
 // `agent_memories.created_by` / `reviewed_by` and `project_briefs.updated_by`
 // hold USERNAMES (see db/postgres/schema.sql), which name real translators.
-// Agent-facing reads therefore never echo them; each is replaced by a stable
-// pseudonym.
 //
-// Keyed HMAC, not a bare hash: usernames are low-entropy and the caller
-// already knows the projectId, so an unkeyed digest would be trivially
-// reversible by hashing candidate names. The key is SYNC_SECRET_KEY — already
-// required by every route in this tier.
+// This used to run its own HMAC pseudonymizer here -- a second implementation
+// of the same idea in external/pii.ts, with a different hex length and id
+// prefix (author_<12 hex> vs. pii.ts's u_<8 hex>) -- that (a) never checked a
+// project's `agentAuthorship: 'none'` opt-out, so this route kept handing back
+// pseudonyms for a project that asked for no identity exposure at all, and (b)
+// never checked a credential's `pii: true` grant, so an OWNER who explicitly
+// minted a real-identity credential still only ever got pseudonyms here.
+// Found in the 2026-09-17 pen test. Delegating to `resolveAuthorshipPolicy` /
+// `mapAuthor` fixes both, and as a side effect makes the same translator
+// resolve to the same opaque id here as on the comments/cells routes.
 //
-// Scoped per project on purpose: the same person is a different pseudonym in
-// two projects, so an agent with credentials on both cannot correlate
-// contributors across them. Within one project the pseudonym is stable, so
-// "these four decisions came from one person" survives — which is the part
-// that has legitimate analytical value.
+// Scoped per project by pii.ts on purpose: the same person is a different
+// pseudonym in two projects, so an agent with credentials on both cannot
+// correlate contributors across them. Within one project the pseudonym is
+// stable, so "these four decisions came from one person" survives -- which is
+// the part that has legitimate analytical value.
 
-const PSEUDONYM_BYTES = 6
-
-/** Build a memoized `username -> "author_<hex>"` mapper for one project. */
-function createPseudonymizer(
-  secret: string,
+/** Build a memoized `username -> mapped identity` mapper for one project. */
+function createIdentityMapper(
+  policy: AuthorshipPolicy,
+  secret: string | undefined,
   projectId: string,
-): (name: string | null) => Promise<string | null> {
-  const cache = new Map<string, string>()
-  let keyPromise: Promise<CryptoKey> | null = null
-
-  const getKey = (): Promise<CryptoKey> => {
-    keyPromise ??= crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    )
-    return keyPromise
-  }
-
-  return async (name: string | null): Promise<string | null> => {
-    if (name === null || name === "") return null
-    const cached = cache.get(name)
-    if (cached !== undefined) return cached
-    const sig = await crypto.subtle.sign(
-      "HMAC",
-      await getKey(),
-      // NUL separator: usernames and project ids can share a character
-      // set, so an unseparated concatenation could collide across
-      // (project, user) pairs. NUL appears in neither.
-      new TextEncoder().encode(`${projectId}\u0000${name}`),
-    )
-    const hex = Array.from(new Uint8Array(sig).slice(0, PSEUDONYM_BYTES))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-    const pseudonym = `author_${hex}`
-    cache.set(name, pseudonym)
-    return pseudonym
+): (name: string | null) => Promise<string | null | undefined> {
+  const cache = new Map<string, string | null | undefined>()
+  return async (name: string | null): Promise<string | null | undefined> => {
+    if (name === null || name === "") return name
+    if (!cache.has(name)) {
+      cache.set(name, await mapAuthor(name, policy, secret, projectId))
+    }
+    return cache.get(name)
   }
 }
 
@@ -132,9 +111,10 @@ interface ExternalMemoryEntry {
   content: string
   firstLine: string
   rationale: string | null
-  /** Pseudonymous — see createPseudonymizer. */
-  createdBy: string | null
-  reviewedBy: string | null
+  /** Pseudonymous by default, real on a `pii` credential, ABSENT entirely when
+   *  the project has set `agentAuthorship: 'none'` — see createIdentityMapper. */
+  createdBy: string | null | undefined
+  reviewedBy: string | null | undefined
   /** Agent run/session that proposed the entry. `credentialId` is dropped: it
    *  names another person's token, which is the same PII class as the author. */
   provenance: { runId?: string; sessionId?: string } | null
@@ -161,7 +141,7 @@ interface ExternalBrief {
   /** The brief record's own version (not the settings version). */
   version: number
   updatedAt: string | null
-  updatedBy: string | null
+  updatedBy: string | null | undefined
   source: "translationBrief"
   /** content !== "" — whether the next draft's prompt will carry the brief. */
   reachesCopilot: boolean
@@ -180,7 +160,7 @@ interface LegacyBrief {
 async function loadExternalBrief(
   db: AquillaDb,
   projectId: string,
-  pseudonymize: (name: string | null) => Promise<string | null>,
+  pseudonymize: (name: string | null) => Promise<string | null | undefined>,
 ): Promise<{ brief: ExternalBrief; legacyBrief: LegacyBrief | null }> {
   const { settings } = await loadProjectSettings(db, projectId)
   const record = readBriefFromSettings(settings)
@@ -230,8 +210,8 @@ function scrubProvenance(
 function toExternalEntry(
   m: AgentMemory,
   inRetrieval: boolean,
-  createdBy: string | null,
-  reviewedBy: string | null,
+  createdBy: string | null | undefined,
+  reviewedBy: string | null | undefined,
 ): ExternalMemoryEntry {
   return {
     id: m.id,
@@ -315,7 +295,8 @@ async function handleMemoryList(
   )
   const page = paginate(filtered, offset, limit)
 
-  const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
+  const policy = await resolveAuthorshipPolicy(db, authed.ctx.credential, projectId)
+  const pseudonymize = createIdentityMapper(policy, env.SYNC_SECRET_KEY, projectId)
   const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
   const data: ExternalMemoryEntry[] = await Promise.all(
     page.data.map(async (m) =>
@@ -343,7 +324,7 @@ async function handleMemoryList(
       kinds:
         'kind is derived from the path prefix: examples/ -> example, decisions/ -> decision, notes/ -> note, observations/ -> observation. Filter with ?kind= or ?status=.',
       identities:
-        "createdBy/reviewedBy/brief.updatedBy are per-project pseudonyms, not usernames — stable within this project, uncorrelatable across projects.",
+        "createdBy/reviewedBy/brief.updatedBy are per-project pseudonyms by default, not usernames — stable within this project, uncorrelatable across projects. Real usernames only on a credential minted `pii: true`; absent entirely when the project has set agentAuthorship: 'none'.",
       brief:
         "brief.content is the rendered L1 summary of settings.translationBrief — the exact text the copilot prompt injects (prompt-preview parts.brief). Empty content means the brief does not reach the AI yet: write sections with SetBrief (which auto-renders) or run RegenerateBriefSummary. legacyBrief (when present) is the older free-text project brief, still injected by the in-app agent's memory context but not by the drafting prompt.",
       perCell:
@@ -399,7 +380,8 @@ async function handleCellMemory(
   const shown = memory.memoryIndex.slice(0, MEMORY_INDEX_RENDER_CAP)
   const overflow = memory.memoryIndex.length - shown.length
 
-  const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
+  const policy = await resolveAuthorshipPolicy(db, authed.ctx.credential, projectId)
+  const pseudonymize = createIdentityMapper(policy, env.SYNC_SECRET_KEY, projectId)
   const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
 
   return Response.json({

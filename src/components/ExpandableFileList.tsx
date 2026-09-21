@@ -52,6 +52,12 @@ interface Props {
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
+   * AQU-1326: hold each expanded row's per-file `/progress` read until the
+   * editor's first cell page has painted, so the sidebar doesn't take a
+   * connection slot from the cell stream on file open.
+   */
+  deferSectionProgress?: boolean
+  /**
    * AQU-253 (a fix): whether org policy allows export. When false, the
    * per-file export menu items are hidden so dashboard affordances match
    * the workspace. Defaults to true (no gate) for callers that haven't
@@ -67,6 +73,7 @@ export function ExpandableFileList({
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   activeChapterHealth,
+  deferSectionProgress,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -79,10 +86,16 @@ export function ExpandableFileList({
   const { requestScrollToSection } = useEditorScroll()
   const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
 
+  // AQU-1326: this prefetch is deliberately eager, but on a file OPEN it lands
+  // just ahead of the cell stream and takes a slot from it — the sidebar's
+  // progress spine is not what the user is waiting for. Held until the editor's
+  // first cell page has painted; the effect re-runs the moment that flips, so
+  // the prefetch still happens, just behind the cells.
   useEffect(() => {
+    if (deferSectionProgress) return
     if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
     for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
-  }, [activeFileId, expanded, getTokenForFile, projectId])
+  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, projectId])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -212,10 +225,13 @@ export function ExpandableFileList({
                       <ChevronDown
                         className={cn("h-3 w-3", isCollapsed && "-rotate-90")}
                       />
-                      {isEditingCorpus ? (
+                      {!isEditingCorpus && <span>{displayLabel}</span>}
+                    </button>
+                    {isEditingCorpus && (
                         <input
                           autoFocus
                           autoComplete="off"
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                           defaultValue={group.label}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => {
@@ -229,14 +245,12 @@ export function ExpandableFileList({
                           }}
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
-                      ) : (
-                        <span>{displayLabel}</span>
-                      )}
-                    </button>
+                    )}
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
-                          className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          type="button"
+                          className="rounded-md p-0.5 transition-colors hover:text-foreground"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >
@@ -306,6 +320,7 @@ export function ExpandableFileList({
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
                               chapters={file.id === activeFileId ? activeChapterHealth : undefined}
+                              deferFetch={deferSectionProgress}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

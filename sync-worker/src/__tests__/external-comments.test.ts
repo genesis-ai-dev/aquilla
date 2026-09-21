@@ -22,11 +22,11 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
-import { handleExternalCommentsRequest, resolveIdentityMode } from '../external/comments-route'
+import { handleExternalCommentsRequest } from '../external/comments-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleCommentsReadRequest } from '../events/comments-read-route'
 import { AGENT_COMMENT_LABEL_SUFFIX } from '../events/comment-authorship'
-import { mintApiToken, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 
@@ -59,7 +59,7 @@ interface Member {
 async function memberToken(
   tdb: TestDb,
   level: number,
-  opts: { projectId?: string; scopeProjectId?: string | null } = {},
+  opts: { projectId?: string; scopeProjectId?: string | null; pii?: boolean } = {},
 ): Promise<Member> {
   const userId = nextUserId++
   const username = `u${userId}`
@@ -75,17 +75,29 @@ async function memberToken(
   const { token, tokenHash, tokenPrefix } = await mintApiToken()
   const credentialId = `00000000-0000-0000-0000-${String(++nextCred).padStart(12, '0')}`
   await tdb.pg.query(
-    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
-     VALUES ($1, $2, 'test', $3, $4, 'act', NULL, $5)`,
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, pii)
+     VALUES ($1, $2, 'test', $3, $4, 'act', NULL, $5, $6)`,
     [
       credentialId,
       String(userId),
       tokenPrefix,
       tokenHash,
       opts.scopeProjectId === undefined ? (opts.projectId ?? PROJECT) : opts.scopeProjectId,
+      opts.pii === true,
     ],
   )
   return { token, userId, username, credentialId }
+}
+
+/** Set the project's `agentAuthorship` policy the same way AQU-1180's own
+ *  tests do (external-pii.test.ts) — through project_settings, not a raw
+ *  column, since that's what resolveAuthorshipPolicy actually reads. */
+async function setAgentAuthorship(tdb: TestDb, projectId: string, value: string): Promise<void> {
+  await tdb.pg.query(
+    `INSERT INTO project_settings (project_id, settings) VALUES ($1, $2)
+     ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    [projectId, JSON.stringify({ agentAuthorship: value })],
+  )
 }
 
 /** Post a comment the way a person does: straight into the projection table,
@@ -285,20 +297,53 @@ describe('AQU-1233 — agent comment reads', () => {
   })
 
   it('a credential minted with the pii grant reads real identities', async () => {
-    // The `pii` grant itself is minted by AQU-1180 (owner-only, default off);
-    // this asserts the branch this route keys off, so the identity mode does
-    // not silently invert when that column arrives.
-    const base: ApiCredentialContext = {
-      credentialId: 'cred-1',
-      userId: '1',
-      username: 'owner',
-      mode: 'act',
-      orgId: null,
-      projectId: PROJECT,
-    }
-    expect(resolveIdentityMode(base)).toBe('pseudonymous')
-    expect(resolveIdentityMode({ ...base, pii: false })).toBe('pseudonymous')
-    expect(resolveIdentityMode({ ...base, pii: true })).toBe('real')
+    // The `pii` grant itself is minted by AQU-1180 (owner-only, default off).
+    const env = makeEnv(tdb.db)
+    const agent = await memberToken(tdb, 400, { pii: true })
+    await seedHumanComment(tdb, { commentId: 'c-1', author: 'reviewer', body: 'one' })
+
+    const { status, body } = await readComments(env, agent.token, `?fileId=${FILE}&cellId=cell-1`)
+    expect(status).toBe(200)
+    expect(body.data[0].author).toBe('reviewer')
+  })
+
+  it("honors the project's agentAuthorship: 'none' opt-out — author is absent, not just pseudonymous", async () => {
+    // Regression: this route used to key identity mode off the credential's
+    // `pii` flag alone and never consulted the project's own opt-out, unlike
+    // every other agent-facing read route (found in the 2026-09-17 pen test —
+    // see external/pii.ts's resolveAuthorshipPolicy).
+    const env = makeEnv(tdb.db)
+    await setAgentAuthorship(tdb, PROJECT, 'none')
+    const agent = await memberToken(tdb, 400)
+    await seedHumanComment(tdb, { commentId: 'c-1', author: 'reviewer', body: 'one' })
+
+    const res = (await handleExternalCommentsRequest(
+      externalReq(`/comments?fileId=${FILE}&cellId=cell-1`, agent.token),
+      env,
+    ))!
+    expect(res.status).toBe(200)
+    const raw = await res.text()
+    expect(raw).not.toContain('reviewer')
+    const body = JSON.parse(raw) as { data: Array<Record<string, unknown>> }
+    // `"author": null` would still say "someone wrote this and we are hiding
+    // them" — the key has to be gone entirely.
+    for (const comment of body.data) expect(comment).not.toHaveProperty('author')
+  })
+
+  it("agentAuthorship: 'none' overrides a pii credential — the project's opt-out wins", async () => {
+    const env = makeEnv(tdb.db)
+    await setAgentAuthorship(tdb, PROJECT, 'none')
+    const agent = await memberToken(tdb, 400, { pii: true })
+    await seedHumanComment(tdb, { commentId: 'c-1', author: 'reviewer', body: 'one' })
+
+    const res = (await handleExternalCommentsRequest(
+      externalReq(`/comments?fileId=${FILE}&cellId=cell-1`, agent.token),
+      env,
+    ))!
+    const raw = await res.text()
+    expect(raw).not.toContain('reviewer')
+    const body = JSON.parse(raw) as { data: Array<Record<string, unknown>> }
+    for (const comment of body.data) expect(comment).not.toHaveProperty('author')
   })
 
   it('pages with an opaque cursor', async () => {

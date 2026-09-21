@@ -88,6 +88,8 @@ e2e/recordings/output/
 # Python bytecode (Modal service)
 __pycache__/
 *.pyc
+smart-tests/.venv/
+smart-tests/results/
 
 # dev DB seed bundle cache (fetched from R2; not committed)
 db/seed/.cache/

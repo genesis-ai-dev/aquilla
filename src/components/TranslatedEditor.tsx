@@ -34,6 +34,7 @@ import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } fro
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
   IDML_SLOT_NODE_NAME,
   editableIdmlRangesIn,
@@ -1763,28 +1764,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         className={cn(compactHeight ? "" : "h-full")}
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
-          const target = e.target as HTMLElement
-          // A violation owns the term text when both decorations overlap.
-          // This preserves the blot-to-toast path after removing the tiny,
-          // separate terminology glyph.
-          if (onRuleClick) {
-            const blot = target.closest("[data-rule-id]")
-            if (blot) {
-              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
-              return
-            }
-          }
-          // AQU-204: managed-term highlight click → open TermLookupPopover.
-          if (onTermChipClick) {
-            const termHighlight = target.closest(".term-chip-host[data-source-term]")
-            if (termHighlight) {
-              const term = termHighlight.getAttribute("data-source-term")
-              if (term) {
-                onTermChipClick(term, termHighlight as HTMLElement)
-                return
-              }
-            }
-          }
+          // AQU-205: a violation owns the term text when both decorations
+          // overlap, so a flagged managed term opens the infraction detail
+          // (which carries the term's guidance) rather than the read-only
+          // lookup popover. AQU-204: an unflagged managed-term highlight opens
+          // TermLookupPopover. Precedence lives in `resolveEditorClickTarget`.
+          const hit = resolveEditorClickTarget(e.target as HTMLElement, {
+            rule: Boolean(onRuleClick),
+            term: Boolean(onTermChipClick),
+          })
+          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          else if (hit?.kind === "term") onTermChipClick?.(hit.term, hit.element)
         }}
       >
         <EditorContent

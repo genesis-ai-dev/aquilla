@@ -135,6 +135,7 @@ import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellAct
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { showAudioValidationInTextView } from "@/lib/audio/text-view-audio-switch"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
@@ -5807,6 +5808,32 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
+  /**
+   * AQU-490: does this line have a recording ANYWHERE — on the default track
+   * or on an added one?
+   *
+   * `hasAudio` above is deliberately narrower and stays that way: it feeds the
+   * audio controller, the transcript comparison and the rail's play button,
+   * all of which are about ONE clip. This is the different question — "is
+   * there anything recorded on this line at all" — which the Recording tab and
+   * its attention dot were answering with the default track alone. A line
+   * whose only take sat on an added target-audio track therefore showed
+   * "No audio yet" while every server counter called it recorded, and Sam's
+   * every-track-must-be-validated rule cannot mean anything while the text
+   * view cannot see those tracks.
+   */
+  const hasAnyTrackAudio = useMemo(() => {
+    const selections = slotSelections({
+      selectedBySlot: cell.selectedBySlot,
+      selectedAudioId: cell.selectedAudioId ?? null,
+      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+    })
+    for (const audioId of Object.values(selections)) {
+      const att = cell.attachments?.[audioId]
+      if (att && !att.isDeleted && (att.role ?? "dub") === "dub") return true
+    }
+    return false
+  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -7579,7 +7606,7 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
+                : (hasAnyTrackAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
                   ? "emerald"
                   : undefined,
               renderContent: () => (
@@ -7689,7 +7716,7 @@ function EditorRow({
                       }
                     />
                   ))}
-                  {!hasAudio && !hasGeneratedVoice && !linkedTakes?.length && (
+                  {!hasAnyTrackAudio && !hasGeneratedVoice && !linkedTakes?.length && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

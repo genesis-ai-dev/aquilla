@@ -528,7 +528,9 @@ describe("the link into the editor (AQU-1278)", () => {
     const onGoToFirstOpen = vi.fn()
     const getToken = withSections([section("GEN 1")])
     renderInspector(
-      nearlyDone({ sectionKey: "GEN", fileName: "Whole Bible", validatedCount: 100, audioCount: 94 }),
+      // AQU-490: the 94 recorded takes are signed off, so "6 to record" is
+      // the only audio term left — the point of this test.
+      nearlyDone({ sectionKey: "GEN", fileName: "Whole Bible", validatedCount: 100, audioCount: 94, audioValidatedCount: 94 }),
       true, true, getToken, { onGoToFirstOpen },
     )
     await waitFor(() => expect(screen.getByTestId("plan-unit-shortfall")).toBeInTheDocument())
@@ -545,7 +547,7 @@ describe("the link into the editor (AQU-1278)", () => {
     const onGoToFirstOpen = vi.fn()
     const getToken = withSections([section("GEN 1")])
     renderInspector(
-      nearlyDone({ sectionKey: "GEN", validatedCount: 98, audioCount: 94 }),
+      nearlyDone({ sectionKey: "GEN", validatedCount: 98, audioCount: 94, audioValidatedCount: 94 }),
       true, true, getToken, { onGoToFirstOpen },
     )
     await waitFor(() => expect(screen.getByTestId("plan-go-to-first-open")).toBeInTheDocument())

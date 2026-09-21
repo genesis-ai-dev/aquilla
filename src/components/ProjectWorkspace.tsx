@@ -387,6 +387,7 @@ import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -8294,8 +8295,20 @@ export function ProjectWorkspace() {
   const ownTakeCellIds = useMemo(() => {
     const ids = new Set<string>()
     for (const [cellId, entry] of workspaceAudioByCellId) {
-      const selected = entry.selectedAudioId
-      if (selected && audioIdSeededWith(selected, cellId)) ids.add(cellId)
+      // AQU-490: EVERY slot, not just `recording`.
+      //
+      // This read `entry.selectedAudioId` — the default track alone — so a
+      // line whose only take sits on an added target-audio track was invisible
+      // to the text view while every server counter called it recorded. The
+      // board said the line was done and the editor showed nothing on it, and
+      // "go to first unrecorded" walked straight past it.
+      //
+      // It matters more now than it did: Sam's rule is that EVERY track
+      // holding a chosen take must be validated, which cannot mean anything
+      // while the text view cannot see the tracks.
+      for (const selected of Object.values(slotSelections(entry))) {
+        if (selected && audioIdSeededWith(selected, cellId)) { ids.add(cellId); break }
+      }
     }
     return ids
   }, [workspaceAudioByCellId])

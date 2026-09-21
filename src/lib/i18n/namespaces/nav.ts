@@ -361,6 +361,8 @@ export const nav = defineNamespace({
     "nav.outbox.eventAttachAudio": "Attach audio",
     "nav.outbox.eventSelectAudio": "Select audio",
     "nav.outbox.eventRemoveAudio": "Remove audio",
+    "nav.outbox.eventValidateAudio": "Validate recording",
+    "nav.outbox.eventUnvalidateAudio": "Unvalidate recording",
     "nav.outbox.previewEditRef": "→ edit {id}",
     "nav.outbox.previewAudioSlot": "{slot} slot",
     "nav.outbox.previewAudio": "audio",
@@ -1367,6 +1369,8 @@ export const nav = defineNamespace({
       "nav.outbox.eventAttachAudio": { description: "Row title for attaching an audio recording to a cell." },
       "nav.outbox.eventSelectAudio": { description: "Row title for choosing which attached audio take is active." },
       "nav.outbox.eventRemoveAudio": { description: "Row title for removing an attached audio recording." },
+      "nav.outbox.eventValidateAudio": { description: "Row title for marking one audio take validated. The word is 'validate', never 'approve' (AQU-290 glossary)." },
+      "nav.outbox.eventUnvalidateAudio": { description: "Row title for withdrawing a validation from one audio take." },
       "nav.outbox.previewEditRef": {
         description:
           "Fallback row preview for validate/unvalidate events, which have no text " +

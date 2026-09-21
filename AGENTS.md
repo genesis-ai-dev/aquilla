@@ -126,6 +126,14 @@ it resolves the issue's current status and does the next right transition:
 The command (`.claude/commands/issue.md`) enforces the verification gate and the status
 rules below.
 
+**Every pull request must carry its `AQU-###`.** QA maps a merged PR back to its issue by
+that reference, so a PR without one becomes untraceable the moment it lands. The
+`Ticket traceability` workflow (`.github/workflows/ticket-traceability.yml`) checks the PR
+title, body, branch name, and all its commits — a reference in any one of them passes.
+Work that genuinely has no ticket (dependency bumps, docs, formatting) is exempted with the
+`no-ticket` label. The 2026-09-21 board audit measured the cost of not having this gate:
+356 of 870 non-merge commits on `main` (41%) carried no ticket reference.
+
 ### The spec is the source of truth
 
 The behavior spec lives in a sibling repo, **`~/frontierrnd/aquilla-specs`**, and is the

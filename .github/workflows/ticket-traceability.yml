@@ -1,0 +1,100 @@
+name: Ticket traceability
+
+# QA maps a merged pull request back to its Linear issue by the AQU-### its
+# commits carry (AGENTS.md → "Issue workflow"). When a pull request lands with
+# no ticket reference anywhere, that mapping breaks silently and the board
+# drifts away from main.
+#
+# The 2026-09-21 board audit measured the cost: 356 of 870 non-merge commits on
+# main (41%) carried no ticket reference, and 24 issues sat in `Dispatched` with
+# no commit, branch or pull request anywhere in the repository.
+#
+# This gate is deliberately cheap and easy to satisfy. A reference in the pull
+# request title, the body, the branch name, or ANY commit on the branch passes.
+# Work that genuinely has no ticket (dependency bumps, docs, formatting) is
+# exempted by applying the `no-ticket` label.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: ticket-traceability-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Dependabot opens its own well-labelled dependency pull requests.
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Require an AQU-### reference
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'no-ticket') }}
+        run: |
+          set -u
+
+          if [ "$EXEMPT" = "true" ]; then
+            echo "::notice::Exempt — the 'no-ticket' label is applied."
+            exit 0
+          fi
+
+          pattern='AQU-[0-9]+'
+
+          found=""
+          for field in "$PR_TITLE" "$PR_BODY" "$PR_BRANCH"; do
+            if printf '%s' "$field" | grep -qiE "$pattern"; then
+              found="yes"
+              break
+            fi
+          done
+
+          # Fall back to the branch's own commits. A shallow or unreadable diff
+          # base must not fail the gate closed on an otherwise valid pull
+          # request, so an unusable range is treated as "cannot tell" and skipped.
+          if [ -z "$found" ]; then
+            if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              if git log --no-merges --format='%s%n%b' "${BASE_SHA}..${HEAD_SHA}" \
+                   | grep -qiE "$pattern"; then
+                found="yes"
+              fi
+            else
+              echo "::notice::No usable diff base; skipping the commit scan."
+            fi
+          fi
+
+          if [ -n "$found" ]; then
+            echo "Ticket reference found."
+            exit 0
+          fi
+
+          echo "::error::No AQU-### reference in this pull request's title, body, branch name, or any of its commits."
+          cat <<'MSG'
+
+          QA maps a merged pull request to its Linear issue by the AQU-###
+          it carries. Without one, this change becomes untraceable the moment
+          it lands.
+
+          To fix, do ONE of these:
+            * Put the ticket in the pull request title, e.g.
+              "AQU-1234 - Short description"
+            * Reference it in the body, e.g. "Closes AQU-1234"
+            * Name the branch for it, e.g. "agent/AQU-1234-short-slug"
+            * Amend a commit message to carry it
+
+          If this work genuinely has no ticket (a dependency bump, a docs or
+          formatting change), apply the `no-ticket` label to exempt it.
+          MSG
+          exit 1

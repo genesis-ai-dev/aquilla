@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { commentAuthorLabel } from './comment-authorship'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1932,18 +1933,32 @@ case 'cell.audio.attach': {
       const scopeKind = scope.kind
       const fileId = scopeKind === 'cell' ? scope.fileId : scopeKind === 'file' ? scope.fileId : null
       const cellId = scopeKind === 'cell' ? scope.cellId : null
+      // AQU-1233: author_id is always the human the credential was minted by —
+      // permissions, foreign-comment floors and "my comments" filters all key
+      // on it. The agent marker rides author_label, which is what the comments
+      // UI renders (`authorLabel ?? authorId`), so a reviewer sees who is
+      // answering AND that a tool typed it.
+      const authorLabel = commentAuthorLabel(event.author, p.viaAgent)
       stmts.push(
         db
           .prepare(
             // AQU-692: created_for_translated stores the target-text snapshot
             // captured on the client at thread-creation time. Null for replies,
             // non-cell scopes, and legacy events that predate the field.
+            //
+            // AQU-1296: the conflict target is the PROJECT-SCOPED key. Comment
+            // ids collide across projects (the importer leaves
+            // `payload.commentId` as the raw legacy id), and conflicting on
+            // `comment_id` alone meant the first project to claim an id owned
+            // the only row that could exist — every later project's insert was
+            // dropped in silence. Same-project replay is still a no-op, which
+            // is what the deterministic commentCreateEventId design relies on.
             `INSERT INTO comments (
               comment_id, project_id, scope_kind, file_id, cell_id,
               parent_comment_id, body, resolved, author_id, author_label,
               created_at, updated_at, deleted_at, created_for_translated
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
-            ON CONFLICT(comment_id) DO NOTHING`,
+            ON CONFLICT(project_id, comment_id) DO NOTHING`,
           )
           .bind(
             p.commentId,
@@ -1954,7 +1969,7 @@ case 'cell.audio.attach': {
             p.parentCommentId,
             p.body,
             event.author,
-            event.author,
+            authorLabel,
             event.serverTs,
             event.serverTs,
             p.createdForTranslated ?? null,
@@ -1969,24 +1984,28 @@ case 'cell.audio.attach': {
       // Maintainer+ foreign path: author_id check dropped so they can edit
       //   any comment. The route layer has already rejected the event if the
       //   caller is not the author AND does not have maintainer(600)+ role.
+      //
+      // AQU-1296: `project_id` is part of the match on BOTH paths. Comment ids
+      // are only unique within a project, so matching on `comment_id` alone let
+      // an edit in project A rewrite project B's same-id row.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId, event.author),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -1997,24 +2016,25 @@ case 'cell.audio.attach': {
       // Soft-delete: preserve the row so threads remain navigable.
       // Body cleared; deleted_at set. UI renders "[deleted]".
       // Maintainer+ foreign path: author_id check dropped (same logic as edit).
+      // AQU-1296: project-scoped on both paths, as comment.edit above.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId, event.author),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -2032,13 +2052,17 @@ case 'cell.audio.attach': {
       //   caller is not the comment author and is below that floor. The
       //   projection logic is the same either way (no author filter on resolve
       //   — ownership was already enforced upstream).
+      //
+      // AQU-1296: project-scoped — resolving a thread in project A must not
+      // flip project B's same-id thread.
       stmts.push(
         db
           .prepare(
             `UPDATE comments SET resolved = ?, updated_at = ?
-             WHERE comment_id = ? AND parent_comment_id IS NULL AND deleted_at IS NULL`,
+             WHERE project_id = ? AND comment_id = ?
+               AND parent_comment_id IS NULL AND deleted_at IS NULL`,
           )
-          .bind(p.resolved ? 1 : 0, event.serverTs, p.commentId),
+          .bind(p.resolved ? 1 : 0, event.serverTs, event.projectId, p.commentId),
       )
       return ['comments']
     }

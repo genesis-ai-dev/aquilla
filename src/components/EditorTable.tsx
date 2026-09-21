@@ -7,9 +7,9 @@ import {
   type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react"
 import {
-  Check, AlertTriangle, AlertCircle,
+  Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Pilcrow,
   PilcrowRight,
@@ -62,6 +62,7 @@ import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
+import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
   overlayBacktranslation,
@@ -85,7 +86,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
-import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -179,6 +180,7 @@ import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -590,7 +592,6 @@ export const REMOTE_DRAFT_HOLD_MS = 15_000
 export type { BacktranslationActionSource }
 
 export interface EditorTableHandle {
-  scrollToCellIndex: (index: number) => void
   /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
    *  for time-ordered files, where store order ≠ display order), optionally
    *  flashing it. Returns false when the id is not currently displayable. */
@@ -1491,13 +1492,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [getListQueryRoot])
 
+  // AQU-1245: the index-based `scrollToCellIndex` entry is GONE. It indexed the
+  // rows the table is RENDERING, so with "Split into milestones" on — where
+  // that is only the current milestone's rows — every caller handing it an
+  // index counted over the whole file was wrong: out of range was silently
+  // dropped, in range landed on an unrelated row of the page already showing,
+  // and neither turned the page. AQU-1244 and AQU-1245 converted the last four
+  // callers to `scrollToCellId`; removing the entry is what stops a fifth from
+  // reintroducing the bug.
   useImperativeHandle(ref, () => ({
-    scrollToCellIndex(index: number) {
-      if (index >= 0 && index < displayCellIds.length) {
-        clearChapterNavigationSelection()
-        programmaticListScroll(index, { viewPosition: 0.5, animated: false })
-      }
-    },
     scrollToCellId(cellId, opts) {
       // AQU-646 round 3: id-based scroll in DISPLAY space. The older
       // index-based path resolved indexes via cellStore.findIndexByCellId —
@@ -3239,10 +3242,12 @@ function CellSourceMenu({
               onClick={(e) => e.stopPropagation()}
               className={cn(
                 // AQU-1134: the term action rail pops up over this corner and
-                // used to render BEHIND it. The rail sits at z-20, so the
-                // menu's own button has to stay below that — it was z-10 as
-                // the pencil and stays there.
-                "absolute end-1 top-1 z-10 flex size-6 shrink-0 items-center justify-center rounded-md",
+                // must render in FRONT of it. Both layers are owned by
+                // source-cell-layers.ts — don't hand-edit this one, the bug
+                // was the two being equal (z-10 each), which handed the
+                // painting order to DOM order and put this button on top.
+                "absolute end-1 top-1 flex size-6 shrink-0 items-center justify-center rounded-md",
+                SOURCE_CELL_MENU_Z,
                 "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
                 // Present but quiet until the row is reached for, exactly as
                 // the pencil was. `open` pins it so the trigger does not fade
@@ -3991,9 +3996,10 @@ interface EditorRowProps {
 // which adds an "Ask AI" action and matches the editor hover-rail aesthetic.
 
 // ────────────────────────────────────────────────────────────────────────────
-// SourceWithTermLookup — renders source plain text with per-word
-// TermLookupPopover triggers for any word that matches an active concept.
-// Words that have no matching concept render as plain text (no popover cost).
+// SourceWithTermLookup — renders source plain text with a TermLookupPopover
+// trigger over every span matching an active concept (multi-word terms and
+// wildcards included, via the shared matcher). Text outside a match renders
+// plain (no popover cost).
 // When no concepts are configured the component falls back to a plain
 // HighlightedText so there's zero overhead on projects that don't use
 // the terminology feature.
@@ -4014,7 +4020,7 @@ interface SourceWithTermLookupProps {
   footnoteNumberOffset?: number
 }
 
-function SourceWithTermLookup({
+export function SourceWithTermLookup({
   text,
   highlights,
   ranges,
@@ -4030,29 +4036,33 @@ function SourceWithTermLookup({
     [concepts],
   )
 
-  // Build a normalized concept index keyed by lowercased sourceTerm for O(1)
-  // per-word lookup. We do exact-word match (normalized, case-insensitive)
-  // per the task spec: "normalized, case-insensitive match against
-  // concept.sourceTerm". Both the raw lowercase and a punctuation-stripped
-  // form are checked so "God," and "God" both resolve.
-  const conceptIndex = useMemo(() => {
-    const idx = new Map<string, Concept[]>()
-    for (const c of activeConcepts) {
-      const key = c.sourceTerm.toLowerCase()
-      const existing = idx.get(key)
-      if (existing) existing.push(c)
-      else idx.set(key, [c])
+  // Match whole terms over the full text with the shared matcher, not
+  // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
+  // equal to a single token, so an index keyed by token could never highlight
+  // one. findTermMatches also brings wildcard parity with the target-side
+  // chips (`grac*` → grace/graced).
+  const matches = useMemo(() => {
+    const found: Array<{ start: number; end: number }> = []
+    for (const concept of activeConcepts) {
+      for (const m of findTermMatches(text, concept.sourceTerm)) found.push(m)
     }
-    return idx
-  }, [activeConcepts])
-
-  // Tokenize the source text into words + inter-word whitespace segments.
-  const tokens = useMemo(() => tokenizeWords(text), [text])
+    // Longest-first at each offset, then drop anything overlapping an already
+    // taken span — a highlight may not start inside another one.
+    found.sort((a, b) => a.start - b.start || b.end - a.end)
+    const kept: Array<{ start: number; end: number }> = []
+    let taken = -1
+    for (const m of found) {
+      if (m.start < taken) continue
+      kept.push(m)
+      taken = m.end
+    }
+    return kept
+  }, [text, activeConcepts])
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
   // Font size inherits from the source column wrapper (per-file pref) — no
   // fixed text-* class here.
-  if (activeConcepts.length === 0) {
+  if (activeConcepts.length === 0 || matches.length === 0) {
     const Wrapper = inline ? "span" : "div"
     return (
       <Wrapper>
@@ -4067,55 +4077,57 @@ function SourceWithTermLookup({
     )
   }
 
-  // Build the inline spans: whitespace gaps between tokens are plain text;
-  // tokens are wrapped with TermLookupPopover when they match a concept.
+  // Build the inline spans: text between matches renders plain; each match is
+  // wrapped with TermLookupPopover.
   const parts: React.ReactNode[] = []
   let cursor = 0
-  for (let i = 0; i < tokens.length; i++) {
-    const { word, start, end } = tokens[i]
-    // Whitespace between previous token and this one.
+  for (let i = 0; i < matches.length; i++) {
+    const { start, end } = matches[i]
     if (start > cursor) {
-      parts.push(<React.Fragment key={`ws-${i}`}>{text.slice(cursor, start)}</React.Fragment>)
-    }
-    // Check raw lowercase and punctuation-stripped form so "God," → "god" matches "God".
-    const normalizedWord = word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
-    const matchedConcepts = conceptIndex.get(word.toLowerCase()) ?? conceptIndex.get(normalizedWord)
-    if (matchedConcepts && matchedConcepts.length > 0) {
-      parts.push(
-        <TermLookupPopover
-          key={`term-${i}`}
-          sourceTerm={word}
-          concepts={activeConcepts}
-          onViewConcept={onViewConcept}
-        >
-          <span className="terminology-highlight">
-            <HighlightedText
-              text={word}
-              highlights={EMPTY_HIGHLIGHTS}
-              ranges={clipRangesToTextSlice(ranges, start, end)}
-              showEvidence={false}
-              onRangeClick={onRangeClick}
-            />
-          </span>
-        </TermLookupPopover>,
-      )
-    } else {
       parts.push(
         <HighlightedText
-          key={`w-${i}`}
-          text={word}
+          key={`gap-${i}`}
+          text={text.slice(cursor, start)}
           highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, start, end)}
+          ranges={clipRangesToTextSlice(ranges, cursor, start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
       )
     }
+    const matchedText = text.slice(start, end)
+    parts.push(
+      <TermLookupPopover
+        key={`term-${i}`}
+        sourceTerm={matchedText}
+        concepts={activeConcepts}
+        onViewConcept={onViewConcept}
+      >
+        <span className="terminology-highlight">
+          <HighlightedText
+            text={matchedText}
+            highlights={EMPTY_HIGHLIGHTS}
+            ranges={clipRangesToTextSlice(ranges, start, end)}
+            showEvidence={false}
+            onRangeClick={onRangeClick}
+          />
+        </span>
+      </TermLookupPopover>,
+    )
     cursor = end
   }
-  // Trailing whitespace after last token.
+  // Trailing text after the last match.
   if (cursor < text.length) {
-    parts.push(<React.Fragment key="ws-tail">{text.slice(cursor)}</React.Fragment>)
+    parts.push(
+      <HighlightedText
+        key="gap-tail"
+        text={text.slice(cursor)}
+        highlights={EMPTY_HIGHLIGHTS}
+        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+        showEvidence={false}
+        onRangeClick={onRangeClick}
+      />,
+    )
   }
 
   const Wrapper = inline ? "span" : "div"
@@ -6731,11 +6743,41 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml
-                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
-                idmlStyleCatalog={idmlStyleCatalog}
-                idmlParagraphStyleId={idmlParagraphStyleId}
-              />
+              // AQU-1135: a formatted source cell renders as sanitized HTML, so
+              // it cannot host the per-match TermLookupPopover triggers the
+              // plain-text path builds. It gets the highlights as decorated
+              // markup instead, and the click is delegated here — the same
+              // `.term-chip-host[data-source-term]` contract TranslatedEditor
+              // uses for the target lane, landing on the same popover.
+              <div
+                onClick={(event) => {
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+              >
+                <SanitizedRichHtml
+                  html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                  idmlStyleCatalog={idmlStyleCatalog}
+                  idmlParagraphStyleId={idmlParagraphStyleId}
+                  concepts={terminologyConcepts}
+                />
+              </div>
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -7673,68 +7715,15 @@ function EditorRow({
                   : undefined,
               disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
               renderContent: () => (
-                <div className="flex flex-col gap-1.5">
-                  {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      {t("editor.issues.none")}
-                    </p>
-                  ) : (
-                    <>
-                      {cellInfractions.map((inf) => {
-                        const rule = ruleMap.get(inf.ruleId)
-                        const isMajor = rule?.severity === "major"
-                        const Icon = isMajor ? AlertTriangle : AlertCircle
-                        return (
-                          <button
-                            key={inf.ruleId}
-                            type="button"
-                            onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
-                          >
-                            <Icon
-                              className={cn(
-                                "mt-0.5 h-3 w-3 shrink-0",
-                                isMajor ? "text-red-500" : "text-amber-500",
-                              )}
-                            />
-                            <span className="flex-1">
-                              <span className="font-medium text-foreground">
-                                {rule ? translateRuleName(rule, t) : inf.ruleId}
-                              </span>
-                              <span className="ms-1 text-muted-foreground">
-                                — {formatInfractionReason(inf, t)}
-                              </span>
-                            </span>
-                            <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
-                          </button>
-                        )
-                      })}
-                      {waivedInfractions.length > 0 && (
-                        <>
-                          <div className="mt-2 px-1 text-xs text-muted-foreground">
-                            {t("editor.issues.waived")}
-                          </div>
-                          {waivedInfractions.map((inf) => {
-                            const rule = ruleMap.get(inf.ruleId)
-                            return (
-                              <button
-                                key={`waived-${inf.ruleId}`}
-                                type="button"
-                                onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
-                              >
-                                <Check className="mt-0.5 h-3 w-3 shrink-0" />
-                                <span className="flex-1">
-                                  {rule ? translateRuleName(rule, t) : inf.ruleId}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
+                <CellIssuesTab
+                  activeInfractions={cellInfractions}
+                  waivedInfractions={waivedInfractions}
+                  ruleMap={ruleMap}
+                  editable={editable}
+                  onOpenRule={setOpenRuleId}
+                  onWaive={handleWaive}
+                  onUnwaive={handleUnwaive}
+                />
               ),
             },
             // Metadata — untranslated import columns (DCS TSV supportReference/

@@ -148,7 +148,7 @@ function fetchDirectoryPage(
     signal: opts.signal,
   }
   if (orgIds.length === 1) {
-    return getPortfolioPage(jwt, orgIds[0]!, pageOpts)
+    return getPortfolioPage(jwt, orgIds[0], pageOpts)
   }
   return getPortfoliosPage(jwt, orgIds, pageOpts)
 }

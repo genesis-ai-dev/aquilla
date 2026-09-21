@@ -49,6 +49,34 @@ export function parseChapterRef(ref: string | undefined): { book: string; chapte
   return m ? { book: m[1], chapter: Number(m[2]) } : null
 }
 
+/** One segment of the Source | Target | Both toggle. Declared at module scope so
+ *  it keeps its identity across renders (react-hooks/static-components). */
+function SideButton({
+  value,
+  label,
+  active,
+  onSelect,
+}: {
+  value: PassageSide
+  label: string
+  active: boolean
+  onSelect: (next: PassageSide) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(value)}
+      aria-pressed={active}
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[10px]",
+        active ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
 /** Pair a file's CellRows (side-split) into display rows in server order. */
 export function pairCellRows(cells: CellRow[]): PassageRow[] {
   const byId = new Map<string, PassageRow>()
@@ -124,20 +152,6 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
   const visible = expanded ? shown : shown.slice(0, ROW_CAP)
   const hidden = shown.length - visible.length
 
-  const SideButton = ({ value, label }: { value: PassageSide; label: string }) => (
-    <button
-      type="button"
-      onClick={() => changeSide(value)}
-      aria-pressed={side === value}
-      className={cn(
-        "rounded px-1.5 py-0.5 text-[10px]",
-        side === value ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  )
-
   return (
     <div className="rounded-md border">
       <div className="flex items-center gap-1.5 border-b px-2 py-1">
@@ -146,9 +160,9 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
           {labelOf(shown)}
         </span>
         <span className="flex items-center gap-0.5 rounded-md border p-0.5">
-          <SideButton value="source" label={t("editor.column.source")} />
-          <SideButton value="target" label={t("editor.column.target")} />
-          <SideButton value="both" label={t("search.side.both")} />
+          <SideButton value="source" label={t("editor.column.source")} active={side === "source"} onSelect={changeSide} />
+          <SideButton value="target" label={t("editor.column.target")} active={side === "target"} onSelect={changeSide} />
+          <SideButton value="both" label={t("search.side.both")} active={side === "both"} onSelect={changeSide} />
         </span>
         {navigable && (
           <span className="flex items-center">

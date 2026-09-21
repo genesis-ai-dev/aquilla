@@ -217,6 +217,10 @@ const LANE_KINDS = new Set([
  *  caller-supplied value would either be silently ignored or fork the plan
  *  from what commit re-checks — reject with a teaching message instead. */
 const SERVER_RESOLVED_FIELDS: Record<string, string[]> = {
+  // AQU-1233: viaAgent is stamped at compile — a caller supplying it (either to
+  // forge the marker on a human's behalf or to suppress it on its own comment)
+  // gets a validation error rather than a silent drop.
+  'comment.create': ['viaAgent'],
   'cell.validate': ['editEventId'],
   'cell.unvalidate': ['editEventId'],
   'cell.backtranslation.set': ['targetEventId'],

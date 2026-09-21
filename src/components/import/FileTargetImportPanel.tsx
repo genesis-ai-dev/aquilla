@@ -27,6 +27,7 @@ import {
   usfmToTargetRows,
   subtitleToTargetRows,
   CUE_TARGET_EXTENSIONS,
+  vttToTargetRows,
   type FileTargetCellRef,
   type FileTargetMatchResult,
   type TargetRow,
@@ -66,6 +67,10 @@ type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
+// AQU-1142: WebVTT subtitle target import. Partners producing dubbing/subtitle
+// translations deliver a translated .vtt whose cues should populate the open
+// cue file's target column, matched positionally against the source cues.
+const VTT_EXTENSIONS = new Set(["vtt"])
 
 /** Format tag for the uploaded file's source artifact (SOURCE_ARTIFACT_FORMATS
  *  in shared/import-contract). Spreadsheets fall through to "csv" because
@@ -74,6 +79,7 @@ const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
 function sourceArtifactFormat(fileName: string) {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
   if (USFM_EXTENSIONS.has(ext)) return "usfm" as const
+  if (VTT_EXTENSIONS.has(ext)) return "vtt" as const
   if (ext === "sbv") return "sbv" as const
   if (ext === "srt") return "srt" as const
   if (ext === "xlsx") return "xlsx" as const
@@ -129,9 +135,21 @@ export function FileTargetImportPanel({
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
+      } else if (VTT_EXTENSIONS.has(ext)) {
+        // AQU-1142: VTT cues carry timestamps, never canonical refs, so match
+        // positionally (cue N → cell N) — the review screen surfaces any
+        // misalignment before commit via the same order-match warning used
+        // for spreadsheets without a ref column.
+        const rows = vttToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
+        if (rows.length === 0) {
+          setError(t("importExport.fileTarget.noCuesInVtt"))
+          return
+        }
+        showReview(matchTargetRowsByOrder(rows, cells), true)
       } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
-        // AQU-1144: subtitle cues have no canonical refs, so they always match
-        // positionally (cue N → cell N) and the order-match warning applies.
+        // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
+        // the same ref-less path as VTT — timecode overlap when the file's
+        // cells carry timings (AQU-1143), cue N → cell N otherwise.
         const rows = subtitleToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), ext)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
@@ -252,7 +270,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.srt,.sbv"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]
@@ -317,6 +335,10 @@ export function FileTargetImportPanel({
   if (step === "review" && matchResult) {
     const { matched, orphans, unmatchedSourceCount } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
+    // AQU-1143: a ref-less match that aligned by cue timecode is not the
+    // fragile top-to-bottom pairing this warns about — don't send the user off
+    // to eyeball 500 rows for a drift that cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
 
     function toggleCell(cellId: string) {
       setSelectedCellIds((prev) => {
@@ -337,7 +359,7 @@ export function FileTargetImportPanel({
             {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
             {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
           </div>
-          {matchedByOrder && (
+          {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
               {t("importExport.review.orderMatchWarning")}
             </p>

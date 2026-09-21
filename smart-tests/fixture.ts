@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url"
 import { resetBackend } from "../e2e/helpers/seed"
 import { ensureAuthState, injectSession, type PersistedSession } from "../e2e/helpers/auth"
 import {
-  seedProjectWithFile, readProjectedCells,
-  type SeededProject,
+  seedProjectWithFile, readProjectedCells, mintSyncToken,
+  type ProjectedCellRow, type SeededProject,
 } from "../e2e/helpers/seed-project"
+import { postIdempotentJson } from "../e2e/helpers/idempotent-request"
+import { OUTBOX_SCHEMA_VERSION } from "../src/lib/sync/outbox-types"
+import { v7 as uuidv7 } from "uuid"
+import type { ValidationContract } from "./validation-oracle"
 import { assertOwnedStack, verifyEdit, type EditContract } from "./outcome"
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
@@ -35,6 +39,11 @@ export function editorUrl(seeded: SeededProject): string {
 
 export function targetSurface(page: Page, cellId: string) {
   return page.locator(`[data-cell-id="${cellId}"] [data-cell-type="target"]`).first()
+}
+
+/** The reviewer's own sign-off control on one row, as the editor renders it. */
+export function validationButton(page: Page, cellId: string) {
+  return page.locator(`[data-cell-id="${cellId}"] button[data-showcase="cell.validation"]`).first()
 }
 
 export async function authenticatedPage(
@@ -84,5 +93,62 @@ export async function verifyInFreshSession(
     return { ...verifyEdit(contract, rows, freshVisible.trim(), inputObserved), rows, freshVisible }
   } finally {
     await context.close()
+  }
+}
+
+/**
+ * Seed a translation on every target row through the same POST /events
+ * boundary the SPA writes to. A reviewer's sign-off journey needs a file
+ * that is already translated: the validation control only renders beside a
+ * target that has content, and every row must offer one so the oracle can
+ * still catch a sign-off on the wrong cell.
+ */
+export async function seedTargetTranslations(
+  session: PersistedSession, seeded: SeededProject,
+): Promise<ProjectedCellRow[]> {
+  const sources = await readProjectedCells(session.jwt, seeded, "source")
+  const token = await mintSyncToken(session.jwt, seeded.projectId, seeded.fileId)
+  const events = seeded.cellIds.map((cellId, index) => ({
+    id: uuidv7(),
+    schemaVersion: OUTBOX_SCHEMA_VERSION,
+    kind: "target.cell.commit",
+    projectId: seeded.projectId,
+    fileId: seeded.fileId,
+    cellId,
+    // The source chain head is this first target commit's parent; a wrong
+    // parent would be accepted and logged as a stale sibling instead.
+    parentId: sources.find((row) => row.cellId === cellId)?.eventId ?? null,
+    author: session.username,
+    payload: { value: `Tafsiri ya mstari wa ${index + 1}.` },
+    clientTs: Date.now(),
+  }))
+  const response = await postIdempotentJson({
+    url: `http://${process.env.VITE_SYNC_WORKER_HOST}/events`,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: { events },
+    operation: "seed target translations",
+  })
+  const { rejected } = await response.json() as { rejected: unknown[] }
+  if (rejected.length > 0) throw new Error("Seeded translations were rejected")
+  const rows = await readProjectedCells(session.jwt, seeded)
+  if (rows.filter((row) => row.side === "target" && row.value).length !== seeded.cellIds.length) {
+    throw new Error("Seeded translations did not project")
+  }
+  return rows
+}
+
+/** A reviewer starts from a fully translated, wholly unvalidated file. */
+export async function prepareValidation() {
+  const fixture = await prepareEdit()
+  const baseline = await seedTargetTranslations(fixture.session, fixture.seeded)
+  if (baseline.some((row) => row.validated)) throw new Error("Fixture is not unvalidated")
+  return {
+    ...fixture,
+    contract: {
+      // Sign off on the last row, so reaching the first control is not enough.
+      cellId: fixture.seeded.cellIds[fixture.seeded.cellIds.length - 1],
+      author: fixture.session.username,
+      baseline,
+    } satisfies ValidationContract,
   }
 }

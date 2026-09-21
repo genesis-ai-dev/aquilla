@@ -64,7 +64,9 @@ provide advisory evidence; they do not silently replace a release check.
 | --- | --- | --- |
 | Open a project and file, edit the intended translation, preserve every other source/target, and read the correction in server state and a fresh session | Normal; immediate hard navigation after input; delayed HTTP | `smart-tests/journeys/edit-durability.spec.ts` |
 | Rename a project, rename a file, or post exactly one comment on the intended cell; retain identities and all translation content | Separate reset fixture per outcome; authoritative API and fresh browser verification | `smart-tests/journeys/project-outcomes.spec.ts` |
+| Sign off on exactly one finished translation; keep every other row unsigned and every translation byte unchanged | Normal; immediate hard navigation the moment the control flips | `smart-tests/journeys/validation-outcomes.spec.ts` |
 | Reject a missing write and a corrupted target, accept a real durable edit | Model-free oracle qualification | `smart-tests/journeys/qualification.spec.ts` |
+| Reject an unsigned file and a misplaced sign-off, accept a real validation | Model-free oracle qualification | `smart-tests/journeys/qualification.spec.ts` |
 | Expose meaningful controls to Jev's actual DOM reader, and activate a target before offering fill | Eight initial route surfaces and editor activation | `smart-tests/journeys/dom-audit.spec.ts` |
 
 ## Journeys moved to another repository

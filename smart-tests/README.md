@@ -27,7 +27,9 @@ pnpm test:smart:audit
 Qualification and DOM audit use real browsers and local workers, but no live
 model. Qualification rejects a missing write and a deliberately wrong target
 projection, then accepts a real UI edit verified through the server and a fresh
-browser. It tests the verifier; it does not measure Jev's reliability.
+browser. A second qualification rejects an unsigned file and a sign-off moved
+to a neighbouring cell, then accepts a real click on the editor's validation
+control. Both test the verifier; they do not measure Jev's reliability.
 
 For live journeys, put credentials in an ignored `.env.smart-tests.local`:
 
@@ -50,10 +52,21 @@ SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart -- \
   --repeat-each=5
 ```
 
-The default command runs eight checks: six live journeys, the DOM audit,
-and oracle qualification. The additional journeys rename a project, rename a
-file, and post one comment on the intended cell. Each checks server state,
-a fresh browser, unchanged identities, and unchanged translation content.
+The default command runs eleven checks: eight live journeys, the DOM audit,
+and two oracle qualifications. The additional journeys rename a project,
+rename a file, post one comment on the intended cell, and sign off on one
+finished translation. Each checks server state, a fresh browser, unchanged
+identities, and unchanged translation content.
+
+The sign-off journey starts from a file whose rows are all translated and
+none validated, seeded through the same `POST /events` boundary the SPA
+writes to. It asks for the LAST row only, so reaching the first control is
+not enough. Besides the projection, it reads the append-only event log: a
+clean pass is exactly one `cell.validate`, by the reviewer, with no
+`cell.unvalidate` undoing it. A run that signs off and withdraws again
+never demonstrated the outcome, even though the projection ends up matching
+an unsigned file. Its adverse condition tears the document down the instant
+the control flips, before the outbox can flush.
 The comment goal names the row's More actions menu; it does not establish
 unguided discovery of that workflow. See [the initial evidence](./QUALIFICATION.md).
 
@@ -165,6 +178,14 @@ comment; that is never a completed pass.
 The existing automatic Cloudflare preview comment now points reviewers to
 these reports and explicitly says that preview deployment does not run Jev.
 Absence of a completed report matching the commit means NOT VERIFIED.
+
+The Hetzner host runs a pinned, separately reviewed harness. Adding a
+journey to this repository does not deploy it there: that host must be
+updated to a harness commit containing `smart-tests/validation-oracle.ts`,
+the sign-off journey, and the new qualification before its reports can
+cover them. Until it is, a report from that host lists the smaller planned
+suite, and the missing checks are NOT VERIFIED rather than passed. Server
+credentials and infrastructure are unchanged by this repository change.
 
 The standalone [Hetzner webhook runner](../docs/runbooks/smart-testing-webhook.md)
 executes same-repository PRs without GitHub Actions compute. A signed webhook

@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test"
-import { prepareEdit, authenticatedPage, editorUrl, targetSurface } from "../fixture"
+import {
+  prepareEdit, prepareValidation, authenticatedPage, editorUrl, targetSurface, validationButton,
+} from "../fixture"
 import { observeDom } from "../dom"
 
 test("DOM audit: project surfaces and editor activation use Jev's actual snapshot", async ({ browser }, testInfo) => {
@@ -48,6 +50,36 @@ test("DOM audit: project surfaces and editor activation use Jev's actual snapsho
       }, null, 2),
       contentType: "application/json",
     })
+    await context.close()
+  }
+})
+
+test("DOM audit: the validation control is a named entry point on a translated row", async ({ browser }, testInfo) => {
+  const fixture = await prepareValidation()
+  const { seeded, session, contract } = fixture
+  const { page, context } = await authenticatedPage(browser, session, seeded)
+  try {
+    await page.goto(editorUrl(seeded))
+    const control = validationButton(page, contract.cellId)
+    await expect(control).toBeVisible({ timeout: 30_000 })
+    const label = await control.getAttribute("aria-label")
+    // The sign-off journey cannot start unless this control reaches Jev's
+    // snapshot without hover, and its name says which row it approves.
+    expect(label).toContain("Not validated")
+    expect(label).toContain("row 3")
+    const report = await observeDom(page)
+    expect(report.actions.some((action) => action.kind === "click" && action.label === label)).toBe(true)
+    // A per-row name is what stops an agent approving whichever row is first.
+    expect(report.actions.filter((action) => action.kind === "click"
+      && action.label?.startsWith("Not validated")).length).toBe(seeded.cellIds.length)
+    await testInfo.attach("dom-audit", {
+      body: JSON.stringify({
+        scope: "The editor's validation gutter on a fully translated seeded file.",
+        label, reports: [report],
+      }, null, 2),
+      contentType: "application/json",
+    })
+  } finally {
     await context.close()
   }
 })

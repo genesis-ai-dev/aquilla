@@ -253,9 +253,16 @@ FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
-# PostHog *project* token (public — same one shipped in the SPA bundle).
-# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+# PostHog ingest region + *project* token (public — same one shipped in the SPA
+# bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+# AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
+# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
+# EMPTY until the EU project exists — the retired US project token must not be
+# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
+# shipping stays off (local logging is unaffected) until the EU token is filled
+# in here. See the Linear issue's "Account-side dependency".
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
 MONDAY_APP_ID = "11760401"

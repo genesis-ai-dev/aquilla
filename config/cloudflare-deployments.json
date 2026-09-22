@@ -64,7 +64,8 @@
             "ENVIRONMENT": "production",
             "BASE_URL": "https://aquilla.app",
             "SYNC_WORKER_URL": "https://api.aquilla.app/sync",
-            "DEPLOYMENT_WORKER_NAME": "aquilla-identity"
+            "DEPLOYMENT_WORKER_NAME": "aquilla-identity",
+            "POSTHOG_HOST": "https://eu.i.posthog.com"
           },
           "hyperdrives": {
             "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -130,7 +131,8 @@
             "ENVIRONMENT": "production",
             "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
             "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
-            "POSTHOG_KEY": "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+            "POSTHOG_KEY": "",
+            "POSTHOG_HOST": "https://eu.i.posthog.com"
           },
           "hyperdrives": {
             "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"

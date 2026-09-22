@@ -30,11 +30,16 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [observability]
 enabled = true
 
-# PostHog *project* token (public — same one shipped in the SPA bundle).
-# Enables slow-request / 4xx / 5xx log shipping to PostHog Logs
+# PostHog ingest region + *project* token (public — same one shipped in the SPA
+# bundle). Enables slow-request / 4xx / 5xx log shipping to PostHog Logs
 # (src/posthog-logs.ts). Mirrors auth-worker and sync-worker.
+# AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
+# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
+# EMPTY until the EU project exists — the retired US project token must not be
+# posted to an EU endpoint, and `shipLog` no-ops on a blank key.
 [vars]
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 
 # The container-backed Durable Object. `image = "./Dockerfile"` builds the
 # sandbox image; `instance_type` sizes each container (contract §6).
@@ -71,7 +76,8 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 enabled = true
 
 [env.development.vars]
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 
 [[env.development.containers]]
 class_name = "Sandbox"
@@ -101,7 +107,8 @@ command = "bash ../scripts/verify-deploy-branch.sh main"
 enabled = true
 
 [env.production.vars]
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 
 [[env.production.containers]]
 class_name = "Sandbox"

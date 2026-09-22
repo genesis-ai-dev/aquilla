@@ -144,7 +144,7 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 
 # PostHog server-side analytics (optional — omit to disable).
 # POSTHOG_KEY=""
-# POSTHOG_HOST="https://us.i.posthog.com"
+# POSTHOG_HOST="https://eu.i.posthog.com"
 
 # R2 object key prefix override for agent artifacts (routes/agent-artifacts.ts).
 # R2_KEY_PREFIX=""

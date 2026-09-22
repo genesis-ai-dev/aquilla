@@ -65,6 +65,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
+import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
   type BacktranslationActionSource,
@@ -153,6 +154,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
@@ -4607,6 +4609,11 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
   )
 }
 
+/** Stable stand-in when the table is rendered without a token minter (tests,
+ *  local-only projects): a read that cannot authenticate simply returns nothing.
+ *  Module-scope so it never re-triggers a row's read effect. */
+const NO_TOKEN = () => Promise.resolve(null)
+
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
@@ -4634,6 +4641,7 @@ function EditorRow({
   isStaleSource,
   isUpstreamStaleSource,
   getAlignmentModel,
+  getTokenForFile,
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
@@ -5869,10 +5877,7 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking =
-    castGutter &&
-    cell.type !== "paratext" &&
-    cell.type !== "heading"
+  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -5928,6 +5933,19 @@ function EditorRow({
     if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
   }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
+
+  // AQU-462: original-language morphology for the Macula Hebrew/Greek source
+  // behind this row. Gated on the same open-alignment condition as the model
+  // above — a Macula book holds tens of thousands of morph rows, so this is a
+  // read for the row a translator is looking at, never for the file. Files with
+  // no morphology answer with an empty list and the strip stays hidden.
+  const { words: originalWords } = useCellMorph({
+    enabled: btAlignmentOpen && expanded && expansionTab === "backtranslation",
+    projectId: project.id,
+    fileId: cell.fileId ?? null,
+    cellId: cell.id,
+    getTokenForFile: getTokenForFile ?? NO_TOKEN,
+  })
 
   // Edit history is reached via the single History control on the cell action
   // rail (opens the full HistoryDrawer). The audit trail lives in the
@@ -7403,6 +7421,7 @@ function EditorRow({
                   onAlignmentOpenChange={setBtAlignmentOpen}
                   alignmentModel={alignmentModelForExpansion}
                   showAlignment={Boolean(getAlignmentModel)}
+                  originalWords={originalWords}
                   onBacktranslate={onBacktranslate}
                   onSaveBacktranslation={onSaveBacktranslation}
                   onAlignmentSeedChange={onAlignmentSeedChange}

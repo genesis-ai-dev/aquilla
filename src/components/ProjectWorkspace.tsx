@@ -116,6 +116,7 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  buildGlosserSeeds,
   nextPaintGate,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
@@ -337,6 +338,7 @@ import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/syn
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -385,7 +387,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useConcepts } from "@/hooks/useConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
-import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
+import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
@@ -584,6 +586,18 @@ export function ProjectWorkspace() {
     roleLevel: serverRoleLevel,
     settingsFetched,
   } = useProject(projectId!)
+  // AQU-1083: the effective policy for this project — its own answer, else its
+  // org's, else count them. Both legs come from the settings hook, which is
+  // the one thing here that re-reads on a remote change frame and on window
+  // focus; an org-level flip therefore reaches this workspace without a
+  // reload. The footer below is the only progress surface that counts cells
+  // itself, and the sidebar's chapter tiles need the value to know when their
+  // cached snapshot is stale — every other surface reads a number the server
+  // already resolved this against.
+  const countStructuralCells =
+    projectSettings?.settings?.countStructuralCells
+    ?? projectSettings?.orgCountStructuralCells
+    ?? true
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -1392,6 +1406,7 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
+    countStructural: countStructuralCells,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
@@ -1534,6 +1549,10 @@ export function ProjectWorkspace() {
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, BacktranslationRecord>
     terminology: ProjectRecord["terminology"] | undefined
+    // AQU-207: confirmed/invalidated interlinear alignments seed the glosser
+    // too, so they belong in the cache key — otherwise a confirmation hands
+    // back the stale pre-confirmation glosser.
+    alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     glosser: Glosser
   } | null>(null)
   const alignmentModelCacheRef = useRef<{
@@ -5170,12 +5189,14 @@ export function ProjectWorkspace() {
     // AQU-1006 follow-up: from the concepts projection, not the retired
     // `project.terminology` settings key.
     const terminology = localConcepts
+    const alignmentSeeds = project?.alignmentSeeds
     const cached = glosserCacheRef.current
     if (
       cached &&
       cached.corpusCells === corpusCells &&
       cached.backtranslationCache === backtranslationCache &&
-      cached.terminology === terminology
+      cached.terminology === terminology &&
+      cached.alignmentSeeds === alignmentSeeds
     ) {
       return cached.glosser
     }
@@ -5183,45 +5204,23 @@ export function ProjectWorkspace() {
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    // High-weight seeds from previous user-corrected BTs stored in the cache.
-    // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
-    // future glosses reflect the reviewer's intent.
-    const seeds: BtSeed[] = []
-    const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
-    for (const record of backtranslationCache.values()) {
-      const cell = corpusByCellId.get(record.cellId)
-      if (!cell?.translated) continue
-      if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
-        continue
-      }
-      seeds.push({
-        source: record.btText,
-        target: record.forText || cell.translated,
-        weight: record.polished === false ? 5 : 2,
-      })
-    }
-    // Seed from project termbase: active concepts feed preferred/admitted/forbidden
-    // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of localConcepts) {
-      if (concept.status !== "active") continue
-      for (const rendering of concept.renderings) {
-        const weight =
-          rendering.status === "preferred" ? 3 :
-          rendering.status === "admitted" ? 1 :
-          -3 // forbidden
-        seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
-      }
-    }
+    const seeds = buildGlosserSeeds({
+      corpusCells,
+      backtranslationCache,
+      terminology,
+      alignmentSeeds,
+    })
     const g = buildGlosser(pairs, seeds)
     memMark(`glosser.build(${pairs.length}p)`)
     glosserCacheRef.current = {
       corpusCells,
       backtranslationCache,
       terminology,
+      alignmentSeeds,
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, localConcepts])
+  }, [corpusCells, backtranslationCache, localConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -5625,6 +5624,15 @@ export function ProjectWorkspace() {
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
   // 2a). openCommentCount (file-level) is still health-derived.
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount } = health
+  // AQU-1083: useHealth counts every cell of the open file; the footer must
+  // show the policy-resolved number or it contradicts the sidebar bar for the
+  // same file. Subtracted here, not inside useHealth, so the health hook stays
+  // ignorant of cell types.
+  const statusBarProgress = useMemo(() => {
+    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
+    if (!live) return EMPTY_STATUS_PROGRESS
+    return applyStructuralPolicy(live, cellSummaries, countStructuralCells)
+  }, [activeFileId, cellSummaries, countStructuralCells, liveFileProgress])
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -5736,9 +5744,14 @@ export function ProjectWorkspace() {
         getSummary,
         health: (cellId) => effectiveHealthMap.get(cellId),
         hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083: draw a heading as "not counted" rather than as work left
+        // to do. The chapter's fraction already excludes it — the store does
+        // that — so this only chooses the colour and what it announces.
+        isExcluded: (cellId) =>
+          !countStructuralCells && isStructuralCell(getSummary(cellId)?.type),
       })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -11261,6 +11274,7 @@ export function ProjectWorkspace() {
                   deferSectionProgress={!editorFirstPaint}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
+                  countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
                   targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
@@ -12543,7 +12557,7 @@ export function ProjectWorkspace() {
             const fileStats = showFileStats ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                progress={activeFileId ? liveFileProgress.get(activeFileId) ?? EMPTY_STATUS_PROGRESS : EMPTY_STATUS_PROGRESS}
+                progress={statusBarProgress}
                 getHealthByCell={getStatusBarHealth}
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}

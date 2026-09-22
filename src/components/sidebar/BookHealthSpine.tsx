@@ -6,7 +6,14 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 export interface BookHealthCell {
   id: string
-  stage: "untranslated" | "automatic" | "validated"
+  /**
+   * AQU-1083: `excluded` is a heading in a project that does not count
+   * headings toward progress. It is drawn — the map still shows the whole
+   * file — but it is not work, so it must not read as untranslated. That is
+   * the entire point of the setting: a chapter title left alone is finished
+   * business, not an outstanding task.
+   */
+  stage: "untranslated" | "automatic" | "validated" | "excluded"
   health?: number
   hasIssue?: boolean
 }
@@ -129,6 +136,9 @@ function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: bool
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
   const warning = cell.hasIssue ? " · automatic warning" : ""
+  // Says WHY it is grey. Without this the square is indistinguishable from a
+  // faint untranslated one to anyone reading it with a screen reader.
+  if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
   if (cell.stage === "automatic") {
     return cell.health === undefined
@@ -221,18 +231,27 @@ export function BookHealthSpine({
                   >
                     {visibleCells.map((cell, cellIndex) => {
                       const tick = cellBucketVisual([cell])
+                      // AQU-1083: an excluded heading is drawn HOLLOW rather
+                      // than in a paler shade of the untranslated fill. The
+                      // three filled stages are points on one "how done is
+                      // this" scale, and a lighter fill just reads as a
+                      // fainter point on it — exactly the wrong message. An
+                      // outline is visibly not on the scale at all.
+                      const excluded = cell.stage === "excluded"
                       return (
                         <span
                           key={cell.id}
                           data-testid="book-health-cell"
+                          data-excluded={excluded || undefined}
                           role="img"
                           aria-label={cellDescription(cell, cellIndex)}
                           title={cellDescription(cell, cellIndex)}
                           className={cn(
                             "size-[7px] rounded-[1px]",
+                            excluded && "ring-1 ring-inset ring-slate-400/50 dark:ring-slate-500/50",
                             tick.issue && "ring-1 ring-inset ring-amber-500",
                           )}
-                          style={{ backgroundColor: tick.color }}
+                          style={{ backgroundColor: excluded ? "transparent" : tick.color }}
                         />
                       )
                     })}

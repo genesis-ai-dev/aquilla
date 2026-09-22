@@ -11,6 +11,12 @@ interface StatusBarProps {
   projectHealth: number
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
+  /**
+   * AQU-1083: `progress` must already reflect the project's structural-cell
+   * policy — this footer no longer sees cells, so it cannot apply it itself.
+   * ProjectWorkspace resolves it with `applyStructuralPolicy` before passing
+   * the numbers down; see `@/lib/cells/structural`.
+   */
   className?: string
 }
 

@@ -109,7 +109,7 @@ const CHECKING: readonly ProcessNodeId[] = [
 const STAGING: readonly ProcessNodeId[] = ["stage", "report"]
 
 const REGION_ORDER = ["reading", "drafting", "checking", "staging"] as const
-type ProcessRegion = (typeof REGION_ORDER)[number]
+export type ProcessRegion = (typeof REGION_ORDER)[number]
 
 const REGION_NODES: Record<ProcessRegion, readonly ProcessNodeId[]> = {
   reading: READING,
@@ -156,7 +156,7 @@ const EMPTY_STATES = Object.fromEntries(
   PROCESS_NODE_IDS.map((id) => [id, "pending"]),
 ) as Record<ProcessNodeId, ProcessNodeState>
 
-function normalizePhase(value: string | null | undefined): ProcessRegion | null {
+export function normalizePhase(value: string | null | undefined): ProcessRegion | null {
   if (!value) return null
   const normalized = value.trim().toLowerCase().replace(/[….]+$/u, "")
   if (normalized === "reading" || normalized === "reading context") return "reading"

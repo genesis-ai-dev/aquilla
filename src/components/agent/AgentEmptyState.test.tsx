@@ -13,12 +13,19 @@ beforeEach(() => {
 })
 
 describe("AgentEmptyState", () => {
-  it("shows intro, example prompts, slash commands, and the guide link", () => {
+  it("keeps two suggestions prominent and team/shortcuts in a closed disclosure", () => {
     render(<AgentEmptyState onPromptSelect={() => {}} />)
     expect(screen.getByText(/works inside this project/)).toBeInTheDocument()
-    for (const prompt of EXAMPLE_PROMPTS) {
-      expect(screen.getByRole("button", { name: prompt })).toBeInTheDocument()
+    // The social-workspace roster: the user meets the team before the first
+    // run, so later thread attribution has a referent.
+    for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
+      expect(screen.getByText(name)).toBeInTheDocument()
     }
+    // Prefill-only behavior is stated, not left to be discovered.
+    expect(screen.getByText(/nothing is sent until you press Enter/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Draft untranslated passages" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check translation consistency" })).toBeInTheDocument()
+    expect(screen.getByText("About the team & shortcuts").closest("details")).not.toHaveAttribute("open")
     for (const cmd of ["/draft", "/check", "/find", "/status"]) {
       expect(screen.getByText(cmd)).toBeInTheDocument()
     }
@@ -31,7 +38,7 @@ describe("AgentEmptyState", () => {
   it("prefills (not sends): clicking a prompt passes its text to onPromptSelect", () => {
     const onPromptSelect = vi.fn()
     render(<AgentEmptyState onPromptSelect={onPromptSelect} />)
-    fireEvent.click(screen.getByRole("button", { name: EXAMPLE_PROMPTS[0] }))
+    fireEvent.click(screen.getByRole("button", { name: "Draft untranslated passages" }))
     expect(onPromptSelect).toHaveBeenCalledWith(EXAMPLE_PROMPTS[0])
   })
 

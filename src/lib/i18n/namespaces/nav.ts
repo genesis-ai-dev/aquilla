@@ -56,6 +56,8 @@ export const nav = defineNamespace({
     "nav.dock.agentTab": "Agent",
     "nav.dock.agentUnread": "{count} unread",
     "nav.dock.expandSidebar": "Expand sidebar",
+    "nav.dock.hidePanel": "Hide sidebar panel",
+    "nav.dock.showPanel": "Show sidebar panel",
     "nav.shell.openSidebar": "Open sidebar",
     "nav.shell.navigation": "Navigation",
 
@@ -592,6 +594,12 @@ export const nav = defineNamespace({
         description:
           "Tooltip and accessible name for the button on the collapsed 40px icon rail " +
           "that expands the dock back open to the Files tab.",
+      },
+      "nav.dock.hidePanel": {
+        description: "Hide the sidebar's content panel while keeping its icon rail and the current main view.",
+      },
+      "nav.dock.showPanel": {
+        description: "Restore the last visible sidebar panel, falling back to an available panel if it is no longer offered.",
       },
       "nav.shell.openSidebar": {
         description:

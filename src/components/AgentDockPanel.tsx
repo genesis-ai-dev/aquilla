@@ -1,20 +1,35 @@
 /**
- * AgentDockPanel.tsx — AQU-320
+ * AgentDockPanel.tsx — the left dock's Agent tab: the team's THREADS LIST
+ * (v2.2 three-column layout, 2026-08-28). The old compact chat lived here and
+ * read as a confusing "preview"; now the dock answers "what is the team
+ * doing" at a glance and clicking a conversation opens it in the agent
+ * surface. Selection is URL-driven (CONVERSATION_PARAM), so this list and the
+ * center pane can never disagree about what is open.
  *
- * Inline AI agent panel for the left dock. Renders AgentDockView in the dock's
- * compact column layout, with a header and (for scripture files) Summarize
- * book/chapter buttons that run an agent-backed, vetted-resource summary.
+ * For scripture files the Summarize book/chapter quick actions remain — they
+ * now hand their prompt to the agent surface (pendingPrompt) instead of a
+ * dock-local composer.
  */
 
-import { useMemo, useState } from "react"
-import { Bot, Maximize2 } from "lucide-react"
+import { useMemo } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { ContextChip } from "@/lib/agent/context-chip"
-import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
-import { CreditsDial, type CreditsDialProps } from "./agent/CreditsDial"
-import type { SuggestedAction } from "./chat/ChatComposer"
+import { useAgentSession } from "@/lib/agent/session-store"
+import {
+  CONVERSATION_PARAM,
+  TEAM_CHAT_CONVERSATION,
+} from "@/lib/agent/team-channel"
+import {
+  buildConversationRows,
+  useTeamConversations,
+} from "@/lib/agent/team-conversations"
+import type { ContextualRunRecord } from "@/lib/contextual/transport"
+import { TeamConversationList } from "./agent/TeamConversationList"
+import { runStatusKey } from "./agent/team-run-status"
+import { agentConversationHref } from "@/lib/agent/workspace-location"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
 
 /** Scripture context that powers the Summarize book/chapter buttons. */
@@ -27,69 +42,71 @@ export interface BibleSummaryContext {
 }
 
 export interface AgentDockPanelProps {
-  /** Agent-run wiring. */
-  agent: Omit<
-    AgentDockViewProps,
-    "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed"
-  >
-  /** When a scripture file is open, shows Summarize book/chapter buttons that
-   *  run an agent-backed, vetted-resource summary. */
+  projectId: string
+  /** Session-store owner key — must match the agent surface's wiring. */
+  author: string
+  /** File display names for conversation titles. */
+  fileNames?: ReadonlyMap<string, string>
+  /** When a scripture file is open, shows Summarize book/chapter buttons. */
   bibleSummary?: BibleSummaryContext | null
-  /** A source-selection chip to insert into the composer (set by EditorTable's "Ask AI"). */
-  pendingChip?: ContextChip | null
-  /** Called once the pending chip has been inserted. */
-  onPendingChipConsumed?: () => void
-  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
-  credits?: CreditsDialProps | null
-  /** Opens the agent workbench as an editor tab (same session — nothing is lost). */
+  /** Hand a quick-action prompt to the agent surface (it opens the chat). */
+  onSummaryPrompt?: (prompt: string) => void
+  /** Opens the agent surface (same as selecting a conversation). */
   onExpand?: () => void
-  /** True while the workbench is showing the same session in an editor tab.
-   *  The dock then renders a pointer back to it instead of a second chat. */
-  expanded?: boolean
 }
 
 export function AgentDockPanel({
-  agent, bibleSummary, pendingChip, onPendingChipConsumed, credits, onExpand, expanded,
+  projectId,
+  author,
+  fileNames,
+  bibleSummary,
+  onSummaryPrompt,
+  onExpand,
 }: AgentDockPanelProps) {
   const t = useT()
-  // A summary prompt queued by a button tap; AgentDockView runs it once.
-  const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { state } = useAgentSession(projectId, author)
+  const { runs, decisions } = useTeamConversations(projectId)
 
-  // Summary buttons appear only when a scripture file is open. The chapter
-  // button needs a focused verse.
-  const summaryActions = useMemo<SuggestedAction[] | undefined>(() => {
-    if (!bibleSummary) return undefined
-    const actions: SuggestedAction[] = []
-    const { bookName, chapterRef } = bibleSummary
-    if (bookName) {
-      actions.push({
-        label: "Summarize book",
-        title: t("workspace.agentDockPanel.summarizeBookTitle", { book: bookName }),
-        onClick: () => setPendingAgentPrompt(bookSummaryPrompt(bookName)),
-      })
-    }
-    actions.push({
-      label: "Summarize chapter",
-      title: chapterRef
-        ? `Summarize ${chapterRef} using vetted Bible resources`
-        : "Focus a verse to summarize its chapter",
-      disabled: !chapterRef,
-      onClick: () => chapterRef && setPendingAgentPrompt(chapterSummaryPrompt(chapterRef)),
-    })
-    return actions.length ? actions : undefined
-  }, [bibleSummary, t])
+  const onAgentSurface = location.pathname.endsWith("/agent")
+  const selectedId = onAgentSurface
+    ? new URLSearchParams(location.search).get(CONVERSATION_PARAM) ?? TEAM_CHAT_CONVERSATION
+    : ""
+
+  const runTitle = useMemo(
+    () => (run: ContextualRunRecord) =>
+      fileNames?.get(run.fileId) ?? run.spanLabel ?? t("agent.team.unnamedThread"),
+    [fileNames, t],
+  )
+  const rows = useMemo(
+    () =>
+      buildConversationRows({
+        chatRuns: state.runs,
+        isStreaming: state.isStreaming,
+        runs: runs ?? [],
+        openCount: decisions?.openCount ?? 0,
+        firstQuestionReason: decisions?.decisions[0]?.reason ?? null,
+        runTitle,
+        runStatusLabel: (run) => t(runStatusKey(run)),
+        t,
+      }),
+    [state.runs, state.isStreaming, runs, decisions, runTitle, t],
+  )
+
+  const openConversation = (id: string) => {
+    // Always explicit — the param is what tells the workbench to land on the
+    // Team surface rather than its default Chat tab.
+    navigate(agentConversationHref(projectId, id))
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium">{t("agent.dock.title")}</span>
+        <span className="text-xs font-medium">{t("agentWorkspace.conversations")}</span>
         <span className="ms-auto flex items-center gap-1">
-          {/* When the workbench owns the session, the agent pane shows the dial —
-              a second copy here would compete for the same click/popover. */}
-          {credits && !expanded && <CreditsDial {...credits} />}
-          {onExpand && !expanded && (
+          {onExpand && (
             <AppTooltip content={t("agent.dock.openInEditorTooltip")}>
               <Button
                 type="button"
@@ -106,25 +123,49 @@ export function AgentDockPanel({
         </span>
       </div>
 
-      {expanded ? (
-        // The workbench is rendering this same session in an editor tab —
-        // a second live chat here would double the composer and confuse focus.
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
-          <Bot className="h-6 w-6 text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">
-            {t("agent.dock.openInEditorNotice")}
-          </p>
+      {/* Scripture quick actions — prompts run in the agent surface. */}
+      {bibleSummary && onSummaryPrompt && (
+        <div className="flex flex-wrap gap-1 border-b px-2 py-1.5">
+          {bibleSummary.bookName && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px]"
+              title={t("workspace.agentDockPanel.summarizeBookTitle", {
+                book: bibleSummary.bookName,
+              })}
+              onClick={() => onSummaryPrompt(bookSummaryPrompt(bibleSummary.bookName!))}
+            >
+              {/* i18n-exempt existing untranslated quick-action labels (AQU-320) */}
+              Summarize book
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 text-[11px]"
+            disabled={!bibleSummary.chapterRef}
+            title={
+              bibleSummary.chapterRef
+                ? // i18n-exempt pre-existing untranslated quick-action title (AQU-320)
+                  `Summarize ${bibleSummary.chapterRef} using vetted Bible resources`
+                : // i18n-exempt pre-existing untranslated quick-action title (AQU-320)
+                  "Focus a verse to summarize its chapter"
+            }
+            onClick={() =>
+              bibleSummary.chapterRef
+              && onSummaryPrompt(chapterSummaryPrompt(bibleSummary.chapterRef))
+            }
+          >
+            {/* i18n-exempt existing untranslated quick-action labels (AQU-320) */}
+            Summarize chapter
+          </Button>
         </div>
-      ) : (
-        <AgentDockView
-          {...agent}
-          suggestedActions={summaryActions}
-          pendingPrompt={pendingAgentPrompt}
-          onPendingPromptConsumed={() => setPendingAgentPrompt(null)}
-          pendingChip={pendingChip}
-          onPendingChipConsumed={onPendingChipConsumed}
-        />
       )}
+
+      <TeamConversationList rows={rows} selectedId={selectedId} onSelect={openConversation} />
     </div>
   )
 }

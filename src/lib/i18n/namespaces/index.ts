@@ -39,6 +39,7 @@ import { billing } from "./billing"
 import { knowledgeBase } from "./knowledgeBase"
 import { settings } from "./settings"
 import { agent } from "./agent"
+import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
 
@@ -66,6 +67,7 @@ export const NAMESPACES = [
   knowledgeBase,
   settings,
   agent,
+  agentDraftReview,
   workspace,
   segmentation,
 ] as const

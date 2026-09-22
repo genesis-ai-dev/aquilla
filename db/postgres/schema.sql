@@ -1680,6 +1680,53 @@ CREATE INDEX IF NOT EXISTS contextual_decisions_run
   ON contextual_decisions(run_id)
   WHERE status IN ('open','researching');
 
+-- Durable team channel (0083_team_channel.sql; AQU-1049 port to the v2
+-- one-channel model). One shared, project-scoped history: the Coordinator
+-- narrates in the main channel (thread_id IS NULL) and every delegated piece
+-- of work owns a thread. Humans and agent personas post into the same table.
+CREATE TABLE IF NOT EXISTS team_threads (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  -- 'run' = a contextual autopilot run (source_ref is its run id);
+  -- 'human' = opened from the channel by a person (source_ref NULL).
+  source_kind text NOT NULL CHECK (source_kind IN ('run', 'human')),
+  source_ref text,
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 160),
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (source_ref IS NULL OR octet_length(source_ref) <= 512),
+  -- One thread per work item; NULL source_refs never collide, so ingestion
+  -- can ON CONFLICT its way to find-or-create for a run.
+  UNIQUE (project_id, source_kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS team_threads_project_time
+  ON team_threads(project_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS team_messages (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  thread_id text,                       -- NULL = the main project channel
+  author_kind text NOT NULL CHECK (author_kind IN ('human', 'persona')),
+  -- Username for a human; persona id for an agent teammate. Open registry.
+  author_id text NOT NULL CHECK (char_length(author_id) BETWEEN 1 AND 128),
+  body_kind text NOT NULL CHECK (body_kind IN ('text', 'activity', 'question')),
+  body jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(body) = 'object')
+    CHECK (octet_length(body::text) <= 16384),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (thread_id IS NULL OR char_length(thread_id) = 36)
+);
+CREATE INDEX IF NOT EXISTS team_messages_main_time
+  ON team_messages(project_id, created_at DESC, id DESC)
+  WHERE thread_id IS NULL;
+CREATE INDEX IF NOT EXISTS team_messages_thread_time
+  ON team_messages(project_id, thread_id, created_at DESC, id DESC);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

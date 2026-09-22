@@ -12,6 +12,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { NavHistoryProvider } from "@/context/NavHistoryContext"
 
 const originalMatchMedia = window.matchMedia
 
@@ -67,6 +68,32 @@ function renderShell(main: React.ReactNode, initialEntries = ["/a"]) {
 }
 
 describe("AppShell main-content error containment", () => {
+  it("stacks history and footer controls in a collapsed project rail", () => {
+    render(
+      <MemoryRouter initialEntries={["/project/p1/editor"]}>
+        <I18nProvider>
+          <NavHistoryProvider>
+            <AppShell
+              logoSlot={<span>Aquilla</span>}
+              header={<div>header</div>}
+              statusBar={null}
+              leftDock={<div>dock</div>}
+              railCollapsed
+              main={<div>main</div>}
+            />
+          </NavHistoryProvider>
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole("group", { name: "Page history" })).toHaveClass("flex-col")
+    const back = screen.getByRole("button", { name: "Back" })
+    expect(back.closest("[data-slot=button-group]")).toHaveAttribute("data-orientation", "vertical")
+    const language = screen.getByRole("button", { name: "Quick language switch" })
+    expect(language.parentElement).toHaveClass("flex-col")
+    expect(language.closest('[data-slot="app-shell-sidebar-footer"]')).toHaveClass("flex-col")
+    expect(screen.getByRole("button", { name: "Copy build info" }).closest('[data-slot="app-shell-sidebar-build"]')).toHaveClass("max-w-full")
+  })
+
   it("renders main content normally when nothing throws", () => {
     renderShell(<div data-testid="content">hello</div>)
     expect(screen.getByTestId("content")).toBeInTheDocument()

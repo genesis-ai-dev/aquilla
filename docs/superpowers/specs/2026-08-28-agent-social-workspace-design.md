@@ -1,0 +1,323 @@
+# Agent social workspace — design (2026-08-28)
+
+Source: 2026-08-28 team meeting transcript (12:46–12:55). Approved direction: make the
+multi-agent surface read like a social chat (Telegram/Discord), not a technical console.
+
+## Goals (from the transcript)
+
+1. **Social team view**: named agents with avatars — Drafter, Reviewer, Coordinator —
+   whose work appears as browsable threads with plain-language messages.
+2. **No raw commands in chat**: the agent chat must not surface raw SQL in the
+   collapsed activity line (raw stays one click away).
+3. **Warmer empty states**: the agent intro presents the team; a "nothing to do"
+   tool reply suggests a next step instead of dead-ending.
+4. **Navigation**: the sidebar Agent rail item must respond while the workbench is
+   open (active state + toggle back to editor); example prompts say they only
+   prefill the composer.
+
+## Non-goals (v1)
+
+- No backend agent identity (`actor` on events) — personas are a deterministic
+  client-side presentation over existing autopilot phases and chat tool kinds.
+- No per-verifier messages (votes are aggregated server-side before emission).
+- No chat-session history list (server has no list endpoint).
+- The workbench default tab stays Chat; Team is the first tab. Revisit after use.
+
+## Architecture
+
+**Personas** (`src/lib/agent/personas.ts`, pure): `drafter | reviewer | coordinator`,
+each with i18n name/tagline keys, lucide icon, tint classes. Mapping:
+- pipeline regions: reading/drafting → drafter, checking → reviewer, staging → coordinator
+- autopilot event kinds: span_started/drafts_staged/span_outcome → coordinator,
+  scene_ready → drafter, phase → by region; run_created/run_state/llm/steering → skipped
+- chat tool kinds: read/examples/search/docs/aquifer/draft → drafter, sql/emit → coordinator
+
+**Feed transform** (`src/lib/agent/social-feed.ts`, pure): `ContextualRunActivity` →
+`TeamFeedMessage[]` ({persona, at, body: typed union with spanLabel/count/reasons/brief
+excerpt}). Consecutive duplicate phase messages dedupe; unknown kinds are skipped.
+
+**Team view** (`src/components/agent/TeamThreadsView.tsx`): Telegram-style two-pane —
+left: roster header + pinned "Needs your expertise" row (decisions) + thread list
+(one thread per autopilot run, titled by file); right: message feed with
+avatar/name/time rows; drafts-staged messages link to review. Data via the same
+transport the inspector uses (`fetchContextualRuns`, `fetchContextualRunActivity`,
+`fetchContextualDecisions`), 4s poll while visible. States: skeleton loading, team
+intro empty state, inline error + retry.
+
+**Chat restyle** (`AgentRunView.tsx`): assistant prose gets a Coordinator
+avatar/name header (grouped Discord-style); tool chips become plain-language
+activity lines attributed to a persona — SQL summary never renders collapsed;
+raw summary/result stay behind the expand.
+
+**Workbench** (`AgentWorkbench.tsx`): tabs = Team | Chat | Project knowledge; a
+pending "Ask AI" chip auto-switches to Chat.
+
+**Empty states**: `AgentEmptyState` presents the roster + keeps example prompts with
+an explicit "fills the message box" hint. Server: the draft tool's "Nothing to
+draft" reply gains a suggested next step (auth-worker/src/lib/agent/tools/draft.ts).
+
+**Navigation**: `resolveSidebarAgentClick` now returns `close-workbench | open-dock`;
+clicking the rail Agent item while the workbench is open returns to the editor
+(mirrors the rail's collapse idiom). New `railActiveTab` prop on `LeftDock` marks the
+Agent rail item active during the takeover without changing which panel is open.
+
+## v2 — the one-channel model (approved direction, 2026-08-28 follow-up)
+
+Ryder's framing after v1 landed: a main orchestrator invokes subagents; subagents
+work in threads; the whole thing reads as one chat history; humans can talk to
+the orchestrator or drill into a thread and direct a subagent. Simple and clear
+beats clever. Synthesis:
+
+**One shared project channel.** The Coordinator is the only agent that speaks at
+top level, narrating at intent level. Every delegated piece of work is one main
+message that owns a thread; the subagent's play-by-play (tool lines, drafts,
+checks) lives in the thread. The main channel IS the team overview — the
+worktree series' overview/questions/work panels dissolve into it:
+questions-needing-expertise become ordinary Coordinator messages mentioning the
+user (Answer affordance, threaded; decision records stay as the data layer);
+work status is a chip on the thread's parent message.
+
+**Layout.** `| main chat | optional thread detail |` — opening a thread
+collapses main to a narrow spine of avatars at the SAME vertical positions
+(temporal order preserved; open thread's parent highlighted). Composer fixed at
+the bottom; in thread mode it takes an inline-start margin plus a scope chip
+("→ Drafter · GEN 1:1–8") so the send target is unmistakable. Main-channel
+composer addresses the orchestrator; thread composer addresses that subagent.
+
+**Transparency (no console).** (1) Agent cards on avatar click: persona's role,
+its actual tool list, the standing state it reads (brief, style guide, termbase,
+living memory, rules), what it may write (staged proposals only — approval gate
+stated on the card). (2) Plain-language receipts inline in threads, raw detail
+one expand deeper. (3) State changes are messages that LINK into the existing
+state surfaces ("Saved a situation note → Living Memory") — no new state UI.
+
+**Multiplayer.** Every user sees the same durable history; multiple humans can
+speak in main and in threads. Requires the server-side thread store — port the
+AQU-1049–1052 `team_threads`/`team_decisions` backend (rebased onto dev) as the
+message store, broadcast via the per-project ProjectSync DO. Autopilot events
+get written into durable threads server-side (replacing v1's client-side
+derivation); `sendContextualSteering` becomes the thread-scoped "message the
+Drafter" path. Personas stay an open registry keyed to core workflow functions
+(Terminology/Audio/Import personas can join later).
+
+**Sequencing.** (1) One-channel presentation + collapse-spine layout on dev
+(presentation only). (2) Durable shared history: port the team-threads backend,
+write autopilot + chat runs into it, DO broadcast — multiplayer lands here.
+(3) Thread-scoped composer wired to steering. (4) Agent cards.
+
+## v2.1 — the typical-chat refinement (2026-08-28 notes, shipped)
+
+Ryder's follow-up notes (ChatGPT/Perplexity/Signal references) pulled the
+layout onto the standard pattern: the app dock is the slim icon rail; inside
+the Team tab, a conversations LIST (Team chat pinned first, one consolidated
+"Needs your expertise" conversation, runs newest-first — each row a
+medium-weight name, one-line preview, quiet time, and the single primary
+accent reserved for counts needing the human) sits beside the ACTIVE
+conversation. The v2 collapse-spine was replaced by this persistent list;
+dispatch messages in Team chat carry a quiet inline "View updates" affordance
+(the replies-badge pattern) instead of being the only entry point; focus mode
+hides the list for a centered wide canvas. Monochrome discipline throughout:
+identity lives in the tinted avatars, names are plain foreground at medium
+weight, activity chips flattened from boxes to quiet rows.
+
+## v2.2 — the three-column layout (2026-08-28 follow-up, shipped)
+
+Ryder's structural observation: per-file conversations duplicated the Files
+sidebar. Resolution — `| dock | conversation | optional step inspector |`:
+
+- The conversations list lives in the LEFT DOCK's Agent tab (AgentDockPanel),
+  replacing the old compact dock chat entirely: the dock lists, the surface
+  talks. A New-conversation control sits in its header; scripture Summarize
+  quick actions hand their prompt to the surface chat (pendingPrompt).
+- The center is the ACTIVE conversation only. Selection is URL-driven
+  (`?conversation=`), so the dock and the surface share one source of truth
+  and threads are deep-linkable; a conversation param lands the workbench on
+  the Team tab. Entering the agent surface opens the dock's Agent panel (the
+  old files-scope-picker takeover and the v2.1 focus toggle are gone — dock
+  collapse plays that role).
+- Clicking a step opens the STEP INSPECTOR third column: the plain-language
+  sentence up top, then collapsed sections holding the receipts — the durable
+  event kind/details, the situation note, outcome reasons.
+- RE-OPEN BY MESSAGING: a finished run's composer no longer dead-ends for
+  CONTRIBUTOR+ viewers — sending starts a fresh run on that file
+  (startFileContextualRun) with the message as its first steering direction,
+  and selection jumps to the new conversation.
+- One shared refcounted poller (team-conversations.ts) feeds both columns.
+
+## Header refinement (2026-09-14)
+
+The Team surface uses one conversation header: the active conversation's name
+is the headline, its run status is secondary, and the three clickable persona
+avatars share that row. The roster retains its accessible name and live
+indicators without a separate visible roster strip. Empty Team chat uses the
+same header; opening a run or the questions conversation updates its headline.
+The workbench toolbar omits its redundant Agent icon/title while Team is
+selected, but retains its tabs and session controls. Chat and Project knowledge
+keep their existing toolbar identity. File tabs, project navigation, message
+content, review actions, and inspector interactions are unchanged.
+
+## Task conversation refinement (2026-09-14)
+
+Consecutive messages from the same persona share one avatar, name, and opening
+timestamp. Another persona starts a new group; events are never reordered
+across speakers. Within a group, two or more adjacent reading/drafting/checking
+updates start collapsed behind a count-labelled disclosure. A single routine
+update stays visible. Starts, situation notes, staged-draft review links, and
+all outcomes remain visible in their original order.
+
+Expanding activity reveals the original messages, each still inspectable with
+its original timestamp and raw receipt in the step inspector. Expansion
+survives polling refreshes and new activity; an inspected step is not hidden
+when an arriving phase turns a single update into a collapsible group. This is
+presentation only: no new summaries, claims of approval, or backend writes.
+The main Team chat and the document-workspace Chat tab are unchanged.
+
+## Unified conversation and review workspace (2026-09-15)
+
+This supersedes the earlier competing Team/Chat tabs and mandatory
+Source/Agent/Target columns. The default is one **Conversation** view. The
+sidebar owns selection; selecting any conversation, including the already
+selected one, returns to that conversation. The URL owns both conversation
+and view so reloading, history navigation, and shared links agree with the UI.
+Main Team chat keeps the complete chat toolset, attachments, selection chips,
+proposal receipts, and compensating Undo; task conversations keep scoped steering.
+
+Unsent messages belong to the signed-in owner, project, and conversation.
+Switching views must not erase them, and selecting another conversation must
+never retarget the previous conversation's draft. Typed text, context chips,
+and attached artifacts retain their scope until handed off successfully.
+
+**Review drafts** stays inside the selected task and opens pending proposals
+with their source context, explicit human approval controls, previous/next
+navigation, and a return to the conversation. It does not change the preferred
+Audio/Text editor mode. Proposed content stays distinct from committed content;
+review uses the existing contextual decision/approval transport.
+
+**Document** is optional main-chat context: source and target are paired in
+shared-height rows within one scrolling surface. Existing target editing,
+validation, collaboration guards, and reference actions are retained.
+Knowledge is a separate view rather than a competing conversation.
+
+Onboarding offers two prefill-only suggestions, with the team description
+and shortcuts behind a disclosure. Existing work takes precedence over a
+first-run guide. Pending human work is the prominent status; machine activity
+remains secondary. Sidebar dates no longer compete with the task title.
+
+## Human-attention header (2026-09-14)
+
+A task with pending proposals shows its current pending-review count and a
+primary **Review drafts** link beneath the conversation title. The run's
+technical status (including Idle) remains secondary metadata. The count is the
+server's run-scoped `proposedDrafts`, not a sum of historical staging messages;
+zero or unavailable counts do not imply pending work or a completed review.
+The link uses the existing file-review destination and preserves the run's
+target-language lane, including an explicitly empty default lane.
+
+Team chat promotes the full project `openCount` with a **View questions** link
+to the existing questions conversation. The count includes questions beyond
+the visible page cap. In that conversation, the count remains visible but
+the redundant navigation action is omitted; answers stay in DecisionCard.
+Project-wide question counts are not attributed to an individual run.
+These are navigation affordances only: no new approval controls or writes.
+
+## Explicit step inspection (2026-09-14)
+
+Message text uses the app's `select-text` opt-in so the global chrome selection
+lock does not apply; the adjacent details control stays non-selectable. Text
+is not an inspector trigger. Each
+inspectable message has a separate **View details** control with an accessible
+name identifying its step. Controls appear on row hover or keyboard focus for
+fine, hover-capable pointers and stay visible on touch devices; the selected
+control remains visible. Expanding routine activity exposes the same controls.
+Review links remain independent native links, including keyboard activation.
+
+The inspector is a named complementary region associated with its expanded
+trigger. Closing it with its close button, the selected step's **Hide details**
+control, or an unhandled Escape leaves the conversation selected and returns
+focus to that trigger. If its activity group was collapsed and the trigger is
+gone, focus returns to the conversation region instead. A subsequent unhandled
+Escape retains the existing return-to-Team-chat behavior. Consumed Escape
+events and composition cancellation do not dismiss or navigate the workspace.
+
+## Chat controls cleanup (2026-09-14)
+
+The dock's pinned Team chat row is the single entry to that conversation; the
+misleading New conversation shortcut is removed because it only navigated to
+the same chat. The workbench's always-visible New session button is replaced
+by **Chat options → Reset chat…**. Tabs and the prominent Send, Stop, review,
+and question actions keep their existing behavior.
+
+Reset always opens an explicit confirmation explaining the actual scope:
+messages, in-chat proposals, and Undo controls shared by Team chat and Chat
+are cleared in this browser; the current chat response and queued messages
+stop. Project task activity, files, and applied translations are not reset.
+Cancel receives initial focus, cancellation does not call reset, and closing
+the dialog returns focus to Chat options. Reset is unavailable during a
+workbench apply/undo operation. Changing the project or account dismisses the
+confirmation rather than retargeting it to another chat. Confirming calls the
+existing session-store reset without navigating, creating a task, or emitting
+document events.
+
+## Separate visibility, navigation, and closing (2026-09-14)
+
+The workbench has one **Back to editor** link. It follows the existing editor
+return destination without closing the Agent tab, stopping the agent, or
+resetting chat. The tab-strip **Close Agent** control remains the explicit way
+to dismiss that tab. The duplicate inner Minimize Agent control is removed.
+
+Source/chat/target dividers only resize their panes. The chat pane retains its
+24% minimum and is not drag-collapsible; dragging or keyboard resizing must
+never navigate away. Legacy zero-width saved layouts continue to fall back to
+the usable default layout.
+
+**Hide sidebar panel** hides content while retaining the icon rail and current
+main view. **Show sidebar panel** restores the last selected panel instead of
+always opening Files. The workspace owns that selection memory so responsive
+dock unmounts do not lose it. If a remembered panel is no longer available, an
+available panel is shown instead.
+Automatic panel choices during Agent/editor navigation or audio-mode changes
+only affect an already-visible sidebar. A hidden panel and its remembered
+selection stay hidden until an explicit panel control reopens them; navigation
+must not undo a manual collapse.
+The collapsed rail stacks Previously viewed, Back, and Forward vertically so
+the history controls remain inside the viewport. Footer utilities also stack
+within the narrow rail; expanded sidebars retain their horizontal arrangement.
+
+## Testing
+
+Vitest: personas mapping totality (every region/tool kind attributes — the social
+view must never show an anonymous actor); social-feed fixtures (persona routing,
+dedupe, skip-unknown, ordering); TeamThreadsView RTL with mocked transport
+(threads, feed, decisions pin, empty state); AgentRunView (no raw SQL collapsed,
+expand reveals raw); AgentEmptyState (roster, prefill behavior); shell-routing
+(resolveSidebarAgentClick). Worker: draft-tool empty-reply text. No new smoke
+(UI-only; AGENTS.md rule 3); existing agent e2e selectors verified unaffected
+("Ask the agent" composer, TabStrip "Agent" tab, data-frame-type attrs unchanged).
+Header refinement is covered in TeamThreadsView RTL (empty/channel/run/questions
+headlines, avatar-card access, live indicators, and Escape navigation) and
+AgentWorkbench RTL (Team toolbar identity and switching back to the document
+workspace).
+Task grouping is covered by `buildRunFeed` output passed through `groupRunFeed`
+and the real thread UI, plus TeamThreadsView RTL for disclosure-to-inspector
+behavior and visible notes, failures, and review links. TeamThreadDetail RTL
+covers singleton activity, refresh/append stability, and inspected-step
+visibility.
+Attention-header RTL covers zero/missing/updated pending counts, default and
+non-default review lanes, project-question scope and capped pages, and the
+existing question-card navigation/answer surface.
+Inspector interaction RTL covers passive text, explicit controls, trigger/panel
+association, focus return and its collapsed-group fallback, Escape priority,
+and keyboard activation of the independent review link.
+Chat-options RTL covers confirmation/cancellation, focus, busy-state gating,
+and the real session-store reset. The workbench integration test preserves
+already-applied outbox records and verifies reset emits no undo/delete writes.
+Existing session-store tests cover stopping queued work and persistence of the
+fresh session.
+Visibility/navigation coverage lives in `useDockTabs.test.ts`, `LeftDock.test.tsx`,
+`AgentWorkbench.test.tsx`, and `workbench-layout.test.ts`: controlled/uncontrolled
+panel restoration, responsive remounts, unavailable panels, actual Back-link
+navigation without stopping the shared run, and legacy layout compatibility.
+`useWorkspaceDockTabs.test.ts` guards sticky visibility across view transitions
+and preserves manually selected panels.
+`NavHistoryControls.test.tsx` and `AppShell.test.tsx` cover the collapsed-rail
+history/footer layout that previously clipped the Previously viewed trigger.

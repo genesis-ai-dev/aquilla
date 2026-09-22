@@ -378,7 +378,17 @@ export async function executeDraft(
 ): Promise<DraftOutcome> {
   const gen = await generateDrafts(db, args, ctx, modelCfg)
   if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
-  if (gen.empty) return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+  if (gen.empty) {
+    // A bare "nothing here" reads as a dead end (2026-08-28 transcript) —
+    // always hand the model a concrete next step to relay to the user.
+    return {
+      ok: true,
+      text:
+        "Nothing to draft — no untranslated cells in scope. "
+        + "Suggest a next step to the user: run /check to review the existing "
+        + "translations in this scope, or pick a file that still has untranslated cells.",
+    }
+  }
 
   // Stage through the SAME path as a hand emit: role floors, staleness
   // pre-check, provenance injection, and rule lint all apply.

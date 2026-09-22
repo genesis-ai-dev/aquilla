@@ -6,6 +6,8 @@
  * and the server-session id, so the full-screen workbench renders the SAME
  * conversation and an in-flight run survives dock unmounts. This component
  * owns only presentation wiring: composer, attachments, proposal Apply.
+ * Unsent prose/chips and uploaded artifact references belong to the author's
+ * project-scoped Team chat draft, shared by the dock and embedded Team view.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
@@ -14,10 +16,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { InputGroupButton } from "@/components/ui/input-group"
-import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import type { ContextChip } from "@/lib/agent/context-chip"
+import { composeAgentSend } from "@/lib/agent/compose-send"
+import { composerDraftKey, composerDraftStore, useComposerDraft, type ComposerDraftScope } from "@/lib/agent/composer-drafts"
+import { TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
 import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
-import { expandSlashCommand } from "@/lib/agent/slash-commands"
-import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
@@ -32,7 +35,6 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentEmptyState } from "./AgentEmptyState"
-import { AGENT_PROMPT_HINTS } from "./prompt-hints"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
 import { passageRowsFor } from "./cards/registry"
@@ -74,9 +76,19 @@ export interface AgentDockViewProps {
   /** Workbench seam: jump to the Memory tab from a memory/brief proposal
    *  notice. Omitted in the dock panel, which has no Memory tab. */
   onReviewMemory?: () => void
+  /** Contextual dispatches/decisions, inside the shared conversation scroller. */
+  conversationPrelude?: ReactNode
 }
 
-export function AgentDockView({
+export function AgentDockView(props: AgentDockViewProps) {
+  const draftScope: ComposerDraftScope = {
+    owner: props.author, projectId: props.projectId, conversationId: TEAM_CHAT_CONVERSATION,
+  }
+  return <ScopedAgentDockView key={composerDraftKey(draftScope)} {...props} draftScope={draftScope} />
+}
+
+function ScopedAgentDockView({
+  draftScope,
   projectId,
   jwt,
   author,
@@ -92,86 +104,70 @@ export function AgentDockView({
   onPendingChipConsumed,
   renderProposalOverride,
   onReviewMemory,
-}: AgentDockViewProps) {
+  conversationPrelude,
+}: AgentDockViewProps & { draftScope: ComposerDraftScope }) {
   const t = useT()
   const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
-  const [promptHintIndex, setPromptHintIndex] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
-
-  // Teach by example in the one place the examples are useful: the empty
-  // composer. Once a conversation exists, return to a quiet generic hint.
+  const draftStore = composerDraftStore(draftScope)
+  const { attachments, attachmentError: attachError } = useComposerDraft(draftStore)
+  const mountedRef = useRef(true)
   useEffect(() => {
-    if (state.runs.length > 0) return
-    const timer = window.setInterval(() => {
-      setPromptHintIndex((index) => (index + 1) % AGENT_PROMPT_HINTS.length)
-    }, 4500)
-    return () => window.clearInterval(timer)
-  }, [state.runs.length])
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   // Composer attach-file affordance (AQU-AGENT Wave-2). Chosen files are
   // uploaded as project artifacts immediately; the returned {artifactId,
   // fileName} pairs ride the next run request so the harness can load_artifact
   // them into the sandbox. Attachments clear once a prompt is sent.
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [attachments, setAttachments] = useState<{ artifactId: string; fileName: string }[]>([])
   const [uploading, setUploading] = useState(false)
-  const [attachError, setAttachError] = useState<string | null>(null)
 
   const handleFilesChosen = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0 || !jwt) return
-      setAttachError(null)
+      draftStore.setAttachmentError(null)
       setUploading(true)
       try {
         for (const file of Array.from(files)) {
           const uploaded = await uploadAgentArtifact(jwt, projectId, file)
-          setAttachments((prev) => [...prev, { artifactId: uploaded.artifactId, fileName: uploaded.fileName }])
+          draftStore.addAttachment({ artifactId: uploaded.artifactId, fileName: uploaded.fileName })
         }
       } catch (err) {
-        setAttachError(
+        draftStore.setAttachmentError(
           err instanceof ArtifactUploadError ? err.message : "Could not attach that file. Try again.",
         )
       } finally {
-        setUploading(false)
+        if (mountedRef.current) setUploading(false)
       }
     },
-    [jwt, projectId],
+    [jwt, projectId, draftStore],
   )
 
   const removeAttachment = useCallback((artifactId: string) => {
-    setAttachments((prev) => prev.filter((a) => a.artifactId !== artifactId))
-  }, [])
+    draftStore.removeAttachments([artifactId])
+  }, [draftStore])
 
   const sendPrompt = useCallback(
     (text: string, chips: ContextChip[] = []) => {
-      if ((!text.trim() && chips.length === 0) || !jwt) return
-      // Slash commands expand into vetted prompts; the bubble keeps the typed
-      // command (CLI-style). Chips skip expansion — a chip message is already
-      // a specific ask, not a command.
-      const expanded = chips.length === 0 ? expandSlashCommand(text) : null
-      // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
-      // legend) is what the model receives.
-      const { wire, display } = expanded
-        ? { wire: expanded, display: text.trim() }
-        : serializeWithChips(text, chips)
-      // Read the profile at send time (fresh, no extra re-render). The server
-      // re-caps every field; this just avoids sending an empty object.
-      const translatorProfile = profileForPrompt(getTranslatorProfile())
-      send({
-        wire,
-        display,
+      const batch = draftStore.getSnapshot().attachments
+      // The dock and embedded Team chat use the same composition contract.
+      const options = composeAgentSend({
+        text,
+        chips,
         jwt,
-        request: {
-          projectId,
-          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
-          ...(translatorProfile ? { translatorProfile } : {}),
-          ...(attachments.length > 0 ? { artifacts: attachments } : {}),
-        },
+        projectId,
+        context,
+        artifacts: batch,
       })
+      if (!options) return false
+      send(options)
       // Attachments belong to the message that carried them — clear after send.
-      if (attachments.length > 0) setAttachments([])
+      if (batch.length > 0) draftStore.removeAttachments(batch.map((attachment) => attachment.artifactId))
+      return true
     },
-    [jwt, send, projectId, context, attachments],
+    [jwt, send, projectId, context, draftStore],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -205,9 +201,12 @@ export function AgentDockView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {state.runs.length === 0 ? (
+      {state.runs.length === 0 && !conversationPrelude ? (
         jwt ? (
-          <AgentEmptyState onPromptSelect={(text) => composerRef.current?.insertText(text)} />
+          <AgentEmptyState
+            projectId={projectId}
+            onPromptSelect={(text) => composerRef.current?.insertText(text)}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />
@@ -219,6 +218,7 @@ export function AgentDockView({
           <MessageScroller className="flex-1">
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
+                {conversationPrelude}
                 {state.runs.map((run) => (
                   <MessageScrollerItem
                     key={run.localId}
@@ -282,6 +282,7 @@ export function AgentDockView({
 
       <ChatComposer
         ref={composerRef}
+        draftScope={draftScope}
         isStreaming={state.isStreaming}
         isConfigured={Boolean(jwt)}
         onSend={({ text, chips }) => sendPrompt(text, chips)}
@@ -289,11 +290,7 @@ export function AgentDockView({
         compact
         suggestedActions={suggestedActions}
         queueWhileStreaming
-        placeholder={
-          state.runs.length === 0
-            ? `${t("agent.emptyState.tryAsking")}: ${AGENT_PROMPT_HINTS[promptHintIndex]}`
-            : t("agent.dock.composerPlaceholder")
-        }
+        placeholder={t("agent.dock.composerPlaceholder")}
         attachmentBar={
           attachments.length > 0 || attachError ? (
             <div className="flex flex-col gap-1">

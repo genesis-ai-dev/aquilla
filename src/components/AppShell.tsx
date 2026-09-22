@@ -328,20 +328,21 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Keep build and shared utilities in one footer row in both sidebar
-          layouts. Help stays compact beside localization; the org-only Tour
-          remains hidden in the project editor. */}
+      {/* Narrow rails stack their controls rather than clipping a full-width row. */}
       <div
         data-slot="app-shell-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
+        className={cn(
+          "flex shrink-0 items-center gap-2 pb-2",
+          railCollapsed ? "flex-col" : "justify-between px-2",
+        )}
       >
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div data-slot="app-shell-sidebar-build" className="flex min-w-0 max-w-full items-center gap-1.5">
           <VersionTag />
           {/* Same overflow reasoning as BetaBadge above: no room for a text
               chip in the 40px collapsed icon rail. */}
           {!chromeCollapsed && <ConnectivityStatusChip />}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className={cn("flex shrink-0 items-center gap-1", railCollapsed && "flex-col")}>
           <HelpMenu compact showTour={!useDockResize} />
           {i18n && (
             <LanguageSwitcher

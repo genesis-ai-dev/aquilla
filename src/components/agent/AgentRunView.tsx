@@ -14,16 +14,8 @@ import { formatNumber } from "@/lib/i18n/format"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   AlertTriangle,
-  Book,
-  BookOpen,
   Check,
   ChevronRight,
-  Database,
-  FileText,
-  PenLine,
-  Quote,
-  Search,
-  Send,
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -35,64 +27,63 @@ import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
+import { AGENT_PERSONAS, personaForToolKind } from "@/lib/agent/personas"
 import { BudgetMeter } from "./BudgetMeter"
 import { ChangesetCard } from "./ChangesetCard"
 import { CodeActivityBlock } from "./CodeActivityBlock"
 import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
+import { PersonaAvatar } from "./PersonaAvatar"
 import { InlineAiError } from "@/components/InlineAiError"
 
-const TOOL_ICON: Record<ToolKind, typeof Database> = {
-  sql: Database,
-  emit: Send,
-  docs: FileText,
-  aquifer: Book,
-  read: BookOpen,
-  examples: Quote,
-  search: Search,
-  draft: PenLine,
-}
-
-const TOOL_LABEL_KEY: Record<ToolKind, MessageKey> = {
-  sql: "agent.run.tool.sql",
-  emit: "agent.run.tool.stage",
-  docs: "agent.run.tool.docs",
-  aquifer: "agent.run.tool.bibleReference",
-  read: "agent.run.tool.read",
-  examples: "agent.run.tool.examples",
-  search: "agent.run.tool.search",
-  draft: "agent.run.tool.draft",
+/** Plain-language sentence per tool kind (social-workspace design): the
+ *  collapsed line reads as a teammate's activity, never a command. */
+const TOOL_FRIENDLY_KEY: Record<ToolKind, MessageKey> = {
+  sql: "agent.run.friendly.sql",
+  emit: "agent.run.friendly.emit",
+  docs: "agent.run.friendly.docs",
+  aquifer: "agent.run.friendly.aquifer",
+  read: "agent.run.friendly.read",
+  examples: "agent.run.friendly.examples",
+  search: "agent.run.friendly.search",
+  draft: "agent.run.friendly.draft",
 }
 
 function ToolChip({ item }: { item: ToolItem }) {
   const t = useT()
   const [open, setOpen] = useState(false)
-  const Icon = TOOL_ICON[item.tool] ?? Database
-  const labelKey = TOOL_LABEL_KEY[item.tool]
+  const persona = AGENT_PERSONAS[personaForToolKind(item.tool)]
+  // Raw SQL is meaningless to a translator — it stays behind the expand.
+  // Other kinds carry human summaries (ref ranges, topics, "N events").
+  const detail = item.tool === "sql" ? null : item.summary
+  const expandable = item.resultSummary !== undefined || item.tool === "sql"
+  // Flat by design (v2.1 typical-chat notes): no box around activity — just a
+  // quiet row that tints on hover, with the raw detail one expand away.
   return (
-    <div className="rounded-md border bg-muted/30">
+    <div>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-[11px] transition-colors hover:bg-accent/40"
       >
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")}
         />
-        <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-muted-foreground">{labelKey ? t(labelKey) : item.tool}</span>
-        <span className="min-w-0 flex-1 truncate font-mono">{item.summary}</span>
+        <PersonaAvatar personaId={persona.id} size="sm" />
+        <span className="shrink-0 text-muted-foreground">{t(TOOL_FRIENDLY_KEY[item.tool])}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/80">{detail}</span>
         {item.ok === undefined ? (
           <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepRunning")} />
         ) : item.ok ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label={t("agent.run.stepSucceeded")} />
+          <Check className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepSucceeded")} />
         ) : (
           <X className="h-3 w-3 shrink-0 text-destructive" aria-label={t("agent.run.stepFailed")} />
         )}
       </button>
-      {open && item.resultSummary !== undefined && (
-        <pre className="overflow-x-auto border-t px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
-          {item.resultSummary}
+      {open && expandable && (
+        <pre className="ms-7 mt-0.5 overflow-x-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+          {item.tool === "sql" && item.summary ? `${item.summary}\n` : ""}
+          {item.resultSummary ?? ""}
         </pre>
       )}
     </div>
@@ -138,14 +129,29 @@ export function AgentRunView({
         </MessageContent>
       </Message>
 
-      {run.items.map((item) => {
+      {run.items.map((item, index) => {
         switch (item.kind) {
-          case "text":
+          case "text": {
+            if (!item.text.trim()) return null
+            // Discord-style attribution: the Coordinator's name heads each
+            // block of prose, re-shown after any interleaved activity.
+            const previous = index > 0 ? run.items[index - 1] : null
+            const showHeader = previous?.kind !== "text"
             // Ghost bubble keeps long-form markdown aligned with the column
             // at full width instead of a cramped framed bubble.
-            return item.text.trim() ? (
+            return (
               <Message key={item.id} align="start">
                 <MessageContent>
+                  {showHeader && (
+                    <div className="mb-0.5 flex items-center gap-1.5">
+                      <PersonaAvatar personaId="coordinator" size="sm" />
+                      {/* Monochrome by design: identity lives in the avatar,
+                          the name carries hierarchy through weight alone. */}
+                      <span className="text-[11px] font-medium text-foreground">
+                        {t(AGENT_PERSONAS.coordinator.nameKey)}
+                      </span>
+                    </div>
+                  )}
                   <Bubble variant="ghost">
                     <BubbleContent>
                       <ChatMarkdown content={item.text} />
@@ -153,7 +159,8 @@ export function AgentRunView({
                   </Bubble>
                 </MessageContent>
               </Message>
-            ) : null
+            )
+          }
           case "tool": {
             const card = renderToolCard?.(item)
             return (

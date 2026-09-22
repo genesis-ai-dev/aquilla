@@ -878,4 +878,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "— a plain plural noun heading. agent.run.tool.examples is the display " +
     "name of the agent's retrieve-examples TOOL call in the run log — an " +
     "operation name that several languages render verbal ('fetch examples').",
+  "agent.card.read.termbase.label":
+    "Row label on an agent card's 'what it reads' list, naming the standing " +
+    "project state the teammate consults before drafting. It collides with " +
+    "nav.sidebarSection.terminology (the left-sidebar entry) and with " +
+    "projectSettings.section.terminology, which already holds the same " +
+    "exception for the same reason: a disclosure list naming a body of project " +
+    "data the agent READS is a different UI role from a navigation entry, and " +
+    "languages that distinguish the subject matter from the place it lives " +
+    "should be free to split them.",
 }

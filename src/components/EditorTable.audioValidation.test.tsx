@@ -60,7 +60,6 @@ vi.mock("@/hooks/useCellAudio", () => ({
 const project = {
   id: "proj-1", name: "Test Project", sourceLanguage: "en", targetLanguage: "fr",
   createdAt: "2026-01-01T00:00:00Z", files: [], members: [],
-  showAudioValidationInTextView: true,
 } as unknown as ProjectRecord
 
 function rows(id: string, ref: string): CellRow[] {
@@ -134,18 +133,15 @@ describe("EditorTable — audio validation across the whole gutter", () => {
     expect(within(without).queryByTestId("audio-validation-empty")).toBeNull()
   })
 
-  // The derived switch looks at the FILE. A project with no stamp and no audio
-  // shows nothing at all — which is the "off until there is audio" half of
-  // Sam's ruling.
-  it("draws nothing anywhere when the file has no audio and the project has no stamp", async () => {
+  // No switch, no setting, no project-level gate (Sam, 2026-09-21). A file
+  // with no audio at all still draws nothing — not because anything gates it,
+  // but because every line is empty and the control draws an empty slot for
+  // an empty line. That is the same rule as the first test, seen from the
+  // other end.
+  it("draws no button anywhere when the file has no audio at all", async () => {
     audioState.byCellId = new Map()
-    render(
-      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
-        <EditorTable {...tableProps({ ...project, showAudioValidationInTextView: undefined } as unknown as ProjectRecord)} />
-      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
-    )
+    renderTable()
     await screen.findByText("bonjour cell-1")
-    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
     expect(screen.queryByTestId("audio-validation-button")).toBeNull()
   })
 })

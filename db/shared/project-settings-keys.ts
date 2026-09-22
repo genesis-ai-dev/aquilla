@@ -102,10 +102,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   validationRoleFloorAudio: { kind: 'enum', values: ['reviewer', 'project_lead', 'maintainer'] },
   validationNamedUsersAudio: { kind: 'string[]' },
   allowSelfValidationAudio: { kind: 'boolean' },
-  // AQU-490: whether the audio validation control appears in the TEXT view's
-  // gutter beside the text one. Stamped false on every project that existed
-  // when 0096 ran, so "absent" means "made after this shipped" and reads as
-  // on-once-the-project-has-audio.
+  // AQU-490: ACCEPTED AND IGNORED. This was briefly a real switch — whether
+  // the audio validation control appeared in the TEXT view's gutter — and Sam
+  // dropped it a day later: the control simply appears wherever a line has a
+  // recording, on every project. Nothing reads the key any more. It stays
+  // listed for the reason `agentAuthorship` below does: a client or an agent
+  // that still names it should get a clean answer rather than "unknown key",
+  // and any project stamped by an early 0096 still carries it in its blob.
   showAudioValidationInTextView: { kind: 'boolean' },
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },

@@ -576,17 +576,6 @@ export interface ProjectRecord {
   validationNamedUsersAudio?: string[]
   allowSelfValidationAudio?: boolean
   /**
-   * AQU-490: does the audio validation control appear in the TEXT view's
-   * gutter, beside the text one?
-   *
-   * ABSENT IS NOT FALSE. Migration 0096 stamped `false` onto every project
-   * that existed when audio validation shipped, so absent means "made after
-   * it shipped" and resolves to on-once-this-project-has-audio. Nothing
-   * writes it on first attach: settings writes need Maintainer and the
-   * recorder is usually a contributor.
-   */
-  showAudioValidationInTextView?: boolean
-  /**
    * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).
    * Lowering below project_lead is not allowed (hard floor per spec).

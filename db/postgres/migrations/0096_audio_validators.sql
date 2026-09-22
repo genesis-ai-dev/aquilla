@@ -112,32 +112,5 @@ ALTER TABLE project_settings
   ADD COLUMN IF NOT EXISTS validation_count_audio TEXT
     GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED;
 
--- The one data write here, and it is a policy default rather than a recovery.
--- Audio validation adds a control to the Text view's gutter, beside the text
--- one. For a team that has only ever seen a single circle there, that is a
--- surprise, so existing projects start with it off and opt in. A project
--- created after this migration carries no key at all, and the reader treats
--- "absent" as "on once this project has audio" — which is why this stamps
--- false rather than leaving the key missing.
---
--- The version bump is not decoration. `version` is the optimistic-concurrency
--- token for every settings write: a client holding version N writes back the
--- whole blob if-match N. Changing the blob underneath it without moving the
--- token would let that client's next save succeed against the stamped row and
--- write out its own copy — the one with no key in it — silently opting the
--- project back in. Bumping makes that save a 409 and a refetch instead, which
--- is exactly how the org-level countStructuralCells clear behaves
--- (auth-worker/src/routes/org-settings.ts). That route also notifies the open
--- project rooms; a migration cannot, but workers restart on the same deploy
--- and clients refetch on reconnect.
---
--- updated_by is deliberately left alone: no person did this, and overwriting
--- it would erase who last actually configured the project to record nobody.
-UPDATE project_settings
-   SET settings = (settings::jsonb
-         || jsonb_build_object('showAudioValidationInTextView', false))::text,
-       version = version + 1,
-       updated_at = now()
- WHERE NOT ((settings::jsonb) ? 'showAudioValidationInTextView');
 
 COMMIT;

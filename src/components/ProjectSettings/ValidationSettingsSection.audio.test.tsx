@@ -101,31 +101,3 @@ describe("the audio threshold input", () => {
     expect(screen.getByLabelText(/Required validators \(audio\)/i)).toBeDisabled()
   })
 })
-
-describe("the Text-view switch", () => {
-  // ABSENT IS NOT FALSE. Undefined means the project was made after audio
-  // validation shipped, which resolves to on-once-there-is-audio. Rendering
-  // an unchecked switch there would disagree with the editor beside it.
-  it("renders its RESOLVED state, not a bare false, when unset", () => {
-    draw({ showAudioValidationInTextView: undefined, hasAnyAudioData: true })
-    expect(screen.getByRole("switch", { name: /Show recording validation in the text view/i })).toBeChecked()
-  })
-
-  it("is off for a new project with no audio yet", () => {
-    draw({ showAudioValidationInTextView: undefined, hasAnyAudioData: false })
-    expect(screen.getByRole("switch", { name: /Show recording validation in the text view/i })).not.toBeChecked()
-  })
-
-  // A project that opted out stays out, whatever its audio says — the stamp
-  // 0096 wrote onto every project that existed at ship.
-  it("honours an explicit opt-out even once there is audio", () => {
-    draw({ showAudioValidationInTextView: false, hasAnyAudioData: true })
-    expect(screen.getByRole("switch", { name: /Show recording validation in the text view/i })).not.toBeChecked()
-  })
-
-  it("writes an explicit value when a human flips it", () => {
-    const { onChange } = draw({ showAudioValidationInTextView: undefined, hasAnyAudioData: true })
-    fireEvent.click(screen.getByRole("switch", { name: /Show recording validation in the text view/i }))
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ showAudioValidationInTextView: false })
-  })
-})

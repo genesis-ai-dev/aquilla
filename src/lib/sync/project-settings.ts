@@ -78,12 +78,6 @@ export interface ProjectWideSettings {
   validationNamedUsersAudio?: string[]
   allowSelfValidationAudio?: boolean
   /**
-   * AQU-490: show the audio validation control in the TEXT view's gutter.
-   * Absent is NOT false — 0096 stamped false onto every project that existed
-   * at ship, so absent means "made after this shipped".
-   */
-  showAudioValidationInTextView?: boolean
-  /**
    * AQU-1068: who may add and remove cells in this project's files?
    *
    * Supersedes AQU-646's `allowLineCreation` boolean, which asked the same

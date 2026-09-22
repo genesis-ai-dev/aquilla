@@ -518,12 +518,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.namedValidatorsAudioDescription":
       "When anyone is listed, only these people may validate recordings. Leave " +
       "empty to allow anyone who meets the minimum role above.",
-    "projectSettings.validation.showInTextViewLabel": "Show recording validation in the text view",
-    "projectSettings.validation.showInTextViewDescription":
-      "Adds a second control beside the text one in the editor's margin, for " +
-      "signing off a line's recording. The Recording tab and the recorder always " +
-      "offer it, whatever this says — turning it off hides one surface, not the " +
-      "feature.",
 
     // ── DecaySettingsSection.tsx ──
     "projectSettings.decay.summary": "Retrieval support",

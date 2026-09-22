@@ -135,8 +135,7 @@ import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellAct
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
-import { selectedDubTakes, slotSelections } from "@/lib/sync/cell-audio-read-types"
-import { showAudioValidationInTextView } from "@/lib/audio/text-view-audio-switch"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -1252,19 +1251,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
-  // AQU-490: is audio validation ON for this file's gutter? One answer for
-  // the whole table, not one per row — the switch is a project setting, and
-  // its derived form ("on once there is audio") has to look at the FILE, not
-  // the cell, or a line with no take could never show the placeholder that
-  // says so. "Has audio" means a selected DUB take somewhere in the file: an
-  // imported film's programme clip is on every cell and is not a recording.
-  const audioValidationEnabled = useMemo(() => {
-    let hasDub = false
-    for (const entry of audioByCellId.values()) {
-      if (selectedDubTakes(entry).length > 0) { hasDub = true; break }
-    }
-    return showAudioValidationInTextView(project, hasDub)
-  }, [audioByCellId, project])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2454,7 +2440,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeLane={activeLane}
           editable={canEdit}
           canValidate={canValidate}
-          audioValidationEnabled={audioValidationEnabled}
           canEditSource={canEditSource}
           sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
@@ -3467,8 +3452,6 @@ interface MemoizedRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
-  /** AQU-490: draw the audio validation control in this row (file-level switch). */
-  audioValidationEnabled: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
   canEditSource: boolean
@@ -3652,7 +3635,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onActivateEditor,
     getEditorActivationVersion,
     onDeactivateEditor,
-    project, username, activeLane, editable, canValidate, audioValidationEnabled, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
     insertAboveReason, insertBelowReason, removeReason,
@@ -3762,7 +3745,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         activeLane={activeLane}
         editable={editable}
         canValidate={canValidate}
-        audioValidationEnabled={audioValidationEnabled}
         canEditSource={canEditSource}
         sourceReadOnlyReason={sourceReadOnlyReason}
         isStaleSource={isStaleSource}
@@ -3887,8 +3869,6 @@ interface EditorRowProps {
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
-  /** AQU-490: draw the audio validation control in this row (file-level switch). */
-  audioValidationEnabled: boolean
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
    *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
@@ -4775,7 +4755,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
-  username, activeLane = "", editable, canValidate, audioValidationEnabled, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
@@ -6445,12 +6425,13 @@ function EditorRow({
     { roleLevel: project.syncRole?.level ?? null, username },
     audioBlockedReason(t),
   )
-  // Behind the project switch (AQU-490 slice 4), resolved once for the whole
-  // file at the table level: a team used to one circle in this gutter should
-  // not find a second one there one morning. The control itself draws
-  // nothing on a line with no recording — same rule as text, no text means
-  // no text control (Sam, 2026-09-21).
-  const audioValidationControl = audioValidationEnabled ? (
+  // AQU-490: no switch, no project setting, no file-level gate. Audio
+  // validation sits in this gutter beside text validation wherever a line has
+  // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
+  // opt-in switch he had asked for a day earlier. The control decides for
+  // itself: a line with no recording draws an empty slot, exactly as a cell
+  // with no text carries no text control.
+  const audioValidationControl = (
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationTakeList}
@@ -6459,7 +6440,7 @@ function EditorRow({
       canValidate={canValidate}
       onValidationChange={emitAudioValidationChange}
     />
-  ) : null
+  )
 
   const cellStateLabel =
     cell.status === "validated" ? "validated" :

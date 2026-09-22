@@ -239,6 +239,107 @@ describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
     // guard first fires, not resurface after every interrupting literal.
     expect(theCount).toBeLessThanOrEqual(2)
   })
+
+  it("breaks a two-phrase alternating cycle, not just a single repeated phrase", () => {
+    // Regression: the single-phrase guard only ever compared the candidate to
+    // the ONE immediately preceding phrase, so it never caught two phrases
+    // that are each other's dominant winner taking turns — "cat dog cat dog
+    // cat dog…" — since no single phrase repeats three times *in a row*.
+    // This is exactly what happened on dev: two Bible-heavy source words
+    // (e.g. "the lord"/"said") so dominant they kept winning the argmax back
+    // and forth for every alternating target token, still stuttering after
+    // the interrupting-literal fix above.
+    const groupA = ["mrowa1", "mrowa2", "mrowa3", "mrowa4"]
+    const groupB = ["zarb1", "zarb2", "zarb3", "zarb4"]
+    const pairs = [
+      ...groupA.flatMap((w) => Array.from({ length: 10 }, () => ({ source: "cat", target: w }))),
+      ...groupB.flatMap((w) => Array.from({ length: 10 }, () => ({ source: "dog", target: w }))),
+    ]
+    const glosser = buildGlosser(pairs)
+
+    const targetWords: string[] = []
+    for (let i = 0; i < 6; i++) {
+      targetWords.push(groupA[i % groupA.length])
+      targetWords.push(groupB[i % groupB.length])
+    }
+
+    const result = glosser.gloss(targetWords.join(" "))
+    const outputTokens = result.split(/\s+/).filter(Boolean)
+
+    // "cat" and "dog" alternating must not run past the same
+    // MAX_CONSECUTIVE_REPEATS cap a single repeated phrase is held to: at
+    // most 2 full [cat, dog] cycles (4 tokens) before the guard breaks it.
+    let consecutiveCatDog = 0
+    let maxConsecutiveCatDog = 0
+    for (let i = 0; i + 1 < outputTokens.length; i += 2) {
+      if (outputTokens[i] === "cat" && outputTokens[i + 1] === "dog") {
+        consecutiveCatDog++
+        maxConsecutiveCatDog = Math.max(maxConsecutiveCatDog, consecutiveCatDog)
+      } else {
+        consecutiveCatDog = 0
+      }
+    }
+    expect(maxConsecutiveCatDog).toBeLessThanOrEqual(2)
+  })
+})
+
+// ── Phrase-boundary duplicate words ("the the heaven", "was was without") ────
+
+describe("buildGlosser — phrase-boundary de-duplication", () => {
+  /**
+   * Regression: reported from dev.aquilla.app as "the English gets duplicated
+   * on key words or connecting words" in back-translations from other
+   * languages. Root cause verified against this exact corpus: the decoder
+   * picks the best-scoring source phrase for each target n-gram window
+   * independently, so two ADJACENT windows can each legitimately resolve to
+   * a source phrase that borders the same word — e.g. one window's winning
+   * phrase is "god created the" (ends "the") and the very next window's is
+   * "the heaven and" (starts "the"), concatenating to "created the the
+   * heaven and". This is a property of phrase-based decoding, not of any
+   * particular language (confirmed here with two English translations, KJV
+   * and WEB, on both sides).
+   */
+  const genesisPairs = [
+    { source: "In the beginning God created the heaven and the earth.",
+      target: "In the beginning, God created the heavens and the earth." },
+    { source: "And the earth was without form, and void; and darkness was upon the face of the deep. And the Spirit of God moved upon the face of the waters.",
+      target: "The earth was formless and empty. Darkness was on the surface of the deep and God's Spirit was hovering over the surface of the waters." },
+    { source: "And God said, Let there be light: and there was light.",
+      target: "God said, Let there be light, and there was light." },
+    { source: "And God saw the light, that it was good: and God divided the light from the darkness.",
+      target: "God saw the light, and saw that it was good. God divided the light from the darkness." },
+    { source: "And God called the light Day, and the darkness he called Night. And the evening and the morning were the first day.",
+      target: "God called the light Day, and the darkness he called Night. There was evening and there was morning, the first day." },
+    { source: "And God said, Let there be a firmament in the midst of the waters, and let it divide the waters from the waters.",
+      target: "God said, Let there be an expanse in the middle of the waters, and let it divide the waters from the waters." },
+    { source: "And God made the firmament, and divided the waters which were under the firmament from the waters which were above the firmament: and it was so.",
+      target: "God made the expanse, and divided the waters which were under the expanse from the waters which were above the expanse, and it was so." },
+    { source: "And God called the firmament Heaven. And the evening and the morning were the second day.",
+      target: "God called the expanse sky. There was evening and there was morning, a second day." },
+    { source: "And God said, Let the waters under the heaven be gathered together unto one place, and let the dry land appear: and it was so.",
+      target: "God said, Let the waters under the sky be gathered together to one place, and let the dry land appear, and it was so." },
+    { source: "And God called the dry land Earth; and the gathering together of the waters called he Seas: and God saw that it was good.",
+      target: "God called the dry land earth, and the gathering together of the waters he called seas. God saw that it was good." },
+  ]
+
+  it("never emits the same word twice in a row from adjacent independently-chosen phrases", () => {
+    const glosser = buildGlosser(genesisPairs)
+
+    for (const { target } of genesisPairs.slice(0, 5)) {
+      const outputTokens = glosser.gloss(target).split(/\s+/).filter(Boolean)
+      for (let i = 1; i < outputTokens.length; i++) {
+        expect(outputTokens[i], `adjacent duplicate in gloss of "${target}": ...${outputTokens[i - 1]} ${outputTokens[i]}...`)
+          .not.toBe(outputTokens[i - 1])
+      }
+    }
+  })
+
+  it("still passes through a genuinely repeated target word via literal fallback", () => {
+    // The de-dup only trims a model-selected phrase's own boundary overlap —
+    // it must never silently drop a word the target text actually repeats.
+    const glosser = buildGlosser([{ source: "unrelated", target: "unrelated" }])
+    expect(glosser.gloss("mystery mystery mystery")).toBe("mystery mystery mystery")
+  })
 })
 
 // ── AQU-203: function words must not win the argmax ──────────────────────────

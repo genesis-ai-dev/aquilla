@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+
+const shouldUseLocalLlm = vi.fn(async () => false)
+const completeWithLocalLlm = vi.fn(async (..._args: unknown[]) => "")
+vi.mock("@/lib/offline/local-llm-client", () => ({
+  shouldUseLocalLlm: () => shouldUseLocalLlm(),
+  completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
+}))
+
 import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
@@ -486,7 +494,12 @@ describe("shouldPromptAiSetup", () => {
 
 describe("complete", () => {
   const fetchMock = vi.fn()
-  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock)
+    fetchMock.mockReset()
+    shouldUseLocalLlm.mockReset().mockResolvedValue(false)
+    completeWithLocalLlm.mockReset().mockResolvedValue("")
+  })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   function okJson(body: unknown): Response {
@@ -547,6 +560,46 @@ describe("complete", () => {
     expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBeUndefined()
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.model).toBe("gemma")
+  })
+
+  describe("offline routing to the local LLM (Phase 6)", () => {
+    it("routes to the local LLM instead of Frontier when offline in Tauri, regardless of provider", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+
+      expect(out).toBe("local translation")
+      expect(completeWithLocalLlm).toHaveBeenCalledWith(msg, { signal: undefined })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("calls onChunk once with the full local-LLM result", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+      const onChunk = vi.fn()
+
+      await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg, onChunk })
+
+      expect(onChunk).toHaveBeenCalledTimes(1)
+      expect(onChunk).toHaveBeenCalledWith("local translation")
+    })
+
+    it("does not require a Frontier session when routed to the local LLM", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("ok")
+
+      await expect(
+        complete({ settings: { ...BASE, provider: "frontier" }, session: null, messages: msg }),
+      ).resolves.toBe("ok")
+    })
+
+    it("stays on the normal Frontier path when online (default)", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+      expect(out).toBe("translated")
+      expect(completeWithLocalLlm).not.toHaveBeenCalled()
+    })
   })
 
   // AQU-414 follow-up: frontier chat invoked from a project route carries the

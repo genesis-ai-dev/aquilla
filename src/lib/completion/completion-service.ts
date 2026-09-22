@@ -3,6 +3,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
+import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
@@ -572,6 +573,16 @@ export interface CompleteOptions {
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
+  // Offline in the Tauri desktop app: route straight to the local LLM proxy
+  // regardless of the configured provider — there is no reachable Frontier or
+  // custom endpoint to fall back to. No streaming, no AB assignment, no
+  // per-project spend attribution; none of that applies to a local model.
+  if (await shouldUseLocalLlm()) {
+    const text = await completeWithLocalLlm(options.messages, { signal: options.signal })
+    options.onChunk?.(text)
+    return text
+  }
+
   const effectiveSettings = resolveEffectiveCompletionSettings(
     options.settings,
     getUserProviderOverride(),

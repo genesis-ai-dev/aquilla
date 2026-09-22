@@ -4,7 +4,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { lineState, takeState } from "./audio-validation-state"
+import { lineState } from "./audio-validation-state"
 
 /**
  * AQU-490: one line's audio validation, as the five surfaces all draw it.
@@ -100,17 +100,21 @@ export function AudioValidationControl({
 
   const requirement = Math.max(1, validationRequirement)
   const state = lineState(displayed, currentUsername, requirement)
-  const validatedTakes = displayed.filter(
-    (take) => takeState(take, currentUsername, requirement) === "full",
-  ).length
-  // Sam's ruling: the fraction appears ONLY on a line with more than one take,
-  // it counts TAKES, and it disappears again at full — where the double check
-  // already says everything a "2/2" would.
-  const showFraction = displayed.length > 1 && state !== "full"
-
   const mineToGive = displayed.filter(
     (take) => take.canValidate && !take.validators.includes(currentUsername),
   )
+  // THE FRACTION IS YOUR PROGRESS ACROSS THE TRACKS, not the line's. Sam,
+  // 2026-09-22, after seeing "0/2" beside a single check on a line he had
+  // fully signed off: it used to count takes that had REACHED the threshold,
+  // so at a threshold of two it sat at zero however much you had done and
+  // read as if nothing had happened. It now counts the takes carrying YOUR
+  // vote, out of the takes on the line, and shows only while a track still
+  // needs you — once you have done every track it goes, and the icon alone
+  // says the rest (single check: waiting on others; double: finished). That
+  // is also exactly what a click does: give your vote to the tracks without
+  // it. The hover list still tells the fuller story per take.
+  const mineDone = displayed.filter((take) => take.validators.includes(currentUsername)).length
+  const showFraction = displayed.length > 1 && state !== "full" && mineToGive.length > 0
   const allMine = displayed.length > 0 && mineToGive.length === 0
     && displayed.every((take) => take.validators.includes(currentUsername))
 
@@ -189,7 +193,7 @@ export function AudioValidationControl({
     ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
     : showFraction
       ? t("editor.audioValidation.ariaPartlyValidated", {
-          done: validatedTakes, total: displayed.length, ref: cellRef,
+          done: mineDone, total: displayed.length, ref: cellRef,
         })
       : t("editor.audioValidation.ariaNotValidated", { ref: cellRef })
 
@@ -242,7 +246,7 @@ export function AudioValidationControl({
       />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
-          {t("editor.audioValidation.takeFraction", { done: validatedTakes, total: displayed.length })}
+          {t("editor.audioValidation.takeFraction", { done: mineDone, total: displayed.length })}
         </span>
       )}
     </button>

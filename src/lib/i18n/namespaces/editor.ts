@@ -1282,7 +1282,7 @@ export const editor = defineNamespace({
     "editor.audioValidation.ariaValidated":
       "Audio validated — {ref}. Click to remove your validation.",
     "editor.audioValidation.ariaPartlyValidated":
-      "{done} of {total} takes validated — {ref}. Click to validate the rest.",
+      "You have validated {done} of {total} takes — {ref}. Click to validate the rest.",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaYoursMoreNeeded": plural({
       one: "You have validated this audio — {ref}. {count} more validator needed.",

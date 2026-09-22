@@ -130,15 +130,28 @@ describe("the readout", () => {
     expect(fraction()).toBeNull()
   })
 
-  // Sam's ruling: the fraction counts TAKES, appears only when there is more
-  // than one, and collapses again at full — where the double check already
-  // says everything a "2/2" would.
-  it("shows a take fraction only while a multi-track line is unfinished", () => {
+  // Sam, 2026-09-22: THE FRACTION IS YOUR PROGRESS ACROSS THE TRACKS. It used
+  // to count takes that had reached the threshold, so at a threshold of two it
+  // sat at "0/2" beside a single check on a line you had fully signed off. It
+  // counts the takes carrying YOUR vote now, and shows only while a track
+  // still needs you.
+  it("counts the takes I have signed off while another still needs me", () => {
     draw([
       take({ audioId: "a", validatorCount: 1, validators: ["ana"] }),
       take({ audioId: "b", slot: "track-2" }),
     ])
     expect(fraction()).toHaveTextContent("1/2")
+  })
+
+  // The reported case: threshold two, both tracks carrying my vote, neither
+  // finished. The icon (a single check) already says "yours, waiting on
+  // others"; a "0/2" beside it read as if nothing had happened.
+  it("drops the fraction once I have done every track, even below the threshold", () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "b", slot: "track-2", validatorCount: 1, validators: ["ana"] }),
+    ], { validationRequirement: 2 })
+    expect(fraction()).toBeNull()
   })
 
   it("drops the fraction once every track is validated", () => {
@@ -147,6 +160,16 @@ describe("the readout", () => {
       take({ audioId: "b", slot: "track-2", validatorCount: 1, validators: ["ana"] }),
     ])
     expect(fraction()).toBeNull()
+  })
+
+  // Somebody else has done one track and nobody the other: I have done
+  // neither, and the number says so honestly.
+  it("reads 0/2 when the votes on the line are all somebody else's", () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "b", slot: "track-2" }),
+    ], { validationRequirement: 2 })
+    expect(fraction()).toHaveTextContent("0/2")
   })
 
   // Found in the browser at a threshold of two: the button announced
@@ -167,7 +190,7 @@ describe("the readout", () => {
       take({ audioId: "a", validatorCount: 1, validators: ["ana"] }),
       take({ audioId: "b", slot: "track-2" }),
     ])
-    expect(button()).toHaveAccessibleName(/1 of 2 takes validated.*GEN 1:1/i)
+    expect(button()).toHaveAccessibleName(/you have validated 1 of 2 takes.*GEN 1:1/i)
   })
 })
 

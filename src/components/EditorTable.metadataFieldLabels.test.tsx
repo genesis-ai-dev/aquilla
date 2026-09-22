@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, cleanup, act, within } from "@testing-library/react"
+import { render, screen, cleanup, act, within, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -91,7 +91,7 @@ const ROWS: CellRow[] = [
   ...cellRows("plain-cell", { quote: "λόγος" }),
 ]
 
-function renderTable() {
+function renderTable(extra: { onAddConceptFromSelection?: () => void } = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(ROWS, { full: true, maxServerSeq: 1 })
@@ -116,6 +116,7 @@ function renderTable() {
           cellLabelsEnabled={false}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          {...extra}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -160,5 +161,33 @@ describe("metadata display-field labels (AQU-1369)", () => {
     setCellDisplayField("some-other-project", "Field", true)
     renderTable()
     expect(screen.queryByTestId("metadata-field-labels")).toBeNull()
+  })
+
+  // WHY: the labels live inside the source cell, whose mouseup captures any
+  // browser selection for the "Add to terminology / Ask AI" toolbar. A label
+  // is chrome, not source text — highlighting it must not offer those actions.
+  function selectInside(el: Element, text: string) {
+    const fakeSel = { isCollapsed: false, toString: () => text, anchorNode: el.firstChild ?? el, removeAllRanges: vi.fn() }
+    vi.spyOn(window, "getSelection").mockReturnValue(fakeSel as unknown as Selection)
+  }
+
+  it("does not offer the selection toolbar when a metadata label is highlighted", () => {
+    renderTable({ onAddConceptFromSelection: () => {} })
+    act(() => setCellDisplayField(project.id, "Field", true))
+    const label = screen.getAllByTestId("metadata-field-labels")[0].children[0]
+    selectInside(label, "glosses")
+    fireEvent.mouseUp(label)
+    expect(screen.queryByRole("button", { name: /add to terminology/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  it("still offers the selection toolbar for real source text (control)", () => {
+    renderTable({ onAddConceptFromSelection: () => {} })
+    act(() => setCellDisplayField(project.id, "Field", true))
+    const sourceText = screen.getByText("source sdbh-a-glosses")
+    selectInside(sourceText, "source sdbh-a-glosses")
+    fireEvent.mouseUp(sourceText)
+    expect(screen.getByRole("button", { name: /add to terminology/i })).toBeInTheDocument()
+    vi.restoreAllMocks()
   })
 })

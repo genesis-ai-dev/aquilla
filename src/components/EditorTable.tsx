@@ -4660,7 +4660,7 @@ function MetadataFieldLabels({
   })
   if (labels.length === 0) return null
   return (
-    <span data-testid="metadata-field-labels" className="flex shrink-0 items-center gap-1">
+    <span data-testid="metadata-field-labels" data-selection-ignore="" className="flex shrink-0 items-center gap-1">
       {labels.map(({ key, text }) => (
         <span
           key={key}
@@ -5528,6 +5528,11 @@ function EditorRow({
     // lives inside this source cell, so its mouseup bubbles here after focus
     // has already collapsed the browser selection (AQU-1006 / AQU-260).
     if (!text) return
+    // Chrome inside the source cell — metadata field labels (AQU-1369) — is
+    // not source text: selecting it must not offer "Add to terminology".
+    const anchor = sel?.anchorNode
+    const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
+    if (anchorEl?.closest("[data-selection-ignore]")) return
     capturedSelectionRef.current = text
     setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])

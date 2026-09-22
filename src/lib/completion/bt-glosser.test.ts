@@ -239,6 +239,48 @@ describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
     // guard first fires, not resurface after every interrupting literal.
     expect(theCount).toBeLessThanOrEqual(2)
   })
+
+  it("breaks a two-phrase alternating cycle, not just a single repeated phrase", () => {
+    // Regression: the single-phrase guard only ever compared the candidate to
+    // the ONE immediately preceding phrase, so it never caught two phrases
+    // that are each other's dominant winner taking turns — "cat dog cat dog
+    // cat dog…" — since no single phrase repeats three times *in a row*.
+    // This is exactly what happened on dev: two Bible-heavy source words
+    // (e.g. "the lord"/"said") so dominant they kept winning the argmax back
+    // and forth for every alternating target token, still stuttering after
+    // the interrupting-literal fix above.
+    const groupA = ["mrowa1", "mrowa2", "mrowa3", "mrowa4"]
+    const groupB = ["zarb1", "zarb2", "zarb3", "zarb4"]
+    const pairs = [
+      ...groupA.flatMap((w) => Array.from({ length: 10 }, () => ({ source: "cat", target: w }))),
+      ...groupB.flatMap((w) => Array.from({ length: 10 }, () => ({ source: "dog", target: w }))),
+    ]
+    const glosser = buildGlosser(pairs)
+
+    const targetWords: string[] = []
+    for (let i = 0; i < 6; i++) {
+      targetWords.push(groupA[i % groupA.length])
+      targetWords.push(groupB[i % groupB.length])
+    }
+
+    const result = glosser.gloss(targetWords.join(" "))
+    const outputTokens = result.split(/\s+/).filter(Boolean)
+
+    // "cat" and "dog" alternating must not run past the same
+    // MAX_CONSECUTIVE_REPEATS cap a single repeated phrase is held to: at
+    // most 2 full [cat, dog] cycles (4 tokens) before the guard breaks it.
+    let consecutiveCatDog = 0
+    let maxConsecutiveCatDog = 0
+    for (let i = 0; i + 1 < outputTokens.length; i += 2) {
+      if (outputTokens[i] === "cat" && outputTokens[i + 1] === "dog") {
+        consecutiveCatDog++
+        maxConsecutiveCatDog = Math.max(maxConsecutiveCatDog, consecutiveCatDog)
+      } else {
+        consecutiveCatDog = 0
+      }
+    }
+    expect(maxConsecutiveCatDog).toBeLessThanOrEqual(2)
+  })
 })
 
 // ── AQU-203: function words must not win the argmax ──────────────────────────

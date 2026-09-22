@@ -70,6 +70,8 @@ jobs:
           TYPESAFE_URL: ${{ vars.TYPESAFE_URL || 'https://openrouter.ai/api/alpha/decisions' }}
           TYPESAFE_MODEL: ${{ vars.TYPESAFE_MODEL || 'typesafe/jev-1.13' }}
           TEXT_MODEL: ${{ vars.TEXT_MODEL || 'inception/mercury-2.5' }}
+          TEXT_MODEL_BASE_URL: ${{ vars.TEXT_MODEL_BASE_URL || 'https://openrouter.ai/api/v1' }}
+          TEXT_MODEL_REASONING: ${{ vars.TEXT_MODEL_REASONING || 'none' }}
         run: pnpm test:smart
 
       - name: Upload smart test evidence (including passes)

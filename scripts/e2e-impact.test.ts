@@ -12,6 +12,7 @@ const specs = [
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+  "e2e/specs/editor/comments.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
   "e2e/specs/orgs/account-switcher.smoke.spec.ts",
@@ -25,6 +26,11 @@ describe("changed-file E2E impact selection", () => {
   it("maps smart-testing infrastructure to the edit durability boundary", () => {
     expect(selectAffectedE2E(["smart-tests/driver.ts"], specs).specs).toContain(
       "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+    )
+  })
+  it("keeps comment coverage when its no-hover entry point changes", () => {
+    expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
+      "e2e/specs/editor/comments.smoke.spec.ts",
     )
   })
   it("runs a changed smoke spec directly", () => {

@@ -653,17 +653,24 @@ describe("PostHog EU region contract (AQU-854)", () => {
     }
   })
 
-  it("pins the EU host in the deployment manifest that gates the wrangler profiles", () => {
-    // The producer-to-consumer contract: these manifest values are asserted
-    // against the real wrangler.toml sections by the plainText check above,
-    // so pinning them here is what makes the region a deploy-time invariant.
-    for (const surface of ["identity", "sync"]) {
-      expect(deploymentManifest.surfaces[surface].environments.production.plainText.POSTHOG_HOST)
-        .toBe("https://eu.i.posthog.com")
-    }
+  it("retires the US project token in the deployment manifest without pinning the host", () => {
     // Blank until the EU project token exists (account-side dependency); a
     // blank key makes `shipLog` a no-op instead of posting a retired token.
+    // The plainText check above asserts this against the real wrangler section.
     expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+
+    // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
+    // environment-guard turns every identity plainText key into a hard runtime
+    // requirement — an unset one makes the Worker answer 503 — so pinning a
+    // telemetry variable there would couple identity availability to
+    // telemetry configuration. The region is enforced on the wrangler
+    // profiles themselves by the per-worker check above, which also covers
+    // agent-worker (absent from this manifest entirely).
+    for (const surface of ["identity", "sync"]) {
+      expect(
+        deploymentManifest.surfaces[surface].environments.production.plainText,
+      ).not.toHaveProperty("POSTHOG_HOST")
+    }
   })
 
   it("points the one-off ops script at the EU control plane with a per-run project id", () => {

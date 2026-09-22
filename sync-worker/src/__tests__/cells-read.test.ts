@@ -1368,3 +1368,130 @@ describe("AQU-1160: chain-order cache", () => {
     expect(body.maxServerSeq).toBeNull()
   })
 })
+
+// The actual HTTP producer feeds the SPA's streaming consumer, not a synthetic
+// page fixture: this pins the contract that a visible row can be edited safely.
+describe("AQU-1328 complete source/target row pages", () => {
+  it("keeps all lanes together at cold and cached boundaries, with empty and target-only rows", async () => {
+    const { streamFileCells } = await import("../../../src/lib/sync/cells-read")
+    const db = await makeTestDb({ cells: [
+      makeCell({ cell_id: "a", side: "source", anchor_cell_id: null, event_id: "s-a", value: "Source A" }),
+      makeCell({ cell_id: "b", side: "source", anchor_cell_id: "a", event_id: "s-b", value: "Source B" }),
+      makeCell({ cell_id: "c", side: "source", anchor_cell_id: "b", event_id: "s-c", value: "Source C" }),
+      makeCell({ cell_id: "a", anchor_cell_id: null, event_id: "t-a", value: "Target A" }),
+      makeCell({ cell_id: "a", target_lang: "es", anchor_cell_id: null, event_id: "es-a", value: "Destino A" }),
+      makeCell({ cell_id: "c", anchor_cell_id: "a", event_id: "t-c", value: "Target C" }),
+      makeCell({ cell_id: "c", target_lang: "es", anchor_cell_id: "a", event_id: "es-c", value: "Destino C" }),
+      makeCell({ cell_id: "orphan", anchor_cell_id: "c", event_id: "t-o", value: "Target only" }),
+    ] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = async (url: string) => (await handleCellsReadRequest(
+      new Request(url, { headers: { Authorization: `Bearer ${token}` } }), envWith(db.db),
+    ))!
+    try {
+      // Prime the legacy ordering: paired pages must use a separate cache key.
+      const legacy = await request("https://w/api/v1/projects/proj-a/files/file-x/cells?limit=2")
+      expect((await legacy.json() as { cells: { cellId: string }[] }).cells.map(r => r.cellId)).toEqual(["a", "b"])
+      vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+        const url = new URL(input)
+        expect(url.searchParams.get("paired")).toBe("1")
+        url.searchParams.set("limit", "2") // Cut directly through a multi-lane row.
+        return request(url.toString())
+      }))
+      const pages: Array<Array<{ cellId: string; side: string; value: string }>> = []
+      await streamFileCells("proj-a", "file-x", token, (rows) => { pages.push(rows) }, undefined, undefined, undefined, true)
+      expect(pages.map(rows => rows.map(r => [r.cellId, r.side, r.value]))).toEqual([
+        [["a", "source", "Source A"], ["a", "target", "Target A"], ["a", "target", "Destino A"]],
+        [["b", "source", "Source B"], ["c", "source", "Source C"], ["c", "target", "Target C"], ["c", "target", "Destino C"]],
+        [["orphan", "target", "Target only"]],
+      ])
+      // An offset shifted inside a group must re-deliver the complete group,
+      // on both a cache hit and the cold fallback.
+      const shifted = `https://w/api/v1/projects/proj-a/files/file-x/cells?paired=1&limit=1&cursor=${encodeURIComponent(btoa(JSON.stringify({ offset: 1 })))}`
+      for (const cold of [false, true]) {
+        if (cold) {
+          const { resetChainCacheForTests } = await import("../events/cells-read-route")
+          resetChainCacheForTests()
+        }
+        const response = await request(shifted)
+        const body = await response.json() as { cells: { cellId: string }[]; completeRows: boolean }
+        expect(body.completeRows).toBe(true)
+        expect(body.cells.map(r => r.cellId)).toEqual(["a", "a", "a"])
+      }
+    } finally {
+      vi.unstubAllGlobals()
+      await db.close()
+    }
+  })
+})
+
+it("preserves every row in anchor order when follow-up pages grow from 500 to 2000", async () => {
+  const expected = makeLinearChain(2503)
+  // Exercise array-literal quoting on a follow-up page, including IDs that
+  // resemble PostgreSQL array syntax. IDs are data, never SQL fragments.
+  expected[500].cell_id = 'id"with\\slashes,{NULL}'
+  expected[501].anchor_cell_id = expected[500].cell_id
+  const { db } = await makeTestDb({ cells: expected })
+  const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+  const ids: string[] = []
+  let cursor: string | null = null
+  for (const limit of [500, 2000, 2000]) {
+    const url = new URL("https://w/api/v1/projects/proj-a/files/file-x/cells")
+    url.searchParams.set("side", "target")
+    url.searchParams.set("limit", String(limit))
+    if (cursor) url.searchParams.set("cursor", cursor)
+    const response = (await handleCellsReadRequest(new Request(url, { headers: { Authorization: `Bearer ${token}` } }), envWith(db)))!
+    expect(response.status).toBe(200)
+    const page = await response.json() as { cells: { cellId: string }[]; total: number; nextCursor: string | null }
+    expect(page.total).toBe(2503)
+    ids.push(...page.cells.map(c => c.cellId))
+    cursor = page.nextCursor
+  }
+  expect(cursor).toBeNull()
+  expect(ids).toEqual(expected.map(c => c.cell_id))
+  expect(new Set(ids).size).toBe(2503)
+})
+
+it("reads narrow ordering on a cold page and keeps intervening edits visible to delta sync", async () => {
+  const { db } = await makeTestDb({
+    cells: makeLinearChain(4),
+    events: [makeEvent({ id: "initial", server_seq: 1, cell_id: "lc00000" })],
+  })
+  const prepare = db.prepare.bind(db)
+  let orderingRows: Record<string, unknown>[] = []
+  let changed = false
+  db.prepare = (sql: string) => {
+    const statement = prepare(sql)
+    if (!sql.startsWith("SELECT cell_id, side, target_lang, anchor_cell_id, event_id FROM cells")) return statement
+    const bind = statement.bind.bind(statement)
+    statement.bind = (...args: unknown[]) => {
+      const bound = bind(...args)
+      const all = bound.all.bind(bound)
+      bound.all = async <T>() => {
+        const result = await all<T>()
+        orderingRows = result.results as Record<string, unknown>[]
+        if (!changed) {
+          changed = true
+          await prepare("UPDATE cells SET value = ? WHERE project_id = ? AND file_id = ? AND cell_id = ?").bind("edited during read", "proj-a", "file-x", "lc00000").run()
+          await prepare("INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, 1, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)")
+            .bind("concurrent", "proj-a", "file-x", "lc00000", "target.cell.commit", "alice", "{}", 1700000000001, 1700000000001, 2).run()
+        }
+        return result
+      }
+      return bound
+    }
+    return statement
+  }
+  const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+  const request = (query: string) => new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, { headers: { Authorization: `Bearer ${token}` } })
+  const response = (await handleCellsReadRequest(request("side=target&limit=1"), envWith(db)))!
+  const page = await response.json() as { cells: { cellId: string; value: string }[]; maxServerSeq: number }
+  expect(orderingRows).toHaveLength(4)
+  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "side", "target_lang"])
+  expect(page.cells).toHaveLength(1)
+  expect(page.cells[0].value).toBe("edited during read")
+  expect(page.maxServerSeq).toBe(1)
+  const delta = await (await handleCellsReadRequest(request("since=1&epoch=0"), envWith(db)))!.json() as { changedCellIds: string[]; cells: { value: string }[] }
+  expect(delta.changedCellIds).toContain("lc00000")
+  expect(delta.cells[0].value).toBe("edited during read")
+})

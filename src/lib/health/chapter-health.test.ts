@@ -106,6 +106,34 @@ describe("createChapterHealthBuilder", () => {
     expect(second[0].cells?.map((cell) => cell.id)).toEqual(["a", "b"])
   })
 
+  it("prunes disappeared cells across regrouping, missing summaries, and empty chapters", () => {
+    const h = harness()
+    const first = h.builder.build(h.chapters, h.readers)
+    const original = structuredClone(first)
+    const check = (chapters: ChapterHealthSource[]) => {
+      const actual = h.builder.build(chapters, h.readers)
+      expect(actual).toEqual(createChapterHealthBuilder().build(chapters, h.readers))
+      return actual
+    }
+    const regrouped = [
+      { ...h.chapters[1], cellIds: ["c", "b"] },
+      { ...h.chapters[0], cellIds: ["d", "a"] },
+    ]
+    check(regrouped)
+    h.summaries.delete("b")
+    check(regrouped)
+    h.summaries.set("b", { status: "validated", translated: "returned" })
+    h.issues.add("b")
+    expect(check(regrouped)[0].cells?.[1]).toMatchObject({ id: "b", stage: "validated", hasIssue: true })
+    // Same number of chapters, but entirely different keys and no cells.
+    check(regrouped.map((chapter, i) => ({ ...chapter, key: `empty-${i}`, cellIds: [] })))
+    const returned = check(h.chapters)
+    expect(returned[0].cells?.[0]).not.toBe(first[0].cells?.[0])
+    check([])
+    check(h.chapters)
+    expect(first).toEqual(original)
+  })
+
   it("clear() forgets identities so the next build allocates afresh", () => {
     const h = harness()
     const first = h.builder.build(h.chapters, h.readers)

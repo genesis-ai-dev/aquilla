@@ -15,6 +15,19 @@ import { EditorTargetReadSurface } from "./EditorCellSurface"
  * happy-dom to assert against — so the class is what the guard pins.
  */
 describe("EditorTargetReadSurface whitespace", () => {
+  it("offers activation instead of text entry until the editor mounts", () => {
+    render(<EditorTargetReadSurface editable aria-label="Cell 1" tabIndex={0}>Draft</EditorTargetReadSurface>)
+    const surface = screen.getByRole("button", { name: "Cell 1" })
+    expect(surface).not.toHaveAttribute("contenteditable", "true")
+    expect(surface).not.toHaveAttribute("aria-readonly")
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
+  it("keeps a locked cell explicitly read-only", () => {
+    render(<EditorTargetReadSurface aria-label="Locked cell">Draft</EditorTargetReadSurface>)
+    expect(screen.getByRole("textbox", { name: "Locked cell" })).toHaveAttribute("aria-readonly", "true")
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
   it("collapses horizontal whitespace runs like the editor's HTML parse", () => {
     // The shape that broke: a TOC line whose page number sits behind a Word tab
     // leader carried through the DOCX import.

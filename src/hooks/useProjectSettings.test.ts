@@ -31,6 +31,15 @@ vi.mock("@/lib/store/project-index", () => ({
 
 beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
+  // AQU-1277: the read-path tests don't mock the write, but the hook pushes
+  // local settings when the server row looks absent — that PATCH went to
+  // production identity for real. Tests that exercise the write path install
+  // their own spy over this default.
+  vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+    kind: "error",
+    status: 0,
+    message: "patchProjectSettings not mocked by this test",
+  })
 })
 
 afterEach(() => vi.restoreAllMocks())

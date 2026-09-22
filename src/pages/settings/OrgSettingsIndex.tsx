@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, SlidersHorizontal, Workflow } from "lucide-react"
+import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, SlidersHorizontal, SpellCheck, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -44,6 +44,15 @@ export function OrgSettingsIndex() {
           <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint="Visibility & permissions" />
           <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Field Plan" />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint="Org keys" />
+          {/* AQU-1131: rules sit beside the Knowledge Base — both are the
+              org-wide context an org should see on arrival, not something
+              buried inside one project's Living Memory. */}
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "rules")}
+            icon={SpellCheck}
+            title={t("rules.orgSettings.title")}
+            hint={t("rules.orgSettings.navHint")}
+          />
           <NavRow
             to={orgSettingsPath(activeOrgId, "knowledge")}
             icon={BookOpen}

@@ -418,7 +418,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     fireEvent.click(within(firstRow!).getByRole("button", { name: "Translate with AI" }))
     await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!)
+    const activation = secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!
+    expect(activation).toHaveAttribute("role", "button")
+    expect(activation).toHaveAccessibleName(/Translation for .*: hello/)
+    fireEvent.keyDown(activation, { key: " " })
     await waitFor(() => expect(secondRow!.querySelector(".ProseMirror")).not.toBeNull())
     expect(secondRow).toContainElement(document.activeElement as HTMLElement)
 

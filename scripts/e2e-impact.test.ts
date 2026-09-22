@@ -22,6 +22,11 @@ const specs = [
 ]
 
 describe("changed-file E2E impact selection", () => {
+  it("maps smart-testing infrastructure to the edit durability boundary", () => {
+    expect(selectAffectedE2E(["smart-tests/driver.ts"], specs).specs).toContain(
+      "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+    )
+  })
   it("runs a changed smoke spec directly", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })

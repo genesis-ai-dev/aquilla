@@ -337,6 +337,30 @@ function formsExcessiveCycle(history: readonly string[], candidate: string): boo
  *    MAX_CYCLE_LEN) past MAX_CONSECUTIVE_REPEATS, falls back to the literal
  *    token instead.
  */
+/**
+ * Append a model-selected source `phrase`'s words to `output`, dropping any
+ * leading words that duplicate the word(s) already at the tail of `output`.
+ *
+ * The decoder picks the best-scoring source phrase for each target n-gram
+ * window independently, so two adjacent phrases can each legitimately border
+ * the same word — e.g. one phrase's source ends "...created the" and the
+ * very next phrase's source happens to start "the heaven..." — a boundary
+ * artifact of phrase-based decoding, not a property of either language. Left
+ * alone it reads as a stutter ("created the the heaven"); collapsing the
+ * overlap removes the duplicate without changing the meaning.
+ *
+ * Only for model phrases: a literal fallback token is pushed plainly (see
+ * below), never through here, because its repetition (if any) reflects the
+ * target text's own content, not a decoder boundary artifact — deduping it
+ * would silently drop genuinely repeated words.
+ */
+function pushDeduped(output: string[], phrase: string): void {
+  const words = phrase.split(" ")
+  let start = 0
+  while (start < words.length && output[output.length - 1] === words[start]) start++
+  for (let k = start; k < words.length; k++) output.push(words[k])
+}
+
 function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): string[] {
   const output: string[] = []
   // Length cap: 2× input tokens + small absolute buffer
@@ -383,7 +407,7 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
           break
         }
 
-        output.push(bestSrc)
+        pushDeduped(output, bestSrc)
         i += n
         matched = true
         break
@@ -391,8 +415,10 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
     }
 
     if (!matched) {
-      // Literal fallback — keep the target token as-is. Not tracked in
-      // modelIntentHistory: it's not something the model chose, so it
+      // Literal fallback — keep the target token as-is, pushed plainly (not
+      // deduped): if the target genuinely repeats a word, the literal copy
+      // must reflect that rather than silently dropping it. Not tracked in
+      // modelIntentHistory either: it's not something the model chose, so it
       // shouldn't count as breaking or extending a cycle.
       output.push(tokens[i])
       i++

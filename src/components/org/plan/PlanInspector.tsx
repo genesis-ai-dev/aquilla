@@ -12,7 +12,7 @@
 
 import { useState } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
 import { X, ChevronUp, ChevronDown } from "lucide-react"
@@ -125,6 +125,16 @@ export function PlanInspector({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+        {projectId && (
+          <a
+            href={`/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(unit.fileId)}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <span className="truncate">
+              {t("org.projectOverview.plan.openFile", { fileName: unit.fileName })}
+            </span>
+          </a>
+        )}
         {failed && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px]"
              role="alert" data-testid="plan-patch-failed">

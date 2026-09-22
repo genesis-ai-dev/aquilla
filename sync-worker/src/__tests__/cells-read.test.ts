@@ -1424,3 +1424,74 @@ describe("AQU-1328 complete source/target row pages", () => {
     }
   })
 })
+
+it("preserves every row in anchor order when follow-up pages grow from 500 to 2000", async () => {
+  const expected = makeLinearChain(2503)
+  // Exercise array-literal quoting on a follow-up page, including IDs that
+  // resemble PostgreSQL array syntax. IDs are data, never SQL fragments.
+  expected[500].cell_id = 'id"with\\slashes,{NULL}'
+  expected[501].anchor_cell_id = expected[500].cell_id
+  const { db } = await makeTestDb({ cells: expected })
+  const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+  const ids: string[] = []
+  let cursor: string | null = null
+  for (const limit of [500, 2000, 2000]) {
+    const url = new URL("https://w/api/v1/projects/proj-a/files/file-x/cells")
+    url.searchParams.set("side", "target")
+    url.searchParams.set("limit", String(limit))
+    if (cursor) url.searchParams.set("cursor", cursor)
+    const response = (await handleCellsReadRequest(new Request(url, { headers: { Authorization: `Bearer ${token}` } }), envWith(db)))!
+    expect(response.status).toBe(200)
+    const page = await response.json() as { cells: { cellId: string }[]; total: number; nextCursor: string | null }
+    expect(page.total).toBe(2503)
+    ids.push(...page.cells.map(c => c.cellId))
+    cursor = page.nextCursor
+  }
+  expect(cursor).toBeNull()
+  expect(ids).toEqual(expected.map(c => c.cell_id))
+  expect(new Set(ids).size).toBe(2503)
+})
+
+it("reads narrow ordering on a cold page and keeps intervening edits visible to delta sync", async () => {
+  const { db } = await makeTestDb({
+    cells: makeLinearChain(4),
+    events: [makeEvent({ id: "initial", server_seq: 1, cell_id: "lc00000" })],
+  })
+  const prepare = db.prepare.bind(db)
+  let orderingRows: Record<string, unknown>[] = []
+  let changed = false
+  db.prepare = (sql: string) => {
+    const statement = prepare(sql)
+    if (!sql.startsWith("SELECT cell_id, side, target_lang, anchor_cell_id, event_id FROM cells")) return statement
+    const bind = statement.bind.bind(statement)
+    statement.bind = (...args: unknown[]) => {
+      const bound = bind(...args)
+      const all = bound.all.bind(bound)
+      bound.all = async <T>() => {
+        const result = await all<T>()
+        orderingRows = result.results as Record<string, unknown>[]
+        if (!changed) {
+          changed = true
+          await prepare("UPDATE cells SET value = ? WHERE project_id = ? AND file_id = ? AND cell_id = ?").bind("edited during read", "proj-a", "file-x", "lc00000").run()
+          await prepare("INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, 1, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)")
+            .bind("concurrent", "proj-a", "file-x", "lc00000", "target.cell.commit", "alice", "{}", 1700000000001, 1700000000001, 2).run()
+        }
+        return result
+      }
+      return bound
+    }
+    return statement
+  }
+  const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+  const request = (query: string) => new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, { headers: { Authorization: `Bearer ${token}` } })
+  const response = (await handleCellsReadRequest(request("side=target&limit=1"), envWith(db)))!
+  const page = await response.json() as { cells: { cellId: string; value: string }[]; maxServerSeq: number }
+  expect(orderingRows).toHaveLength(4)
+  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "side", "target_lang"])
+  expect(page.cells).toHaveLength(1)
+  expect(page.cells[0].value).toBe("edited during read")
+  expect(page.maxServerSeq).toBe(1)
+  const delta = await (await handleCellsReadRequest(request("since=1&epoch=0"), envWith(db)))!.json() as { changedCellIds: string[]; cells: { value: string }[] }
+  expect(delta.changedCellIds).toContain("lc00000")
+  expect(delta.cells[0].value).toBe("edited during read")
+})

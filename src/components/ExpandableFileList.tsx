@@ -33,6 +33,9 @@ interface Props {
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
   validationCount: number
+  /** AQU-1083: the project's effective structural-cell policy, forwarded to
+   *  each expanded file's section grid so a flip revalidates its snapshot. */
+  countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
   /** Storage lane used when exporting translated source files. */
   targetLang?: string
@@ -64,15 +67,16 @@ interface Props {
    * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
-  activeChapterHealth?: BookHealthChapter[]
+  hasActiveChapters?: boolean
+  getActiveChapterHealth?: () => BookHealthChapter[]
 }
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  activeChapterHealth,
+  hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
 }: Props) {
   const t = useT()
@@ -225,10 +229,13 @@ export function ExpandableFileList({
                       <ChevronDown
                         className={cn("h-3 w-3", isCollapsed && "-rotate-90")}
                       />
-                      {isEditingCorpus ? (
+                      {!isEditingCorpus && <span>{displayLabel}</span>}
+                    </button>
+                    {isEditingCorpus && (
                         <input
                           autoFocus
                           autoComplete="off"
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                           defaultValue={group.label}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => {
@@ -242,14 +249,12 @@ export function ExpandableFileList({
                           }}
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
-                      ) : (
-                        <span>{displayLabel}</span>
-                      )}
-                    </button>
+                    )}
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
-                          className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          type="button"
+                          className="rounded-md p-0.5 transition-colors hover:text-foreground"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >
@@ -263,7 +268,7 @@ export function ExpandableFileList({
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
                       const canExpand = fileHasSections(file)
-                        || (file.id === activeFileId && Boolean(activeChapterHealth?.length))
+                        || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -317,8 +322,9 @@ export function ExpandableFileList({
                               projectId={projectId}
                               fileId={file.id}
                               validationCount={validationCount}
+                              countStructural={countStructural}
                               getTokenForFile={getTokenForFile}
-                              chapters={file.id === activeFileId ? activeChapterHealth : undefined}
+                              getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {

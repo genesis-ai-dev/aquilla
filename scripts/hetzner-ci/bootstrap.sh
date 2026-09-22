@@ -54,7 +54,7 @@ log "installing base packages"
 apt-get update -y
 apt-get install -y --no-install-recommends \
   ca-certificates curl git gnupg jq lsb-release \
-  python3 python3-pip fonts-liberation fonts-noto-color-emoji
+  python3 python3-pip python3-venv fonts-liberation fonts-noto-color-emoji
 
 if ! id -u "$CI_USER" >/dev/null 2>&1; then
   log "creating user $CI_USER"

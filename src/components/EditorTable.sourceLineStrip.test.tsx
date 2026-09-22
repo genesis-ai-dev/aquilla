@@ -36,9 +36,12 @@ import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
+import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+
+vi.mock("@/lib/timeline/timestamp-neighbours", { spy: true })
 
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
@@ -553,11 +556,14 @@ describe("EditorTable — structural controls on an untimed file", () => {
   it("offers no timestamps entry — an untimed file has none to edit", async () => {
     // Sam, 2026-09-09: hidden rather than disabled. Not a permission, just a
     // fact about the file, and a dead entry on every text project is furniture.
+    vi.mocked(timestampNeighbours).mockClear()
     renderTable({ sourceLineEditing: untimedEditing() })
     await screen.findByText("First cue")
     openMenu("cue-a")
     await entry("insert-above")
     expect(screen.queryByTestId("cell-menu-edit-timestamps")).toBeNull()
+    expect(timestampNeighbours).toHaveBeenCalled()
+    expect(vi.mocked(timestampNeighbours).mock.calls.every((call) => call[3] === false)).toBe(true)
   })
 })
 

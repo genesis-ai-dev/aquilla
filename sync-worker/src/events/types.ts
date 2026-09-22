@@ -31,6 +31,14 @@ export interface TermRenderingPayload {
 /** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
 export type ConceptStatusPayload = 'active' | 'draft' | 'deprecated'
 
+/** Mirrors `TermMatchOptions` in src/lib/terminology/types.ts. */
+export interface TermMatchOptionsPayload {
+  foldMarks?: boolean
+  affixes?: boolean
+  forms?: string[]
+  excludedForms?: string[]
+}
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -626,6 +634,7 @@ export interface EventPayloads {
     status: ConceptStatusPayload
     notes?: string
     caseSensitive?: boolean
+    match?: TermMatchOptionsPayload
   }
   // Partial patch. Only the keys present are written — absent keys keep their
   // projected value, so two people editing DIFFERENT fields of the same
@@ -637,6 +646,7 @@ export interface EventPayloads {
     renderings?: TermRenderingPayload[]
     notes?: string
     caseSensitive?: boolean
+    match?: TermMatchOptionsPayload
   }
   'term.delete': {
     conceptId: string // soft-delete: stamps deleted_at

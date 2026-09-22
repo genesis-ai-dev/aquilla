@@ -476,6 +476,21 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredAudioDisabledNote": "Enabled once audio translations exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
+    // ── StructuralCellsProjectSection ── AQU-1083
+    "projectSettings.structuralCells.label": "Count headings as translatable content",
+    "projectSettings.structuralCells.description":
+      "Whether chapter headings, section titles and book names count toward " +
+      "this project's translation and validation percentages. Leaving them " +
+      "out means a book reads 100% once every verse is done.",
+    "projectSettings.structuralCells.inherit": "Organization default",
+    "projectSettings.structuralCells.currentlyCounting":
+      "The organization currently counts them",
+    "projectSettings.structuralCells.currentlyExcluding":
+      "The organization currently leaves them out",
+    "projectSettings.structuralCells.count": "Count them",
+    "projectSettings.structuralCells.exclude": "Leave them out",
+    "projectSettings.structuralCells.saveFailed": "Could not save that change",
+
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
@@ -683,6 +698,22 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+
+    // ── Terminology source-term matching (AQU-1271) ──
+    "projectSettings.termMatching.title": "Prefixes and suffixes",
+    "projectSettings.termMatching.description":
+      "Letters or syllables that attach to source words. Terminology matching will allow them around a term when the term's \"Allow prefixes and suffixes\" option is on.",
+    "projectSettings.termMatching.prefixes": "Prefixes",
+    "projectSettings.termMatching.suffixes": "Suffixes",
+    "projectSettings.termMatching.maxAffixes": "Max chained per side",
+    "projectSettings.termMatching.foldMarksDefault": "Ignore vowel marks and accents by default",
+    "projectSettings.termMatching.loadPreset": "Load preset",
+    "projectSettings.termMatching.addAffixPlaceholder": "Type and press Enter",
+    "projectSettings.termMatching.remove": "Remove {affix}",
+    "projectSettings.termMatching.preset.hebrew": "Hebrew",
+    "projectSettings.termMatching.preset.arabic": "Arabic",
+    "projectSettings.termMatching.preset.swahili": "Swahili",
+    "projectSettings.termMatching.preset.turkish": "Turkish",
   },
   context: {
     _context: {
@@ -1258,6 +1289,52 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.termMatching.title": {
+        description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",
+      },
+      "projectSettings.termMatching.description": {
+        description:
+          "Explains what the affix inventory is for — it only takes effect on terms with " +
+          "\"Allow prefixes and suffixes\" enabled.",
+      },
+      "projectSettings.termMatching.prefixes": {
+        description: "Label and accessible name of the prefix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.suffixes": {
+        description: "Label and accessible name of the suffix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.maxAffixes": {
+        description: "Label of the numeric input capping how many chained affixes are allowed per side (1-4).",
+      },
+      "projectSettings.termMatching.foldMarksDefault": {
+        description:
+          "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
+          "when matching terms, absent a per-concept override.",
+      },
+      "projectSettings.termMatching.loadPreset": {
+        description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
+      },
+      "projectSettings.termMatching.addAffixPlaceholder": {
+        description: "Placeholder text in the prefix/suffix tag-input fields.",
+      },
+      "projectSettings.termMatching.remove": {
+        description: "Accessible name of the small remove button on one affix chip.",
+        placeholders: {
+          affix: "The affix text on the chip being removed (data, not translated).",
+        },
+      },
+      "projectSettings.termMatching.preset.hebrew": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.arabic": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.swahili": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.turkish": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
       },
     },
   },

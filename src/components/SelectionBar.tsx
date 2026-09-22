@@ -378,6 +378,32 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           </Button>
         </AppTooltip>
       )}
+      {/* AQU-490: beside the text pair, never folded into it. Hidden rather
+          than disabled when the selection holds no validatable take — an
+          always-present dead button on a text-only project is noise.
+          OUTSIDE the `!audioMode` branch, unlike the text actions: this is the
+          one validation the Audio view offers, and the Audio view is where
+          recordings are worked on. It sat inside that branch until 2026-09-21,
+          which made its two guards mutually exclusive — invisible in the audio
+          lens by the branch, invisible in the text lens because the map behind
+          its count was empty there. */}
+      {audioTakeTargets.length > 0 && (
+        <AppTooltip content={t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onValidateAudio}
+            disabled={isBusy}
+          >
+            {running.kind === "validate-audio" ? <Spinner className="me-1 size-3.5" /> : null}
+            {t("editor.selection.validateAudio")}
+            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+              {audioTakeTargets.length}
+            </span>
+          </Button>
+        </AppTooltip>
+      )}
       {!audioMode && (
         <>
       <AppTooltip content={
@@ -448,26 +474,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           )}
         </Button>
       </AppTooltip>
-      {/* AQU-490: beside the text pair, never folded into it. Hidden rather
-          than disabled when the selection holds no validatable take — an
-          always-present dead button on a text-only project is noise. */}
-      {audioTakeTargets.length > 0 && (
-        <AppTooltip content={t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })}>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onValidateAudio}
-            disabled={isBusy}
-          >
-            {running.kind === "validate-audio" ? <Spinner className="me-1 size-3.5" /> : null}
-            {t("editor.selection.validateAudio")}
-            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
-              {audioTakeTargets.length}
-            </span>
-          </Button>
-        </AppTooltip>
-      )}
       {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}

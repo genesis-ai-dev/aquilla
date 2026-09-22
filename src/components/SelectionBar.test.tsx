@@ -17,6 +17,7 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -146,6 +147,7 @@ function renderBar(
   cells: CellData[] = CELLS,
   myScopes: MemberScope[] = [],
   activeLane = "",
+  extra: Partial<React.ComponentProps<typeof SelectionBar>> = {},
 ) {
   return renderWithTooltips(
     <SelectionBar
@@ -156,8 +158,39 @@ function renderBar(
       activeLane={activeLane}
       myScopes={myScopes}
       completeBatch={vi.fn()}
+      {...extra}
     />,
   )
+}
+
+// AQU-490: the file's audio, in the shape the workspace hands down. Until
+// 2026-09-21 no test here passed it at all, which is why a suite of 30 stayed
+// green over a button that could never appear.
+function audioMap(over: Partial<AudioAttachmentOut> = {}): Map<string, CellAudioEntry> {
+  const take: AudioAttachmentOut = {
+    audioId: "take-1",
+    url: "frontier-audio://take-1.webm",
+    slot: "recording",
+    mimeType: "audio/webm",
+    voiceId: null,
+    referenceAudioId: null,
+    durationMs: 1000,
+    label: null,
+    trimStartMs: null,
+    trimEndMs: null,
+    role: "dub",
+    validatorCount: 0,
+    validators: [],
+    recordedBy: "bob",
+    ...over,
+  }
+  return new Map([["cell-1", {
+    attachments: { [take.audioId]: take },
+    selectedBySlot: { [take.slot]: take.audioId },
+    selectedAudioId: take.audioId,
+    selectedGeneratedVoiceAudioId: null,
+    audioTimings: {},
+  }]])
 }
 
 describe("SelectionBar — viewer suppression (AQU-365)", () => {
@@ -372,6 +405,53 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
 
     expect(emitCellValidate).not.toHaveBeenCalled()
     expect(onValidationCommitted).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-490 — bulk validating recordings
+// ---------------------------------------------------------------------------
+
+describe("SelectionBar — Validate recordings", () => {
+  const selectBoth = () =>
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+
+  it("offers the action, with a count, when the selection holds a validatable take", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+    const button = screen.getByRole("button", { name: /validate recordings/i })
+    expect(button).toBeEnabled()
+    expect(button).toHaveTextContent("1")
+    vi.restoreAllMocks()
+  })
+
+  // Sam's call, 2026-09-21: the Audio view is where recordings are worked on,
+  // so this is the one validation that view offers. It used to sit inside the
+  // text-only branch, which made it unreachable there.
+  it("offers it in the Audio view too, where the text actions do not appear", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap(), audioMode: true })
+    expect(screen.getByRole("button", { name: /validate recordings/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^validate$/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  it("stays hidden when the selection holds no recording at all", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: new Map() })
+    expect(screen.queryByRole("button", { name: /validate recordings/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  // The take is already mine, so there is nothing left for this viewer to give
+  // and the button must not offer work it would then skip.
+  it("stays hidden when every take already carries my vote", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", {
+      audioByCellId: audioMap({ validatorCount: 1, validators: ["alice"] }),
+    })
+    expect(screen.queryByRole("button", { name: /validate recordings/i })).toBeNull()
     vi.restoreAllMocks()
   })
 })

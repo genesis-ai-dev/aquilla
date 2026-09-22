@@ -1482,6 +1482,13 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   span_allowance integer,
   park_reason text
     CHECK (park_reason IS NULL OR park_reason IN ('awaiting_input','work_exhausted')),
+  -- Park-time reflection watermark (0094_contextual_run_reflection.sql; AQU-1302).
+  -- reflected_at: evidence for the next reflection is everything after this
+  -- instant (NULL = never reflected → the run's created_at). reflected_done_spans:
+  -- done_spans at that reflection, so the "2 spans since last reflection" gate
+  -- counts PASSAGES, not staged cells.
+  reflected_at timestamptz,
+  reflected_done_spans integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
@@ -1564,7 +1571,8 @@ CREATE TABLE IF NOT EXISTS contextual_run_events (
     'span_outcome',
     'steering_queued',
     'run_command',
-    'draft_reviewed'
+    'draft_reviewed',
+    'memories_proposed'
   )),
   span_id text,
   span_label text,

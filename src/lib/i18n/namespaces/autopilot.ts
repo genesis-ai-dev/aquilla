@@ -406,6 +406,7 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.runCommandStop": "You asked Autopilot to stop.",
     "autopilot.inspector.event.runCommandPause": "You asked Autopilot to pause.",
     "autopilot.inspector.event.kind.draftReviewed": "Draft reviewed",
+    "autopilot.inspector.event.kind.memoriesProposed": "Notes proposed",
     "autopilot.inspector.event.kind.unknown": "Activity event",
     "autopilot.inspector.event.status.started": "Work started",
     "autopilot.inspector.event.status.partial": "Partially completed",
@@ -435,6 +436,11 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.draftApplied": "Draft applied",
     "autopilot.inspector.event.draftSuperseded": "Draft superseded",
     "autopilot.inspector.event.draftRejected": "Draft rejected",
+    "autopilot.inspector.event.memoriesProposed": plural({
+      one: "Proposed {count} note for review",
+      other: "Proposed {count} notes for review",
+    }),
+    "autopilot.inspector.event.memoriesUnavailable": "Could not review this run for notes",
 
     // — Inspector: draft and scene evidence —————————————————————————
     // The review card's fallback title reuses autopilot.graph.node.draft —
@@ -957,6 +963,10 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.event.draftsStaged": withPlaceholders(
         "Activity-timeline summary counting reviewable drafts staged by one passage.",
         { count: "Number of reviewable drafts staged." },
+      ),
+      "autopilot.inspector.event.memoriesProposed": withPlaceholders(
+        "Activity-timeline summary counting memory notes a parked run proposed for human review.",
+        { count: "Number of proposed notes." },
       ),
       "autopilot.inspector.review.inEditorCell": withPlaceholders(
         "Accessible name of an editor review link that identifies its target cell.",

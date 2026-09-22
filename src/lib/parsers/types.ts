@@ -403,6 +403,9 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  // AQU-1083's org default is NOT here. It lives on the project settings
+  // response (`ProjectSettingsResponse.orgCountStructuralCells`), because that
+  // is the one an open editor re-reads when someone else changes it.
   /**
    * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
    * allowed to change this project's source/target language and its extra
@@ -440,6 +443,8 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
+  termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]
@@ -520,6 +525,17 @@ export interface ProjectRecord {
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
   validationCountAudio?: number
+  /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — as translatable content in its progress and
+   * completion numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. There is deliberately no stored value for it: a null would be
+   * a third thing the resolver has no meaning for. Absent on the org too means
+   * they count, which is what every project did before this existed.
+   */
+  countStructuralCells?: boolean
   /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"

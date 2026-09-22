@@ -40,6 +40,13 @@
  * A line break is a protected token rather than a newline, so the division is
  * named from the heading's first line, after the unit is partitioned.
  *
+ * Contents lines park a page number next to the title — either as its own
+ * character run, or behind tab leaders in the same run. The number will still
+ * be a number after translation, so it is left in the package rather than
+ * imported: a separate run is dropped from the line's locator (export keeps
+ * the source slot), and a same-run trailer is sliced off (export keeps the
+ * unmentioned remainder).
+ *
  * This is a presentation filter over parsed units — it never reinterprets the
  * package. Every emitted cell is an engine projection or slice of its
  * paragraph, so protected-HTML editing keeps working on the original bytes:
@@ -49,6 +56,7 @@
 
 import {
   partitionIdmlUnitAtLineBreaks,
+  projectIdmlUnitToLocator,
   sliceIdmlUnit,
   type IdmlSliceRange,
   type IdmlTranslationUnit,
@@ -59,13 +67,16 @@ import {
   compactHeading,
   eblHeadingLevel,
   headingSlug,
+  isEblContentsStyle,
   isEblLessonNumberStyle,
   isEblLessonTitleStyle,
   isEblTopicNumberStyle,
   isEblTopicTitleStyle,
   isNonTextualContent,
+  isPageNumberRun,
   parseEblLessonNumber,
   parseEblTopicNumber,
+  trailingPageNumberStart,
 } from "./note-rules"
 
 /**
@@ -220,7 +231,11 @@ function contentLines(
       continue
     }
     const storyId = unit.locator.storyId ?? unit.locator.memberPath
-    const visible = partitionIdmlUnitAtLineBreaks(unit).filter(hasVisibleText)
+    const visible = partitionIdmlUnitAtLineBreaks(unit)
+      .map((line) => (
+        isEblContentsStyle(paragraphStyle) ? dropStandalonePageNumberSlots(line) : line
+      ))
+      .filter(hasVisibleText)
     // Joined with a space: the engine reports a line break as a protected token
     // rather than whitespace, so the paragraph's own text would run its lines
     // together ("MODULE 1How we have the Bible").
@@ -423,25 +438,62 @@ export function selectEblNotes(
     const division = divisionIndex === undefined ? undefined : divisions[divisionIndex]
     const common = division ? { division } : {}
 
-    if (!splitSentences) {
-      notes.push({ unit: line.unit, ...common })
-      continue
-    }
-
-    // One cell per sentence. Slices are kept whole and in order, however little
-    // text a slice holds, because their ranges have to tile the line for the
-    // exporter to rebuild it.
-    const slices = sliceIdmlUnit(line.unit, eblSentenceCutPoints(line.text))
-    for (const [sliceIndex, slice] of slices.entries()) {
-      notes.push({
-        unit: slice.unit,
-        ...(slices.length > 1
-          ? { rejoin: { index: sliceIndex, count: slices.length, ranges: slice.ranges } }
-          : {}),
-        ...common,
-      })
+    for (const note of importableLine(line, splitSentences)) {
+      notes.push({ ...note, ...common })
     }
   }
 
   return { notes, otherUnitCount, divisions }
+}
+
+/**
+ * A contents page number that is its own character run is dropped from the
+ * line's locator. Export never sees a translation for that slot, so the
+ * publisher's number stays in the package. Trailing empty runs left behind
+ * by tab leaders are dropped the same way — they have nothing to translate.
+ */
+function dropStandalonePageNumberSlots(unit: IdmlTranslationUnit): IdmlTranslationUnit {
+  if (unit.slots.length < 2) return unit
+  const keep = unit.slots.flatMap((slot, index) => (isPageNumberRun(slot.text) ? [] : [index]))
+  if (keep.length === 0 || keep.length === unit.slots.length) return unit
+  if (isNonTextualContent(keep.map((index) => unit.slots[index]!.text))) return unit
+  while (keep.length > 1) {
+    const last = keep.at(-1)!
+    if (unit.slots[last]!.text.replace(/\s+/g, "").length > 0) break
+    keep.pop()
+  }
+  const locator = {
+    ...unit.locator,
+    slotIndexes: keep.map((index) => unit.locator.slotIndexes[index]!),
+  }
+  return projectIdmlUnitToLocator(unit, locator) ?? unit
+}
+
+/**
+ * The cells one contents or body line becomes. Sentence cuts stay as they were;
+ * a same-run contents page number is sliced off and never imported, so export
+ * keeps the publisher's trailer.
+ */
+function importableLine(
+  line: ContentLine,
+  splitSentences: boolean,
+): Array<Pick<EblNote, "unit" | "rejoin">> {
+  const pageStart = isEblContentsStyle(line.paragraphStyle)
+    ? trailingPageNumberStart(line.text)
+    : undefined
+  const importEnd = pageStart ?? line.text.length
+  const sentenceCuts = splitSentences
+    ? eblSentenceCutPoints(line.text).filter((cut) => cut < importEnd)
+    : []
+  const cuts = pageStart === undefined ? sentenceCuts : [...sentenceCuts, pageStart]
+  const slices = sliceIdmlUnit(line.unit, cuts)
+  const imported = pageStart === undefined ? slices : slices.slice(0, -1)
+  if (imported.length === 0) return [{ unit: line.unit }]
+  const needsRejoin = imported.length > 1 || pageStart !== undefined
+  return imported.map((slice, sliceIndex) => ({
+    unit: slice.unit,
+    ...(needsRejoin
+      ? { rejoin: { index: sliceIndex, count: imported.length, ranges: slice.ranges } }
+      : {}),
+  }))
 }

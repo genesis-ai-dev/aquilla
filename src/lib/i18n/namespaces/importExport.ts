@@ -580,6 +580,29 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    // — AQU-1148: what the exported file is allowed to contain. The hints say
+    //   exactly what lands in the file, because "approved text" was being
+    //   claimed for output that mixed validated text, unreviewed drafts and
+    //   untranslated source. —
+    "importExport.dialog.contentLegend": "Content",
+    "importExport.dialog.contentModeAriaLabel": "What the exported file contains",
+    "importExport.dialog.contentModeCurrent": "Current translations",
+    "importExport.dialog.contentModeValidatedOnly": "Validated translations only",
+    "importExport.dialog.contentModeCurrentHint":
+      "Every cell's current text — validated, unvalidated draft and AI draft alike. " +
+      "Untranslated cells are filled with the source text, so the file will not show " +
+      "which parts are approved.",
+    "importExport.dialog.contentModeValidatedOnlyHint":
+      "Only cells that meet this project's validation threshold. Everything else is left " +
+      "out — no unreviewed drafts and no source-language filler.",
+    "importExport.dialog.contentModeValidatedOnlyRoundTripHint":
+      "Only cells that meet this project's validation threshold are written into your " +
+      "original document. Anything else keeps the words already in the file you uploaded.",
+    "importExport.dialog.contentModeValidatedCount":
+      plural({
+        one: "{validated} of {count} cell in this file is validated.",
+        other: "{validated} of {count} cells in this file are validated.",
+      }),
     "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
     "importExport.dialog.allChapters": "All chapters",
     "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
@@ -920,16 +943,17 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, or VTT",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or VTT " +
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
-      "(.csv/.tsv/.xlsx), or a WebVTT subtitle file (.vtt).",
+      "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -1419,6 +1443,18 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.contentModeAriaLabel": {
+        description:
+          "Accessible name for the content-mode select on the Export dialog — the control that chooses between every current translation and validated translations only (AQU-1148).",
+      },
+      "importExport.dialog.contentModeValidatedCount": {
+        description:
+          "Count shown under the content-mode select once 'Validated translations only' is chosen, so the user knows how much of the file will actually be written. 'Validated' means a cell that has met this project's validation threshold.",
+        placeholders: {
+          validated: "Number of cells in the current file that are validated.",
+          count: "Total number of cells in the current file — the number the plural form agrees with.",
+        },
       },
       "importExport.dialog.chapterFilterAriaLabel": {
         description: "Accessible name for the chapter-scope select on the Export dialog.",
@@ -2433,7 +2469,7 @@ export const importExport = defineNamespace({
         description:
           "Caption in small grey text under the drag-and-drop area of the panel " +
           "that fills in the open file's translations, listing the file kinds it " +
-          "accepts. Only the conjunction joining the four format names is " +
+          "accepts. Only the conjunction joining the format names is " +
           "translated; the format names themselves stay as they are.",
       },
       "importExport.fileTarget.description": {
@@ -2450,6 +2486,13 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInSubtitle": {
+        description:
+          "Error shown in red under the drop area when a subtitle file was read " +
+          "successfully but contained no timed caption blocks, so there is nothing " +
+          "to fill in. Single short statement of fact. 'Cues' are the individual " +
+          "timed caption blocks of a subtitle file.",
       },
       "importExport.fileTarget.noCuesInVtt": {
         description:
@@ -2656,11 +2699,12 @@ export const importExport = defineNamespace({
       },
       "importExport.review.orderMatchWarning": {
         description:
-          "Amber warning above the match-review list, shown when the user did not " +
-          "nominate a column holding the reference that identifies each line. It " +
-          "explains that rows were therefore paired top to bottom by position, " +
-          "which is easy to get wrong, and asks the user to eyeball the original " +
-          "text shown beside each row before committing.",
+          "Amber warning above the match-review list, shown when no reference " +
+          "identifying each line was available — either the user did not nominate " +
+          "a spreadsheet column holding one, or the uploaded format (a subtitle " +
+          "file) has none. It explains that rows were therefore paired top to " +
+          "bottom by position, which is easy to get wrong, and asks the user to " +
+          "eyeball the original text shown beside each row before committing.",
       },
       "importExport.review.replacesExisting": {
         description:

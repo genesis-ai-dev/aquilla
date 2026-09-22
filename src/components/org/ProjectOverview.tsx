@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -31,6 +31,15 @@ import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isAutopilotVisible } from "@/lib/features/flags"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import {
+  downloadProjectOffline,
+  removeOfflineProject,
+  getOfflineQueueDepth,
+  useDownloadProgress,
+  useOfflineProjectStatus,
+} from "@/lib/offline/download"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -750,6 +759,39 @@ export function ProjectOverview() {
     }
   }
 
+  // Project Download UI (Phase 5) — Tauri desktop only. `offlineStore` is
+  // null outside Tauri (see OfflineStoreContext.tsx), so every handler below
+  // is a no-op in the plain browser SPA.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStatus = useOfflineProjectStatus(offlineStore, id || null)
+  const downloadProgress = useDownloadProgress(id)
+
+  async function handleMakeAvailableOffline() {
+    if (!offlineStore || !jwt || !id) return
+    setError(null)
+    try {
+      await downloadProjectOffline(offlineStore, id, jwt)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  function handleRemoveOfflineCopy() {
+    if (!offlineStore || !id) return
+    setError(null)
+    const queueDepth = getOfflineQueueDepth(offlineStore, id)
+    if (queueDepth > 0) {
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: queueDepth }))
+      return
+    }
+    const result = removeOfflineProject(offlineStore, id)
+    if (!result.ok && result.reason === "queue-not-empty") {
+      // Lost a race with a write that queued between the check above and the
+      // removal itself — same message, fresh count.
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: result.queueDepth }))
+    }
+  }
+
   // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
   // visually mirrors under RTL instead of pointing away from the target.
   const languagePair =
@@ -840,6 +882,23 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
+                      {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                        <Badge variant="secondary" className="shrink-0" data-testid="offline-ready-badge">
+                          <HardDriveDownload className="size-3" aria-hidden />
+                          {t("org.projectOverview.offlineReadyBadge")}
+                        </Badge>
+                      )}
+                      {isTauriRuntime() && offlineStatus?.status === "downloading" && (
+                        <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
+                          <Spinner className="size-3" />
+                          {downloadProgress
+                            ? t("org.projectOverview.offlineDownloadingProgress", {
+                                done: downloadProgress.filesDone,
+                                total: downloadProgress.filesTotal,
+                              })
+                            : t("org.projectOverview.offlineDownloading")}
+                        </Badge>
+                      )}
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
@@ -889,8 +948,8 @@ export function ProjectOverview() {
                         {t("common.restore")}
                       </Button>
                     )}
-                    {/* Archive + Download + Lifecycle moved into overflow menu */}
-                    {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
+                    {/* Archive + Download + Lifecycle + Offline moved into overflow menu */}
+                    {(canManage || isOwner || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -925,6 +984,25 @@ export function ProjectOverview() {
                                 <PauseCircle className="size-4" />
                               )}
                               {isFrozen ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status !== "ready" && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                void handleMakeAvailableOffline()
+                              }}
+                              disabled={!jwt || offlineStatus?.status === "downloading"}
+                            >
+                              <CloudDownload className="size-4" />
+                              {offlineStatus?.status === "downloading"
+                                ? t("org.projectOverview.offlineDownloading")
+                                : t("org.projectOverview.makeAvailableOffline")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                            <DropdownMenuItem onClick={handleRemoveOfflineCopy}>
+                              <CloudOff className="size-4" />
+                              {t("org.projectOverview.removeOfflineCopy")}
                             </DropdownMenuItem>
                           )}
                           {isOwner && (

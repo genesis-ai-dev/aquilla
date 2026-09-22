@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CONFIDENCE_RESCORE_DEBOUNCE_MS, useCellConfidence } from "./useCellConfidence"
-import type { CellSummary } from "./useActiveCellStore"
+import { CellStore, type CellSummary } from "./useActiveCellStore"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 
 const fetchCellConfidence = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/sync/cell-confidence-read", () => ({ fetchCellConfidence }))
@@ -39,6 +40,55 @@ afterEach(() => {
 })
 
 describe("useCellConfidence request shaping", () => {
+  it("reuses preparation across focus and response renders and skips disabled files", async () => {
+    const cells = Array.from({ length: 31_215 }, (_, i) => cell(`c${i}`, "", "empty"))
+    cells[0] = cell("c0", "draft")
+    Object.defineProperty(cells[0], "status", { get: () => "unvalidated", configurable: true })
+    const readStatus = vi.spyOn(cells[0], "status", "get")
+    let enabled = false
+    let focusedCellId: string | null = null
+    const { rerender } = renderHook(() => useCellConfidence({ ...base, cells, enabled, focusedCellId }))
+    expect(readStatus).not.toHaveBeenCalled()
+    enabled = true
+    rerender()
+    await act(async () => { await Promise.resolve() })
+    expect(fetchCellConfidence).toHaveBeenCalledTimes(1)
+    readStatus.mockClear()
+    focusedCellId = "c0"
+    rerender()
+    focusedCellId = null
+    rerender()
+    // Effect still updates local validation on focus, but preparation must not
+    // scan original/translated text or repeat the three status filters.
+    expect(readStatus.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
+  it("observes fresh source and target text from real CellStore snapshots", async () => {
+    const store = new CellStore()
+    store.setRuntime({ projectId: "p1", fileId: "f1", username: "alice", requiredValidations: 1, auditStats: new Map() })
+    const row = (side: "source" | "target", value: string): CellRow => ({
+      cellId: "c1", side, targetLang: "", value, valueHtml: null,
+      type: "verse", canonicalRef: "GEN 1:1", anchorCellId: null,
+      eventId: `${side}-${value}`, sourceEventId: null,
+      lastEditor: "bob", lastEditAt: 1, validated: false, wordCount: 1,
+    })
+    store.replaceRows([row("source", "Original"), row("target", "Draft")])
+    const initial = store.getAllSummaries()
+    const { rerender } = renderHook(() => useCellConfidence({ ...base, cells: store.getAllSummaries() }))
+    await act(async () => { await Promise.resolve() })
+    expect(fetchCellConfidence).toHaveBeenCalledTimes(1)
+    expect(fetchCellConfidence.mock.calls[0][0].cellIds).toEqual(["c1"])
+    for (const [original, translated] of [["Revised", "Draft"], ["Revised", "New draft"]]) {
+      store.replaceRowsForCell("c1", [row("source", original), row("target", translated)])
+      expect(store.getAllSummaries()).not.toBe(initial)
+      rerender()
+      await act(async () => { await vi.advanceTimersByTimeAsync(CONFIDENCE_RESCORE_DEBOUNCE_MS) })
+    }
+    expect(fetchCellConfidence).toHaveBeenCalledTimes(3)
+    expect(initial[0].original).toBe("Original")
+    expect(initial[0].translated).toBe("Draft")
+  })
+
   it("scores immediately on first enable for a file", async () => {
     renderHook(() => useCellConfidence({ ...base, cells: [cell("c1", "a"), cell("c2", "b")] }))
     await act(async () => { await Promise.resolve() })

@@ -42,6 +42,22 @@ export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
   return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
 }
 
+/** AQU-1083: the second key with a floor below maintainer. */
+export const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
+/**
+ * Is this patch only the structural-cells override?
+ *
+ * Mirrors the terminology carve-out above, and mirrors the server's, which is
+ * the point: this hook refuses a write it believes the server would reject, so
+ * a floor it does not know about shows up as a control that silently does
+ * nothing for exactly the role the feature was written for.
+ */
+export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === COUNT_STRUCTURAL_KEY)
+}
+
 /**
  * AQU-1086: the project-language keys, gated by the org's configurable
  * `languageEditMinRole` (default maintainer 600 — today's behaviour) rather
@@ -176,6 +192,13 @@ export interface UseProjectSettings {
   updatedAt: string | null
   /** True after the first GET resolves (success OR network failure). */
   hasFetched: boolean
+  /**
+   * AQU-1083: the org default this project inherits when it has no
+   * `countStructuralCells` of its own. Null when the project has no org, or
+   * before the first response that carries it — read it as
+   * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
+   */
+  orgCountStructuralCells: boolean | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
@@ -293,6 +316,11 @@ function localSettingsFrom(
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
+  // AQU-1083. `!= null` rather than a truthiness test: `false` is a real
+  // answer here — it is the whole point of the setting — and absent means
+  // "inherit the org", which must stay absent rather than become `false`.
+  if (record.countStructuralCells != null)
+    out.countStructuralCells = record.countStructuralCells
   if (record.validationRoleFloor != null) out.validationRoleFloor = record.validationRoleFloor
   if (record.validationNamedUsers != null) out.validationNamedUsers = record.validationNamedUsers
   if (record.allowSelfValidation != null) out.allowSelfValidation = record.allowSelfValidation
@@ -365,9 +393,18 @@ export function useProjectSettings(
   // the next queued PATCH runs in the same microtask the previous one
   // resolves, well before React commits and runs the effect.
   const serverRef = useRef<ProjectSettingsResponse | null>(null)
+  // AQU-1083: the org default, held apart from the snapshot above because not
+  // every snapshot carries it — the optimistic one built during a patch has no
+  // server response behind it, and a server that predates the field omits it.
+  // Either would otherwise blank the org default for a moment and flip the
+  // project control's meaning while a save was in flight.
+  const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
+    if (next?.orgCountStructuralCells !== undefined) {
+      setOrgCountStructuralCells(next.orgCountStructuralCells)
+    }
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -457,6 +494,9 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.validationCountAudio != null
               ? { validationCountAudio: got.settings.validationCountAudio }
+              : {}),
+            ...(got.settings.countStructuralCells != null
+              ? { countStructuralCells: got.settings.countStructuralCells }
               : {}),
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }
@@ -684,6 +724,7 @@ export function useProjectSettings(
 
     const requiredLevel =
       isTerminologyOnlyPatch(partial) ? resolveTermbaseEditFloor(termbaseEditMinRole)
+      : isCountStructuralOnlyPatch(partial) ? ROLE.PROJECT_LEAD
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
       : SETTINGS_EDIT_ROLE_FLOOR
@@ -845,6 +886,7 @@ export function useProjectSettings(
     updatedBy: server?.updatedBy ?? null,
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
+    orgCountStructuralCells,
     isOnline,
     canEdit,
     reasonCannotEdit,

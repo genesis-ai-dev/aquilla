@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -8,8 +8,8 @@ interface DecayBreakdownProps {
   health: number
   /** Short scope label, e.g. "project health". */
   scopeLabel: string
-  /** Per-cell health 0-100 (decay-derived) for every cell in scope. */
-  healthByCell: Array<{ cellId: string; label: string; health: number }>
+  /** Read current per-cell health only while the breakdown is open. */
+  getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
   /** Decay warn threshold (0-1). Cells above it "need attention". */
   warnThreshold?: number
   /** Number of cells whose pinned source has advanced (AD-9). Optional row. */
@@ -27,17 +27,20 @@ interface DecayBreakdownProps {
 export function DecayBreakdown({
   health,
   scopeLabel,
-  healthByCell,
+  getHealthByCell,
   warnThreshold = DECAY_DEFAULTS.decayWarnThreshold,
   staleSourceCount,
   onJumpToCell,
   children,
 }: DecayBreakdownProps) {
   const t = useT()
+  const [open, setOpen] = useState(false)
   // needsAttention ⟺ decay > warnThreshold ⟺ health < (1 - warnThreshold)*100.
   const attentionHealthCutoff = (1 - warnThreshold) * 100
 
   const { needsAttentionPct, drags } = useMemo(() => {
+    if (!open) return { needsAttentionPct: 0, drags: [] }
+    const healthByCell = getHealthByCell()
     const total = healthByCell.length
     const attention = healthByCell.filter((c) => c.health < attentionHealthCutoff)
     const drags = [...attention]
@@ -47,10 +50,10 @@ export function DecayBreakdown({
       needsAttentionPct: total > 0 ? Math.round((attention.length / total) * 100) : 0,
       drags,
     }
-  }, [healthByCell, attentionHealthCutoff])
+  }, [open, getHealthByCell, attentionHealthCutoff])
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger nativeButton={false} openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
       <PopoverContent side="top" align="start" className="w-72 rounded-lg border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">

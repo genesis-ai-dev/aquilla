@@ -97,6 +97,13 @@ function runHasQueuedWork(run: ContextualRunRecord): boolean {
   return run.status === "parked" && run.total > run.done + run.failed
 }
 
+/** Parked because the run is holding for a human, not because the scope is
+ *  finished (AQU-1300). The two look identical in `status` alone, which is
+ *  exactly why the server sends a reason. */
+function runAwaitsInput(run: ContextualRunRecord): boolean {
+  return run.status === "parked" && run.parkReason === "awaiting_input"
+}
+
 function runFromOverview(row: ContextualOverview["files"][number]): ContextualRunRecord {
   return {
     runId: row.runId,
@@ -115,6 +122,10 @@ function runFromOverview(row: ContextualOverview["files"][number]): ContextualRu
     activeDirections: [],
     proposedDrafts: row.proposedDrafts,
     targetLang: row.targetLang,
+    // Carry the trust-gate reason through (AQU-1300) — without it the overview
+    // row for a file waiting on a human is indistinguishable from a finished
+    // one, which is the exact failure the reason exists to prevent.
+    ...(row.parkReason !== undefined ? { parkReason: row.parkReason } : {}),
   }
 }
 
@@ -123,6 +134,7 @@ function statusLabel(run: ContextualRunRecord, t: TFunction): string {
   if (run.status === "running" || run.status === "pausing") return t("autopilot.status.working")
   if (run.status === "paused") return t("autopilot.status.paused")
   if (run.status === "parked") {
+    if (runAwaitsInput(run)) return t("autopilot.pill.waitingForYou")
     return t(runHasQueuedWork(run) ? "autopilot.status.queued" : "autopilot.status.idle")
   }
   if (run.status === "done") return t("autopilot.status.complete")
@@ -432,6 +444,26 @@ function RunControls({
           {t("autopilot.action.resume")}
         </Button>
       )}
+      {/* AQU-1300. Deliberately NOT a plain Resume: this run has no span
+          budget left, so resuming it would park it again without drafting
+          anything. Both of these buy work first. */}
+      {runAwaitsInput(run) && (
+        <>
+          <Button type="button" size="sm" disabled={busy !== null} onClick={() => onCommand("continue")}>
+            <PencilSparkles data-icon="inline-start" aria-hidden />
+            {t("autopilot.action.continue")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => onCommand("continue-all")}
+          >
+            {t("autopilot.action.translateEverything")}
+          </Button>
+        </>
+      )}
       {["running", "pausing", "paused", "parked"].includes(run.status) && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("terminate")}>
           <Square data-icon="inline-start" aria-hidden />
@@ -457,6 +489,7 @@ const EVENT_KIND_KEYS: Record<string, MessageKey> = {
   drafts_staged: "autopilot.inspector.event.kind.draftsStaged",
   span_outcome: "autopilot.inspector.event.kind.spanOutcome",
   steering_queued: "autopilot.inspector.event.kind.steeringQueued",
+  run_command: "autopilot.inspector.event.kind.runCommand",
   draft_reviewed: "autopilot.inspector.event.kind.draftReviewed",
 }
 
@@ -551,6 +584,11 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
     return event.details.steeringKind === "direction"
       ? t("autopilot.inspector.event.directionQueued")
       : t("autopilot.inspector.event.kind.steeringQueued")
+  }
+  if (event.kind === "run_command") {
+    return event.details.command === "pause"
+      ? t("autopilot.inspector.event.runCommandPause")
+      : t("autopilot.inspector.event.runCommandStop")
   }
   if (event.kind === "draft_reviewed") {
     if (event.details.outcome === "applied") return t("autopilot.inspector.event.draftApplied")

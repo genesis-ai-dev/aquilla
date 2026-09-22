@@ -72,6 +72,15 @@ interface GlossaryEditorProps {
    * project again when this surface replaces the editor center pane. */
   project?: ProjectRecord | null
   patchSettings?: UseProjectSettings["patch"]
+  /**
+   * AQU-1340 — concepts-read status for the WORKSPACE-OWNED path. On that path
+   * ProjectWorkspace owns the `useConcepts` call and folds only `concepts` onto
+   * the record it hands down, so a failed read arrives here indistinguishable
+   * from an empty termbase unless the failure is passed alongside it.
+   */
+  conceptsError?: string | null
+  conceptsLoading?: boolean
+  refreshConcepts?: () => void | Promise<void>
 }
 
 function conceptsEqual(a: Concept[], b: Concept[]): boolean {
@@ -97,6 +106,9 @@ export function GlossaryEditor({
   files: workspaceFiles,
   project: workspaceProject,
   patchSettings: workspacePatchSettings,
+  conceptsError: workspaceConceptsError,
+  conceptsLoading: workspaceConceptsLoading,
+  refreshConcepts: workspaceRefreshConcepts,
 }: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
@@ -171,6 +183,14 @@ export function GlossaryEditor({
   const serverConcepts = workspaceProject
     ? workspaceProject.terminology ?? EMPTY_SERVER_CONCEPTS
     : fetched.concepts
+  // AQU-1340: the hook deliberately fails closed (it sets `error` rather than
+  // reporting "no terms"), so the surface must read that status — dropping it
+  // turns any read failure into the empty-termbase screen.
+  const conceptsError = workspaceProject ? workspaceConceptsError ?? null : fetched.error
+  const conceptsLoading = workspaceProject
+    ? workspaceConceptsLoading ?? false
+    : fetched.isLoading
+  const retryConcepts = workspaceProject ? workspaceRefreshConcepts : fetched.refresh
   const conceptsRef = useRef<Concept[]>(serverConcepts)
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
@@ -195,6 +215,20 @@ export function GlossaryEditor({
   // The drill-down commits through `target.cell.commit`, so it asks the same
   // role-policy question the editor does.
   const canEditCells = canEditTermCells(project?.syncRole)
+  // AQU-1340: three states the empty list used to collapse into one.
+  //   unknown  — the read failed and we hold no termbase: the error state, and
+  //              no whole-termbase writes (an Import here appends to a list the
+  //              client never actually read, doubling every term on recovery).
+  //   pending  — first read in flight: progress, not "no terms yet".
+  //   stale    — a LATER read failed over concepts we already have: keep the
+  //              last good termbase visible and say the refresh failed.
+  const termbaseUnknown = conceptsError != null && concepts.length === 0
+  const termbasePending = conceptsError == null && conceptsLoading && concepts.length === 0
+  const termbaseStale = conceptsError != null && concepts.length > 0
+  const canWriteTermbase = canManage && !termbaseUnknown
+  const termbaseWriteDenial = termbaseUnknown
+    ? t("terminology.editor.loadFailedDisabledTooltip")
+    : termbaseDenial
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(concepts),
@@ -262,10 +296,28 @@ export function GlossaryEditor({
   )
 
   // ── Row callbacks (all reuse store.ts helpers over the live project) ────────
+  // AQU-1340: the mutation callbacks below are memoized on
+  // `[project, canManage, persist]`, so they hold the `guard` from an older
+  // render. The live flag is read through a ref (written in an effect, never
+  // during render) rather than from that stale closure.
+  const termbaseUnknownRef = useRef(termbaseUnknown)
+  useEffect(() => {
+    termbaseUnknownRef.current = termbaseUnknown
+  }, [termbaseUnknown])
+
   const guard = () => {
     if (!project) return null
     if (!canManage) {
       setError(t("terminology.editor.errorRequiresProjectLead"))
+      return null
+    }
+    // Every write emits a DELTA against the last known termbase. When the read
+    // failed we hold no termbase, so that delta is computed against nothing:
+    // an import would append its whole file on top of terms still on the
+    // server, doubling them all once the read recovers (AQU-1337 leaves no way
+    // to merge them back).
+    if (termbaseUnknownRef.current) {
+      setError(t("terminology.editor.loadFailedDetail"))
       return null
     }
     return { ...project, terminology: conceptsRef.current }
@@ -512,12 +564,12 @@ export function GlossaryEditor({
       <header className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
         <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
-        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+        <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
           <Button
             variant="outline"
             size="sm"
             onClick={handleSuggest}
-            disabled={!canManage || suggestRequested}
+            disabled={!canWriteTermbase || suggestRequested}
           >
             <Sparkles data-icon="inline-start" />{" "}
             {suggestRequested
@@ -530,18 +582,18 @@ export function GlossaryEditor({
           type="file"
           accept=".csv,.tsv,.tbx"
           className="hidden"
-          disabled={!canManage}
+          disabled={!canWriteTermbase}
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) handleImport(f)
             e.target.value = ""
           }}
         />
-        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+        <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
           <Button
             variant="outline"
             size="sm"
-            disabled={!canManage}
+            disabled={!canWriteTermbase}
             onClick={() => importInputRef.current?.click()}
           >
             <Upload data-icon="inline-start" /> {t("nav.workspaceActions.import")}
@@ -595,10 +647,10 @@ export function GlossaryEditor({
         </Button>
         {/* i18n-exempt "glossary" is a view token, not copy */}
         {view === "glossary" && (
-          <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
             <Button
               size="sm"
-              disabled={!canManage}
+              disabled={!canWriteTermbase}
               onClick={() => setAddOpen(true)}
               aria-label={t("terminology.editor.addTerm")}
             >
@@ -669,6 +721,22 @@ export function GlossaryEditor({
         <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>
       )}
 
+      {/* AQU-1340: a refresh that failed OVER a termbase we already hold. The
+          last good terms stay on screen (the hook preserves them) and this is
+          non-blocking — writes are still safe against a known termbase. */}
+      {termbaseStale && (
+        <div
+          role="status"
+          data-testid="concepts-refresh-stale"
+          className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          <span>{t("terminology.editor.refreshFailedNotice")}</span>
+          <Button variant="ghost" size="sm" onClick={() => void retryConcepts?.()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
+
       {view === "violations" ? (
         <main className="flex-1 overflow-y-auto p-4">
           {!cellDataReady ? (
@@ -734,9 +802,41 @@ export function GlossaryEditor({
         ))}
 
         {active.length === 0 && suggested.length === 0 && (
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            {t("terminology.editor.noTermsYet")}
-          </p>
+          // AQU-1340: "No terms yet" is claimed ONLY when the read succeeded
+          // and came back empty. A failed or in-flight read says so instead.
+          termbaseUnknown ? (
+            <div
+              role="alert"
+              data-testid="concepts-read-error"
+              className="flex flex-col items-center gap-3 px-4 py-10 text-center"
+            >
+              <p className="text-sm font-medium">{t("terminology.editor.loadFailedTitle")}</p>
+              <p className="max-w-md text-sm text-muted-foreground">
+                {t("terminology.editor.loadFailedDetail")}
+              </p>
+              {/* The raw reason is a server/network message, not UI copy — it
+                  renders verbatim like the write-failure banner above. */}
+              {conceptsError && (
+                <p className="max-w-md text-xs text-muted-foreground">{conceptsError}</p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void retryConcepts?.()}
+                data-testid="concepts-read-retry"
+              >
+                {t("common.retry")}
+              </Button>
+            </div>
+          ) : termbasePending ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground" role="status">
+              {t("terminology.editor.loadingGlossary")}
+            </p>
+          ) : (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              {t("terminology.editor.noTermsYet")}
+            </p>
+          )
         )}
 
         {/* Archived toggle + rows */}

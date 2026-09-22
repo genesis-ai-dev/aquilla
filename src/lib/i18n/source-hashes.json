@@ -2962,7 +2962,13 @@
     "editor.view.settings": "bea3f3865295923d",
     "editor.timeline.qualityOriginalTooltip": "345f72f202b2bce8",
     "comments.stale.badge": "a03f2386ae06b211",
-    "comments.drawer.closeLabel": "3530ee6dc03cdc69"
+    "comments.drawer.closeLabel": "3530ee6dc03cdc69",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -5918,7 +5924,13 @@
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
     "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
-    "org.orgSettings.noSessionError": "2e7c28aba070c036"
+    "org.orgSettings.noSessionError": "2e7c28aba070c036",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -8864,7 +8876,13 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -11820,7 +11838,13 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -16639,7 +16663,13 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -21458,6 +21488,12 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   }
 }

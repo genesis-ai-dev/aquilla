@@ -72,6 +72,17 @@ export const terminology = defineNamespace({
     "terminology.editor.checkingTerminology": "Checking terminology…",
     "terminology.editor.noTermsYet":
       "No terms yet. Add one with “Add term”, or use “Suggest terms”.",
+    // AQU-1340: a FAILED termbase read must never borrow the empty state above.
+    // "No terms yet" told users their glossary had been deleted when the read
+    // had merely failed, and the reasonable response — re-importing the CSV —
+    // doubles every term once the read recovers.
+    "terminology.editor.loadFailedTitle": "Couldn’t load terms",
+    "terminology.editor.loadFailedDetail":
+      "The termbase could not be read, so no terms are shown. Nothing has been deleted — retry once the connection recovers.",
+    "terminology.editor.loadFailedDisabledTooltip":
+      "Terms cannot be added or imported until the termbase loads.",
+    "terminology.editor.refreshFailedNotice":
+      "Showing the terms last loaded — the most recent read failed.",
     "terminology.editor.showArchived": plural({
       one: "Show archived ({count})",
       other: "Show archived ({count})",

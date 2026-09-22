@@ -113,7 +113,7 @@ export async function hashPasswordWerkzeugScrypt(
       p: params.p,
       maxmem: 64 * 1024 * 1024,
     })
-    digestHex = dk.toString("hex")
+    digestHex = nobleBytesToHex(dk)
   } catch {
     const dk = nobleScrypt(utf8Bytes(password), utf8Bytes(salt), {
       N: params.N,

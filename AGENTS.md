@@ -45,7 +45,10 @@ Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/J
 
 - Snapshots (under redesign) — see Plan 2.
 - Cross-browser. Chromium only for v1.
-- Tauri shell — see Plan 3 for the separate `tauri-driver` suite.
+- Tauri shell — native-surface smoke suite at `e2e/tauri/smoke.spec.ts` (WebdriverIO +
+  `@wdio/tauri-service` embedded provider, not Playwright/tauri-driver — see
+  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Release-gate
+  only (`tauri-release.yml`), not a push gate.
 
 ## Project-level conventions
 

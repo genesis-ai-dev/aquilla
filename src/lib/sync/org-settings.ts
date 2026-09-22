@@ -83,6 +83,13 @@ export interface OrgWideSettings {
    */
   allowScopedLaneAssignment?: boolean
   /**
+   * AQU-1083: the org-wide default for whether structural cells — chapter
+   * headings, section titles, book names — count toward progress. Unset means
+   * they DO, which is what every project did before this existed. A project
+   * may override it.
+   */
+  countStructuralCells?: boolean
+  /**
    * AQU-1037: Minimum effective project role allowed to assign, reassign, or
    * unassign file/chapter/target-lane work and route AI changesets. Default
    * (when absent) = PROJECT_LEAD (500), preserving prior behavior.
@@ -159,6 +166,14 @@ export interface OrgSettingsResponse {
   version: number
   updatedAt: string | null
   updatedBy: number | null
+  /**
+   * AQU-1083: how many projects in this org carry their own
+   * countStructuralCells and so ignore the org default.
+   *
+   * Absent from an older server, which reads as none — the prompt simply does
+   * not appear, which is the pre-feature behaviour.
+   */
+  countStructuralOverrides?: number
 }
 
 export type OrgPatchResult =
@@ -265,4 +280,32 @@ export async function postPromotionRequest(
   if (res.status === 403) return { kind: "forbidden" }
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: text }
+}
+
+/**
+ * POST .../settings/count-structural/reset-project-overrides — put every
+ * project in the org back on the org's structural-cell default.
+ *
+ * Clears the per-project key rather than stamping the current value into each
+ * one, so those projects follow the NEXT change of the default too.
+ */
+export async function resetCountStructuralOverrides(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/orgs/${orgId}/settings/count-structural/reset-project-overrides`,
+      { method: "POST", headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      return { kind: "error", message: body?.error ?? `HTTP ${res.status}` }
+    }
+    const body = (await res.json()) as { cleared: number }
+    return { kind: "ok", cleared: Number(body.cleared) || 0 }
+  } catch (err) {
+    return { kind: "error", message: String(err) }
+  }
 }

@@ -225,3 +225,40 @@ describe("ExpandableFileList — Jump to Testament control (AQU-1084)", () => {
     expect(screen.getByText("Ungrouped")).toBeInTheDocument()
   })
 })
+
+describe("ExpandableFileList — on-demand chapter health", () => {
+  it("does no projection work while collapsed and reads current health on each reopen", () => {
+    let label = "Initial chapter"
+    const getActiveChapterHealth = vi.fn(() => [{
+      key: "chapter", label, translated: 0, validated: 0, total: 1, cells: [],
+    }])
+    renderList([file("Genesis", { bookCode: "GEN" })], {
+      activeFileId: "genesis", hasActiveChapters: true,
+      getActiveChapterHealth, deferSectionProgress: true,
+    })
+    expect(getActiveChapterHealth).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }))
+    expect(getActiveChapterHealth).toHaveBeenCalledTimes(1)
+    expect(screen.getByText("Initial chapter")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
+    label = "Updated chapter"
+    expect(getActiveChapterHealth).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }))
+    expect(getActiveChapterHealth).toHaveBeenCalledTimes(2)
+    expect(screen.getByText("Updated chapter")).toBeInTheDocument()
+    expect(screen.queryByText("Initial chapter")).not.toBeInTheDocument()
+  })
+
+  it("does not build an expanded active file's health while its corpus is hidden", () => {
+    localStorage.setItem("sidebar:expanded:p1", JSON.stringify(["genesis"]))
+    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(["OT"]))
+    const getActiveChapterHealth = vi.fn(() => [])
+    renderList([file("Genesis", { bookCode: "GEN" })], {
+      activeFileId: "genesis", hasActiveChapters: true,
+      getActiveChapterHealth, deferSectionProgress: true,
+    })
+    expect(getActiveChapterHealth).not.toHaveBeenCalled()
+    fireEvent.click(headerToggle("OT"))
+    expect(getActiveChapterHealth).toHaveBeenCalledTimes(1)
+  })
+})

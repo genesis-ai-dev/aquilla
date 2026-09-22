@@ -1104,3 +1104,40 @@ describe("text a line already holds (AQU-1360)", () => {
     expect(by("empty")).not.toHaveProperty("alreadyThere")
   })
 })
+
+describe("showing the line's own timecode (AQU-1360)", () => {
+  const lines = [
+    cell({ cellId: "a", startMs: 10000, endMs: 10800, cueRef: "00:00:10.000 --> 00:00:10.800" }),
+    cell({ cellId: "b", startMs: 20000, endMs: 20800, cueRef: "00:00:20.000 --> 00:00:20.800" }),
+  ]
+  const refs = (rows: TargetRow[]) => matchTargetRowsByOverlap(rows, lines).matched.map((m) => m.cellRef ?? null)
+
+  it("stays out of the way when the cue sits exactly on its line", () => {
+    expect(refs([
+      { ref: "00:00:10.000 --> 00:00:10.800", text: "a", startMs: 10000, endMs: 10800 },
+      { ref: "00:00:20.000 --> 00:00:20.800", text: "b", startMs: 20000, endMs: 20800 },
+    ])).toEqual([null, null])
+  })
+
+  it("appears when the cue is shifted, so drift is visible without reading the text", () => {
+    expect(refs([{ ref: "00:00:10.300 --> 00:00:11.100", text: "a", startMs: 10300, endMs: 11100 }]))
+      .toEqual(["00:00:10.000 --> 00:00:10.800"])
+  })
+
+  it("compares numbers, not strings — an SRT comma is not drift", () => {
+    expect(refs([{ ref: "00:00:10,000 --> 00:00:10,800", text: "a", startMs: 10000, endMs: 10800 }]))
+      .toEqual([null])
+  })
+
+  it("stays out of the way on a file the frame-rate correction lined up", () => {
+    const PAL = 25 / (24000 / 1001)
+    const cells = Array.from({ length: 40 }, (_, i) =>
+      cell({ cellId: `c${i}`, startMs: 5000 + i * 2500, endMs: 6200 + i * 2500 + (i % 3) * 300, cueRef: `line ${i}` }))
+    const rows = cells.map((c, i) => ({
+      ref: `cue ${i}`, text: `t${i}`, startMs: Math.round(c.startMs! / PAL), endMs: Math.round(c.endMs! / PAL),
+    }))
+    const result = matchTargetRowsByOrder(rows, cells)
+    expect(result.timebase).toBeDefined()
+    expect(result.matched.filter((m) => m.cellRef)).toHaveLength(0)
+  })
+})

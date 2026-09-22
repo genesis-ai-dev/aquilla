@@ -196,6 +196,8 @@ function toMatchedCell(
   text: string,
   ref: string,
   flag?: TargetMatchFlag,
+  /** Show the line's own timecode — only when it disagrees with the cue's. */
+  showCellRef = false,
 ): FileTargetMatchedCell {
   const currentText = cell.translated ?? ""
   const current = currentText.trim()
@@ -211,7 +213,7 @@ function toMatchedCell(
     parentId: cell.targetEventId ?? cell.sourceEventId ?? "",
     ref,
     sourceText: cell.original,
-    ...(cell.cueRef ? { cellRef: cell.cueRef } : {}),
+    ...(showCellRef && cell.cueRef ? { cellRef: cell.cueRef } : {}),
     ...(flag ? { flag } : {}),
     ...(alreadyThere ? { alreadyThere } : {}),
   }
@@ -484,6 +486,11 @@ function sharedTimingRows(a: OverlapAssignment): Set<number> {
   return shared
 }
 
+/** Below this, a cue's and its line's timings count as the same when deciding
+ *  whether to show the line's own timecode: under half a frame at every rate
+ *  in timebase.ts, so only real drift prints a second timecode. */
+const CELL_REF_TOLERANCE_MS = 20
+
 /** Warn when fewer than this share of the pairings are close matches. Every
  *  correct file measured stays above 0.75; a start offset falls far below it
  *  (a 2s offset on a 650-cue episode: 640 "matched", 7 correct) and so does a
@@ -711,15 +718,24 @@ export function matchTargetRowsByOverlap(
       })
       continue
     }
-    const cell = assignment.cells[cellAt].cell
+    const { cell, timing: lineTiming } = assignment.cells[cellAt]
     const flag: TargetMatchFlag | undefined = contested.assigned.has(at)
       ? "contested"
       : shared.has(at)
         ? "sharedTiming"
         : undefined
+    // Compared as numbers, on the timing the matcher used (rescaled when a
+    // correction applied), so an SRT comma, a corrected frame rate, or a
+    // sub-frame rounding difference never prints a second timecode.
+    const cueTiming = assignment.rows[at].timing
+    const drifted =
+      Math.abs(cueTiming.startMs - lineTiming.startMs) > CELL_REF_TOLERANCE_MS ||
+      Math.abs(cueTiming.endMs - lineTiming.endMs) > CELL_REF_TOLERANCE_MS
     // The cue's timecode is the only meaningful label a VTT row has — a
     // cue-sourced cell's `canonicalRef` is an opaque group id.
-    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`, flag))
+    matched.push(
+      toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`, flag, drifted),
+    )
   }
 
   const uncovered = uncoveredLines(cells, matched)

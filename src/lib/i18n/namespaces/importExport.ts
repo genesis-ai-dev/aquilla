@@ -992,29 +992,78 @@ export const importExport = defineNamespace({
       "yet verified.",
     "importExport.preview.reviewBeforeImporting": "Review before importing",
     "importExport.preview.structuralContentAriaLabel": "Structural content",
+    "importExport.review.alreadyThereCount": plural({
+      one: "{count} already there",
+      other: "{count} already there",
+    }),
+    "importExport.review.brokenTimecodeCount": plural({
+      one: "{count} broken timecode",
+      other: "{count} broken timecodes",
+    }),
     "importExport.review.conflictCount": plural({
       one: "{count} conflict",
       other: "{count} conflicts",
+    }),
+    "importExport.review.contestedWarning": plural({
+      one: "{count} row competed with another cue for the same line and was left unticked. " +
+        "Check it before importing.",
+      other: "{count} rows competed with another cue for the same line and were left " +
+        "unticked. Check them before importing.",
     }),
     "importExport.review.deselectAll": "Deselect all",
     "importExport.review.importCellCount": plural({
       one: "Import {count} cell",
       other: "Import {count} cells",
     }),
+    "importExport.review.looseFitWarning": "Many cues only partly overlap the lines they were paired with. The file may be " +
+      "offset in time, or cut into different lines than this one. Check the pairings " +
+      "before importing.",
     "importExport.review.matchedCount": "{count} matched",
     "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
       "order. Check the source text next to each row to confirm alignment " +
       "before importing.",
+    "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
+    "importExport.review.reasonLostItsLine": "Lost its line to another cue",
+    "importExport.review.reasonNoLineInReach": "No line within reach",
     "importExport.review.replacesExisting": "Replaces: {text}",
+    "importExport.review.rowAlreadyThere": "Already there",
+    "importExport.review.rowContested": "Competed for the same line, check both",
+    "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
+    "importExport.review.sharedTimingWarning": plural({
+      one: "{count} row has exactly the same timing as another cue, so only file order " +
+        "decided its line. It was left unticked.",
+      other: "{count} rows have exactly the same timing as another cue, so only file order " +
+        "decided their lines. They were left unticked.",
+    }),
+    "importExport.review.skippedCueCount": plural({
+      one: "{count} cue skipped (empty or unreadable)",
+      other: "{count} cues skipped (empty or unreadable)",
+    }),
+    "importExport.review.timebaseNamed": plural({
+      one: "Timings in the uploaded file were adjusted from {fromFps} to {toFps} frames per " +
+        "second, which lined up {count} more line.",
+      other: "Timings in the uploaded file were adjusted from {fromFps} to {toFps} frames per " +
+        "second, which lined up {count} more lines.",
+    }),
+    "importExport.review.timebaseUnnamed": plural({
+      one: "Timings in the uploaded file were adjusted by {percent}, which lined up {count} " +
+        "more line.",
+      other: "Timings in the uploaded file were adjusted by {percent}, which lined up {count} " +
+        "more lines.",
+    }),
+    "importExport.review.timingNote": "Translations keep this file's timings. Timings in the uploaded file are only used " +
+      "to find each line.",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
       one: "{count} cell not covered",
       other: "{count} cells not covered",
     }),
+    "importExport.review.uncoveredListTitle": "Lines left without a translation",
     "importExport.review.uncoveredSourceCellCount": plural({
       one: "{count} source cell not covered",
       other: "{count} source cells not covered",
     }),
+    "importExport.review.unmatchedListTitle": "Cues that didn't find a line",
     "importExport.review.unmatchedRowCount": plural({
       one: "{count} unmatched row",
       other: "{count} unmatched rows",
@@ -2695,6 +2744,26 @@ export const importExport = defineNamespace({
           "as a heading or a layout marker. Short noun phrase; sighted users see " +
           "only the dash.",
       },
+      "importExport.review.alreadyThereCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading: how many " +
+          "incoming rows carry exactly the text their line already holds, so there " +
+          "is nothing to import for them. Count plus a short phrase meaning 'present " +
+          "already'; sits beside sibling fragments, so keep it short.",
+        placeholders: {
+          count: "Number of incoming rows whose text the matched line already holds.",
+        },
+      },
+      "importExport.review.brokenTimecodeCount": {
+        description:
+          "Amber figure in the summary strip under the 'Review matches' heading: how " +
+          "many cues in the uploaded subtitle file have a timecode that ends before " +
+          "it starts, so they could not be placed on any line. Count plus noun " +
+          "phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded cues whose timecode runs backwards.",
+        },
+      },
       "importExport.review.conflictCount": {
         description:
           "Amber-coloured figure in the summary strip under the 'Review matches' " +
@@ -2703,6 +2772,17 @@ export const importExport = defineNamespace({
           "sits beside sibling fragments.",
         placeholders: {
           count: "Number of pairings that would overwrite existing translated text.",
+        },
+      },
+      "importExport.review.contestedWarning": {
+        description:
+          "Amber warning above the match-review list. Two cues from the uploaded " +
+          "subtitle file both lay mostly on the same line of the open file, so one " +
+          "of them ended up on a different line or none. From timing alone either " +
+          "could be the right one, so the affected rows were left unticked and the " +
+          "user is asked to check them.",
+        placeholders: {
+          count: "Number of review rows involved in such a contest.",
         },
       },
       "importExport.review.deselectAll": {
@@ -2721,6 +2801,14 @@ export const importExport = defineNamespace({
         placeholders: {
           count: "Number of ticked lines that will be written into the project.",
         },
+      },
+      "importExport.review.looseFitWarning": {
+        description:
+          "Amber warning above the match-review list, shown when a large share of the " +
+          "pairings between uploaded subtitle cues and the open file's lines barely " +
+          "overlap in time. Usually the uploaded file's timings are shifted, or its " +
+          "translator split the dialogue into different lines. Asks the user to check " +
+          "the pairings before saving anything.",
       },
       "importExport.review.matchedCount": {
         description:
@@ -2741,6 +2829,25 @@ export const importExport = defineNamespace({
           "bottom by position, which is easy to get wrong, and asks the user to " +
           "eyeball the original text shown beside each row before committing.",
       },
+      "importExport.review.reasonBackwardsTimecode": {
+        description:
+          "Reason shown next to one entry in the list of uploaded cues that were not " +
+          "paired with any line: the cue's end time is earlier than its start time, a " +
+          "mistake in the uploaded file itself. Short sentence fragment.",
+      },
+      "importExport.review.reasonLostItsLine": {
+        description:
+          "Reason shown next to one entry in the list of uploaded cues that were not " +
+          "paired with any line: the cue lay mostly on a line that another uploaded " +
+          "cue was paired with instead, typically the second half of a line the " +
+          "translator split in two. Short sentence fragment.",
+      },
+      "importExport.review.reasonNoLineInReach": {
+        description:
+          "Reason shown next to one entry in the list of uploaded cues that were not " +
+          "paired with any line: no line of the open file plays close enough in time " +
+          "to this cue. Short sentence fragment.",
+      },
       "importExport.review.replacesExisting": {
         description:
           "Amber warning line under one row of the match-review list, shown only " +
@@ -2752,6 +2859,74 @@ export const importExport = defineNamespace({
           text: "The translation currently stored for this line, shown so the user can " +
             "see what would be lost — do not translate the substituted value.",
         },
+      },
+      "importExport.review.rowAlreadyThere": {
+        description:
+          "Small grey tag on one row of the match-review list: the line already holds " +
+          "exactly this text, so importing it would change nothing. Two or three words.",
+      },
+      "importExport.review.rowContested": {
+        description:
+          "Small amber tag on one row of the match-review list: this cue and another " +
+          "one both lay mostly on the same line, so the user should look at both rows " +
+          "before importing. Short phrase ending in an instruction.",
+      },
+      "importExport.review.rowSharedTiming": {
+        description:
+          "Small amber tag on one row of the match-review list: another uploaded cue " +
+          "has exactly the same start and end time, as when two people speak at " +
+          "once, so which line each went to was decided only by their order in the " +
+          "file. Short phrase ending in an instruction.",
+      },
+      "importExport.review.sharedTimingWarning": {
+        description:
+          "Amber warning above the match-review list. Some uploaded cues share an " +
+          "identical time range, as when two people speak at once, so timing could " +
+          "not tell them apart and their order in the file decided which line each " +
+          "went to. Those rows were left unticked for the user to check.",
+        placeholders: {
+          count: "Number of review rows sharing an identical time range with another cue.",
+        },
+      },
+      "importExport.review.skippedCueCount": {
+        description:
+          "Amber figure in the summary strip under the 'Review matches' heading: how " +
+          "many cues in the uploaded subtitle file never became rows at all, because " +
+          "they had no text or a timing line that could not be read. The bracketed " +
+          "part names those two causes.",
+        placeholders: {
+          count: "Number of cues in the uploaded file that produced no row.",
+        },
+      },
+      "importExport.review.timebaseNamed": {
+        description:
+          "Note above the match-review list: the uploaded subtitle file was authored " +
+          "at a different video frame rate than the open file, so every one of its " +
+          "timings was rescaled before pairing. Names both frame rates and how many " +
+          "more lines lined up as a result.",
+        placeholders: {
+          fromFps: "Frame rate the uploaded file's timings were authored at, e.g. \"25\". Keep as is.",
+          toFps: "Frame rate the timings were moved onto, e.g. \"23.976\". Keep as is.",
+          count: "How many more lines lined up after the adjustment.",
+        },
+      },
+      "importExport.review.timebaseUnnamed": {
+        description:
+          "Note above the match-review list: every timing in the uploaded subtitle " +
+          "file was stretched or shrunk by a small percentage before pairing, to undo " +
+          "a frame-rate mismatch whose exact rates can't be named. Says by how much " +
+          "and how many more lines lined up as a result.",
+        placeholders: {
+          percent: "Signed percentage the timings were scaled by, e.g. \"+0.1%\".",
+          count: "How many more lines lined up after the adjustment.",
+        },
+      },
+      "importExport.review.timingNote": {
+        description:
+          "Grey note above the match-review list when a subtitle file was paired by " +
+          "time: importing fills in only the translated text, and each line keeps the " +
+          "open file's own start and end times. The uploaded file's timings are used " +
+          "only to work out which line each translation belongs to.",
       },
       "importExport.review.title": {
         description:
@@ -2771,6 +2946,11 @@ export const importExport = defineNamespace({
             "for.",
         },
       },
+      "importExport.review.uncoveredListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every line of " +
+          "the open file that received no translation from the upload.",
+      },
       "importExport.review.uncoveredSourceCellCount": {
         description:
           "Figure in the summary strip under the 'Review matches' heading when " +
@@ -2782,6 +2962,12 @@ export const importExport = defineNamespace({
           count: "Number of existing original-text lines the upload did not supply a " +
             "translation for.",
         },
+      },
+      "importExport.review.unmatchedListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every cue of " +
+          "the uploaded subtitle file that was not paired with any line, each with " +
+          "the reason.",
       },
       "importExport.review.unmatchedRowCount": {
         description:

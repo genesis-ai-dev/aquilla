@@ -17,19 +17,22 @@
 
 import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatCount, formatPercent } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
+import { cn } from "@/lib/utils"
 import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
-  subtitleToTargetRows,
+  subtitleToTargetRowsWithReport,
   CUE_TARGET_EXTENSIONS,
-  vttToTargetRows,
+  vttToTargetRowsWithReport,
   type FileTargetCellRef,
   type FileTargetMatchResult,
+  type TargetOrphanReason,
   type TargetRow,
 } from "@/lib/import-file-target"
 import {
@@ -100,7 +103,7 @@ export function FileTargetImportPanel({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
 }: FileTargetImportPanelProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
@@ -114,9 +117,13 @@ export function FileTargetImportPanel({
   const showReview = useCallback((result: FileTargetMatchResult, byOrder: boolean) => {
     setMatchResult(result)
     setMatchedByOrder(byOrder)
-    // Pre-select only non-conflicting cells — overwriting an existing
-    // translation requires an explicit tick.
-    setSelectedCellIds(new Set(result.matched.filter((m) => !m.hasConflict).map((m) => m.cellId)))
+    // Pre-select only rows that are safe to take as they stand. Overwriting an
+    // existing translation needs an explicit tick; so does a row the matcher
+    // flagged for a person to check (AQU-1360); and a row whose text the line
+    // already holds has nothing to import at all.
+    setSelectedCellIds(new Set(
+      result.matched.filter((m) => !m.hasConflict && !m.alreadyThere && !m.flag).map((m) => m.cellId),
+    ))
     setStep("review")
   }, [])
 
@@ -140,22 +147,27 @@ export function FileTargetImportPanel({
         // positionally (cue N → cell N) — the review screen surfaces any
         // misalignment before commit via the same order-match warning used
         // for spreadsheets without a ref column.
-        const rows = vttToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
+        const { rows, skippedCues } = vttToTargetRowsWithReport(
+          decodeImportText(await file.arrayBuffer(), file.name),
+        )
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInVtt"))
           return
         }
-        showReview(matchTargetRowsByOrder(rows, cells), true)
+        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
         // the same ref-less path as VTT — timecode overlap when the file's
         // cells carry timings (AQU-1143), cue N → cell N otherwise.
-        const rows = subtitleToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), ext)
+        const { rows, skippedCues } = subtitleToTargetRowsWithReport(
+          decodeImportText(await file.arrayBuffer(), file.name),
+          ext,
+        )
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
           return
         }
-        showReview(matchTargetRowsByOrder(rows, cells), true)
+        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
@@ -333,12 +345,39 @@ export function FileTargetImportPanel({
 
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
-    const { matched, orphans, unmatchedSourceCount } = matchResult
+    const { matched, orphans, uncovered, timebase, looseFit, skippedCues = 0 } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
+    const alreadyThere = matched.filter((m) => m.alreadyThere)
+    // Rows a person can actually choose to import.
+    const selectable = matched.filter((m) => !m.alreadyThere)
+    const contestedRows = matched.filter((m) => m.flag === "contested").length
+    const sharedTimingRows = matched.filter((m) => m.flag === "sharedTiming").length
+    const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
+    const unplaced = orphans.length - brokenTimecodes
     // AQU-1143: a ref-less match that aligned by cue timecode is not the
     // fragile top-to-bottom pairing this warns about — don't send the user off
     // to eyeball 500 rows for a drift that cannot have happened.
     const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
+    const reasonLabel = (reason: TargetOrphanReason | undefined) =>
+      reason === "backwardsTimecode"
+        ? t("importExport.review.reasonBackwardsTimecode")
+        : reason === "lostItsLine"
+          ? t("importExport.review.reasonLostItsLine")
+          : reason === "noLineInReach"
+            ? t("importExport.review.reasonNoLineInReach")
+            : null
+    const timebaseNote = timebase
+      ? timebase.fromFps && timebase.toFps
+        ? t("importExport.review.timebaseNamed", {
+            fromFps: timebase.fromFps,
+            toFps: timebase.toFps,
+            count: timebase.closeAfter - timebase.closeBefore,
+          })
+        : t("importExport.review.timebaseUnnamed", {
+            percent: formatPercent(timebase.scale - 1, locale, { maximumFractionDigits: 1, signDisplay: "always" }),
+            count: timebase.closeAfter - timebase.closeBefore,
+          })
+      : null
 
     function toggleCell(cellId: string) {
       setSelectedCellIds((prev) => {
@@ -353,32 +392,113 @@ export function FileTargetImportPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-3 py-2">
         <div className="shrink-0">
           <p className="text-sm font-medium">{t("importExport.review.title")}</p>
+          {/* AQU-1360: anything other than a clean pairing is amber. Unmatched
+              and uncovered counts used to share the grey of "8 matched", so a
+              file that mostly failed looked exactly like a perfect one. */}
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span>{t("importExport.review.matchedCount", { count: matched.length })}</span>
+            {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: alreadyThere.length })}</span>}
             {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: conflicts.length })}</span>}
-            {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
-            {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
+            {unplaced > 0 && <span className="text-amber-600">{t("importExport.review.unmatchedRowCount", { count: unplaced })}</span>}
+            {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: brokenTimecodes })}</span>}
+            {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: uncovered.length })}</span>}
+            {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: skippedCues })}</span>}
           </div>
           {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
               {t("importExport.review.orderMatchWarning")}
             </p>
           )}
+          {contestedRows > 0 && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {t("importExport.review.contestedWarning", { count: contestedRows })}
+            </p>
+          )}
+          {sharedTimingRows > 0 && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {t("importExport.review.sharedTimingWarning", { count: sharedTimingRows })}
+            </p>
+          )}
+          {looseFit && (
+            <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
+          )}
+          {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
+          {matchResult.alignedBy === "overlap" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">{t("importExport.review.timingNote")}</p>
+          )}
+
+          {orphans.length > 0 && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                {t("importExport.review.unmatchedListTitle")} ({formatCount(orphans.length, locale)})
+              </summary>
+              <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                {orphans.map((o, i) => (
+                  <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
+                    <p className="font-mono text-[10px] text-muted-foreground">
+                      {o.ref}
+                      {reasonLabel(o.reason) && (
+                        <span className="ms-1.5 font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                      )}
+                    </p>
+                    <p className="truncate text-foreground/80">{o.text}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {uncovered.length > 0 && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                {t("importExport.review.uncoveredListTitle")} ({formatCount(uncovered.length, locale)})
+              </summary>
+              <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                {uncovered.map((u) => (
+                  <li key={u.cellId} className="px-3 py-1.5">
+                    {u.cellRef && <p className="font-mono text-[10px] text-muted-foreground">{u.cellRef}</p>}
+                    <p className="truncate text-foreground/80">{u.sourceText}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
           <div className="divide-y">
             {matched.map((m) => (
-              <label key={m.cellId} className="flex items-start gap-2 px-3 py-2 hover:bg-muted/30">
+              <label
+                key={m.cellId}
+                className={cn("flex items-start gap-2 px-3 py-2 hover:bg-muted/30", m.alreadyThere && "opacity-60")}
+              >
                 <input
                   type="checkbox"
                   className="mt-0.5 rounded"
                   checked={selectedCellIds.has(m.cellId)}
+                  disabled={m.alreadyThere}
                   onChange={() => toggleCell(m.cellId)}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="font-mono text-[10px] text-muted-foreground">{m.ref}</p>
-                  <p className="truncate text-[10px] text-muted-foreground/80">{m.sourceText}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">
+                    {m.ref}
+                    {m.flag && (
+                      <span className="ms-1.5 font-sans text-amber-600">
+                        {m.flag === "contested"
+                          ? t("importExport.review.rowContested")
+                          : t("importExport.review.rowSharedTiming")}
+                      </span>
+                    )}
+                    {m.alreadyThere && (
+                      <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
+                    )}
+                  </p>
+                  {/* The line's own timecode, present only when it disagrees
+                      with the cue's — so drift announces itself, and a clean
+                      file doesn't print every timecode twice. */}
+                  <p className="truncate text-[10px] text-muted-foreground/80">
+                    {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
+                    {m.sourceText}
+                  </p>
                   <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
                   {m.hasConflict && (
                     <p className="truncate text-[10px] text-amber-600">
@@ -398,12 +518,13 @@ export function FileTargetImportPanel({
             type="button"
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => {
-              const allIds = new Set(matched.map((m) => m.cellId))
+              // Rows whose text is already there have nothing to import.
+              const allIds = new Set(selectable.map((m) => m.cellId))
               const allSelected = allIds.size > 0 && [...allIds].every((id) => selectedCellIds.has(id))
               setSelectedCellIds(allSelected ? new Set() : allIds)
             }}
           >
-            {selectedCellIds.size === matched.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
+            {selectedCellIds.size === selectable.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
           </button>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>

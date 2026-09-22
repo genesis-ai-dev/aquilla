@@ -380,3 +380,119 @@ describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
     expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
   })
 })
+
+describe("FileTargetImportPanel — a review screen that says what happened (AQU-1360)", () => {
+  const tc = (ms: number) => {
+    const h = Math.floor(ms / 3_600_000), m = Math.floor(ms / 60_000) % 60, s = Math.floor(ms / 1000) % 60
+    const pad = (n: number, w = 2) => String(n).padStart(w, "0")
+    return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms % 1000, 3)}`
+  }
+  const line = (n: number, startMs: number, endMs: number, translated = "") => ({
+    cellId: `line-${n}`,
+    fileId: "file-1",
+    canonicalRef: null,
+    sourceEventId: `se-${n}`,
+    targetEventId: undefined,
+    translated,
+    original: `SOURCE ${n}`,
+    startMs,
+    endMs,
+    cueRef: `${tc(startMs)} --> ${tc(endMs)}`,
+  })
+  const vtt = (cues: [number, number, string][]) =>
+    ["WEBVTT", "", ...cues.flatMap(([a, b, text]) => [`${tc(a)} --> ${tc(b)}`, text, ""])].join("\n")
+  const checkboxFor = (text: string) =>
+    screen.getByText(text).closest("label")!.querySelector("input") as HTMLInputElement
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 0, skippedCount: 0 })
+  })
+
+  const four = [line(1, 10000, 10800), line(2, 20000, 20800), line(3, 30000, 30800), line(4, 40000, 40800)]
+
+  it("names the cues that found no line, with the reason, and the lines left without a translation — in amber", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "TARGET 1"],
+      [30000, 28000, "TARGET 3 backwards"],
+      [100000, 100800, "TARGET far away"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("1 unmatched row")).toHaveClass("text-amber-600")
+    expect(screen.getByText("1 broken timecode")).toHaveClass("text-amber-600")
+    expect(screen.getByText("3 cells not covered")).toHaveClass("text-amber-600")
+    // The lists, with a reason per cue and each uncovered line by name.
+    expect(screen.getByText("Timecode ends before it starts")).toBeInTheDocument()
+    expect(screen.getByText("No line within reach")).toBeInTheDocument()
+    expect(screen.getByText("TARGET 3 backwards")).toBeInTheDocument()
+    for (const name of ["SOURCE 2", "SOURCE 3", "SOURCE 4"]) expect(screen.getByText(name)).toBeInTheDocument()
+  })
+
+  it("leaves contested, shared-timing and already-there rows unticked, and won't tick an already-there row", async () => {
+    renderPanel({
+      cells: [
+        line(1, 10000, 10400),
+        line(2, 10500, 10900),
+        line(3, 20000, 21500),
+        line(4, 20000, 21500),
+        line(5, 30000, 30800, "same words"),
+      ],
+    })
+    await selectFile(makeFile(vtt([
+      [10500, 10900, "swap one"],
+      [10500, 10900, "swap two"],
+      [20000, 21500, "PETER"],
+      [20000, 21500, "ANDREW"],
+      [30000, 30800, "same words"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    for (const text of ["swap one", "swap two", "PETER", "ANDREW", "same words"]) {
+      expect(checkboxFor(text).checked).toBe(false)
+    }
+    expect(checkboxFor("same words").disabled).toBe(true)
+    expect(screen.getAllByText("Competed for the same line, check both")).toHaveLength(2)
+    expect(screen.getAllByText("Same timing as another cue, check which is which")).toHaveLength(2)
+    expect(screen.getByText("Already there")).toBeInTheDocument()
+    expect(screen.getByText(/2 rows competed with another cue for the same line/)).toBeInTheDocument()
+    expect(screen.getByText(/2 rows have exactly the same timing as another cue/)).toBeInTheDocument()
+    // "Select all" never ticks a row whose text is already there.
+    fireEvent.click(screen.getByText(/select all/i))
+    expect(checkboxFor("same words").checked).toBe(false)
+    expect(checkboxFor("PETER").checked).toBe(true)
+  })
+
+  it("shows the line's own timecode beside a shifted cue, and says timings aren't kept", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([[10300, 11100, "TARGET 1 late"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // Line 1's own timecode appears because the cue is 300ms off; line 2's doesn't.
+    expect(screen.getByText(/00:00:10\.000 --> 00:00:10\.800/)).toBeInTheDocument()
+    expect(screen.queryByText(/00:00:20\.000 --> 00:00:20\.800 /)).not.toBeInTheDocument()
+    expect(screen.getByText(/Translations keep this file's timings/)).toBeInTheDocument()
+  })
+
+  it("counts the cues that never became rows", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(
+      ["WEBVTT", "", `${tc(10000)} --> ${tc(10800)}`, "TARGET 1", "", `${tc(20000)} --> ${tc(20800)}`, "", ""].join("\n"),
+      "episode.vtt",
+    ))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("1 cue skipped (empty or unreadable)")).toHaveClass("text-amber-600")
+  })
+
+  it("explains a frame-rate correction", async () => {
+    const PAL = 25 / (24000 / 1001)
+    const cells = Array.from({ length: 30 }, (_, i) =>
+      line(i + 1, 5000 + i * 2500, 6200 + i * 2500 + (i % 3) * 300))
+    renderPanel({ cells })
+    await selectFile(makeFile(
+      vtt(cells.map((c, i) => [Math.round(c.startMs / PAL), Math.round(c.endMs / PAL), `TARGET ${i + 1}`])),
+      "episode.vtt",
+    ))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/adjusted from 25 to 23\.976 frames per second/)).toBeInTheDocument()
+    expect(screen.getByText("30 matched")).toBeInTheDocument()
+  })
+})

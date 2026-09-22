@@ -196,9 +196,9 @@ describe('POST /events — counter recompute runs after the write transaction', 
     expect(writeTxn.sql.some(isCountersRecompute)).toBe(false)
     expect(writeTxn.sql.some(isProgressRecompute)).toBe(false)
 
-    // Exactly ONE recompute batch for the one (file, chunk), carrying exactly
-    // one files-counters recompute — same once-per-(file, chunk) coalescing as
-    // before, just in its own short transaction after the commit.
+    // Exactly ONE recompute batch for the one file, carrying exactly one
+    // files-counters recompute — the once-per-file coalescing, in its own short
+    // transaction after the commit.
     const recomputes = rest.filter((b) => b.sql.some(isCountersRecompute))
     expect(recomputes).toHaveLength(1)
     expect(recomputes[0].sql.filter(isCountersRecompute)).toHaveLength(1)
@@ -209,6 +209,57 @@ describe('POST /events — counter recompute runs after the write transaction', 
     const files = await td.rows<{ id: string; cell_count: number; filled_count: number }>('files')
     expect(files.map((f) => [f.id, f.cell_count, f.filled_count])).toEqual([[FILE, 2, 2]])
   })
+
+  it('AQU-1261: recomputes a multi-chunk file ONCE, not once per chunk', async () => {
+    // BATCH_LIMIT is 100 statements and a source.cell.create costs 3, so 60
+    // creates split into two write chunks (33 + 27). The recompute is a
+    // full-file aggregate scan, so its answer is a function of the file, not of
+    // how many chunks carried the events — running it per chunk scanned the
+    // whole file twice for one identical result, with only the second surviving.
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+    const { db, batches } = recordingDb(td)
+    const r = await post(db, Array.from({ length: 60 }, (_, i) => sourceCreate(i)))
+    expect(r.rejected).toEqual([])
+    expect(r.accepted).toHaveLength(60)
+
+    // Two write transactions, and exactly one recompute batch after them.
+    expect(batches.filter((b) => isWriteTxn(b.sql))).toHaveLength(2)
+    const recomputes = batches.filter((b) => b.sql.some(isCountersRecompute))
+    expect(recomputes).toHaveLength(1)
+    expect(recomputes[0].sql.filter(isCountersRecompute)).toHaveLength(1)
+    expect(batches.at(-1)).toBe(recomputes[0])
+
+    // One pass, and the totals still cover every chunk's cells.
+    const files = await td.rows<{ id: string; cell_count: number }>('files')
+    expect(files.map((f) => [f.id, f.cell_count])).toEqual([[FILE, 60]])
+  }, 120_000)
+
+  it('AQU-1261: a failed later chunk still recomputes over the durable prefix', async () => {
+    // Batch #1 is the first chunk's write transaction; failing batch #2 (the
+    // second chunk) leaves that first chunk's creates durably committed. Their
+    // counters must still be brought up to date — accepting a durable prefix
+    // while `files.cell_count` sat at 0 was the drift this guards. The exact
+    // split is a function of BATCH_LIMIT and is deliberately not asserted.
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+    const { db, batches } = recordingDb(td, { pipelined: true, failBatch: 2 })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await post(db, Array.from({ length: 60 }, (_, i) => sourceCreate(i)))
+      // A partial commit: some events landed, the rest were rejected.
+      expect(r.accepted.length).toBeGreaterThan(0)
+      expect(r.accepted.length).toBeLessThan(60)
+      expect(r.accepted.length + r.rejected.length).toBe(60)
+      expect(error).toHaveBeenCalledWith('[events] DB batch failed:', expect.anything())
+
+      // The recompute ran after the failure, over exactly what landed.
+      const recomputes = batches.filter((b) => b.sql.some(isCountersRecompute))
+      expect(recomputes).toHaveLength(1)
+      const files = await td.rows<{ id: string; cell_count: number }>('files')
+      expect(files.map((f) => [f.id, f.cell_count])).toEqual([[FILE, r.accepted.length]])
+    } finally {
+      error.mockRestore()
+    }
+  }, 120_000)
 
   it('a failed recompute is logged loudly but the committed events stay accepted', async () => {
     const td = (t = await makeTestDb())

@@ -226,9 +226,12 @@ export function GlossaryEditor({
   const termbasePending = conceptsError == null && conceptsLoading && concepts.length === 0
   const termbaseStale = conceptsError != null && concepts.length > 0
   const canWriteTermbase = canManage && !termbaseUnknown
-  const termbaseWriteDenial = termbaseUnknown
-    ? t("terminology.editor.loadFailedDisabledTooltip")
-    : termbaseDenial
+  // The ROLE reason wins when both apply. "Terms cannot be added until the
+  // termbase loads" implies waiting will help — which is false for someone
+  // below the floor, whose button stays disabled after the read recovers.
+  const termbaseWriteDenial =
+    termbaseDenial ??
+    (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(concepts),

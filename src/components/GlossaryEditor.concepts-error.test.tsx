@@ -18,6 +18,7 @@ import { MemoryRouter } from "react-router-dom"
 import type { Concept } from "@/lib/terminology/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ConceptsReadError } from "@/lib/sync/concepts-read"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("react-router-dom", async (orig) => ({
   ...(await orig<typeof import("react-router-dom")>()),
@@ -121,6 +122,45 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     expect(screen.getByRole("button", { name: "Add term" })).toBeDisabled()
     expect(screen.getByRole("button", { name: /Import/ })).toBeDisabled()
     expect(screen.getByRole("button", { name: /Suggest terms/ })).toBeDisabled()
+  })
+
+  it("explains the disabled control by naming the failed read", async () => {
+    fetchConcepts.mockRejectedValue(readFailure())
+    renderWithTooltips(
+      <MemoryRouter initialEntries={["/project/p1/terminology"]}>
+        <GlossaryEditor />
+      </MemoryRouter>,
+    )
+    await screen.findByTestId("concepts-read-error")
+
+    await expectTooltip(
+      screen.getByRole("button", { name: "Add term" }),
+      "Terms cannot be added or imported until the termbase loads.",
+    )
+  })
+
+  it("names the ROLE, not the failed read, when the user is below the floor too", async () => {
+    // Both reasons apply at once. "Until the termbase loads" would promise a
+    // recovery that never enables this user's button — the read succeeding
+    // leaves them just as unable to write.
+    mockProject = {
+      id: "p1",
+      name: "P",
+      syncRole: { level: 100 },
+      termbaseEditMinRole: 500,
+    } as unknown as ProjectRecord
+    fetchConcepts.mockRejectedValue(readFailure())
+    renderWithTooltips(
+      <MemoryRouter initialEntries={["/project/p1/terminology"]}>
+        <GlossaryEditor />
+      </MemoryRouter>,
+    )
+    await screen.findByTestId("concepts-read-error")
+
+    const add = screen.getByRole("button", { name: "Add term" })
+    expect(add).toBeDisabled()
+    await expectTooltip(add, /Project lead/i)
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/until the termbase loads/)
   })
 
   it("recovers on Retry without a reload", async () => {

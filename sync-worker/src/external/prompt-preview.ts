@@ -34,6 +34,10 @@
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
+// The system prompt resolves top-level `settings.systemPrompt` first (the key
+// PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
+// SPA keeps in sync), then DEFAULT_SYSTEM_PROMPT (AQU-1283).
+//
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
 // assembled. It performs no writes and mints no drafts.
@@ -272,7 +276,13 @@ export async function buildPromptPreview(
   // target language (resolveActiveTargetLanguage, project-workspace-lane-target.ts).
   const targetLanguage = targetLang || stringSetting(settings, "targetLanguage")
 
-  const systemPrompt = stringSetting(completion, "systemPrompt") || DEFAULT_SYSTEM_PROMPT
+  // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
+  // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
+  // the nested copy is the fallback for projects that only ever set it there.
+  const systemPrompt =
+    stringSetting(settings, "systemPrompt") ||
+    stringSetting(completion, "systemPrompt") ||
+    DEFAULT_SYSTEM_PROMPT
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"

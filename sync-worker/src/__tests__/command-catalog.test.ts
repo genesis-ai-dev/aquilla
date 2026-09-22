@@ -76,6 +76,8 @@ describe('command catalog — invariants', () => {
       ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
       UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
+      RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
@@ -148,6 +150,19 @@ describe('command catalog — invariants', () => {
     // The caps the validator actually enforces, not prose approximations.
     expect(entry.paramsDoc).toContain(String(BRIEF_FIELD_MAX_CHARS))
     expect(entry.paramsDoc).toContain(String(BRIEF_NOTES_MAX_CHARS))
+  })
+
+  it('describe_command("RegenerateBriefSummary") names the floor, the pin, and the failure codes (AQU-1282)', () => {
+    const entry = describeCommand('RegenerateBriefSummary')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    expect(entry.agentReachable).toBe(true)
+    for (const needle of ['ifMatchVersion', 'l1Summary', 'nothing to summarize', 'rate_limited', 'briefSummaryChars']) {
+      expect(entry.paramsDoc).toContain(needle)
+    }
+    // SetBrief's doc no longer claims the L1 is merely "carried over".
+    const setBriefDoc = describeCommand('SetBrief')!.paramsDoc
+    expect(setBriefDoc).toContain('RegenerateBriefSummary')
+    expect(setBriefDoc).not.toContain('carried over, not cleared')
   })
 
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {

@@ -6,15 +6,18 @@ import {
   decodeStyleName,
   eblHeadingLevel,
   headingSlug,
+  isEblContentsStyle,
   isEblLessonNumberStyle,
   isEblLessonTitleStyle,
   isEblTopicNumberStyle,
   isEblTopicTitleStyle,
   isNonTextualContent,
+  isPageNumberRun,
   isStructuralOnlyContent,
   parseEblLessonNumber,
   parseEblTopicNumber,
   styleParts,
+  trailingPageNumberStart,
 } from "./note-rules"
 
 describe("decodeStyleName", () => {
@@ -165,6 +168,39 @@ describe("isStructuralOnlyContent", () => {
   it("is false once any visible text is present", () => {
     expect(isStructuralOnlyContent(["<?ACE 18?>", "30 min"])).toBe(false)
     expect(isStructuralOnlyContent(["8"])).toBe(false)
+  })
+})
+
+describe("isEblContentsStyle", () => {
+  it("recognizes the contents group regardless of the marker", () => {
+    expect(isEblContentsStyle("02_TOC:tc1")).toBe(true)
+    expect(isEblContentsStyle("ParagraphStyle/02_TOC%3atc3")).toBe(true)
+    expect(isEblContentsStyle("02_TOC:ms1")).toBe(true)
+    expect(isEblContentsStyle("07_Lessons:ms1")).toBe(false)
+  })
+})
+
+describe("isPageNumberRun", () => {
+  it("is true only for a run that is a whole integer", () => {
+    expect(isPageNumberRun("16")).toBe(true)
+    expect(isPageNumberRun(" 9")).toBe(true)
+    expect(isPageNumberRun("1.1")).toBe(false)
+    expect(isPageNumberRun("30 min")).toBe(false)
+    expect(isPageNumberRun("Lesson 1")).toBe(false)
+  })
+})
+
+describe("trailingPageNumberStart", () => {
+  it("finds a page number parked behind tab leaders or two-or-more spaces", () => {
+    expect(trailingPageNumberStart("1.1 How God shows himself\t\t\t18"))
+      .toBe("1.1 How God shows himself".length)
+    expect(trailingPageNumberStart("Words you need to know list  80"))
+      .toBe("Words you need to know list".length)
+  })
+
+  it("leaves a single space before a number, which is ordinary copy", () => {
+    expect(trailingPageNumberStart("Introduction 3")).toBeUndefined()
+    expect(trailingPageNumberStart("Lesson 1")).toBeUndefined()
   })
 })
 

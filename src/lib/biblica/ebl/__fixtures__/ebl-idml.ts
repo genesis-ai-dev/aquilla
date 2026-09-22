@@ -51,6 +51,30 @@ export function styled(self: string, paragraphStyle: string, text: string): stri
 }
 
 /**
+ * Contents entries the way the live template writes the top-level lines: the
+ * title in one character run, the page number in the next, a `<Br/>` after.
+ */
+export function tocEntriesWithPageRuns(
+  self: string,
+  paragraphStyle: string,
+  entries: readonly { title: string; page: string }[],
+): string {
+  return paragraph(
+    self,
+    paragraphStyle,
+    entries.map((entry) => (
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/${PLAIN}">`
+        + `<Content>${entry.title}</Content>`
+        + `</CharacterStyleRange>`
+        + `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/${PLAIN}" PointSize="16">`
+        + `<Content>${entry.page}</Content>`
+        + `</CharacterStyleRange>`
+        + `<Br />`
+    )).join(""),
+  )
+}
+
+/**
  * One paragraph whose lines are separated by `<Br/>` — how the template sets a
  * contents block, a list of objectives, and a heading run over two lines.
  */
@@ -85,6 +109,17 @@ export const SAMPLE_EBL = {
   introBody: "The church is seeing remarkable growth in the spread of the Gospel.",
   contentsHead: "CONTENTS",
   contentsEntries: ["Introduction 3", "About the programme 4", "Module 1 16"],
+  /** Titles whose page numbers live in a neighbouring character run. */
+  contentsTitles: [
+    "Introduction",
+    "About the programme",
+    "Module 1: How we have the Bible",
+  ],
+  contentsPages: ["3", "4", "16"],
+  /** A nested contents line: title and page number share one Content run. */
+  contentsNestedTitle: "1.1 How God shows himself",
+  contentsNestedPage: "18",
+  contentsNestedEntry: "1.1 How God shows himself\t\t\t18",
   moduleLines: ["MODULE 1", "How we have the Bible"],
   moduleBody: "This module looks at where the Bible came from.",
   topicTag: "TOPIC 1.1",

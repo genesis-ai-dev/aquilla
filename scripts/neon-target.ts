@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import process from "node:process"
 
 type Target = "production" | "dev"
-type Command = "status" | "apply" | "baseline" | "backfill-progress" | "backfill-activity"
+type Command = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity"
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
@@ -34,7 +34,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress|backfill-activity>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity>")
   process.exit(1)
 }
 
@@ -46,7 +46,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity") return value
   usage()
 }
 

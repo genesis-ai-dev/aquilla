@@ -32,12 +32,16 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
   type SpanCursor,
   type StoredSpanSeed,
 } from "../../../../db/shared/contextual-runs"
-import { raiseDecisionOnce } from "../../../../db/shared/contextual-decisions"
+import {
+  raiseDecisionOnce,
+  findOpenDecisionForRun,
+} from "../../../../db/shared/contextual-decisions"
 import {
   proposeSceneBrief,
   listSceneBriefs,
@@ -315,6 +319,11 @@ export interface ContextualRunStateFrame {
   done: number
   total: number
   failed?: number
+  /** Why a `parked` run stopped (AQU-1300). Carried on the LIVE frame, not
+   *  left to the next poll: parking is the moment the UI has to switch from
+   *  "drafting" to "waiting for you", and a frame that says only `parked`
+   *  cannot tell that apart from "finished". Omitted on every other status. */
+  parkReason?: ContextualParkReason
 }
 
 export interface ContextualSceneFrame {
@@ -405,6 +414,7 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
+    ...(run.status === "parked" && run.parkReason ? { parkReason: run.parkReason } : {}),
   }
 }
 
@@ -1175,7 +1185,34 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // A run that produced nothing at all still fails, so Play can start fresh.
     const t = run.failedSpans > 0 && run.doneSpans === 0
       ? await failRun(db, runId, run.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+
+  // ── Trust gate (AQU-1300) ────────────────────────────────────────────────
+  // There IS more work past this point, so both checks below park with
+  // `awaiting_input` — "waiting for you", never "all done".
+  //
+  // Honoured at the span edge, alongside pause/terminate, and before any model
+  // call: the whole value of a budget is that spending stops BEFORE the spend.
+  //
+  // An unanswered question wins over remaining allowance. Drafting on past it
+  // buries the question under work built on the assumption it was answered one
+  // particular way, which is worse than not drafting at all.
+  const openDecision = await findOpenDecisionForRun(db, {
+    projectId: run.projectId,
+    runId: run.id,
+  })
+  if (openDecision) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+  // `null` is unlimited (explicit "translate everything", and every run created
+  // before this shipped). Only a real, spent budget parks.
+  if (run.spanAllowance !== null && run.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
     if (t.status === "ok") await notify(runStateFrame(t.run))
     return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
   }
@@ -1212,7 +1249,13 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     },
   }
 
-  const remaining = cursor.seeds.length - cursor.nextIndex
+  // The allowance caps the WAVE, not just the loop: a run with one span of
+  // budget must draft one passage, not a wave of six and then notice. This is
+  // the only place wave width and budget meet, and the budget always wins.
+  const unspent = cursor.seeds.length - cursor.nextIndex
+  const remaining = run.spanAllowance === null
+    ? unspent
+    : Math.min(unspent, run.spanAllowance)
   const width = Math.max(1, Math.min(deps.concurrency ?? waveSize(remaining), remaining))
   const wave = cursor.seeds.slice(cursor.nextIndex, cursor.nextIndex + width)
 
@@ -1267,6 +1310,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     callsUsed: reports.reduce((n, r) => n + r.callsUsed, 0),
     lastError,
     steeringCursor: new Date().toISOString(),
+    // Debit only the spans that actually ran. A blocked span produced a
+    // question rather than a passage, and the cursor rewinds it to the front of
+    // the tail — charging for it would make the user pay twice for one passage.
+    spansProcessed: completedWaveSeeds.length,
   })
 
   const lastReport = reports[reports.length - 1]
@@ -1318,7 +1365,16 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // that staged nothing still fails so retry can start a new run.
     const t = fresh.failedSpans > 0 && fresh.doneSpans === 0
       ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    return result(false, t.status === "ok" ? t.run.status : fresh.status)
+  }
+  // Allowance spent with work still queued: park here rather than leaving the
+  // driver to loop once more and discover it. Same outcome, but the parked
+  // frame reaches the UI now instead of after another round-trip — and the run
+  // never reports `continueRun: true` when it has already decided to stop.
+  if (fresh?.status === "running" && fresh.spanAllowance !== null && fresh.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
     if (t.status === "ok") await notify(runStateFrame(t.run))
     return result(false, t.status === "ok" ? t.run.status : fresh.status)
   }

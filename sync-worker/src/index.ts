@@ -75,12 +75,15 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
+import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
+import { handleExternalSkillsRequest } from "./external/skills-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -380,6 +383,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1233: agent-facing comment reads. Its own module (rather than another
+    // arm of read-routes) because it re-uses that file's auth/scope gate —
+    // registering it here keeps the dependency one-directional.
+    const externalCommentsResponse = await handleExternalCommentsRequest(request, env)
+    if (externalCommentsResponse) return withCors(externalCommentsResponse, request)
     // AQU-1229: Living Memory reads. Mounted after the general external reads —
     // both regexes are $-anchored so neither can shadow the other, but the
     // memory paths extend .../files/:fileId/cells, so keeping the narrower
@@ -480,6 +488,13 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1294: partner intake template + agent skills. Static text / pure
+    // transforms, unauthenticated like the command docs below.
+    const externalSetupTemplateResponse = await handleExternalSetupTemplateRequest(request)
+    if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
+    const externalSkillsResponse = handleExternalSkillsRequest(request)
+    if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
 
     // Static command documentation (the REST half of describe_command).
     // Unauthenticated like the discovery root, and mounted with it so both sit

@@ -8320,8 +8320,26 @@ export function ProjectWorkspace() {
     audioCounts,
   }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
 
+  // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
+  // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
+  // `project.syncRole?.level` — the SAME expression the action registry's
+  // `roleAllows` uses — so the button's enabled state and the action's
+  // `isAvailable` can never disagree and leave a live button that no-ops.
+  // Fails open on a null role (local/unsynced project, no server floor).
+  const canImportSource = canPerform("file.create", project?.syncRole?.level ?? null)
+  const importDenialReason = canImportSource
+    ? null
+    : denialMessage(t, ROLE.PROJECT_LEAD, project?.syncRole?.level ?? null)
+
   const openImportFlow = useCallback(() => {
     if (!project) return
+    // AQU-481: the single choke point for the source-import dialog. Every
+    // entry (header button, setup checklist step 1, "Import again" in the
+    // export dialog, the empty-state CTA) funnels through here, so a
+    // below-floor role cannot reach the type picker by any route — each of
+    // those callers also disables its own affordance, so this is the backstop
+    // rather than the explanation.
+    if (!canPerform("file.create", project.syncRole?.level ?? null)) return
     setImportOpen(true)
   }, [project])
 
@@ -11326,6 +11344,7 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onImport={project ? handleHeaderImport : undefined}
+            importDisabledReason={importDenialReason}
             onSettings={project ? openProjectSettings : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
@@ -12208,7 +12227,10 @@ export function ProjectWorkspace() {
             fileName={activeFile?.name}
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
-            onImportClick={openImportFlow}
+            /* AQU-481: no empty-state "Import" CTA below the file.create floor —
+               the placeholder renders without one when it's absent, so a viewer
+               gets the explanatory empty state rather than a dead button. */
+            onImportClick={canImportSource ? openImportFlow : undefined}
             onRetryClick={retryCells}
           />
         )}
@@ -12537,7 +12559,9 @@ export function ProjectWorkspace() {
             // closes. Using step 1 must not silently abandon the setup flow.
             setResumeChecklistAfterImport(true)
             setChecklistOpen(false)
-            setImportOpen(true)
+            // AQU-481: through the guarded opener, not setImportOpen directly,
+            // so step 1 cannot become a second ungated route to the dialog.
+            openImportFlow()
           }}
         />
       )}
@@ -12762,10 +12786,13 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
           orgId={projectOrg?.id.toString()}
-          onReimport={() => {
+          /* AQU-481: "Import again" is an import affordance too — omitted below
+             the file.create floor, which leaves the dialog's own button
+             disabled (`disabled={!onReimport}`) instead of dead. */
+          onReimport={canImportSource ? () => {
             setExportOpen(false)
-            setImportOpen(true)
-          }}
+            openImportFlow()
+          } : undefined}
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>

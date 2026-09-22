@@ -89,6 +89,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
+import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
@@ -4637,6 +4638,44 @@ function SourceTagChips({ metadata }: { metadata?: Record<string, unknown> | nul
   )
 }
 
+// ---------------------------------------------------------------------------
+// MetadataFieldLabels — AQU-1369. The metadata keys the project switched on
+// from a cell's Metadata tab ("show on cells"), rendered as small labels on
+// every row that carries the key. Rows without the key, or whose value has no
+// one-line label (nested objects), render nothing for it.
+// ---------------------------------------------------------------------------
+function MetadataFieldLabels({
+  projectId,
+  metadata,
+}: {
+  projectId: string
+  metadata?: Record<string, unknown> | null
+}) {
+  const fields = useCellDisplayFields(projectId)
+  if (!metadata || fields.length === 0) return null
+  const labels = fields.flatMap((key) => {
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) return []
+    const text = displayFieldLabel(metadata[key])
+    return text == null ? [] : [{ key, text }]
+  })
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="metadata-field-labels" className="flex shrink-0 items-center gap-1">
+      {labels.map(({ key, text }) => (
+        <span
+          key={key}
+          dir="auto"
+          title={`${key}: ${text}`}
+          data-metadata-key={key}
+          className="max-w-[12rem] truncate rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {text}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 /** Stable stand-in when the table is rendered without a token minter (tests,
  *  local-only projects): a read that cannot authenticate simply returns nothing.
  *  Module-scope so it never re-triggers a row's read effect. */
@@ -6646,6 +6685,7 @@ function EditorRow({
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
               <SourceTagChips metadata={cell.metadata} />
+              <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -7658,7 +7698,12 @@ function EditorRow({
                     value: "metadata",
                     icon: <Braces className="h-3 w-3" />,
                     label: t("editor.expansion.metadata"),
-                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                    renderContent: () => (
+                      <CellMetadataTab
+                        metadata={cell.metadata as Record<string, unknown>}
+                        projectId={project.id}
+                      />
+                    ),
                   },
                 ]
               : []),

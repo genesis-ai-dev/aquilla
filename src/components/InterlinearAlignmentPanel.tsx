@@ -17,6 +17,13 @@
  *
  * AQU-240: confirm/reject buttons carry descriptive aria-labels and app tooltips that
  * explain how the action feeds the interlinear training loop.
+ *
+ * AQU-207: a decision stays on screen. The parent rebuilds the model with the
+ * new seed, and an invalidation can push the link below the display floor (or
+ * hand that source token to a different target), so the row the user just
+ * clicked would otherwise vanish — indistinguishable from the click having
+ * done nothing. Decided pairs present in this cell that the model no longer
+ * proposes are synthesized back into the list, in place, with their state.
  */
 
 import { useMemo } from "react"
@@ -28,6 +35,7 @@ import {
   alignCell,
   confirmAlignment,
   invalidateAlignment,
+  tokenize,
   CONFIDENCE_HIGH,
   CONFIDENCE_AMBER,
   MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT,
@@ -57,6 +65,16 @@ export interface InterlinearAlignmentPanelProps {
   onSeedChange: (seed: AlignmentSeed) => void
 }
 
+/**
+ * React key for a row. A decision is about the token PAIR (so the decided
+ * sets key on `src|tgt`), but a sentence that repeats a word yields one link
+ * per position with the same pair — keyed on the pair alone React logged
+ * "two children with the same key" for every "you → you" in a verse.
+ */
+function rowKey(link: AlignmentLink): string {
+  return `${link.srcIndex}:${link.srcToken}|${link.tgtIndex}:${link.tgtToken}`
+}
+
 function confidenceLabel(confidence: number): string {
   if (confidence >= CONFIDENCE_HIGH) return "high"
   // CONFIDENCE_AMBER = 0.3 — amber band used for styling only (alignCell already
@@ -70,17 +88,21 @@ function AlignmentRow({
   link,
   confirmed,
   invalidated,
+  modelled = true,
   onConfirm,
   onInvalidate,
 }: {
   link: AlignmentLink
   confirmed: boolean
   invalidated: boolean
+  /** False for a decided pair the model no longer proposes: there is no
+   *  confidence to show, only the decision. */
+  modelled?: boolean
   onConfirm: () => void
   onInvalidate: () => void
 }) {
   const t = useT()
-  const band = confidenceLabel(link.confidence)
+  const band = confirmed ? "high" : confidenceLabel(link.confidence)
   const pct = Math.round(link.confidence * 100)
 
   return (
@@ -123,19 +145,21 @@ function AlignmentRow({
         </span>
       </AppTooltip>
 
-      {/* Confidence pill */}
-      <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
-        <span
-          className={cn(
-            "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
-            band === "high"
-              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-              : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-          )}
-        >
-          {pct}%
-        </span>
-      </AppTooltip>
+      {/* Confidence pill — only for a link the model currently proposes */}
+      {modelled && (
+        <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
+          <span
+            className={cn(
+              "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
+              band === "high"
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+            )}
+          >
+            {pct}%
+          </span>
+        </AppTooltip>
+      )}
 
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && (
@@ -351,6 +375,43 @@ export function InterlinearAlignmentPanel({
     return s
   }, [confirmedSeeds])
 
+  // AQU-207: decided pairs in this cell that neither band proposes any more.
+  // Synthesized on the same token boundaries `alignCell` uses so the row lands
+  // where the proposal sat; no confidence — the model has none to report.
+  const decidedOnlyLinks: AlignmentLink[] = useMemo(() => {
+    if (!hasSufficientData || confirmedSeeds.length === 0) return []
+    if (!sourceText.trim() || !targetText.trim()) return []
+    const srcTokens = tokenize(sourceText)
+    const tgtTokens = tokenize(targetText)
+    const proposed = new Set<string>()
+    for (const l of links) proposed.add(`${l.srcToken}|${l.tgtToken}`)
+    for (const l of amberLinks) proposed.add(`${l.srcToken}|${l.tgtToken}`)
+    const out: AlignmentLink[] = []
+    for (const seed of confirmedSeeds) {
+      if (seed.weight === 0) continue
+      const srcToken = seed.srcToken.toLowerCase()
+      const tgtToken = seed.tgtToken.toLowerCase()
+      const key = `${srcToken}|${tgtToken}`
+      if (proposed.has(key)) continue
+      const srcIndex = srcTokens.indexOf(srcToken)
+      const tgtIndex = tgtTokens.indexOf(tgtToken)
+      if (srcIndex < 0 || tgtIndex < 0) continue
+      proposed.add(key)
+      out.push({ srcIndex, srcToken, tgtIndex, tgtToken, confidence: 0 })
+    }
+    return out
+  }, [hasSufficientData, confirmedSeeds, sourceText, targetText, links, amberLinks])
+
+  // The main list: proposals plus decided-only rows, in sentence order, so a
+  // pair keeps its place after the model stops proposing it.
+  const mainRows = useMemo(() => {
+    const rows = [
+      ...links.map((link) => ({ link, modelled: true })),
+      ...decidedOnlyLinks.map((link) => ({ link, modelled: false })),
+    ]
+    return rows.sort((a, b) => a.link.srcIndex - b.link.srcIndex || a.link.tgtIndex - b.link.tgtIndex)
+  }, [links, decidedOnlyLinks])
+
   if (!alignmentModel) return null
 
   const handleConfirm = (link: AlignmentLink) => {
@@ -392,9 +453,10 @@ export function InterlinearAlignmentPanel({
     )
   }
 
-  // With sufficient data but no links in either band: hide the section entirely
-  // — unless there is an original-language strip, which stands on its own.
-  if (links.length === 0 && amberLinks.length === 0 && originalAlignments.length === 0) return null
+  // With sufficient data but nothing to show in either band (proposed or
+  // decided rows): hide the section entirely — unless there is an
+  // original-language strip, which stands on its own.
+  if (mainRows.length === 0 && amberLinks.length === 0 && originalAlignments.length === 0) return null
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -404,7 +466,7 @@ export function InterlinearAlignmentPanel({
         <OriginalLanguageSection words={originalAlignments} />
       )}
 
-      {(links.length > 0 || amberLinks.length > 0) && (
+      {(mainRows.length > 0 || amberLinks.length > 0) && (
         <div className="flex items-center gap-1">
           {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
           <span className="text-xs font-medium text-muted-foreground">
@@ -421,14 +483,15 @@ export function InterlinearAlignmentPanel({
         </div>
       )}
 
-      {links.length > 0 && (
+      {mainRows.length > 0 && (
         <div className="flex flex-col gap-0.5">
-          {links.map((link) => {
+          {mainRows.map(({ link, modelled }) => {
             const key = `${link.srcToken}|${link.tgtToken}`
             return (
               <AlignmentRow
-                key={key}
+                key={rowKey(link)}
                 link={link}
+                modelled={modelled}
                 confirmed={confirmedSet.has(key)}
                 invalidated={invalidatedSet.has(key)}
                 onConfirm={() => handleConfirm(link)}
@@ -457,7 +520,7 @@ export function InterlinearAlignmentPanel({
               const key = `${link.srcToken}|${link.tgtToken}`
               return (
                 <AlignmentRow
-                  key={key}
+                  key={rowKey(link)}
                   link={link}
                   confirmed={confirmedSet.has(key)}
                   invalidated={invalidatedSet.has(key)}

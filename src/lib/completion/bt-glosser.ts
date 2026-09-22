@@ -31,8 +31,12 @@ export interface Glosser {
  * Calibrated against the other seed sources in the workspace so an explicit
  * per-token confirmation outranks an "admitted" rendering (1) but stays below a
  * "preferred" one (3) — a single word link is a narrower claim than a termbase
- * entry. `buildAlignmentModel` multiplies every seed by `SEED_MULTIPLIER`, so
- * the effective score contribution is ±10 against a corpus observation of ~1.
+ * entry. `buildAlignmentModel` multiplies every seed by `SEED_MULTIPLIER` and
+ * adds it as an unnormalized bonus on top of the corpus association, which is
+ * a Dice coefficient bounded 0..1 (AQU-203, see `scoreAlignments`). The
+ * effective contribution is therefore ±10 against at most 1 from the corpus:
+ * a confirmed link cannot be outvoted by co-occurrence evidence alone, only by
+ * a heavier seed such as a "preferred" termbase rendering.
  */
 export const ALIGNMENT_SEED_BT_WEIGHT = 2
 

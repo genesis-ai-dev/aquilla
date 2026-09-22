@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
+  matchTargetRowsByOverlap,
   usfmToTargetRows,
   subtitleToTargetRows,
   subtitleToTargetRowsWithReport,
@@ -745,4 +746,121 @@ describe("vttToTargetRows", () => {
     expect(result.unmatchedSourceCount).toBe(0)
   })
 
+})
+
+describe("frame-rate rescale (AQU-1360)", () => {
+  /** A deterministic but irregular episode — cue lengths 0.8–3s, gaps
+   *  0.08–1.5s — like a real subtitle grid. A perfectly regular grid would let
+   *  a wrong scale line up by aliasing and prove nothing. */
+  function episode(count: number, seed = 7): FileTargetCellRef[] {
+    let s = seed
+    const rand = () => {
+      s = (s * 1103515245 + 12345) % 2147483648
+      return s / 2147483648
+    }
+    const cells: FileTargetCellRef[] = []
+    let t = 5000
+    for (let i = 0; i < count; i++) {
+      const dur = 800 + Math.round(rand() * 2200)
+      cells.push(cell({ cellId: `c${i}`, startMs: t, endMs: t + dur, original: `line ${i}` }))
+      t += dur + 80 + Math.round(rand() * 1420)
+    }
+    return cells
+  }
+
+  /** The same episode as a partner would deliver it, every time mapped by `f`. */
+  function delivered(cells: FileTargetCellRef[], f: (ms: number) => number): TargetRow[] {
+    return cells.map((c, i) => ({
+      ref: `cue ${i}`,
+      text: `target ${i}`,
+      startMs: Math.round(f(c.startMs!)),
+      endMs: Math.round(f(c.endMs!)),
+    }))
+  }
+
+  /** Rows that landed on the line they were written for. */
+  function correct(result: ReturnType<typeof matchTargetRowsByOrder>): number {
+    return result.matched.filter((m) => m.cellId === `c${m.incomingText.slice("target ".length)}`).length
+  }
+
+  const PAL = 25 / (24000 / 1001) // 25 fps against 23.976
+
+  it("leaves a correctly timed file exactly as delivered", () => {
+    const cells = episode(650)
+    const result = matchTargetRowsByOrder(delivered(cells, (t) => t), cells)
+    expect(result.timebase).toBeUndefined()
+    expect(correct(result)).toBe(650)
+  })
+
+  it("at 25 against 23.976 a real-length episode mis-pairs silently — and the rescale recovers every line", () => {
+    const cells = episode(650)
+    const rows = delivered(cells, (t) => t / PAL)
+    // What the matcher did before AQU-1360: most rows "match", almost none
+    // correctly. This is the failure the review screen used to hide.
+    const unscaled = matchTargetRowsByOverlap(rows, cells)
+    expect(unscaled.matched.length).toBeGreaterThan(300)
+    expect(correct(unscaled)).toBeLessThan(100)
+
+    const result = matchTargetRowsByOrder(rows, cells)
+    expect(result.timebase?.scale).toBeCloseTo(PAL, 9)
+    expect(result.timebase).toMatchObject({ fromFps: "25", toFps: "23.976", closeAfter: 650 })
+    expect(correct(result)).toBe(650)
+    // The label a reviewer sees is still the file's own timecode.
+    expect(result.matched[0].ref).toBe("cue 0")
+  })
+
+  it("rescales the other direction too", () => {
+    const cells = episode(650)
+    const result = matchTargetRowsByOrder(delivered(cells, (t) => t * PAL), cells)
+    expect(result.timebase?.scale).toBeCloseTo(1 / PAL, 9)
+    expect(result.timebase).toMatchObject({ fromFps: "23.976", toFps: "25" })
+    expect(correct(result)).toBe(650)
+  })
+
+  it("rescales a 1000/1001 drift over a long episode, without naming rates it can't tell apart", () => {
+    const cells = episode(1000)
+    const result = matchTargetRowsByOrder(delivered(cells, (t) => t / 1.001), cells)
+    expect(result.timebase?.scale).toBeCloseTo(1.001, 9)
+    // 24/23.976 and 30/29.97 are both exactly 1001/1000.
+    expect(result.timebase).toMatchObject({ fromFps: null, toFps: null })
+    expect(correct(result)).toBe(1000)
+  })
+
+  it.each([
+    ["a 2s start offset", (t: number) => t + 2000],
+    ["a 700ms start offset", (t: number) => t + 700],
+    ["a -5s start offset", (t: number) => t - 5000],
+    ["a one-hour broadcast offset", (t: number) => t + 3_600_000],
+    ["25/23.976 combined with a 2s offset", (t: number) => t / PAL + 2000],
+  ])("declines %s — offsets are out of scope, and must never be 'fixed' with a wrong scale", (_name, f) => {
+    const cells = episode(650)
+    expect(matchTargetRowsByOrder(delivered(cells, f), cells).timebase).toBeUndefined()
+  })
+
+  it("declines a re-segmented file, where the translator split lines instead of shifting them", () => {
+    const cells = episode(650)
+    const rows: TargetRow[] = []
+    cells.forEach((c, i) => {
+      if (i % 5 < 2) {
+        const mid = Math.round((c.startMs! + c.endMs!) / 2)
+        rows.push({ ref: `a${i}`, text: `target ${i}a`, startMs: c.startMs, endMs: mid })
+        rows.push({ ref: `b${i}`, text: `target ${i}b`, startMs: mid, endMs: c.endMs })
+      } else {
+        rows.push({ ref: `cue ${i}`, text: `target ${i}`, startMs: c.startMs, endMs: c.endMs })
+      }
+    })
+    expect(matchTargetRowsByOrder(rows, cells).timebase).toBeUndefined()
+  })
+
+  it("declines missing and extra cues", () => {
+    const cells = episode(650)
+    const rows = delivered(cells, (t) => t).filter((_, i) => i % 9 !== 4)
+    rows.push({ ref: "extra", text: "target extra", startMs: 99_000_000, endMs: 99_001_000 })
+    expect(matchTargetRowsByOrder(rows, cells).timebase).toBeUndefined()
+  })
+
+  it("never rescales a file too small to judge", () => {
+    const cells = episode(19)
+    expect(matchTargetRowsByOrder(delivered(cells, (t) => t / PAL), cells).timebase).toBeUndefined()
+  })
 })

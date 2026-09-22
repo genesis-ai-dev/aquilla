@@ -26,6 +26,7 @@ import {
   repairShortFormCueTimestamps,
 } from "./parsers/subtitle"
 import { extractSbvStrings } from "./parsers/sbv"
+import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -151,6 +152,8 @@ export interface FileTargetMatchResult {
    *  text, or a timestamp line the parser couldn't read. Set by the caller
    *  from the parse report, since the matchers only ever see the rows. */
   skippedCues?: number
+  /** A frame-rate correction applied before matching, when one was. */
+  timebase?: TimebaseAdjustment
 }
 
 function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCell[]): UncoveredLine[] {
@@ -361,6 +364,137 @@ function assignByOverlap(rows: TimedRow[], cells: TimedCell[]): OverlapAssignmen
   return { rows, cells, candidates, cellForRow, rowForCell, overlapForRow }
 }
 
+const durationOf = (t: Timing): number => t.endMs - t.startMs
+
+/** A row CLAIMS a line when their overlap is more than half the row's own
+ *  length: the line is where most of the cue plays. */
+function claims(overlap: number, row: Timing): boolean {
+  return 2 * overlap > durationOf(row)
+}
+
+/** A CLOSE match also covers more than half the line — each is mostly the
+ *  other. It is what a correct pairing looks like, and what a pairing reached
+ *  only through drift or tolerance does not. */
+function isCloseMatch(overlap: number, row: Timing, cell: Timing): boolean {
+  return claims(overlap, row) && 2 * overlap > durationOf(cell)
+}
+
+function closeMatchedRows(a: OverlapAssignment): Set<number> {
+  const close = new Set<number>()
+  for (const [rowAt, cellAt] of a.cellForRow) {
+    const overlap = a.overlapForRow.get(rowAt) ?? 0
+    if (isCloseMatch(overlap, a.rows[rowAt].timing, a.cells[cellAt].timing)) close.add(rowAt)
+  }
+  return close
+}
+
+// ── Frame-rate rescale (AQU-1360) ─────────────────────────────────────────────
+//
+// A partner file authored at the wrong frame rate (25 against 23.976 is a 4.3%
+// stretch) drifts past the 500ms tolerance within seconds. On a real episode
+// that does NOT leave lines empty — the matcher quietly pairs cues with the
+// wrong lines: on a 650-cue, 42-minute episode, 553 "matched" and 9 were right.
+// So the match COUNT can't tell a good scale from a bad one; close matches can.
+//
+// The thresholds were set against synthetic 650-cue episodes: rescales at
+// 25/23.976 gain 0.47–0.61 of the file and 1000/1001 over 42 minutes about
+// 0.44; wrong scales never fit above 0.56; and every correct file already
+// scores above 0.75 at scale 1, so it can never gain the 0.25 required.
+
+/** Too few rows and the per-quarter check means nothing. */
+const RESCALE_MIN_ROWS = 20
+/** A scale must line up at least this share of the file MORE than scale 1. */
+const RESCALE_MIN_GAIN = 0.25
+/** …and line up at least this share of the file overall. */
+const RESCALE_MIN_FIT = 0.6
+/** …and hold in every quarter of the file. This is what stops a START OFFSET
+ *  being "fixed" with a wrong scale: an offset cancels against a scale in one
+ *  part of the file only (a 2s offset scores 0.72 overall at 0.999, but 0.32
+ *  in its first quarter). Offsets themselves are out of scope. */
+const RESCALE_MIN_QUARTER_FIT = 0.5
+/** Only ratios this close to 1 are considered — see `frameRateScalesNear`. */
+const RESCALE_MAX_DEVIATION = 0.05
+
+/** A frame-rate correction applied to the uploaded file's timings. */
+export interface TimebaseAdjustment {
+  /** Multiplier applied to every incoming cue time. */
+  scale: number
+  /** The rate the file's timings behaved as if authored at, and the rate they
+   *  were moved onto — null when the ratio names several pairs equally well
+   *  (24/23.976 and 30/29.97 are both exactly 1001/1000). */
+  fromFps: string | null
+  toFps: string | null
+  /** Close matches before and after the correction. */
+  closeBefore: number
+  closeAfter: number
+}
+
+function scaleTimedRows(rows: TimedRow[], scale: number): TimedRow[] {
+  return rows.map((r) => ({
+    ...r,
+    timing: { startMs: Math.round(r.timing.startMs * scale), endMs: Math.round(r.timing.endMs * scale) },
+  }))
+}
+
+interface ScaleEvaluation {
+  scale: number
+  close: number
+  totalOverlap: number
+  everyQuarterFits: boolean
+}
+
+function evaluateScale(rows: TimedRow[], cells: TimedCell[], scale: number): ScaleEvaluation {
+  const scaled = scale === 1 ? rows : scaleTimedRows(rows, scale)
+  const assignment = assignByOverlap(scaled, cells)
+  const close = closeMatchedRows(assignment)
+  let totalOverlap = 0
+  for (const overlap of assignment.overlapForRow.values()) totalOverlap += overlap
+  const byTime = scaled
+    .map((r, at) => ({ at, startMs: r.timing.startMs }))
+    .sort((a, b) => a.startMs - b.startMs)
+  let everyQuarterFits = true
+  for (let q = 0; q < 4 && everyQuarterFits; q++) {
+    const quarter = byTime.slice(
+      Math.floor((q * byTime.length) / 4),
+      Math.floor(((q + 1) * byTime.length) / 4),
+    )
+    const hits = quarter.filter((r) => close.has(r.at)).length
+    if (quarter.length > 0 && hits < RESCALE_MIN_QUARTER_FIT * quarter.length) everyQuarterFits = false
+  }
+  return { scale, close: close.size, totalOverlap, everyQuarterFits }
+}
+
+/** The frame-rate correction to apply before matching, or null to leave the
+ *  file's timings exactly as delivered. It declines unless the best candidate
+ *  clears every threshold above AND strictly beats every other candidate —
+ *  near-duplicate ratios (25/24 against 25/23.976) that tie on close matches
+ *  are split by total overlap, and if still level nothing is applied. */
+function chooseTimebase(rows: TimedRow[], cells: TimedCell[]): TimebaseAdjustment | null {
+  if (rows.length < RESCALE_MIN_ROWS || cells.length === 0) return null
+  const maxCloseMatches = Math.min(rows.length, cells.length)
+  const base = evaluateScale(rows, cells, 1)
+  // Already lined up too well to gain the required margin: nothing to try.
+  if (base.close > (1 - RESCALE_MIN_GAIN) * maxCloseMatches) return null
+
+  const [best, runnerUp] = frameRateScalesNear(RESCALE_MAX_DEVIATION)
+    .map((scale) => evaluateScale(rows, cells, scale))
+    .sort((a, b) => b.close - a.close || b.totalOverlap - a.totalOverlap)
+  if (!best) return null
+  if (runnerUp && runnerUp.close === best.close && runnerUp.totalOverlap === best.totalOverlap) return null
+  if (best.close - base.close < RESCALE_MIN_GAIN * maxCloseMatches) return null
+  if (best.close < RESCALE_MIN_FIT * maxCloseMatches) return null
+  if (!best.everyQuarterFits) return null
+
+  const named = snapToFrameRatio(best.scale)
+  return {
+    scale: best.scale,
+    fromFps: named?.cue ?? null,
+    toFps: named?.reference ?? null,
+    closeBefore: base.close,
+    closeAfter: best.close,
+  }
+}
+
 /** Raw positional matching: data row N → file cell N. Empty rows keep their
  *  slot (so alignment holds) but produce no commit. Rows beyond the file's
  *  cell count become orphans.
@@ -418,6 +552,10 @@ function matchRowsPositionally(
 export function matchTargetRowsByOverlap(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
+  /** `rescale`: try a frame-rate correction before matching (AQU-1360). Off
+   *  here so a direct call is pure overlap; `matchTargetRowsByOrder`, the
+   *  policy entry point the dialog uses, turns it on. */
+  options: { rescale?: boolean } = {},
 ): FileTargetMatchResult {
   // Rows carrying no text can't commit anything, and must not hold a cell
   // hostage — a blank incoming cue never clears an existing translation.
@@ -436,7 +574,14 @@ export function matchTargetRowsByOverlap(
     timedRows.push({ row, index, timing })
   }
 
-  const assignment = assignByOverlap(timedRows, timedCellsOf(cells))
+  const timedCells = timedCellsOf(cells)
+  // Rescaled rows keep their `row` (so their label is still the file's own
+  // timecode); only the timing the matcher compares changes.
+  const timebase = options.rescale ? chooseTimebase(timedRows, timedCells) : null
+  const assignment = assignByOverlap(
+    timebase ? scaleTimedRows(timedRows, timebase.scale) : timedRows,
+    timedCells,
+  )
 
   const matched: FileTargetMatchedCell[] = []
   const orphans: TargetOrphan[] = []
@@ -466,6 +611,7 @@ export function matchTargetRowsByOverlap(
     unmatchedSourceCount: uncovered.length,
     uncovered,
     alignedBy: "overlap",
+    ...(timebase ? { timebase } : {}),
   }
 }
 
@@ -494,7 +640,7 @@ export function matchTargetRowsByOrder(
     nonEmptyRows.every((row) => rowTimingMs(row) !== null)
 
   return canMatchByOverlap
-    ? matchTargetRowsByOverlap(rows, cells)
+    ? matchTargetRowsByOverlap(rows, cells, { rescale: true })
     : matchRowsPositionally(rows, cells)
 }
 

@@ -70,6 +70,7 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -349,7 +350,7 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
@@ -500,64 +501,7 @@ async function reconcilePgSchema(
     patched.push("rebuilt file_section_progress PK with target_lang")
   }
 
-  // AQU-1093 (migration 0088): scope gained 'book'. The generic loop never
-  // rewrites CHECKs, so a container created under 0053 still carries the
-  // auto-named file_section_progress_check (file|section only). Import
-  // finalize and the boot-time progress backfill then 500 inserting book
-  // rows — same drift class as changesets_status_check below. Drop any
-  // scope/shape CHECK that predates 'book' and re-add the named pair.
-  if (live.has("file_section_progress")) {
-    const { rows: staleProgressChecks } = await client.query(
-      `SELECT conname FROM pg_constraint
-        WHERE conrelid = 'file_section_progress'::regclass
-          AND contype = 'c'
-          AND pg_get_constraintdef(oid) ILIKE '%scope%'
-          AND pg_get_constraintdef(oid) NOT ILIKE '%book%'`,
-    )
-    if (staleProgressChecks.length > 0) {
-      await run(
-        `DO $$
-         DECLARE c RECORD;
-         BEGIN
-           FOR c IN
-             SELECT conname
-               FROM pg_constraint
-              WHERE conrelid = 'file_section_progress'::regclass
-                AND contype = 'c'
-                AND pg_get_constraintdef(oid) ILIKE '%scope%'
-                AND pg_get_constraintdef(oid) NOT ILIKE '%book%'
-           LOOP
-             EXECUTE format('ALTER TABLE file_section_progress DROP CONSTRAINT %I', c.conname);
-           END LOOP;
-
-           IF NOT EXISTS (
-             SELECT 1 FROM pg_constraint
-              WHERE conrelid = 'file_section_progress'::regclass
-                AND conname = 'file_section_progress_scope_check'
-           ) THEN
-             ALTER TABLE file_section_progress
-               ADD CONSTRAINT file_section_progress_scope_check
-               CHECK (scope IN ('file', 'section', 'book'));
-           END IF;
-
-           IF NOT EXISTS (
-             SELECT 1 FROM pg_constraint
-              WHERE conrelid = 'file_section_progress'::regclass
-                AND conname = 'file_section_progress_shape_check'
-           ) THEN
-             ALTER TABLE file_section_progress
-               ADD CONSTRAINT file_section_progress_shape_check
-               CHECK (
-                 (scope = 'file' AND section_key = '') OR
-                 (scope IN ('section', 'book') AND section_key <> '')
-               );
-           END IF;
-         END $$`,
-        "rebuilding file_section_progress CHECKs to allow scope='book' (migration 0088)",
-      )
-      patched.push("rebuilt file_section_progress CHECKs to allow book rows")
-    }
-  }
+  await finalizeProgressSchema(run)
 
   // AQU-AGENT: the Agent API changeset lifecycle added the transitional
   // 'committing' status (schema.sql line ~782, used by commit.ts). The generic

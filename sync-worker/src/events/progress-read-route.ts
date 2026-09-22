@@ -1,5 +1,6 @@
 import { verifyTokenForProject } from '../auth'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
+import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -12,6 +13,13 @@ interface ProgressRow {
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
+  // AQU-1083: the structural subset of the three above, recorded by the
+  // projection whatever the policy says, so excluding headings is a
+  // subtraction here rather than a reprojection over there. Optional because
+  // plan-route builds rows by hand; absent reads as nothing to subtract.
+  structural_count?: number | string | null
+  structural_filled_count?: number | string | null
+  structural_validator_histogram?: Record<string, number> | string | null
   revision: number | string | bigint
   // AQU-1098: written by the projection since 0088. Absent on the synthetic
   // rows plan-route builds, which carry their own audio numbers.
@@ -81,8 +89,26 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
   return out
 }
 
-export function counts(row: ProgressRow, validationCount: number): ProgressCounts {
+/**
+ * The numbers a row reports, with the policy applied. `countStructural`
+ * defaults to counting — the behaviour every caller had before the setting
+ * existed — so a caller that has not resolved the policy gets today's numbers.
+ */
+export function counts(
+  row: ProgressRow,
+  validationCount: number,
+  countStructural = true,
+): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
+  if (!countStructural) {
+    // Bucket-wise, because the levels are cumulative on read: a validated
+    // chapter title would otherwise still be counted at every level below it.
+    for (const [bucket, amount] of parseHistogram(row.structural_validator_histogram ?? null)) {
+      const remaining = (histogram.get(bucket) ?? 0) - amount
+      if (remaining > 0) histogram.set(bucket, remaining)
+      else histogram.delete(bucket)
+    }
+  }
   const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCount))
   const validationLevels = Array.from({ length: levelCap }, (_, index) => {
     const threshold = index + 1
@@ -90,9 +116,13 @@ export function counts(row: ProgressRow, validationCount: number): ProgressCount
     for (const [bucket, amount] of histogram) if (bucket >= threshold) count += amount
     return count
   })
+  const structuralTotal = countStructural ? 0 : Number(row.structural_count) || 0
+  const structuralFilled = countStructural ? 0 : Number(row.structural_filled_count) || 0
   return {
-    totalCount: Number(row.total_count) || 0,
-    filledCount: Number(row.filled_count) || 0,
+    // Clamped at zero: an un-backfilled row has structural counts of 0, but a
+    // partially backfilled one must never report a negative denominator.
+    totalCount: Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
+    filledCount: Math.max(0, (Number(row.filled_count) || 0) - structuralFilled),
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
     audioCount: Number(row.audio_count) || 0,
@@ -179,6 +209,7 @@ export async function handleProgressReadRequest(
 
   if (sectionMatch) {
     const sectionKey = decodeURIComponent(sectionMatch[3]).trim()
+    const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
         `SELECT s.canonical_ref,
@@ -196,7 +227,8 @@ export async function handleProgressReadRequest(
                   WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
                     THEN SPLIT_PART(s.canonical_ref, ':', 1)
                   ELSE COALESCE(s.canonical_ref, '')
-                END) = ?`,
+                END) = ?
+            ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
       ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         canonical_ref: string | null
         target_value: string
@@ -213,7 +245,10 @@ export async function handleProgressReadRequest(
     // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
     // append a lane segment so caches never cross lanes.
     const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${laneTag}"`
+    // The policy is part of the cache key. Without it a reader who flips the
+    // switch keeps being served the arrangement they just changed away from.
+    const structuralTag = countStructural ? '' : ':nostruct'
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -234,11 +269,13 @@ export async function handleProgressReadRequest(
     return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
 
+  const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
   const [rowsResult, validationCount] = await Promise.all([
     env.AQUILLA_PG
       .prepare(
-        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision,
-                audio_count, audio_validated_count
+        `SELECT scope, section_key, total_count, filled_count, validator_histogram,
+                structural_count, structural_filled_count, structural_validator_histogram,
+                revision, audio_count, audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND ${targetLaneDualReadSql()}`,
       )
@@ -253,6 +290,7 @@ export async function handleProgressReadRequest(
     const fallback = await env.AQUILLA_PG
       .prepare(
         `SELECT f.cell_count AS total_count, f.filled_count, f.approved_count,
+                f.structural_cell_count, f.structural_filled_count, f.structural_approved_count,
                 GREATEST(
                   COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = f.project_id AND file_id = f.id), 0),
                   COALESCE((SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = f.project_id), 0)
@@ -260,12 +298,25 @@ export async function handleProgressReadRequest(
            FROM files f WHERE f.project_id = ? AND f.id = ?`,
       )
       .bind(projectId, fileId)
-      .first<{ total_count: number; filled_count: number; approved_count: number; revision: number }>()
+      .first<{
+        total_count: number; filled_count: number; approved_count: number
+        structural_cell_count: number; structural_filled_count: number
+        structural_approved_count: number; revision: number
+      }>()
     if (!fallback) return new Response('file not found', { status: 404 })
     const histogram = fallback.approved_count > 0 ? { [String(validationCount)]: fallback.approved_count } : {}
+    // The fallback fakes a histogram by parking every approved cell at the
+    // threshold, so the structural one has to be faked the same way or the
+    // subtraction would not line up on a bucket.
+    const structuralHistogram = fallback.structural_approved_count > 0
+      ? { [String(validationCount)]: fallback.structural_approved_count }
+      : {}
     rows = [{
       scope: 'file', section_key: '', total_count: fallback.total_count,
       filled_count: fallback.filled_count, validator_histogram: histogram,
+      structural_count: fallback.structural_cell_count,
+      structural_filled_count: fallback.structural_filled_count,
+      structural_validator_histogram: structuralHistogram,
       revision: fallback.revision,
       // `files` carries no audio rollup — the projection is the only source,
       // and this branch runs only before it has been backfilled.
@@ -283,21 +334,37 @@ export async function handleProgressReadRequest(
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
   // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
   // a client holding a pre-audio cached body would 304 and keep it forever:
-  // the shape changed without the revision moving.
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${laneTag}"`
+  // the shape changed without the revision moving. The structural policy is
+  // part of the key for the same reason: flipping it changes every number
+  // without moving the revision either.
+  const structuralTag = countStructural ? '' : ':nostruct'
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
 
+  const sectionRows = rows.filter((row) => row.scope === 'section')
   const body: FileProgressResponse = {
     fileId,
     revision,
     validationCount,
-    file: counts(fileRow, validationCount),
-    sections: rows
-      .filter((row) => row.scope === 'section')
+    file: counts(fileRow, validationCount, countStructural),
+    sections: sectionRows
       .sort((a, b) => compareSections(a.section_key, b.section_key))
-      .map((row) => ({ key: row.section_key, ...counts(row, validationCount) })),
+      .map((row) => ({
+        key: row.section_key,
+        rawTotal: Number(row.total_count) || 0,
+        ...counts(row, validationCount, countStructural),
+      }))
+      // A section made ENTIRELY of structural cells — USFM front matter is one,
+      // its \h/\toc/\mt lines all sitting before chapter 1 — has nothing left
+      // in it once the policy excludes them. Without this the sidebar keeps a
+      // tile for that section reading 0%, which is a section that no longer
+      // exists reporting that no work has been done on it. Only the ones the
+      // subtraction emptied are dropped; a section that is empty under both
+      // policies is left exactly as it is today.
+      .filter((section) => section.totalCount > 0 || section.rawTotal === 0)
+      .map(({ rawTotal: _rawTotal, ...section }) => section),
     source,
   }
   return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })

@@ -53,6 +53,7 @@ export function planUnitsSql(fileScope: string): string {
                  f.kind        AS file_kind,
                  f.book_code   AS file_book_code,
                  f.cell_count  AS file_cell_count,
+                 f.structural_cell_count AS file_structural_cell_count,
                  u.section_key
             FROM files f
             CROSS JOIN LATERAL (
@@ -87,6 +88,11 @@ export interface PlanUnitRow {
   total_count: number
   filled_count: number
   validator_histogram: Record<string, number> | string
+  // AQU-1083: the structural subset, so the board can subtract like every
+  // other progress surface. Same lane fallback as the columns they shadow.
+  structural_count: number
+  structural_filled_count: number
+  structural_validator_histogram: Record<string, number> | string
   audio_count: number
   audio_validated_count: number
   last_edit_at: number | null
@@ -125,6 +131,10 @@ export function readPlanUnitsSql(extraScope = ""): string {
                      CASE WHEN u.section_key = '' THEN u.file_cell_count END, 0) AS total_count,
             COALESCE(pl.filled_count, 0) AS filled_count,
             COALESCE(pl.validator_histogram, '{}'::jsonb) AS validator_histogram,
+            COALESCE(pl.structural_count, pd.structural_count,
+                     CASE WHEN u.section_key = '' THEN u.file_structural_cell_count END, 0) AS structural_count,
+            COALESCE(pl.structural_filled_count, 0) AS structural_filled_count,
+            COALESCE(pl.structural_validator_histogram, '{}'::jsonb) AS structural_validator_histogram,
             COALESCE(pd.audio_count, 0) AS audio_count,
             COALESCE(pd.audio_validated_count, 0) AS audio_validated_count,
             COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,

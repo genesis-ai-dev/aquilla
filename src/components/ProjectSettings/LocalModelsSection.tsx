@@ -1,4 +1,4 @@
-// Manage the in-browser AI model weights (Whisper transcription, Kokoro + MMS
+// Manage the in-browser AI model weights (Whisper transcription, MMS
 // voices). These live in the browser's Cache Storage and are SHARED across
 // every project on this device — downloading once here speeds up the first
 // transcribe / synth everywhere. Lets the user see what's downloaded, pull a
@@ -34,17 +34,11 @@ interface ModelMeta {
 const MODELS: ModelMeta[] = [
   {
     id: "whisper",
-    // i18n-exempt: model/product name, same treatment as the sibling "Kokoro"
-    // and "MMS" labels below (already atomic — untranslated in every locale).
+    // i18n-exempt: model/product name, same treatment as the sibling "MMS"
+    // label below (already atomic — untranslated in every locale).
     label: "Whisper",
     sizeMb: 140,
     blurb: "Transcribes recordings and adds word-level timing for karaoke playback.",
-  },
-  {
-    id: "kokoro",
-    label: "Kokoro",
-    sizeMb: 80,
-    blurb: "English text-to-speech that runs locally after a one-time download.",
   },
   {
     id: "mms",

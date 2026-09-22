@@ -24,6 +24,54 @@ export interface Glosser {
   gloss(target: string): string
 }
 
+/**
+ * AQU-207: weight given to one confirmed interlinear alignment when it is fed
+ * back into the glosser as a seed.
+ *
+ * Calibrated against the other seed sources in the workspace so an explicit
+ * per-token confirmation outranks an "admitted" rendering (1) but stays below a
+ * "preferred" one (3) — a single word link is a narrower claim than a termbase
+ * entry. `buildAlignmentModel` multiplies every seed by `SEED_MULTIPLIER` and
+ * adds it as an unnormalized bonus on top of the corpus association, which is
+ * a Dice coefficient bounded 0..1 (AQU-203, see `scoreAlignments`). The
+ * effective contribution is therefore ±10 against at most 1 from the corpus:
+ * a confirmed link cannot be outvoted by co-occurrence evidence alone, only by
+ * a heavier seed such as a "preferred" termbase rendering. The bonus applies to
+ * every target n-gram that contains the confirmed token, not just the bare
+ * token (see `SeedRule`), because the decoder tries the longest n-gram first
+ * and would otherwise never consult the entry the seed adjusted.
+ */
+export const ALIGNMENT_SEED_BT_WEIGHT = 2
+
+/**
+ * AQU-207: adapt confirmed/invalidated interlinear alignments into glosser seeds.
+ *
+ * `AlignmentSeed` and `BtSeed` describe the same relation with different field
+ * names — `srcToken`/`tgtToken` vs `source`/`target` — and both are oriented
+ * source-language → target-language, so the mapping is positional, not a swap.
+ * Sign carries through: a confirmed link boosts the alignment, an invalidated
+ * one penalizes it.
+ *
+ * This is the seam that makes a confirm in the interlinear panel actually move
+ * subsequent statistical BT output; without it the seeds only ever fed
+ * `interlinear.ts`'s own model and the BT ignored the user's corrections.
+ */
+export function btSeedsFromAlignmentSeeds(
+  seeds: readonly import("./interlinear").AlignmentSeed[],
+): BtSeed[] {
+  const out: BtSeed[] = []
+  for (const seed of seeds) {
+    if (seed.weight === 0) continue
+    if (!seed.srcToken?.trim() || !seed.tgtToken?.trim()) continue
+    out.push({
+      source: seed.srcToken,
+      target: seed.tgtToken,
+      weight: seed.weight * ALIGNMENT_SEED_BT_WEIGHT,
+    })
+  }
+  return out
+}
+
 // ── Internal types ────────────────────────────────────────────────────────────
 
 interface Alignment {
@@ -184,24 +232,125 @@ function buildAlignmentModel(
   // score as an unnormalized bonus below. Folding them into `cooc` would let
   // the Dice normalization cancel them out (a seed's only mass is its own
   // observation, so it would always normalize to the same value).
-  const seedScores = new Map<string, Map<string, number>>()
+  const rules = compileSeedRules(seeds)
+
+  return scoreAlignments(cooc, srcMass, rules)
+}
+
+/**
+ * A seed as the scorer applies it: a claim that wherever the target phrase
+ * `tgt` occurs, its gloss goes through the source phrase `src`.
+ *
+ * The claim is scored on every target n-gram that CONTAINS `tgt`, not only on
+ * `tgt` itself. `glossTokens` decodes longest-n-gram-first, so a seed that
+ * only adjusted the bare pair ("reine" → "king", −10) was never consulted
+ * when the trigram "la reine aime" already had a corpus winner ("the king
+ * loves") — the confirmation persisted, the model changed, and the BT the
+ * user read did not move (AQU-207, qa-bot walk on PR #548).
+ */
+interface SeedRule {
+  tgt: string[]
+  tgtPhrase: string
+  src: string[]
+  srcPhrase: string
+  /** Signed bonus: the caller's weight × SEED_MULTIPLIER. */
+  w: number
+}
+
+interface SeedRules {
+  all: SeedRule[]
+  /** Rules keyed by the first token of their target phrase, for lookup. */
+  byFirstToken: Map<string, SeedRule[]>
+}
+
+const NO_RULES: SeedRule[] = []
+
+function compileSeedRules(seeds: BtSeed[]): SeedRules {
+  const all: SeedRule[] = []
+  const byFirstToken = new Map<string, SeedRule[]>()
   for (const seed of seeds) {
     if (seed.weight === 0) continue
-    const srcPhrase = tokenize(seed.source).join(" ")
-    const tgtPhrase = tokenize(seed.target).join(" ")
-    if (!srcPhrase || !tgtPhrase) continue
-    // Seeds count as SEED_MULTIPLIER corpus observations for positive weights;
-    // negative seeds directly subtract score.
-    const w = seed.weight * SEED_MULTIPLIER
-    let inner = seedScores.get(tgtPhrase)
-    if (!inner) {
-      inner = new Map()
-      seedScores.set(tgtPhrase, inner)
+    const src = tokenize(seed.source)
+    const tgt = tokenize(seed.target)
+    if (src.length === 0 || tgt.length === 0) continue
+    // A target phrase longer than any n-gram the decoder asks for can never be
+    // contained in one, so the rule could not fire; drop it at compile time.
+    if (tgt.length > MAX_NGRAM) continue
+    const rule: SeedRule = {
+      tgt,
+      tgtPhrase: tgt.join(" "),
+      src,
+      srcPhrase: src.join(" "),
+      // Seeds count as SEED_MULTIPLIER corpus observations for positive
+      // weights; negative seeds directly subtract score.
+      w: seed.weight * SEED_MULTIPLIER,
     }
-    inner.set(srcPhrase, (inner.get(srcPhrase) ?? 0) + w)
+    all.push(rule)
+    let bucket = byFirstToken.get(tgt[0])
+    if (!bucket) {
+      bucket = []
+      byFirstToken.set(tgt[0], bucket)
+    }
+    bucket.push(rule)
   }
+  return { all, byFirstToken }
+}
 
-  return scoreAlignments(cooc, srcMass, seedScores)
+/** True if `needle` occurs in `hay` as a contiguous run of whole tokens. */
+function containsSeq(hay: readonly string[], needle: readonly string[]): boolean {
+  const n = needle.length
+  if (n === 0 || n > hay.length) return false
+  outer: for (let i = 0; i + n <= hay.length; i++) {
+    for (let j = 0; j < n; j++) {
+      if (hay[i + j] !== needle[j]) continue outer
+    }
+    return true
+  }
+  return false
+}
+
+/** The rules whose target phrase is contained in `tgtTokens`, each at most once. */
+function rulesFor(tgtTokens: readonly string[], rules: SeedRules): SeedRule[] {
+  let out: SeedRule[] | null = null
+  for (let i = 0; i < tgtTokens.length; i++) {
+    const bucket = rules.byFirstToken.get(tgtTokens[i])
+    if (!bucket) continue
+    for (const rule of bucket) {
+      if (rule.tgt.length > tgtTokens.length - i) continue
+      let matches = true
+      for (let j = 1; j < rule.tgt.length; j++) {
+        if (tgtTokens[i + j] !== rule.tgt[j]) {
+          matches = false
+          break
+        }
+      }
+      if (!matches) continue
+      if (out?.includes(rule)) continue
+      ;(out ??= []).push(rule)
+    }
+  }
+  return out ?? NO_RULES
+}
+
+/**
+ * The seed bonus for glossing a target phrase (whose applicable rules are
+ * `applicable`) through `srcTokens`.
+ *
+ * Each rule votes for the candidates that agree with it and against the ones
+ * that do not: a candidate containing the rule's source phrase gets `+w`, any
+ * other candidate gets `−w`. Voting against matters for a confirmation — a
+ * bonus on the confirmed candidate alone would leave the corpus winner
+ * ("the king loves") untouched, and Dice differences never exceed 1, so the
+ * disagreeing candidate has to be pushed below the agreeing one explicitly.
+ * For an invalidation (`w < 0`) the signs flip and the same rule reads
+ * "anything but this".
+ */
+function seedBonus(srcTokens: readonly string[], applicable: readonly SeedRule[]): number {
+  let bonus = 0
+  for (const rule of applicable) {
+    bonus += containsSeq(srcTokens, rule.src) ? rule.w : -rule.w
+  }
+  return bonus
 }
 
 /**
@@ -222,6 +371,12 @@ function buildAlignmentModel(
  * with this target wins. Bounded 0..1, so a seed bonus (± SEED_MULTIPLIER × the
  * caller's weight) still dominates by design.
  *
+ * Seeds are applied as rules over containment (see `SeedRule`): every target
+ * phrase containing a seeded target phrase scores each candidate by whether it
+ * contains the seeded source phrase. The bare seeded pair is additionally a
+ * candidate in its own right when the corpus never paired the two, so a
+ * termbase rendering the corpus has not used yet can still surface.
+ *
  * The collapse to argmax is unchanged: `glossTokens` only ever reads the single
  * highest-scoring source phrase, so retaining the full source×target n-gram
  * cross-product (~45× more entries) is pure waste — the dominant contributor to
@@ -231,16 +386,17 @@ function buildAlignmentModel(
 function scoreAlignments(
   cooc: CooccurrenceMap,
   srcMass: Map<string, number>,
-  seedScores: Map<string, Map<string, number>>,
+  rules: SeedRules,
 ): AlignmentMap {
   const model: AlignmentMap = new Map()
 
   // Target phrases seen in the corpus, in seeds, or both.
-  const targetPhrases = new Set<string>([...cooc.keys(), ...seedScores.keys()])
+  const targetPhrases = new Set<string>(cooc.keys())
+  for (const rule of rules.all) targetPhrases.add(rule.tgtPhrase)
 
   for (const tgtPhrase of targetPhrases) {
     const inner = cooc.get(tgtPhrase)
-    const seedsForTarget = seedScores.get(tgtPhrase)
+    const applicable = rules.all.length > 0 ? rulesFor(tgtPhrase.split(" "), rules) : NO_RULES
 
     // Total corpus mass for this target phrase — the other Dice denominator.
     let tgtMass = 0
@@ -254,7 +410,7 @@ function scoreAlignments(
       for (const [src, alignment] of inner) {
         const denom = (srcMass.get(src) ?? 0) + tgtMass
         const dice = denom > 0 ? (2 * alignment.score) / denom : 0
-        const score = dice + (seedsForTarget?.get(src) ?? 0)
+        const score = dice + (applicable.length > 0 ? seedBonus(src.split(" "), applicable) : 0)
         if (score > bestScore) {
           bestScore = score
           bestSrc = src
@@ -264,14 +420,16 @@ function scoreAlignments(
     }
 
     // Seed-only candidates (no corpus co-occurrence) compete on seed weight.
-    if (seedsForTarget) {
-      for (const [src, seedScore] of seedsForTarget) {
-        if (inner?.has(src)) continue
-        if (seedScore > bestScore) {
-          bestScore = seedScore
-          bestSrc = src
-          bestCount = 1
-        }
+    // Only a rule whose target IS this phrase proposes its own source phrase;
+    // a rule merely contained in it would propose a partial gloss.
+    for (const rule of applicable) {
+      if (rule.tgtPhrase !== tgtPhrase) continue
+      if (inner?.has(rule.srcPhrase)) continue
+      const score = seedBonus(rule.src, applicable)
+      if (score > bestScore) {
+        bestScore = score
+        bestSrc = rule.srcPhrase
+        bestCount = 1
       }
     }
 

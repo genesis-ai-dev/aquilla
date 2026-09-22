@@ -20,6 +20,7 @@ import {
   isChainArbitrated,
   isChainMutatingKind,
   laneOfEvent,
+  projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
@@ -224,20 +225,13 @@ export async function handleRebuildProjectionRequest(
     await db.batch(stmts.slice(i, i + BATCH_LIMIT))
   }
 
-  // 4b. Recompute file counters once, set-based (deferred above). Mirrors
-  //     POST /migrate/finalize — O(total cells), not O(N²) per cell.
-  await db
-    .prepare(
-      `UPDATE files SET
-         cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
-         approved_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND validated=1),
-         filled_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target' AND TRIM(value)!=''),
-         word_count = (SELECT COALESCE(SUM(word_count),0) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target'),
-         last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
-         updated_at = ?
-       WHERE project_id = ?`,
-    )
-    .bind(Date.now(), projectId)
+  // 4b. Recompute file counters once, set-based (deferred above). Shares one
+  //     builder with the live projection and POST /migrate/finalize — this used
+  //     to be a third hand-written copy, and it had already drifted, dropping
+  //     ai_drafted_count. AQU-1083 made the divergence dangerous rather than
+  //     merely untidy: a rebuild running its own SQL would silently put
+  //     headings back into a project that had excluded them.
+  await projectFileCountersRecomputeStmt(db, projectId, Date.now())
     .run()
 
   // 5. Mark the rebuild for warm delta clients (audit B5). A rebuild changes

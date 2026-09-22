@@ -65,6 +65,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
+import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
   type BacktranslationActionSource,
@@ -75,6 +76,7 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -153,6 +155,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
@@ -509,8 +512,8 @@ function SynthStatusBadge({
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
       error.category === "sign-in-required" ||
-      error.category === "omnivoice-not-configured" ||
-      error.category === "omnivoice-failed" ||
+      error.category === "hosted-tts-not-configured" ||
+      error.category === "hosted-tts-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
       error.category === "gemini-failed" ||
@@ -4607,6 +4610,38 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
   )
 }
 
+// ---------------------------------------------------------------------------
+// SourceTagChips — small read-only chips from the extensible
+// `cell.metadata.tags` bucket (a flat list of labels). Importers that know a
+// cell's category — the SDBH lexicon's headword / "Contextual meaning" / Gloss
+// tags (AQU-793) — put it here so the reader sees it on the row itself instead
+// of opening the metadata drawer. Non-array or empty values render nothing.
+// ---------------------------------------------------------------------------
+function SourceTagChips({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const tags = (metadata as { tags?: unknown } | null | undefined)?.tags
+  if (!Array.isArray(tags)) return null
+  const labels = tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="source-tag-chips" className="flex shrink-0 items-center gap-1">
+      {labels.map((tag, i) => (
+        <span
+          key={`${tag}-${i}`}
+          dir="auto"
+          className="rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {tag}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Stable stand-in when the table is rendered without a token minter (tests,
+ *  local-only projects): a read that cannot authenticate simply returns nothing.
+ *  Module-scope so it never re-triggers a row's read effect. */
+const NO_TOKEN = () => Promise.resolve(null)
+
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
@@ -4634,6 +4669,7 @@ function EditorRow({
   isStaleSource,
   isUpstreamStaleSource,
   getAlignmentModel,
+  getTokenForFile,
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
@@ -5869,10 +5905,7 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking =
-    castGutter &&
-    cell.type !== "paratext" &&
-    cell.type !== "heading"
+  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -5882,6 +5915,7 @@ function EditorRow({
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+  const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
@@ -5928,6 +5962,19 @@ function EditorRow({
     if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
   }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
+
+  // AQU-462: original-language morphology for the Macula Hebrew/Greek source
+  // behind this row. Gated on the same open-alignment condition as the model
+  // above — a Macula book holds tens of thousands of morph rows, so this is a
+  // read for the row a translator is looking at, never for the file. Files with
+  // no morphology answer with an empty list and the strip stays hidden.
+  const { words: originalWords } = useCellMorph({
+    enabled: btAlignmentOpen && expanded && expansionTab === "backtranslation",
+    projectId: project.id,
+    fileId: cell.fileId ?? null,
+    cellId: cell.id,
+    getTokenForFile: getTokenForFile ?? NO_TOKEN,
+  })
 
   // Edit history is reached via the single History control on the cell action
   // rail (opens the full HistoryDrawer). The audit trail lives in the
@@ -6345,6 +6392,7 @@ function EditorRow({
                     castName={gutterCastName}
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
+                    showLanguageBadge={gutterLanguageBadge}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
                     onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
                   />
@@ -6597,6 +6645,7 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              <SourceTagChips metadata={cell.metadata} />
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -7064,7 +7113,7 @@ function EditorRow({
               overflowOpen={railOverflowOpen}
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
-              overflowLabel={t("editor.rail.moreActions")}
+              overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
               // AQU-200: AI-generate is the one action that stays a direct
               // button. Validate is the other always-visible action, and it
               // already lives in the row's left gutter — it is not moved.
@@ -7403,6 +7452,7 @@ function EditorRow({
                   onAlignmentOpenChange={setBtAlignmentOpen}
                   alignmentModel={alignmentModelForExpansion}
                   showAlignment={Boolean(getAlignmentModel)}
+                  originalWords={originalWords}
                   onBacktranslate={onBacktranslate}
                   onSaveBacktranslation={onSaveBacktranslation}
                   onAlignmentSeedChange={onAlignmentSeedChange}

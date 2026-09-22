@@ -82,6 +82,7 @@ import {
 } from "@/lib/parsers/types"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
@@ -411,6 +412,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    // AQU-1083: what "Organization default" currently resolves to, from the
+    // same response as the value it is the fallback for.
+    orgCountStructuralCells,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -1235,7 +1239,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -2441,6 +2445,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               allowSelfValidation={allowSelfValidation}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
+              // AQU-1083: the last row of the validation card. Passed as a
+              // node rather than props because it patches the shared blob
+              // directly — see the component's own note for why it must not
+              // ride this page's draft/baseline state.
+              structuralCellsRow={
+                <StructuralCellsProjectSection
+                  value={sharedSettingsBlob?.countStructuralCells}
+                  orgDefault={orgCountStructuralCells ?? true}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
               onChange={(u) => {
                 if (u.validationCount !== undefined) setValidationCount(u.validationCount)
                 if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)

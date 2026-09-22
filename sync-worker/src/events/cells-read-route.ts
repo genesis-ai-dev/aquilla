@@ -211,9 +211,25 @@ function mapRow(row: CellRowRaw): CellRowOut {
  * the wrong default for a read API that should surface everything in the
  * projection.
  */
+/**
+ * What the chain walk needs of a row. Exported (AQU-1278) so the plan board's
+ * "first outstanding cell" read can order a document's cells exactly as the
+ * editor does, rather than growing a second idea of document order.
+ */
+export interface AnchorChainRow {
+  cell_id: string
+  anchor_cell_id: string | null
+  event_id: string
+}
+
+/**
+ * The narrow projection the ordering read selects on a chain-cache miss
+ * (AQU-1160): enough to walk and to key the per-side/lane page lookup, so a
+ * cold isolate never reads a file's full row values just to order it.
+ */
 type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "anchor_cell_id" | "event_id">
 
-function walkAnchorChain<T extends OrderRow>(rows: T[]): T[] {
+export function walkAnchorChain<T extends AnchorChainRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
 
   // anchor_cell_id (null → "") → ordered children by event_id.

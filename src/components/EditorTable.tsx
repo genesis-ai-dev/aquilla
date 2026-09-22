@@ -153,6 +153,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
@@ -5869,10 +5870,7 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking =
-    castGutter &&
-    cell.type !== "paratext" &&
-    cell.type !== "heading"
+  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null

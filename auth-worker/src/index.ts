@@ -163,7 +163,7 @@ app.use("*", async (c, next) => {
 // Hono throws on `c.executionCtx` when there is none (vitest calls
 // app.fetch without a ctx), so resolve it defensively and fall back to
 // un-awaited fire-and-forget.
-const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+const runInBackground = (c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, task: Promise<void>) => {
   try {
     c.executionCtx.waitUntil(task)
   } catch {

@@ -51,13 +51,17 @@ describe("step-up elevation flow", () => {
 
     const key = "_migrate/daemon-status.json"
     const snapshot = { runner: "daemon@test", heartbeatAt: "2026-09-21T00:00:00.000Z" }
-    await env.SNAPSHOTS.put(key, JSON.stringify(snapshot))
+    // Env.SNAPSHOTS is optional (the route 503s without it): narrow once so the
+    // put/delete type-check, and fail loudly if the test env binds no stub.
+    const snapshots = env.SNAPSHOTS
+    if (!snapshots) throw new Error("PGlite test env binds no SNAPSHOTS bucket (see helpers/pg-test-env.ts)")
+    await snapshots.put(key, JSON.stringify(snapshot))
     try {
       const response = await migrationStatus(jwt)
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ status: snapshot })
     } finally {
-      await env.SNAPSHOTS.delete(key)
+      await snapshots.delete(key)
     }
   })
 

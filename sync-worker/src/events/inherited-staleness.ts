@@ -242,8 +242,8 @@ export async function computeUpstreamStaleCellIds(
   // D starts as the project under test; walk hop by hop up the chain.
   const dCellIds: string[] = [...cellIds]
   for (let i = 0; i < chain.length - 1; i++) {
-    const d = chain[i]!
-    const u = chain[i + 1]!
+    const d = chain[i]
+    const u = chain[i + 1]
     if (dCellIds.length === 0) break
 
     // Step 1: mirror check — D's local mirrored source row's

@@ -18,7 +18,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
 import { X, ChevronUp, ChevronDown, ArrowRight } from "lucide-react"
@@ -282,7 +282,7 @@ export function PlanInspector({
               // Styled as the board's other links are: the words as they were,
               // a dotted underline on hover and focus, so the title still reads
               // as a title until the pointer asks it what it does.
-              <AppTooltip content={t("org.projectOverview.plan.openFile")}>
+              <AppTooltip content={t("org.projectOverview.plan.openInEditor")}>
                 <button
                   type="button"
                   data-testid="plan-inspector-open-file"
@@ -320,6 +320,16 @@ export function PlanInspector({
           outside it. That is the convention the base stylesheet already
           names for inner panes; this one was missing it (2026-09-22). */}
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 py-4">
+        {projectId && (
+          <a
+            href={`/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(unit.fileId)}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <span className="truncate">
+              {t("org.projectOverview.plan.openFile", { fileName: unit.fileName })}
+            </span>
+          </a>
+        )}
         {failed && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px]"
              role="alert" data-testid="plan-patch-failed">
@@ -710,7 +720,7 @@ function PlanChapterCard({
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 text-[12.5px] font-semibold" data-testid="plan-chapter-detail-title">
           {firstCellId && onOpenCell ? (
-            <AppTooltip content={t("org.projectOverview.plan.openFile")}>
+            <AppTooltip content={t("org.projectOverview.plan.openInEditor")}>
               <button
                 type="button"
                 data-testid="plan-chapter-open"

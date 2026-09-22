@@ -19,5 +19,6 @@ describe("neon-target hands the backfill its flags", () => {
     expect(childArgs("apply", ["--whatever"])).toEqual(["scripts/neon-migrate.ts", "apply"])
     expect(childArgs("status", [])).toEqual(["scripts/neon-migrate.ts", "status"])
     expect(childArgs("baseline", [])).toEqual(["scripts/neon-migrate.ts", "baseline"])
+    expect(childArgs("prepare-comments-key", ["--dry-run"])).toEqual(["scripts/neon-migrate.ts", "prepare-comments-key"])
   })
 })

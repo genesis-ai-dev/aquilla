@@ -15,7 +15,7 @@
 import type { AquillaDb } from '../../../db/shim/postgres'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
-import { checkProjectMembership } from './membership'
+import { checkProjectMembershipDetailed } from './membership'
 import { counts, readValidationCount, readValidationCountAudio, BOOK_INDEX } from './progress-read-route'
 import { readCountStructuralCells } from './structural-cells'
 import { resolveCorpusMarker } from './corpus-marker'
@@ -221,7 +221,7 @@ export async function handlePlanRequest(
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
   const db = env.AQUILLA_PG
-  const projectId = decodeURIComponent(match[1]!)
+  const projectId = decodeURIComponent(match[1])
 
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
@@ -277,9 +277,18 @@ export async function handlePlanRequest(
   // live membership before letting them write. Platform operators are the
   // documented exemption — they have no membership rows to check.
   if (auth.claims.src !== 'platform') {
-    const membership = await checkProjectMembership(db, projectId, auth.claims.userId)
-    if (membership === 'revoked') {
+    const membership = await checkProjectMembershipDetailed(db, projectId, auth.claims.userId)
+    if (membership.status === 'revoked') {
       return new Response('project membership revoked', { status: 403 })
+    }
+    // [Pen test 2026-09-21] The check above only catches full removal. A
+    // direct membership row DOWNGRADED below maintainer (not deleted) still
+    // has_grant, so it reports "ok" too, letting a stale still-maintainer
+    // token keep writing plan units for the rest of its window. The floor
+    // required here is a fixed constant, so re-check the live role against
+    // it directly rather than only against the token's stale claim.
+    if (membership.roleLevel !== null && membership.roleLevel < PLAN_WRITE_MIN_ROLE) {
+      return new Response('role >= maintainer (600) required', { status: 403 })
     }
   }
 

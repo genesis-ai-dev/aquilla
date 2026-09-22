@@ -23,6 +23,7 @@ import {
   type PatchSettingsCommand,
   type PlanImportCommand,
   type ProjectLifecycleCommand,
+  type RegenerateBriefSummaryCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type StructureCommand,
@@ -36,6 +37,9 @@ import {
 } from './commands-membership'
 import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
 import { commitSetBrief } from './commands-set-brief'
+import { commitRegenerateBriefSummary } from './commands-regenerate-brief'
+import { commitProjectSetup } from './commit-project-setup'
+import type { ProjectSetupCommand } from './commands-project-setup'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
@@ -68,6 +72,7 @@ import type {
   ChangesetReceipt,
   ChangesetWarning,
   ExternalEnv,
+  PlannedEventIds,
   ProvenanceChannel,
   ReceiptOnlyReceipt,
   StoredChangeset,
@@ -263,7 +268,24 @@ export async function commitChangesetCore(
   // writes it back as the translationBrief settings key.
   const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
   if (setBriefCmd) {
-    return commitSetBrief(db, cred, cs, setBriefCmd, channel)
+    return commitSetBrief(db, env, cred, cs, setBriefCmd, channel)
+  }
+  // AQU-1282 RegenerateBriefSummary: receipt-only — renders the L1 through
+  // auth-worker and writes it into the same translationBrief key.
+  const regenBriefCmd = cs.commands.find(
+    (c): c is RegenerateBriefSummaryCommand => c.kind === 'RegenerateBriefSummary',
+  )
+  if (regenBriefCmd) {
+    return commitRegenerateBriefSummary(db, env, cred, cs, regenBriefCmd, channel)
+  }
+  // AQU-1294 ProjectSetup: the composite plan. Its module re-runs the live
+  // authorization, consumes the approval once, and walks the step ledger —
+  // persisting each step's status so a retry resumes rather than re-applies.
+  const projectSetupCmd = cs.commands.find(
+    (c): c is ProjectSetupCommand => c.kind === 'ProjectSetup',
+  )
+  if (projectSetupCmd) {
+    return commitProjectSetup(request, env, db, cred, cs, projectSetupCmd, channel, ctx)
   }
   // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
   // CreateProject it must run before the project-role precheck below.
@@ -620,25 +642,49 @@ function sourceBlobFormat(fileType: string): string {
   return normalized in SOURCE_ARTIFACT_FORMATS ? normalized : 'custom-original'
 }
 
+/** Outcome of one PlanImport apply (AQU-1294). `error` short-circuits before
+ *  anything could be applied (no receipt yet); otherwise `receipt` is always
+ *  present and `ok` says whether every event landed. The caller owns the
+ *  terminal changeset row write — a ProjectSetup plan has more steps to run
+ *  after an import succeeds, so the apply must not close the changeset. */
+export interface ApplyPlanImportOutcome {
+  ok: boolean
+  fileId: string
+  receipt: ChangesetReceipt | null
+  rejected: { id: string; status: number; reason: string }[]
+  error: Response | null
+}
+
 /**
  * Compile a PlanImport into one file.create + N genesis source.cell.create
  * events (chained by anchorCellId, mirroring the SPA import + bulk /import
  * semantics), route them through the SAME /events perimeter Wave 1 uses (source.*
  * requires PROJECT_LEAD (500) — a contributor credential is 403'd there), keep
- * the file soft-hidden while its chunks are being applied, and stamp
- * provenance on applied events, link the artifact, and write the receipt.
+ * the file soft-hidden while its chunks are being applied, stamp provenance on
+ * applied events, and link the artifact.
+ *
+ * Writes NO terminal changeset row — see ApplyPlanImportOutcome. `commitPlanImport`
+ * wraps it for the sole-command PlanImport changeset; `commit-project-setup.ts`
+ * calls it once per import step.
  */
-async function commitPlanImport(
+export async function applyPlanImport(
   request: Request,
   env: ExternalEnv,
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   cmd: PlanImportCommand,
+  opts: {
+    /** The prepare-time id ledger for THIS import (a composite plan holds one
+     *  per import step, so it cannot be read off cs.plannedIds.planImport). */
+    planned?: PlannedEventIds['planImport']
+    /** Warnings the receipt starts from (the plan's own summary warnings). */
+    baseWarnings?: readonly ChangesetWarning[]
+  },
   confirmationId: string | null,
   channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
-): Promise<Response> {
+): Promise<ApplyPlanImportOutcome> {
   const projectId = cs.projectId
   const clientTs = Date.now()
 
@@ -647,7 +693,7 @@ async function commitPlanImport(
   // /events idempotency layer (INSERT OR IGNORE on event id) dedupes them — no
   // duplicate file, no duplicate source cells. Fall back to minting for
   // changesets staged before the planned-id ledger existed (backward compat).
-  const plannedImport = cs.plannedIds?.planImport
+  const plannedImport = opts.planned
   const fileId = plannedImport?.fileId ?? uuidv7()
   const compiled = compilePlanImport(cmd)
 
@@ -767,7 +813,7 @@ async function commitPlanImport(
   try {
     token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
   } catch (err) {
-    return toErrorResponse(err)
+    return { ok: false, fileId, receipt: null, rejected: [], error: toErrorResponse(err) }
   }
 
   const acceptedIds = new Set<string>()
@@ -780,7 +826,12 @@ async function commitPlanImport(
       body: JSON.stringify({ events: chunk }),
     })
     const res = await handleEventsWriteRequest(req, env, ctx)
-    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+    if (!res) {
+      return {
+        ok: false, fileId, receipt: null, rejected,
+        error: errorResponse('job_failed', 'events perimeter did not respond'),
+      }
+    }
     const out = (await res.json()) as EventsWriteResponse
     for (const a of out.accepted) acceptedIds.add(a.id)
     for (const r of out.rejected) rejected.push(r)
@@ -800,11 +851,14 @@ async function commitPlanImport(
   // credential is 403'd by the perimeter since source.* needs PROJECT_LEAD 500).
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
-    return errorResponse(
-      anyForbidden ? 'permission_denied' : 'job_failed',
-      'no events were applied',
-      { rejected },
-    )
+    return {
+      ok: false, fileId, receipt: null, rejected,
+      error: errorResponse(
+        anyForbidden ? 'permission_denied' : 'job_failed',
+        'no events were applied',
+        { rejected },
+      ),
+    }
   }
 
   // Link the uploaded artifact while the file is still hidden. A binding
@@ -889,7 +943,12 @@ async function commitPlanImport(
       body: JSON.stringify({ events: [revealEvent] }),
     })
     const revealResponse = await handleEventsWriteRequest(revealRequest, env, ctx)
-    if (!revealResponse) return errorResponse('job_failed', 'events perimeter did not respond')
+    if (!revealResponse) {
+      return {
+        ok: false, fileId, receipt: null, rejected,
+        error: errorResponse('job_failed', 'events perimeter did not respond'),
+      }
+    }
     const revealResult = (await revealResponse.json()) as EventsWriteResponse
     for (const accepted of revealResult.accepted) acceptedIds.add(accepted.id)
     for (const rejectedEvent of revealResult.rejected) rejected.push(rejectedEvent)
@@ -907,7 +966,7 @@ async function commitPlanImport(
       .run()
   }
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
+  const warnings: ChangesetWarning[] = [...(opts.baseWarnings ?? [])]
   for (const r of rejected) {
     warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
   }
@@ -921,10 +980,44 @@ async function commitPlanImport(
     fileId,
   }
 
-  // Only expose a terminal committed receipt after every event is accepted.
-  // On a partial result the row stays `committing`; a retry re-posts the same
-  // prepare-time ids and converges through event idempotency.
-  if (rejected.length > 0) {
+  return { ok: rejected.length === 0, fileId, receipt, rejected, error: null }
+}
+
+/**
+ * The sole-command PlanImport changeset: apply the import, then own the
+ * terminal changeset row write.
+ *
+ * Only exposes a terminal committed receipt after every event is accepted. On
+ * a partial result the row stays `committing`; a retry re-posts the same
+ * prepare-time ids and converges through event idempotency.
+ */
+async function commitPlanImport(
+  request: Request,
+  env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: PlanImportCommand,
+  confirmationId: string | null,
+  channel: ProvenanceChannel,
+  ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+): Promise<Response> {
+  const outcome = await applyPlanImport(
+    request,
+    env,
+    db,
+    cred,
+    cs,
+    cmd,
+    { ...(cs.plannedIds?.planImport ? { planned: cs.plannedIds.planImport } : {}), baseWarnings: cs.summary.warnings },
+    confirmationId,
+    channel,
+    ctx,
+  )
+  if (outcome.error) return outcome.error
+  const receipt = outcome.receipt as ChangesetReceipt
+
+  if (!outcome.ok) {
     await db
       .prepare(`UPDATE changesets SET receipt = ?::text::jsonb WHERE id = ? AND status = 'committing'`)
       .bind(JSON.stringify(receipt), cs.id)

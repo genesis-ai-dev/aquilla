@@ -8,6 +8,7 @@
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
 import { settingsKeyDocLines } from './project-settings-keys'
+import { POLICY_DIRECTION_TABLE } from './policy-direction'
 
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
 
@@ -34,6 +35,13 @@ export interface CommandCatalogEntry {
 const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
   .map((line) => `\`${line}\``)
   .join(', ')
+
+/** AQU-1282: the per-key restrictive direction, rendered from the same table the
+ *  enforcing helper uses (db/shared/policy-direction.ts) so the doc an agent
+ *  reads and the rule it hits cannot drift. */
+const POLICY_DIRECTION_DOC = POLICY_DIRECTION_TABLE.map(
+  (row) => `  - \`${row.key}\`: ${row.restrictiveDirection}`,
+).join('\n')
 
 const COMMENTER = 200
 const CONTRIBUTOR = 400
@@ -172,7 +180,8 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
-Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship.
+Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
+${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
@@ -197,8 +206,52 @@ Gotchas:
 - An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
 - Section text caps at 4000 chars; \`freeformNotes\` at 8000.
 - \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
-- The L1 summary is carried over, not cleared, so it shows as stale in-app until regenerated — same as an in-app section edit.
+- The copilot reads only the brief's rendered L1 summary (\`translationBrief.l1Summary\`), so on commit the summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed; run \`RegenerateBriefSummary\` to re-render.
 Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
+  },
+  {
+    kind: 'RegenerateBriefSummary',
+    title: 'Regenerate brief summary',
+    oneLiner: 'Re-render the brief’s L1 summary so the copilot sees the current sections.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### RegenerateBriefSummary
+Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
+Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. The L1 is the ONLY part of the brief the copilot's prompt injects (see \`parts.brief\` in the prompt-preview read), so this is how a brief written by SetBrief — or edited in-app without regenerating — reaches the AI.
+Gotchas:
+- Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
+- \`ifMatchVersion\` is the SETTINGS version and must match at prepare AND commit (plan_stale on drift). A successful commit bumps it by one.
+- The render runs BEFORE the approval is consumed: a failed model call answers \`job_failed\` / \`rate_limited\` (credit cap) and leaves the approved changeset committable for a retry.
+- Receipt carries \`briefSummaryChars\` and \`l1ModelId\`.
+Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersion": 8 }\``,
+  },
+  {
+    kind: 'ProjectSetup',
+    title: 'Project setup (composite)',
+    oneLiner: 'Settings, brief, members and imports for one project in ONE approval.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ProjectSetup
+Params: \`{ projectId, settings?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
+1. \`settings\` — non-policy keys, one write.
+2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
+3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
+4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
+5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
+6. The verification receipt (below).
+Gotchas:
+- The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
+- Never guess these four — they come from the partner, not from you: \`settings.sourceLanguage\`, \`settings.targetLanguage\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
+- Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
+- Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
+- Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
+- Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
+- Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
+- Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, policyKeysNotApplied }\`. \`briefReachesCopilot\` is the real prompt-preview run on the first source cell of the first created file — if it is false, the brief is NOT reaching the AI.
+Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "settings": { "sourceLanguage": "ru", "targetLanguage": "sty", "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
   },
   {
     kind: 'UpdateProjectSettings',

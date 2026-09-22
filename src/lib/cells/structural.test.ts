@@ -8,7 +8,7 @@
 // its own denominator.
 
 import { describe, it, expect } from "vitest"
-import { countsTowardProgress, isStructuralCell, STRUCTURAL_CELL_TYPES } from "./structural"
+import { applyStructuralPolicy, countsTowardProgress, isStructuralCell, STRUCTURAL_CELL_TYPES } from "./structural"
 
 describe("isStructuralCell", () => {
   it("is true for the USFM structure types", () => {
@@ -51,5 +51,33 @@ describe("countsTowardProgress", () => {
     expect(countsTowardProgress("paratext", false)).toBe(false)
     expect(countsTowardProgress("verse", false)).toBe(true)
     expect(countsTowardProgress(null, false)).toBe(true)
+  })
+})
+
+describe("applyStructuralPolicy", () => {
+  const cells = [
+    { type: "verse", status: "unvalidated" },
+    { type: "verse", status: "empty" },
+    { type: "heading", status: "validated" },
+    { type: "paratext", status: "unvalidated" },
+    { type: null, status: "validated" },
+  ]
+  // What useHealth would have counted over those five cells.
+  const counted = { total: 5, translated: 4, validated: 2 }
+
+  it("returns the input untouched when the policy counts everything", () => {
+    expect(applyStructuralPolicy(counted, cells, true)).toBe(counted)
+  })
+
+  it("removes structure from every number, and only structure", () => {
+    // The untyped cell is content and stays; both headings leave, taking
+    // their translated and validated marks with them.
+    expect(applyStructuralPolicy(counted, cells, false)).toEqual({ total: 3, translated: 2, validated: 1 })
+  })
+
+  it("returns the input untouched when nothing is structural", () => {
+    const verses = cells.filter((c) => !isStructuralCell(c.type))
+    const p = { total: 3, translated: 2, validated: 1 }
+    expect(applyStructuralPolicy(p, verses, false)).toBe(p)
   })
 })

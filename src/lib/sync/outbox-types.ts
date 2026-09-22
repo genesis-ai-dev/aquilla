@@ -16,7 +16,7 @@
  */
 
 import type { CameraState } from "@/lib/sync/cells-read-types"
-import type { TermRendering } from "@/lib/terminology/types"
+import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
@@ -472,6 +472,7 @@ export interface OutboxEventPayloads {
     status: "active" | "draft" | "deprecated"
     notes?: string
     caseSensitive?: boolean
+    match?: TermMatchOptions
   }
   // Partial patch: only the keys present are written, so two people editing
   // different fields of one concept both survive. `renderings` is replaced
@@ -482,6 +483,7 @@ export interface OutboxEventPayloads {
     renderings?: TermRendering[]
     notes?: string
     caseSensitive?: boolean
+    match?: TermMatchOptions
   }
   "term.delete": {
     conceptId: string // soft-delete: stamps deleted_at

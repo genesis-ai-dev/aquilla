@@ -18,7 +18,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
-import type { TermRendering } from "@/lib/terminology/types"
+import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -1566,6 +1566,7 @@ export interface TermCreateInput {
   status: "active" | "draft" | "deprecated"
   notes?: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
   author: string
   clientTs?: number
 }
@@ -1584,6 +1585,7 @@ export async function emitTermCreate(input: TermCreateInput): Promise<string> {
       status: input.status,
       ...(input.notes ? { notes: input.notes } : {}),
       ...(input.caseSensitive ? { caseSensitive: true } : {}),
+      ...(input.match ? { match: input.match } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1598,6 +1600,7 @@ export interface TermUpdateInput {
   renderings?: TermRendering[]
   notes?: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
   author: string
   clientTs?: number
 }
@@ -1620,6 +1623,7 @@ export async function emitTermUpdate(input: TermUpdateInput): Promise<string> {
       ...(input.renderings !== undefined ? { renderings: input.renderings } : {}),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
       ...(input.caseSensitive !== undefined ? { caseSensitive: input.caseSensitive } : {}),
+      ...(input.match !== undefined ? { match: input.match } : {}),
     },
     clientTs: input.clientTs,
   })

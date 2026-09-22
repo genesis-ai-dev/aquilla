@@ -436,6 +436,50 @@ describe("per-unit activity", () => {
 })
 
 describe("pruning", () => {
+  it("prunes disappeared source keys across lanes without touching other files or file-level rows", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g2", canonical_ref: "GEN 2:1" }),
+        cell({ cell_id: "m1", canonical_ref: "MAT 1" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "fr", value: "un" }),
+        cell({ cell_id: "g2", side: "target", target_lang: "es", value: "dos" }),
+      ],
+    })
+    await recompute(db)
+    // A different file can have the same keys. Its rows must never satisfy
+    // this file's existence checks or be removed by this file's cleanup.
+    await db.prepare(`INSERT INTO file_section_progress
+      (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+       validator_histogram, revision, updated_at)
+      SELECT project_id, 'other-file', scope, section_key, target_lang, total_count,
+             filled_count, validator_histogram, revision, updated_at
+        FROM file_section_progress WHERE project_id = ? AND file_id = ?`).bind(P, F).run()
+    const readOther = async () => (await db.prepare(
+      `SELECT * FROM file_section_progress WHERE file_id = 'other-file' ORDER BY scope, section_key, target_lang`,
+    ).all()).results
+    const otherBefore = await readOther()
+
+    // The orphan Spanish target must not keep GEN 2 alive.
+    await db.prepare(`DELETE FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = 'g2' AND side = 'source'`).bind(P, F).run()
+    await recompute(db)
+    expect((await rows(db, "section")).map(({ section_key, target_lang }) => [section_key, target_lang]))
+      .toEqual(["GEN 1", "MAT 1"].flatMap(key => ["", "es", "fr"].map(lane => [key, lane])))
+    expect((await rows(db, "book")).map(({ section_key, target_lang }) => [section_key, target_lang]))
+      .toEqual(["GEN", "MAT"].flatMap(key => ["", "es", "fr"].map(lane => [key, lane])))
+    expect(await readOther()).toEqual(otherBefore)
+
+    const fileRows = await rows(db, "file")
+    await db.prepare(`DELETE FROM cells WHERE project_id = ? AND file_id = ? AND side = 'source'`).bind(P, F).run()
+    // Exercise just the pruning statement with an empty source set. File
+    // counters are the recompute statement's responsibility, not the prune's.
+    await fullProgressRecomputeStmts(db, P, F, TS)[1].run()
+    expect(await rows(db, "section")).toEqual([])
+    expect(await rows(db, "book")).toEqual([])
+    expect(await rows(db, "file")).toEqual(fileRows)
+    expect(await readOther()).toEqual(otherBefore)
+  })
+
   it("removes a book row once its cells are gone", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }), cell({ cell_id: "e1", canonical_ref: "EXO 1:1" })],

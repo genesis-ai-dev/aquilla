@@ -2,6 +2,7 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { Spinner } from "@/components/ui/spinner"
 
 /** WebKit maps label:hover onto the labelled control. Keep hover paint on the menu, not the FieldLabel. */
 const restWhileFieldLabelHovered =
@@ -70,15 +71,31 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    /**
+     * Shows an inline spinner, sets `aria-busy`, and disables the button so an
+     * in-flight action reads as "processing" instead of static (AQU-594).
+     */
+    loading?: boolean
+  }) {
   return (
     <ButtonPrimitive
       data-slot="button"
       data-variant={variant}
+      data-loading={loading || undefined}
+      aria-busy={loading || undefined}
+      disabled={disabled || loading}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {loading && <Spinner data-icon="inline-start" data-slot="button-spinner" aria-hidden="true" />}
+      {children}
+    </ButtonPrimitive>
   )
 }
 

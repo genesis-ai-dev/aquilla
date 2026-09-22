@@ -39,3 +39,46 @@ export function countsTowardProgress(
 ): boolean {
   return countStructural || !isStructuralCell(type)
 }
+
+/** The three numbers every progress surface renders. */
+interface ProgressTriple {
+  total: number
+  translated: number
+  validated: number
+}
+
+/**
+ * Apply the policy to a progress triple that was counted over `cells`
+ * WITHOUT it.
+ *
+ * The editor footer reads useHealth's live per-file count, and the health
+ * hook knows nothing about cell types. Rather than teach it the policy, the
+ * workspace subtracts the structural subset here — by the SAME `status` rule
+ * useHealth counts with (non-empty ⇒ translated, "validated" ⇒ validated), so
+ * the two can never drift. A heading leaves both halves of the ratio: a
+ * translated chapter title must not inflate the numerator for work the policy
+ * says nobody has to do.
+ */
+export function applyStructuralPolicy<T extends ProgressTriple>(
+  progress: T,
+  cells: ReadonlyArray<{ type: string | null | undefined; status: string }>,
+  countStructural: boolean,
+): T {
+  if (countStructural) return progress
+  let total = 0
+  let translated = 0
+  let validated = 0
+  for (const cell of cells) {
+    if (!isStructuralCell(cell.type)) continue
+    total += 1
+    if (cell.status !== "empty") translated += 1
+    if (cell.status === "validated") validated += 1
+  }
+  if (total === 0) return progress
+  return {
+    ...progress,
+    total: progress.total - total,
+    translated: progress.translated - translated,
+    validated: progress.validated - validated,
+  }
+}

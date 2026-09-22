@@ -89,6 +89,7 @@ beforeEach(() => {
   }
   mockProjectCells.mockReturnValue({
     files: [], isLoading: false, isTruncated: false,
+    revalidate: vi.fn(), applyOptimisticTargetEdit: vi.fn(),
   } as ReturnType<typeof useProjectCells>)
 })
 

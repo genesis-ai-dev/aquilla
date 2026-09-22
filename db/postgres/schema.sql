@@ -971,7 +971,7 @@ CREATE TABLE IF NOT EXISTS ai_usage_daily (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date ON ai_usage_daily(date_utc);
 
--- OmniVoice TTS usage metering (0041_tts_usage_daily.sql).
+-- TTS usage metering (0041_tts_usage_daily.sql).
 -- Per-user, org-attributed audio-seconds. (user_id=0, org_id=0) = global sentinel.
 -- Org totals derived at read time: SUM WHERE org_id = ?
 CREATE TABLE IF NOT EXISTS tts_usage_daily (

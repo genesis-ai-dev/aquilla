@@ -154,10 +154,14 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
-      /** OmniVoice TTS Modal endpoint (infra/modal/omnivoice.py). */
-      OMNIVOICE_URL?: string
-      /** Shared secret for the OmniVoice endpoint (matches its OMNIVOICE_TOKEN). */
-      OMNIVOICE_TOKEN?: string
+      /**
+       * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
+       * See docs/INWORLD-TTS.md.
+       */
+      INWORLD_API_KEY?: string
+      INWORLD_API_BASE?: string
+      INWORLD_TTS_MODEL?: string
+      INWORLD_DEFAULT_VOICE?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */

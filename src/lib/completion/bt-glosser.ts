@@ -293,10 +293,37 @@ const OUTPUT_LENGTH_FACTOR = 2
 const OUTPUT_LENGTH_ABS_CAP = 10 // extra headroom for short inputs
 
 /**
- * How many consecutive times the same emitted phrase may appear before the
- * repetition guard fires and falls back to the literal token.
+ * How many consecutive times a repeating run (see MAX_CYCLE_LEN) may appear
+ * before the repetition guard fires and falls back to the literal token.
  */
 const MAX_CONSECUTIVE_REPEATS = 2
+
+/**
+ * Longest repeating unit the cycle guard checks for. 1 catches the same
+ * phrase emitted over and over ("the the the…"); 2 and 3 catch a short
+ * alternating loop ("cat dog cat dog…", "the lord said the lord said…") —
+ * two or three phrases so mutually dominant they keep winning the argmax
+ * back and forth even though no single phrase repeats on its own.
+ */
+const MAX_CYCLE_LEN = 3
+
+/**
+ * True if appending `candidate` to `history` would complete
+ * MAX_CONSECUTIVE_REPEATS+1 consecutive repeats of some cycle of length
+ * 1..MAX_CYCLE_LEN (e.g. history […, cat, dog, cat] + candidate dog → the
+ * 2-cycle [cat, dog] repeated 3× in a row).
+ */
+function formsExcessiveCycle(history: readonly string[], candidate: string): boolean {
+  const seq = [...history, candidate]
+  for (let cycleLen = 1; cycleLen <= MAX_CYCLE_LEN; cycleLen++) {
+    const needed = cycleLen * (MAX_CONSECUTIVE_REPEATS + 1)
+    if (seq.length < needed) continue
+    const window = seq.slice(seq.length - needed)
+    const isRepeating = window.every((phrase, idx) => phrase === window[idx % cycleLen])
+    if (isRepeating) return true
+  }
+  return false
+}
 
 /**
  * For each target token, find the best-scoring source phrase.
@@ -305,18 +332,22 @@ const MAX_CONSECUTIVE_REPEATS = 2
  *
  * Guards against runaway output:
  *  - Length cap: stops when output tokens exceed ~2× the input token count.
- *  - Repetition break: if the same emitted phrase appears more than
- *    MAX_CONSECUTIVE_REPEATS times in a row, falls back to the literal token.
+ *  - Repetition break: if the phrase the model wants to emit would extend a
+ *    repeating run (single phrase or a short alternating cycle, see
+ *    MAX_CYCLE_LEN) past MAX_CONSECUTIVE_REPEATS, falls back to the literal
+ *    token instead.
  */
 function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): string[] {
   const output: string[] = []
   // Length cap: 2× input tokens + small absolute buffer
   const maxOutputTokens = tokens.length * OUTPUT_LENGTH_FACTOR + OUTPUT_LENGTH_ABS_CAP
 
-  // Repetition tracking: last emitted (or currently-suppressed) phrase and its
-  // consecutive run count.
-  let lastEmittedPhrase = ""
-  let consecutiveCount = 0
+  // What the model has wanted to emit at each prior position, whether or not
+  // the guard actually let it through. Tracking intent (not just what made it
+  // into `output`) is what lets the guard keep recognizing an ongoing cycle
+  // across an interrupting literal fallback — otherwise a single interruption
+  // would look like a break and the cycle would resume right after it.
+  const modelIntentHistory: string[] = []
 
   let i = 0
 
@@ -325,10 +356,6 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
     if (output.length >= maxOutputTokens) break
 
     let matched = false
-    // Set when this token's n-gram match hit the repetition guard, so the
-    // literal-fallback branch below leaves the cooldown counters alone instead
-    // of resetting them against the literal it's about to emit.
-    let suppressed = false
 
     // Try longest n-gram down to unigram
     for (let n = Math.min(maxN, tokens.length - i); n >= 1; n--) {
@@ -348,22 +375,11 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
 
       if (bestScore > 0 && bestSrc) {
         // ── Repetition break guard ─────────────────────────────────────────
-        // Track consecutive runs of the same emitted phrase.
-        if (bestSrc === lastEmittedPhrase) {
-          consecutiveCount++
-        } else {
-          consecutiveCount = 1
-          lastEmittedPhrase = bestSrc
-        }
+        const suppressed = formsExcessiveCycle(modelIntentHistory, bestSrc)
+        modelIntentHistory.push(bestSrc)
 
-        if (consecutiveCount > MAX_CONSECUTIVE_REPEATS) {
-          // Phrase is cycling. Fall through to the literal fallback below, but
-          // keep lastEmittedPhrase/consecutiveCount pinned on this phrase (not
-          // reset to the literal) — otherwise the single interrupting literal
-          // reset the count and let "phrase, phrase, [literal], phrase,
-          // phrase, [literal], ..." stutter forever instead of actually
-          // breaking (AQU-203 follow-up).
-          suppressed = true
+        if (suppressed) {
+          // Cycling — fall through to the literal fallback below.
           break
         }
 
@@ -375,18 +391,10 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
     }
 
     if (!matched) {
-      // Literal fallback — keep the target token as-is
-      const literal = tokens[i]
-      if (!suppressed) {
-        // Genuine no-match (not a cooldown): reset the counter against the literal.
-        if (literal === lastEmittedPhrase) {
-          consecutiveCount++
-        } else {
-          consecutiveCount = 1
-          lastEmittedPhrase = literal
-        }
-      }
-      output.push(literal)
+      // Literal fallback — keep the target token as-is. Not tracked in
+      // modelIntentHistory: it's not something the model chose, so it
+      // shouldn't count as breaking or extending a cycle.
+      output.push(tokens[i])
       i++
     }
   }

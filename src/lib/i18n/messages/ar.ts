@@ -4313,7 +4313,6 @@ export const ar: Catalog = {
   "terminology.addConcept.createDraftAriaLabel": "إضافة مصطلح",
   "terminology.addConcept.renderingPlaceholder": "مقابل اختياري",
   "terminology.addConcept.renderingAriaLabel": "مقابل المفهوم الجديد",
-  "terminology.addConcept.caseInsensitiveLabel": "بلا تمييز لحالة الأحرف",
   "terminology.addConcept.savingToast": "جارٍ حفظ المصطلح…",
   "terminology.addConcept.savedToast": "تمت إضافة “{term}”",
   "terminology.addConcept.viewEntry": "عرض الإدخال",

@@ -57,12 +57,13 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
 
   return {
     build(chapters, readers) {
-      const nextCells = new Map<string, CellEntry>()
       const nextChapters = new Map<string, ChapterEntry>()
       let anyChapterChanged = chapters.length !== last.length
+      let membershipChanged = anyChapterChanged
 
       const result = chapters.map((source, chapterIndex) => {
         const prevChapter = chaptersByKey.get(source.key)
+        if (!prevChapter) membershipChanged = true
         const cells: CellEntry[] = []
         let cellsChanged = !prevChapter || prevChapter.cells.length !== source.cellIds.length
 
@@ -77,10 +78,14 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
             ? prev
             : { id: cellId, stage, health, hasIssue }
           if (entry !== prevChapter?.cells[cells.length]) cellsChanged = true
-          nextCells.set(cellId, entry)
+          if (cellId !== prevChapter?.cells[cells.length]?.id) membershipChanged = true
+          if (entry !== prev) cellsById.set(cellId, entry)
           cells.push(entry)
         }
-        if (prevChapter && cells.length !== prevChapter.cells.length) cellsChanged = true
+        if (prevChapter && cells.length !== prevChapter.cells.length) {
+          cellsChanged = true
+          membershipChanged = true
+        }
 
         const reusable = prevChapter
           && !cellsChanged
@@ -104,7 +109,13 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
         return chapter
       })
 
-      cellsById = nextCells
+      // A health-only update changes a few entries, not chapter membership.
+      // Avoid copying the whole file's cache; prune only after membership or
+      // ordering changes, including a previously present summary disappearing.
+      if (membershipChanged) {
+        const retained = new Set(result.flatMap(chapter => chapter.cells?.map(cell => cell.id) ?? []))
+        for (const id of cellsById.keys()) if (!retained.has(id)) cellsById.delete(id)
+      }
       chaptersByKey = nextChapters
       if (!anyChapterChanged) return last
       last = result

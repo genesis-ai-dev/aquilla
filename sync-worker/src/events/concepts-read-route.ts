@@ -32,6 +32,7 @@ interface ConceptRowRaw {
   notes: string | null
   status: string
   case_sensitive: number
+  match_options: unknown
   created_by: string | null
   created_at: number
   updated_at: number
@@ -43,6 +44,14 @@ export interface ConceptRenderingOut {
   status: 'preferred' | 'admitted' | 'forbidden'
 }
 
+/** Mirrors `TermMatchOptions` in src/lib/terminology/types.ts. */
+export interface TermMatchOptionsOut {
+  foldMarks?: boolean
+  affixes?: boolean
+  forms?: string[]
+  excludedForms?: string[]
+}
+
 export interface ConceptRowOut {
   conceptId: string
   projectId: string
@@ -51,6 +60,7 @@ export interface ConceptRowOut {
   notes: string | null
   status: 'active' | 'draft' | 'deprecated'
   caseSensitive: boolean
+  matchOptions: TermMatchOptionsOut | null
   createdBy: string | null
   createdAt: number
   updatedAt: number
@@ -87,6 +97,36 @@ function parseRenderings(raw: unknown): ConceptRenderingOut[] {
   )
 }
 
+/**
+ * Normalize `match_options` to a validated options object or null.
+ *
+ * Defensive for the same reason as `parseRenderings`: this column feeds
+ * rule compilation / match resolution, so a malformed value must resolve to
+ * "no options" (all defaults) rather than propagate garbage or throw.
+ */
+function parseMatchOptions(raw: unknown): TermMatchOptionsOut | null {
+  let value = raw
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const obj = value as Record<string, unknown>
+  const out: TermMatchOptionsOut = {}
+  if (typeof obj.foldMarks === 'boolean') out.foldMarks = obj.foldMarks
+  if (typeof obj.affixes === 'boolean') out.affixes = obj.affixes
+  if (Array.isArray(obj.forms) && obj.forms.every((f) => typeof f === 'string')) {
+    out.forms = obj.forms as string[]
+  }
+  if (Array.isArray(obj.excludedForms) && obj.excludedForms.every((f) => typeof f === 'string')) {
+    out.excludedForms = obj.excludedForms as string[]
+  }
+  return out
+}
+
 function toOut(row: ConceptRowRaw): ConceptRowOut {
   const status = row.status === 'active' || row.status === 'deprecated' ? row.status : 'draft'
   return {
@@ -97,6 +137,7 @@ function toOut(row: ConceptRowRaw): ConceptRowOut {
     notes: row.notes,
     status,
     caseSensitive: row.case_sensitive === 1,
+    matchOptions: parseMatchOptions(row.match_options),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -140,7 +181,7 @@ export async function handleConceptsReadRequest(
   const parts: string[] = [
     'SELECT',
     '  concept_id, project_id, source_term, renderings, notes,',
-    '  status, case_sensitive, created_by, created_at, updated_at, deleted_at',
+    '  status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at',
     'FROM concepts',
     'WHERE project_id = ?',
   ]

@@ -52,6 +52,9 @@ export async function handleExportBundleRequest(
   }
   const projectId = decodeURIComponent(match[1])
   const lane = url.searchParams.get("lane") ?? ""
+  // AQU-1148: same contract as the single-file route — ?validated=1 overlays
+  // only translations meeting the project's validation threshold.
+  const validatedOnly = url.searchParams.get("validated") === "1"
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -97,7 +100,7 @@ export async function handleExportBundleRequest(
     // verse and verses removed outright. AQU-1068 moved this into a shared
     // builder: the query above used to be a character-for-character copy of
     // export-route.ts's, with nothing enforcing that they stayed identical.
-    const { overrides, edits } = await buildUsfmExportPlan(db, projectId, file_id, lane)
+    const { overrides, edits } = await buildUsfmExportPlan(db, projectId, file_id, lane, { validatedOnly })
 
     let original = raw_source
     if (!original && r2_key) {

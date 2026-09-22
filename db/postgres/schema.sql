@@ -725,8 +725,16 @@ CREATE TABLE cell_backtranslations (
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
+-- AQU-1296: comment identity is PROJECT-SCOPED. `comment_id` was a global
+-- primary key, but the ids themselves are not globally unique — the Codex
+-- importer namespaces the event id and the file id per project and leaves
+-- `payload.commentId` as the raw legacy id. Two projects importing the same
+-- source (a fork, a re-import, a migration rehearsal) therefore emit identical
+-- comment ids, and `ON CONFLICT(comment_id) DO NOTHING` silently swallowed the
+-- second project's every insert. Every reader/writer of this table must match
+-- on (project_id, comment_id), never comment_id alone.
 CREATE TABLE comments (
-    comment_id        TEXT PRIMARY KEY,
+    comment_id        TEXT NOT NULL,
     project_id        TEXT NOT NULL,
     scope_kind        TEXT NOT NULL,
     file_id           TEXT,
@@ -743,7 +751,8 @@ CREATE TABLE comments (
     -- thread. Drives the "Translation changed since this thread was created"
     -- badge. NULL = unknown baseline (reply, non-cell scope, or legacy row) →
     -- never shown as stale.
-    created_for_translated TEXT
+    created_for_translated TEXT,
+    PRIMARY KEY (project_id, comment_id)
 );
 
 -- ─────────────────────────── terminology concepts ──────────────────────
@@ -758,6 +767,7 @@ CREATE TABLE concepts (
     notes          TEXT,
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
+    match_options  JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
@@ -1429,6 +1439,14 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
   scope_group text,                     -- shared id across runs one project-wide start created
   blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
+  -- AQU-1300 trust gate. span_allowance = spans this run may still process
+  -- before it parks; NULL = unlimited ("translate everything"). A fresh run
+  -- gets 1, and human input buys more. park_reason splits `parked` into
+  -- 'awaiting_input' (more work, needs a human) vs 'work_exhausted' (scope
+  -- finished) so "waiting for you" can never render as "all done".
+  span_allowance integer,
+  park_reason text
+    CHECK (park_reason IS NULL OR park_reason IN ('awaiting_input','work_exhausted')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
@@ -1510,6 +1528,7 @@ CREATE TABLE IF NOT EXISTS contextual_run_events (
     'drafts_staged',
     'span_outcome',
     'steering_queued',
+    'run_command',
     'draft_reviewed'
   )),
   span_id text,

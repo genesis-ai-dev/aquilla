@@ -4325,7 +4325,6 @@ export const zh_Hant: Catalog = {
   "terminology.addConcept.createDraftAriaLabel": "新增術語",
   "terminology.addConcept.renderingPlaceholder": "選填譯法",
   "terminology.addConcept.renderingAriaLabel": "新概念的譯法",
-  "terminology.addConcept.caseInsensitiveLabel": "不分大小寫",
   "terminology.addConcept.savingToast": "正在儲存術語…",
   "terminology.addConcept.savedToast": "已新增「{term}」",
   "terminology.addConcept.viewEntry": "檢視條目",

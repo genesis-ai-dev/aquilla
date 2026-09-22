@@ -4308,7 +4308,6 @@ export const my: Catalog = {
   "terminology.addConcept.createDraftAriaLabel": "ဝေါဟာရ ထည့်ရန်",
   "terminology.addConcept.renderingPlaceholder": "ပြန်ဆိုချက် (ချန်လှပ်နိုင်)",
   "terminology.addConcept.renderingAriaLabel": "သဘောတရားအသစ်အတွက် ပြန်ဆိုချက်",
-  "terminology.addConcept.caseInsensitiveLabel": "စာလုံးအကြီးအသေး မခွဲခြား",
   "terminology.addConcept.savingToast": "ဝေါဟာရ သိမ်းနေသည်…",
   "terminology.addConcept.savedToast": "“{term}” ထည့်ပြီးပါပြီ",
   "terminology.addConcept.viewEntry": "ထည့်သွင်းချက် ကြည့်ရန်",

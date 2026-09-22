@@ -34,6 +34,7 @@ import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } fro
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
   IDML_SLOT_NODE_NAME,
   editableIdmlRangesIn,
@@ -69,7 +70,7 @@ import {
 } from "@/lib/richtext/editor-content"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
@@ -395,6 +396,12 @@ interface TranslatedEditorProps {
    */
   terminologyConcepts?: Concept[]
   /**
+   * AQU-1271: project-level source-matching defaults (mark folding, affix
+   * inventory). Chips resolve each concept's match options against this, so a
+   * highlight covers exactly the surface forms the rule engine enforces.
+   */
+  termMatching?: TermMatchingSettings
+  /**
    * AQU-204: Called when the user clicks a managed-term highlight in the editor.
    * Receives the sourceTerm string and the highlight DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
@@ -455,6 +462,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onDiscardLocal,
   onNavigateCell,
   terminologyConcepts,
+  termMatching,
   onTermChipClick,
   footnoteNumberOffset = 0,
   showFootnoteTooltips = true,
@@ -508,6 +516,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   })
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
+  const latestTermMatchingRef = useRef<TermMatchingSettings | undefined>(termMatching)
 
   const preparedIdmlContent = useMemo(
     () => idmlConfiguration
@@ -736,7 +745,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
-        ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        ? [createTerminologyChipExtension(
+            () => latestTerminologyConceptsRef.current,
+            () => latestTermMatchingRef.current,
+          )]
         : []),
       ...(idmlContext
         ? idmlEditorExtensions({
@@ -1584,10 +1596,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   useEffect(() => {
     latestTerminologyConceptsRef.current = terminologyConcepts ?? []
+    latestTermMatchingRef.current = termMatching
     if (editor && terminologyConcepts !== undefined) {
       editor.view.dispatch(editor.state.tr.setMeta(terminologyChipPluginKey, "rebuild"))
     }
-  }, [editor, terminologyConcepts])
+  }, [editor, terminologyConcepts, termMatching])
 
   useEffect(() => {
     if (!editor) return
@@ -1604,29 +1617,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
   }, [editor, audioTimings, audioCurrentTime])
 
-  // Flush the pending idle commit on unmount so a programmatic navigate-away
-  // (file/tab switch, route change) doesn't drop work still inside the 1.2s
-  // idle window. The commit lands in the outbox (AD-3) and reconciles from
-  // there; without this it was silently discarded.
-  useEffect(() => {
-    return () => {
-      if (idleTimerRef.current !== null) {
-        clearTimeout(idleTimerRef.current)
-        idleTimerRef.current = null
-      }
-      const pending = pendingCommitRef.current
-      pendingCommitRef.current = null
-      if (
-        pending
-        && (pending.value !== lastCommittedRef.current
-          || pending.valueHtml !== lastCommittedHtmlRef.current)
-      ) {
-        lastCommittedRef.current = pending.value
-        lastCommittedHtmlRef.current = pending.valueHtml
-        onCommitRef.current(pending)
-      }
+  // Flush the pending idle commit so work still inside the 1.2s idle window
+  // isn't dropped. The commit lands in the outbox (AD-3) and reconciles from
+  // there; without this it was silently discarded. Runs on unmount (file/tab
+  // switch, route change) and — AQU-1334 — when the document is hidden or
+  // about to unload (tab close, reload, navigation off the SPA), which never
+  // unmounts anything. Idempotent: a flush clears the snapshot, so a later
+  // trigger finds nothing to commit.
+  const flushPendingCommit = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    const pending = pendingCommitRef.current
+    pendingCommitRef.current = null
+    if (
+      pending
+      && (pending.value !== lastCommittedRef.current
+        || pending.valueHtml !== lastCommittedHtmlRef.current)
+    ) {
+      lastCommittedRef.current = pending.value
+      lastCommittedHtmlRef.current = pending.valueHtml
+      onCommitRef.current(pending)
     }
   }, [])
+  useEffect(() => flushPendingCommit, [flushPendingCommit])
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushPendingCommit()
+    }
+    window.addEventListener("pagehide", flushPendingCommit)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flushPendingCommit)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [flushPendingCommit])
 
   if (!editor) {
     return (
@@ -1763,28 +1789,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         className={cn(compactHeight ? "" : "h-full")}
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
-          const target = e.target as HTMLElement
-          // A violation owns the term text when both decorations overlap.
-          // This preserves the blot-to-toast path after removing the tiny,
-          // separate terminology glyph.
-          if (onRuleClick) {
-            const blot = target.closest("[data-rule-id]")
-            if (blot) {
-              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
-              return
-            }
-          }
-          // AQU-204: managed-term highlight click → open TermLookupPopover.
-          if (onTermChipClick) {
-            const termHighlight = target.closest(".term-chip-host[data-source-term]")
-            if (termHighlight) {
-              const term = termHighlight.getAttribute("data-source-term")
-              if (term) {
-                onTermChipClick(term, termHighlight as HTMLElement)
-                return
-              }
-            }
-          }
+          // AQU-205: a violation owns the term text when both decorations
+          // overlap, so a flagged managed term opens the infraction detail
+          // (which carries the term's guidance) rather than the read-only
+          // lookup popover. AQU-204: an unflagged managed-term highlight opens
+          // TermLookupPopover. Precedence lives in `resolveEditorClickTarget`.
+          const hit = resolveEditorClickTarget(e.target as HTMLElement, {
+            rule: Boolean(onRuleClick),
+            term: Boolean(onTermChipClick),
+          })
+          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          else if (hit?.kind === "term") onTermChipClick?.(hit.term, hit.element)
         }}
       >
         <EditorContent

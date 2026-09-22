@@ -1,11 +1,13 @@
 /**
  * File-scoped target import: populate the OPEN file's target column from a
- * USFM file or a spreadsheet (CSV/TSV/XLSX). Target-only — source cells are
- * never created or modified.
+ * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
+ * Target-only — source cells are never created or modified.
  *
  * Flow:
  *   1. User drops/picks a file
  *   2. USFM → refs are intrinsic, straight to review (match by canonical ref)
+ *      Subtitle (AQU-1144) → cues parsed, straight to review, matched by
+ *      order (cue N → cell N) because cue cells carry no canonical refs
  *      Spreadsheet → [sheet selector] → column mapping (target required,
  *      ref optional; no ref column → rows match cells by order)
  *   3. Review: each incoming row beside the matched cell's source text;
@@ -23,6 +25,8 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  subtitleToTargetRows,
+  CUE_TARGET_EXTENSIONS,
   vttToTargetRows,
   type FileTargetCellRef,
   type FileTargetMatchResult,
@@ -67,6 +71,21 @@ const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
 // translations deliver a translated .vtt whose cues should populate the open
 // cue file's target column, matched positionally against the source cues.
 const VTT_EXTENSIONS = new Set(["vtt"])
+
+/** Format tag for the uploaded file's source artifact (SOURCE_ARTIFACT_FORMATS
+ *  in shared/import-contract). Spreadsheets fall through to "csv" because
+ *  that branch also covers the ".txt-as-delimited" cases parseCsvToSheet
+ *  accepts. */
+function sourceArtifactFormat(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (USFM_EXTENSIONS.has(ext)) return "usfm" as const
+  if (VTT_EXTENSIONS.has(ext)) return "vtt" as const
+  if (ext === "sbv") return "sbv" as const
+  if (ext === "srt") return "srt" as const
+  if (ext === "xlsx") return "xlsx" as const
+  if (ext === "tsv") return "tsv" as const
+  return "csv" as const
+}
 
 export function FileTargetImportPanel({
   projectId,
@@ -124,6 +143,16 @@ export function FileTargetImportPanel({
         const rows = vttToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInVtt"))
+          return
+        }
+        showReview(matchTargetRowsByOrder(rows, cells), true)
+      } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
+        // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
+        // the same ref-less path as VTT — timecode overlap when the file's
+        // cells carry timings (AQU-1143), cue N → cell N otherwise.
+        const rows = subtitleToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), ext)
+        if (rows.length === 0) {
+          setError(t("importExport.fileTarget.noCuesInSubtitle"))
           return
         }
         showReview(matchTargetRowsByOrder(rows, cells), true)
@@ -197,15 +226,7 @@ export function FileTargetImportPanel({
           sourceArtifact: {
             name: sourceFile.name,
             bytes: await sourceFile.arrayBuffer(),
-            format: USFM_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
-              ? "usfm"
-              : VTT_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
-                ? "vtt"
-                : sourceFile.name.toLowerCase().endsWith(".xlsx")
-                  ? "xlsx"
-                  : sourceFile.name.toLowerCase().endsWith(".tsv")
-                    ? "tsv"
-                    : "csv",
+            format: sourceArtifactFormat(sourceFile.name),
           },
         },
       )
@@ -249,7 +270,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]

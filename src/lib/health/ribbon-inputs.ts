@@ -128,41 +128,66 @@ export function stabilizeRibbonPoints(
  */
 export function createRibbonInputCache(): RibbonInputCache {
   let byId = new Map<string, RibbonInputEntry>()
+  let lastCellIds: string[] = []
   let lastRebuilt = 0
   let previousPoints: Map<string, HealthRibbonPoint> = new Map()
+  let previousInputs: HealthRibbonInput[] | null = null
   const cache: RibbonInputCache = {
     get lastRebuilt() {
       return lastRebuilt
     },
     ribbon(cellIds, readers) {
-      previousPoints = stabilizeRibbonPoints(previousPoints, buildHealthRibbon(cache.read(cellIds, readers)))
+      const inputs = cache.read(cellIds, readers)
+      const previous = previousInputs
+      if (previous && inputs.length === previous.length
+        && inputs.every((input, index) => input === previous[index])) return previousPoints
+      previousPoints = stabilizeRibbonPoints(previousPoints, buildHealthRibbon(inputs))
+      previousInputs = inputs
       return previousPoints
     },
     read(cellIds, readers) {
-      const next = new Map<string, RibbonInputEntry>()
+      let orderChanged = cellIds.length !== lastCellIds.length
       let rebuilt = 0
-      const inputs = cellIds.map((cellId) => {
+      const inputs = cellIds.map((cellId, index) => {
+        if (cellId !== lastCellIds[index]) orderChanged = true
         const version = readers.getCellVersion(cellId)
         const health = readers.health(cellId)
         const examples = readers.examples(cellId)
         const prev = byId.get(cellId)
         if (prev && prev.version === version && prev.health === health && prev.examples === examples) {
-          next.set(cellId, prev)
           return prev.input
         }
         rebuilt++
-        const input = ribbonInputFor(cellId, readers.getCell(cellId), readers)
-        next.set(cellId, { version, health, examples, input })
+        const derived = ribbonInputFor(cellId, readers.getCell(cellId), readers)
+        // A new cell version can be a save acknowledgement or a text edit
+        // whose score/stage/evidence did not change. Preserve the input's
+        // identity only after checking every field the smoother consumes.
+        const input = prev && prev.input.id === derived.id
+          && prev.input.scope === derived.scope
+          && prev.input.stage === derived.stage
+          && prev.input.rawScore === derived.rawScore
+          && prev.input.evidenceWeight === derived.evidenceWeight
+          ? prev.input : derived
+        byId.set(cellId, { version, health, examples, input })
         return input
       })
-      byId = next
+      // Keep unchanged entries in place. Rebuilding a 30k-entry Map on each
+      // save costs more than updating the few entries whose inputs changed.
+      // Compare actual IDs, not array identity: a display order can mutate.
+      if (orderChanged) {
+        const retained = new Set(cellIds)
+        for (const id of byId.keys()) if (!retained.has(id)) byId.delete(id)
+        lastCellIds = [...cellIds]
+      }
       lastRebuilt = rebuilt
       return inputs
     },
     clear() {
       byId = new Map()
+      lastCellIds = []
       lastRebuilt = 0
       previousPoints = new Map()
+      previousInputs = null
     },
   }
   return cache

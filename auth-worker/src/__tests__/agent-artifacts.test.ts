@@ -46,7 +46,9 @@ async function upload(
   headers: Record<string, string>,
   bucket?: FakeBucket,
 ): Promise<Response> {
-  const testEnv = bucket ? { ...env, SNAPSHOTS: bucket } : env
+  // Explicitly unbind when no bucket is given: the shared test env now carries
+  // its own SNAPSHOTS stub, so the unbound branch has to be asked for.
+  const testEnv = { ...env, SNAPSHOTS: bucket }
   return app.request(
     `/api/v2/projects/${projectId}/agent-artifacts`,
     { method: "POST", headers: { ...authHeader(jwt), ...headers }, body },
@@ -140,7 +142,7 @@ describe("agent artifact upload", () => {
     await grant(PROJECT, 2, ROLE.CONTRIBUTOR)
     const jwt = await jwtFor("contrib")
 
-    // No bucket override → env.SNAPSHOTS is undefined in the PGlite test env.
+    // No bucket override → the request env has SNAPSHOTS unbound.
     const res = await upload(PROJECT, jwt, new TextEncoder().encode("x"), { "x-artifact-name": "f.txt" })
     expect(res.status).toBe(503)
     const body = (await res.json()) as { error: { code: string } }

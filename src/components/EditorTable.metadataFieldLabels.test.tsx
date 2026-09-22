@@ -171,6 +171,16 @@ describe("metadata display-field labels (AQU-1369)", () => {
     vi.spyOn(window, "getSelection").mockReturnValue(fakeSel as unknown as Selection)
   }
 
+  it("does not offer the selection toolbar when the context line itself is highlighted", () => {
+    renderTable({ onAddConceptFromSelection: () => {} })
+    act(() => setCellDisplayField(project.id, "Field", true))
+    const line = screen.getAllByTestId("source-context-line")[0]
+    selectInside(line, "glosses")
+    fireEvent.mouseUp(line)
+    expect(screen.queryByRole("button", { name: /add to terminology/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
   it("does not offer the selection toolbar when a metadata label is highlighted", () => {
     renderTable({ onAddConceptFromSelection: () => {} })
     act(() => setCellDisplayField(project.id, "Field", true))

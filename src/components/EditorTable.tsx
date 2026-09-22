@@ -4660,7 +4660,7 @@ function MetadataFieldLabels({
   })
   if (labels.length === 0) return null
   return (
-    <span data-testid="metadata-field-labels" data-selection-ignore="" className="flex shrink-0 items-center gap-1">
+    <span data-testid="metadata-field-labels" className="flex shrink-0 items-center gap-1">
       {labels.map(({ key, text }) => (
         <span
           key={key}
@@ -5528,8 +5528,9 @@ function EditorRow({
     // lives inside this source cell, so its mouseup bubbles here after focus
     // has already collapsed the browser selection (AQU-1006 / AQU-260).
     if (!text) return
-    // Chrome inside the source cell — metadata field labels (AQU-1369) — is
-    // not source text: selecting it must not offer "Add to terminology".
+    // The context line (reference, cell label, tag chips, metadata field
+    // labels — AQU-1369) is chrome, not source text: selecting any of it must
+    // not offer "Ask AI" / "Add to terminology".
     const anchor = sel?.anchorNode
     const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
     if (anchorEl?.closest("[data-selection-ignore]")) return
@@ -6657,7 +6658,7 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               {/* AQU-646: the character, on the SOURCE side too (Sam,
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".

@@ -382,6 +382,13 @@ export function useFileProgressResource(
   )
   useEffect(() => {
     if (!projectId || !fileId || !getTokenForFile) return
+    // AQU-350: the sidebar row this hook backs is unmounted and remounted on
+    // every dock-tab switch, so without a freshness gate each switch fires one
+    // conditional GET per expanded file. Match prefetchFileProgress's policy —
+    // the module-level record survives the unmount, so fresh progress is
+    // already on screen and the request would only ever return a 304.
+    const existing = resourceFor(projectId, fileId, lane)
+    if (existing.progress != null && Date.now() - existing.fetchedAt < PREFETCH_FRESH_MS) return
     void loadResource(projectId, fileId, () => getTokenForFile(fileId), false, lane)
   }, [fileId, getTokenForFile, projectId, lane])
   useEffect(() => {

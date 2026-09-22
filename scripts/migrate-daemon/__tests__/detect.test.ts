@@ -56,17 +56,20 @@ describe("registerProject", () => {
     expect(p?.team_id).toBe(2)
     expect(p?.owner_user_id).toBe(9)
     const jobs = db.listJobs()
-    expect(jobs.length).toBe(1)
-    expect(jobs[0]).toMatchObject({ project_id: 7, kind: "content", sha: "sha1" })
+    expect(jobs).toHaveLength(2)
+    expect(jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ project_id: 7, kind: "content", sha: "sha1" }),
+      expect.objectContaining({ project_id: 7, kind: "audio", sha: "sha1" }),
+    ]))
   })
 
   it("unchanged sha (matches applied_sha + current content logic) enqueues nothing", async () => {
     const deps = makeDeps({ db })
     await registerProject(deps, proj(), "sha1")
-    db.setProjectFields(7, { applied_sha: "sha1", content_logic: CONTENT_LOGIC_VERSION })
+    db.setProjectFields(7, { applied_sha: "sha1", audio_applied_sha: "sha1", content_logic: CONTENT_LOGIC_VERSION })
     const r = await registerProject(deps, proj(), "sha1")
     expect(r).toBe("unchanged")
-    expect(db.listJobs().length).toBe(1) // still just the first job
+    expect(db.listJobs()).toHaveLength(2) // the original content + audio jobs only
   })
 
   it("null sha fetches the head via gitlab.headSha", async () => {
@@ -74,7 +77,7 @@ describe("registerProject", () => {
     const deps = makeDeps({ db, gitlab })
     const r = await registerProject(deps, proj(), null)
     expect(r).toBe("enqueued")
-    expect(db.listJobs()[0]?.sha).toBe("resolved-sha")
+    expect(db.listJobs().map((job) => job.sha)).toEqual(["resolved-sha", "resolved-sha"])
   })
 
   it("throws when headSha resolves to null (fail loud, never treat as unchanged)", async () => {
@@ -99,7 +102,7 @@ describe("pollInbox", () => {
     const n = await pollInbox(deps)
     expect(n).toBe(1)
     expect(db.kvGet("inbox_cursor")).toBe("cursor-1")
-    expect(db.listJobs().length).toBe(1)
+    expect(db.listJobs()).toHaveLength(2)
   })
 
   it("follows pages until one comes back short", async () => {
@@ -141,8 +144,9 @@ describe("pollInbox", () => {
     const n = await pollInbox(deps)
     expect(n).toBe(1)
     const jobs = db.listJobs()
-    expect(jobs.length).toBe(1)
-    expect(jobs[0]?.sha).toBe("sha-new")
+    expect(jobs).toHaveLength(2)
+    expect(jobs.every((job) => job.sha === "sha-new")).toBe(true)
+    expect(jobs.map((job) => job.kind).sort()).toEqual(["audio", "content"])
   })
 
   it("skips inbox items whose project is gone from GitLab", async () => {

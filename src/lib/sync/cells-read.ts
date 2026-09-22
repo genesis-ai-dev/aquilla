@@ -397,7 +397,7 @@ export async function streamFileCells(
   jwt: string,
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
-  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
+  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null; total?: number }) => void,
   lane?: string,
   paired = false,
 ): Promise<void> {
@@ -410,8 +410,9 @@ export async function streamFileCells(
   // for a translated Bible plus additional target languages.
   const MAX_PAGES = paired ? 1000 : 100
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired }, jwt)
-    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch })
+    // Keep the first paint small; amortize subsequent network/database work.
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : 2000 }, jwt)
+    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch, total: page.total })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
     legacy ||= paired && page.completeRows !== true

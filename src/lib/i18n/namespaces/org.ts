@@ -432,6 +432,16 @@ export const org = defineNamespace({
     "org.projectOverview.markAsActive": "Mark as Active",
     "org.projectOverview.markAsInactive": "Mark as Inactive",
     "org.projectOverview.archive": "Archive",
+    // Project Download UI (Phase 5) — Tauri desktop only.
+    "org.projectOverview.makeAvailableOffline": "Make available offline",
+    "org.projectOverview.offlineDownloading": "Downloading…",
+    "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
+    "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.removeOfflineCopy": "Remove offline copy",
+    "org.projectOverview.offlineRemoveBlocked": plural({
+      one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
+      other: "Can't remove yet — {count} changes haven't synced to the server. Reconnect and wait for them to sync first.",
+    }),
     "org.projectOverview.customizeStatsAria": "Customize stats",
     // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
@@ -2711,6 +2721,21 @@ export const org = defineNamespace({
         description:
           "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
         maxLength: 16,
+      },
+      "org.projectOverview.offlineDownloadingProgress": {
+        description:
+          "Overflow-menu label on ProjectOverview's offline download item (Tauri desktop app, Phase 5), shown while 'Make available offline' is downloading and file-count progress is known. Falls back to org.projectOverview.offlineDownloading before the first file completes.",
+        placeholders: {
+          done: "Files downloaded so far — a number.",
+          total: "Total files in the project being downloaded — a number.",
+        },
+      },
+      "org.projectOverview.offlineRemoveBlocked": {
+        description:
+          "Inline error shown on ProjectOverview (Tauri desktop app, Phase 5) when 'Remove offline copy' is blocked because locally queued writes haven't reached the server yet. Full sentence, two sentences, second is an instruction.",
+        placeholders: {
+          count: "How many locally queued writes haven't synced yet.",
+        },
       },
     },
   },

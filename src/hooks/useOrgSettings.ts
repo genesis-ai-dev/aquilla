@@ -7,6 +7,7 @@ import {
   fetchOrgSettings,
   patchOrgSettings,
   postPromotionRequest,
+  resetCountStructuralOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -223,6 +224,25 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-1083: do chapter headings and section titles count as translatable
+   * content in this org's progress numbers? Explicit org setting, or TRUE when
+   * unset — which is what every project did before the setting existed, so
+   * nothing moves for an org that never opts out. A project may override it.
+   *
+   * Unlike the keys above this is NOT a permission policy — it decides how a
+   * number is calculated rather than who may see or do anything — so it rides
+   * the general maintainer write gate, not the owner-only one.
+   */
+  countStructuralCells: boolean
+  /**
+   * AQU-1083: how many projects in this org set their own value and therefore
+   * ignore the default above. Zero means changing the default reaches
+   * everything, which is why zero suppresses the prompt entirely.
+   */
+  countStructuralOverrides: number
+  /** Put those projects back on the org default. Clears their own key. */
+  resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
    * AQU-1037: effective floor for assigning work to anyone, including
    * file/chapter/target-lane assignments and AI changeset routing.
    */
@@ -337,6 +357,21 @@ export function useOrgSettings(
     return got
   }, [orgId, jwt, writeServer])
 
+  /**
+   * AQU-1083: put every project back on the org's structural-cell default.
+   *
+   * Re-fetches afterwards rather than adjusting the count locally, because the
+   * server is the only thing that knows what it actually cleared — another
+   * maintainer may have opted a project out while this dialog was open.
+   */
+  const resetOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetCountStructuralOverrides(jwt, orgId)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -417,6 +452,10 @@ export function useOrgSettings(
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
+  // `!== false` rather than `=== true`: unset must read as ON here, because
+  // counting headings is what every org does today.
+  const countStructuralCells = server?.settings?.countStructuralCells !== false
+  const countStructuralOverrides = server?.countStructuralOverrides ?? 0
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -552,6 +591,9 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    countStructuralCells,
+    countStructuralOverrides,
+    resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

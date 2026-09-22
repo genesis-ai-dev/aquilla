@@ -36,7 +36,7 @@ interface Props {
   review: CueLinkReview | null
   /** The matcher is writing pairings right now. */
   pending?: boolean
-  textById: ReadonlyMap<string, LinkableCue>
+  textById: Pick<ReadonlyMap<string, LinkableCue>, "get">
   cueById: ReadonlyMap<string, LinkableCue>
   onClose(): void
   /**
@@ -192,7 +192,7 @@ function CollapsedGroup({
   testId: string
   label: (n: number) => string
   ids: readonly string[]
-  byId: ReadonlyMap<string, LinkableCue>
+  byId: Pick<ReadonlyMap<string, LinkableCue>, "get">
   onNavigate?: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)

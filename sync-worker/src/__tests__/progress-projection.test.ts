@@ -139,7 +139,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:p:s4"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -191,6 +191,43 @@ describe('GET file progress', () => {
     expect(response.status).toBe(403)
   })
 
+  // AQU-490, found on the live board: a chapter grid read 0 recorded and 0
+  // validated for a whole book whose rows were correct in the database. The
+  // client cache behind that grid is DURABLE and per account, so a false 304
+  // is not a stale second — it lasts until someone clears IndexedDB. Every
+  // recompute that fills in a column without emitting an event looks like
+  // this: a rebuild, a rollout backfill, a manual repair.
+  it('busts the cache when a backfill rewrites the rows without moving the revision', async () => {
+    const { db } = await fixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress`
+    const read = async (ifNoneMatch?: string) => (await handleProgressReadRequest(new Request(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(ifNoneMatch ? { 'If-None-Match': ifNoneMatch } : {}),
+      },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+
+    const first = await read()
+    const cached = first.headers.get('ETag')!
+    // Nothing has changed: the cache is honoured, which is the whole point of
+    // the key and must keep working.
+    expect((await read(cached)).status).toBe(304)
+
+    // The backfill. No event is written, so `revision` cannot move — only the
+    // projection's own clock does.
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 20_000))
+    const after = await read(cached)
+    expect(after.status).toBe(200)
+    expect(after.headers.get('ETag')).not.toBe(cached)
+    expect(after.headers.get('ETag')).toContain(':u20000:')
+    // And the revision really did stay put — otherwise this test would pass
+    // for the wrong reason and prove nothing about the clock.
+    expect(cached).toContain(':7:')
+    expect(after.headers.get('ETag')).toContain(':7:')
+  })
+
   it('invalidates a cached fallback when backfill rows appear at the same revision', async () => {
     const { db } = await fixture()
     const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
@@ -198,18 +235,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:f:s4"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:u0:v2:va1:f:s4"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:va1:f:s4"',
+        'If-None-Match': '"progress:file-progress:7:u0:v2:va1:f:s4"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:va1:p:s4"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
@@ -256,7 +293,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:va1:s4"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s4"')
 
     const notHonoured = async (candidate: string) => (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}`, 'If-None-Match': candidate },

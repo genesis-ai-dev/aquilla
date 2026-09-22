@@ -36,6 +36,21 @@ interface ProgressRow {
   // today's behaviour exactly.
   audio_validator_histogram?: ProgressRow['validator_histogram']
   structural_audio_validator_histogram?: ProgressRow['validator_histogram']
+  /**
+   * When the projection last rewrote this row — the ETag's backfill clock.
+   *
+   * `revision` cannot serve: it tracks the event sequence, and a BACKFILL
+   * rewrites counts without emitting an event, so a client holding the
+   * pre-backfill body revalidates its unchanged ETag and is handed a 304
+   * forever. plan-route.ts has carried this second clock since AQU-1092 and
+   * its comment names the failure; this route is the sibling that never got
+   * it, which is how a filled-in audio column stayed invisible on the chapter
+   * grid while the (uncached) book row showed it immediately.
+   *
+   * Optional, like the rest: a caller building a row by hand has no clock, and
+   * absent reads as 0, which is the behaviour this route had before.
+   */
+  updated_at?: number | string | bigint | null
 }
 
 export interface ProgressCounts {
@@ -616,11 +631,21 @@ export async function handleProgressReadRequest(
       }>(),
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
-        `SELECT revision FROM file_section_progress
+        `SELECT revision, updated_at FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ? AND target_lang = ?`,
-      ).bind(projectId, fileId, sectionKey, lane).first<{ revision: number | string | bigint }>(),
+      ).bind(projectId, fileId, sectionKey, lane).first<{
+        revision: number | string | bigint
+        updated_at: number | string | bigint | null
+      }>(),
     ])
     const revision = Number(revisionRow?.revision) || 0
+    // The same backfill clock the file-level key below carries, and needed for
+    // the same reason twice over: these verses are read LIVE from cells and
+    // cell_audio, so a backfill that rewrites validator counts changes this
+    // body without touching an event. Harmless today only because this call is
+    // uncached on the client — which is a fact about one caller, not a
+    // property of the key.
+    const progressUpdatedAt = Number(revisionRow?.updated_at) || 0
     // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
     // append a lane segment so caches never cross lanes.
     const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
@@ -644,7 +669,7 @@ export async function handleProgressReadRequest(
     // of take_signed changed under clients holding an `s3` body: same field,
     // same type, different question — the one kind of change a revision can
     // never express.
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:va${validationCountAudio}:s4${structuralTag}${laneTag}"`
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s4${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -676,7 +701,8 @@ export async function handleProgressReadRequest(
                 structural_count, structural_filled_count, structural_validator_histogram,
                 revision, audio_count, audio_validated_count,
                 structural_audio_count, structural_audio_validated_count,
-                audio_validator_histogram, structural_audio_validator_histogram
+                audio_validator_histogram, structural_audio_validator_histogram,
+                updated_at
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -731,6 +757,15 @@ export async function handleProgressReadRequest(
   const fileRow = rows.find((row) => row.scope === 'file')
   if (!fileRow) return new Response('progress backfill pending', { status: 503 })
   const revision = Math.max(0, ...rows.map((row) => Number(row.revision) || 0))
+  // THE BACKFILL CLOCK, and the reason it is here rather than folded into the
+  // revision: a recompute rewrites these rows without emitting an event, so
+  // `revision` does not move and every cached body revalidates true. The
+  // client cache this feeds is DURABLE (IndexedDB, per account, per file), so
+  // a false 304 is not a stale second — it is stale until someone clears the
+  // store. Found on the chapter grid reading 0 recorded / 0 validated for a
+  // whole book whose rows were correct in the database (AQU-490, 2026-09-21).
+  // plan-route.ts already carries this exact clock; this route is its sibling.
+  const progressUpdatedAt = Math.max(0, ...rows.map((row) => Number(row.updated_at) || 0))
   // A backfill can replace the rollout fallback without advancing the event
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
@@ -746,7 +781,7 @@ export async function handleProgressReadRequest(
   // against a threshold, and audioCount stopped counting imported source
   // clips — three changes the 0096 backfill likewise makes with no event.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:va${validationCountAudio}:${source === 'projection' ? 'p' : 'f'}:s4${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:${source === 'projection' ? 'p' : 'f'}:s4${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

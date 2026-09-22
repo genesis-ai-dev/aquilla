@@ -15,18 +15,111 @@ export const audio = defineNamespace({
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
+    "audio.newVoice.inworldVoiceLabel": "Voice",
+    "audio.newVoice.inworldVoiceLoading": "Loading voices…",
+    "audio.newVoice.inworldVoiceUnavailable":
+      "Couldn't load Inworld voices for these languages. Showing the built-in list.",
+    "audio.newVoice.inworldCustomVoice": "Designed voice",
+    "audio.newVoice.tabPrebuilt": "Prebuilt voice",
+    "audio.newVoice.tabDesign": "Voice design",
+    "audio.newVoice.inworldSourceGroupLabel": "Inworld voice source",
+    "audio.newVoice.designPromptPlaceholder":
+      "A middle-aged male voice with a clear British accent, speaking at a steady pace with a warm, neutral tone.",
+    "audio.newVoice.designPromptHint":
+      "Write in English. Include age, gender, accent, pitch, pace, and tone. Under 30 characters rarely works.",
+    "audio.newVoice.designPromptTooShort": "Write at least 30 characters so Inworld can shape a voice.",
+    "audio.newVoice.designStructuredEmpty": "Fill in at least one attribute so Inworld can shape a voice.",
+    "audio.newVoice.designModeGroupLabel": "Voice design mode",
+    "audio.newVoice.designModeFreeform": "Freeform",
+    "audio.newVoice.designModeStructured": "Structured",
+    "audio.newVoice.designModeFreeformHint":
+      "Describe the voice in your own words, and we build the full voice profile from it",
+    "audio.newVoice.designModeStructuredHint":
+      "Edit the voice profile directly for full control over the voice's nuances",
+    "audio.newVoice.designPresetGroupLabel": "Voice design presets",
+    "audio.newVoice.designPresetAgent": "Agent",
+    "audio.newVoice.designPresetNarrator": "Narrator",
+    "audio.newVoice.designPresetCompanion": "Companion",
+    "audio.newVoice.designPresetInstructor": "Instructor",
+    "audio.newVoice.designPresetPirate": "Pirate",
+    "audio.newVoice.designStructuredLabel": "Voice profile",
+    "audio.newVoice.designStructuredHint":
+      "One attribute per line, as key: value. Fill in the ones that matter. Dialect carries language and accent.",
+    "audio.newVoice.designScriptLabel": "Preview script",
+    "audio.newVoice.designScriptHint":
+      "The previews speak this. About 50–400 characters in English shapes the voice best.",
+    "audio.newVoice.designScriptHelpAria": "About the preview script",
+    "audio.newVoice.designScriptTooShort": "Write at least 50 characters so the preview has enough to say.",
+    "audio.newVoice.designLanguageHint":
+      "The language this designed voice will speak. The preview script is read in this language too.",
+    "audio.newVoice.catalogLanguageHint":
+      "Stock voices for languages Inworld already has speakers for.",
+    "audio.newVoice.catalogMissingLanguageHint":
+      "Can't find the language? Go to the Voice design tab to design one yourself.",
+    "audio.newVoice.designLanguageHelpAria": "About the language",
+    "audio.newVoice.designLanguageSearch": "Find a language…",
+    "audio.newVoice.designLanguageSearchAria": "Find a language",
+    "audio.newVoice.designAccentLabel": "Accent",
+    "audio.newVoice.designAccentHint":
+      "Regional accent for that language. Default is just en; American English is en-US; British is en-GB.",
+    "audio.newVoice.catalogAccentHint":
+      "Regional accent used to load matching stock voices. Default is the language tag without a region.",
+    "audio.newVoice.designAccentHelpAria": "About the accent",
+    "audio.newVoice.designAccentUS": "American",
+    "audio.newVoice.designAccentGB": "British",
+    "audio.newVoice.designAccentMX": "Mexican",
+    "audio.newVoice.designAccentBR": "Brazilian",
+    "audio.newVoice.designAccentDefault": "Default",
+    "audio.newVoice.designAccentStandard": "Standard",
+    "audio.newVoice.designGenerate": "Generate previews",
+    "audio.newVoice.designKnobsHint":
+      "These options only apply when you generate a line with this voice. They don't affect the previews you hear in this dialog.",
+    "audio.newVoice.designGenerating": "Generating…",
+    "audio.newVoice.designDocsLink": "Voice design guide",
+    "audio.newVoice.designPreviewLabel": "Preview {n}",
+    "audio.newVoice.designPlayPreview": "Play preview {n}",
+    "audio.newVoice.designStopPreview": "Stop preview {n}",
+    "audio.newVoice.designSelectPreview": "Voice previews",
+    "audio.newVoice.designExistingHint":
+      "This saved voice was designed. Play the sample you picked, or generate new previews to replace it.",
+    "audio.newVoice.designSavedLabel": "Saved voice",
+    "audio.newVoice.designPlaySaved": "Play saved voice",
+    "audio.newVoice.designStopSaved": "Stop saved voice",
+    "audio.newVoice.errorDesignPreviewRequired":
+      "Generate previews and pick one before creating this voice.",
+    "audio.newVoice.errorDesignNoProject": "Open a project file before designing a voice.",
+    "audio.newVoice.inworldLanguageLabel": "Language",
+    "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
+    "audio.newVoice.inworldLanguageHint":
+      "At least one project language isn't a code Inworld recognizes. Choose the closest match so we can load matching voices.",
+    "audio.newVoice.inworldLanguageOther": "Other",
+    "audio.newVoice.inworldLanguageCodeLabel": "Language code",
+    "audio.newVoice.inworldLanguageCodeHint":
+      "Use a BCP-47 tag Inworld should speak, for example sv-SE.",
+    "audio.newVoice.errorInworldLanguageRequired": "Choose a language for this Inworld voice.",
+    "audio.newVoice.audioQualityLabel": "Audio quality",
+    "audio.newVoice.audioQualityHint":
+      "Standard uses Inworld TTS 2 Flash — faster and lower cost. Highest uses Inworld TTS 2 for a fuller, more expressive reading, and unlocks Delivery and steering.",
+    "audio.newVoice.audioQualityStandard": "Standard",
+    "audio.newVoice.audioQualityHighest": "Highest",
+    "audio.newVoice.steeringBestPractices": "Best practices",
+    "audio.newVoice.deliveryLabel": "Delivery",
+    "audio.newVoice.deliveryHint":
+      "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
+    "audio.newVoice.deliveryNeedsHighest":
+      "Delivery is available with Highest audio quality (Inworld TTS 2). Flash ignores this control.",
+    "audio.newVoice.deliveryStable": "More Stable",
+    "audio.newVoice.deliveryBalanced": "Balanced",
+    "audio.newVoice.deliveryCreative": "More Creative",
+    "audio.newVoice.talkingSpeedLabel": "Talking speed",
+    "audio.newVoice.talkingSpeedHint":
+      "How fast the voice speaks. 1.0 is the voice's native speed. Values below 0.8 can sound less natural.",
+    "audio.newVoice.talkingSpeedResetAria": "Reset talking speed",
+    "audio.newVoice.audioQualityHelpAria": "About audio quality",
+    "audio.newVoice.deliveryHelpAria": "About delivery",
+    "audio.newVoice.talkingSpeedHelpAria": "About talking speed",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Voice",
-    "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
-    "audio.newVoice.kokoroGroupAmerican": "American English",
-    "audio.newVoice.kokoroGroupBritish": "British English",
-    "audio.newVoice.kokoroGenderFemale": "Female",
-    "audio.newVoice.kokoroGenderMale": "Male",
-    "audio.newVoice.kokoroEnglishOnlyHint":
-      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to OmniVoice, Gemini, or MMS.",
-    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
-    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
@@ -333,10 +426,9 @@ export const audio = defineNamespace({
     // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
     // see audio.newVoice.singleVoiceHint's context note — so only the hint
     // sentence is keyed here.)
-    "audio.provider.omnivoiceHint":
-      "Runs on our servers. No key or download; usage is cloud-metered. Supports voice cloning from a reference recording.",
+    "audio.provider.inworldHint":
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
-    "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
     "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
     "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
@@ -368,7 +460,6 @@ export const audio = defineNamespace({
     // ai-consent.ts — display name of each heavy in-browser AI model, shown
     // in the first-run download-consent dialog (AiModelConsentDialog).
     "audio.consent.whisperLabel": "Whisper (transcription)",
-    "audio.consent.kokoroLabel": "Kokoro (text-to-speech)",
     "audio.consent.mmsLabel": "MMS (multilingual TTS)",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
@@ -379,8 +470,8 @@ export const audio = defineNamespace({
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
     "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
-    "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
-    "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
+    "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
+    "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -468,10 +559,477 @@ export const audio = defineNamespace({
       "audio.newVoice.engineLabel": {
         description:
           "Form label above the row of TTS engine choice cards. On the TTS tab " +
-          "this is all four engines (OmniVoice, Gemini, Kokoro, MMS). On the Clone " +
+          "this is Inworld, Gemini, and MMS. On the Clone " +
           "tab it is only the cloud engines that can clone a reference clip " +
-          "(OmniVoice, Gemini) — on-device engines are omitted, not shown disabled. " +
+          "(Inworld, Gemini) — on-device engines are omitted, not shown disabled. " +
           "'Engine' means which speech-synthesis backend generates this voice's audio.",
+      },
+      "audio.newVoice.inworldVoiceLabel": {
+        description:
+          "Form label above the Inworld stock-voice dropdown on the TTS tab of " +
+          "the New Voice dialog. Options are Inworld catalog names for the " +
+          "project's target-language lanes (Dennis, Alex, …) — do not translate " +
+          "those values. When the project has more than one language lane, each " +
+          "option also shows a language-code badge (en-US, es-ES) next to the name.",
+      },
+      "audio.newVoice.inworldVoiceLoading": {
+        description:
+          "Short status shown in the Inworld voice dropdown while the catalog is " +
+          "fetched from the hosted TTS worker.",
+      },
+      "audio.newVoice.inworldVoiceUnavailable": {
+        description:
+          "Helper under the Inworld voice dropdown when the live catalog could " +
+          "not be loaded (missing API key, network error, or no voices for the " +
+          "project's languages). The dropdown still lists a small built-in English set.",
+      },
+      "audio.newVoice.inworldCustomVoice": {
+        description:
+          "Fallback label in the Inworld prebuilt-voice dropdown for a Voice Design " +
+          "id that is not in the SYSTEM catalog. Shown instead of the raw voice id.",
+      },
+      "audio.newVoice.tabPrebuilt": {
+        description:
+          "Nested tab on the Inworld TTS form: pick a stock voice from Inworld's " +
+          "library (Dennis, Alex, …), as opposed to designing a new one from a " +
+          "text description. Short noun phrase.",
+        maxLength: 18,
+      },
+      "audio.newVoice.tabDesign": {
+        description:
+          "Nested tab on the Inworld TTS form: create a custom voice from a text " +
+          "description (Inworld Voice Design), as opposed to picking a prebuilt " +
+          "library voice. Short noun phrase.",
+        maxLength: 18,
+      },
+      "audio.newVoice.inworldSourceGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Prebuilt / Voice design " +
+          "tab pair on the Inworld TTS form, read by screen readers.",
+      },
+      "audio.newVoice.designPromptPlaceholder": {
+        description:
+          "Placeholder inside the Voice Design description textarea before the user " +
+          "types. An example voice description in English, not an instruction.",
+      },
+      "audio.newVoice.designPromptHint": {
+        description:
+          "Helper under the Voice Design description label, above the prompt. Tells the user to write " +
+          "in English and which attributes to include, and that very short prompts fail.",
+      },
+      "audio.newVoice.designPromptTooShort": {
+        description:
+          "Inline validation under the Voice Design description when Generate " +
+          "previews is clicked with fewer than 30 characters.",
+      },
+      "audio.newVoice.designStructuredEmpty": {
+        description:
+          "Inline validation under the Voice profile textarea when Generate " +
+          "previews is clicked with an empty Structured template.",
+      },
+      "audio.newVoice.designModeGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Freeform / Structured " +
+          "tab pair on Voice Design, read by screen readers.",
+      },
+      "audio.newVoice.designModeFreeform": {
+        description:
+          "Tab on Voice Design: describe the voice in plain English. Short noun. " +
+          "Opposite of Structured.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designModeStructured": {
+        description:
+          "Tab on Voice Design: edit the voice profile as one attribute per line " +
+          "(dialect, gender, age, …). Short noun. Opposite of Freeform.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designModeFreeformHint": {
+        description:
+          "Hover tooltip on the Freeform tab. Explains that a plain-English " +
+          "description is expanded into the full voice profile.",
+      },
+      "audio.newVoice.designModeStructuredHint": {
+        description:
+          "Hover tooltip on the Structured tab. Explains that the user edits " +
+          "the voice-profile attributes directly for finer control.",
+      },
+      "audio.newVoice.designPresetGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the five starting-point " +
+          "chips under the Voice Design prompt (Agent, Narrator, Companion, " +
+          "Instructor, Pirate), read by screen readers.",
+      },
+      "audio.newVoice.designPresetAgent": {
+        description:
+          "Chip under the Voice Design prompt that fills a patient, helpful " +
+          "customer-support voice. Short noun. The English prompt it inserts is " +
+          "not this string — only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetNarrator": {
+        description:
+          "Chip under the Voice Design prompt that fills a calm narration voice. " +
+          "Short noun for that starting style, not the project's default-narrator " +
+          "badge (audio.narrator). The English prompt it inserts is not this string.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetCompanion": {
+        description:
+          "Chip under the Voice Design prompt that fills a bright, energetic " +
+          "companion voice. Short noun. The English prompt it inserts is not this " +
+          "string — only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetInstructor": {
+        description:
+          "Chip under the Voice Design prompt that fills a soothing instructor " +
+          "voice. Short noun. The English prompt it inserts is not this string — " +
+          "only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetPirate": {
+        description:
+          "Chip under the Voice Design prompt that fills a theatrical pirate " +
+          "voice. Short noun. The English prompt it inserts is not this string — " +
+          "only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designStructuredLabel": {
+        description:
+          "Form label above the Structured Voice Design textarea. The textarea is " +
+          "a key: value profile (dialect, gender, age, …), not a free-English " +
+          "description.",
+      },
+      "audio.newVoice.designStructuredHint": {
+        description:
+          "Helper above the Structured Voice Design textarea. Explains that the " +
+          "profile is one attribute per line as key: value, that empty keys can " +
+          "be left blank, and that Dialect carries language and accent.",
+      },
+      "audio.newVoice.designScriptLabel": {
+        description:
+          "Form label above the Voice Design textarea for the spoken preview script " +
+          "(the words the generated samples will say), as opposed to the voice " +
+          "description field above it.",
+      },
+      "audio.newVoice.designScriptHint": {
+        description:
+          "Tooltip on the info icon beside the Voice Design preview-script label. " +
+          "Explains that the generated samples speak this text, and that about " +
+          "50–400 English characters produce the best voice.",
+      },
+      "audio.newVoice.designScriptHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Preview script. The visible " +
+          "label is already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.designLanguageHint": {
+        description:
+          "Tooltip on the info icon beside Language on Voice Design. Explains " +
+          "that the designed voice and its preview script use this language.",
+      },
+      "audio.newVoice.catalogLanguageHint": {
+        description:
+          "Tooltip on the info icon beside Language on the Inworld prebuilt tab. " +
+          "Explains that the searchable list is only languages that already have " +
+          "Inworld SYSTEM speakers.",
+      },
+      "audio.newVoice.catalogMissingLanguageHint": {
+        description:
+          "Helper under Language and Accent on the Inworld prebuilt tab. Tells " +
+          "the user to open the Voice design tab when a language is missing " +
+          "from the stock catalog. Plain text, not a control.",
+      },
+      "audio.newVoice.designLanguageHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Language on Voice Design " +
+          "and on the Inworld prebuilt/clone language picker.",
+      },
+      "audio.newVoice.designLanguageSearch": {
+        description:
+          "Placeholder inside the Inworld Language combobox search field on Voice " +
+          "Design and on the prebuilt/clone tabs. The list is every language Inworld " +
+          "returns from supportedLanguages.",
+      },
+      "audio.newVoice.designLanguageSearchAria": {
+        description:
+          "Accessible name for the search field inside the Inworld Language combobox " +
+          "on Voice Design and on the prebuilt/clone tabs.",
+      },
+      "audio.newVoice.designAccentLabel": {
+        description:
+          "Form label for the regional-accent dropdown next to Language on Voice Design. " +
+          "Short noun.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designAccentHint": {
+        description:
+          "Tooltip on the info icon beside Accent on Voice Design. Explains that accent " +
+          "is the regional variant, that Default is the family code (en for English), " +
+          "and that American vs British English are en-US / en-GB.",
+      },
+      "audio.newVoice.catalogAccentHint": {
+        description:
+          "Tooltip on the info icon beside Accent on the Inworld prebuilt and clone " +
+          "tabs. Explains that accent is the regional variant used to load matching " +
+          "stock voices, and that Default is the family code without a region.",
+      },
+      "audio.newVoice.designAccentHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Accent on Voice Design.",
+      },
+      "audio.newVoice.designAccentUS": {
+        description:
+          "Accent option for en-US. Adjective, as in American English. Not the country name.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentGB": {
+        description:
+          "Accent option for en-GB. Adjective, as in British English. Not the country name.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentMX": {
+        description:
+          "Accent option for es-MX. Adjective, as in Mexican Spanish.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentBR": {
+        description:
+          "Accent option for pt-BR. Adjective, as in Brazilian Portuguese.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentDefault": {
+        description:
+          "First accent option in Voice Design. The language's family code with " +
+          "no regional tag (en, fr, sw). Short noun. Selected until the user " +
+          "picks a named regional accent.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentStandard": {
+        description:
+          "Accent option when the language has no regional tag (for example Yoruba). " +
+          "Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designScriptTooShort": {
+        description:
+          "Inline validation under the Voice Design preview-script field when " +
+          "Generate previews is clicked with fewer than 50 characters.",
+      },
+      "audio.newVoice.designGenerate": {
+        description:
+          "Button that asks Inworld to generate up to three listen-able voice " +
+          "previews from the description. Verb phrase, present tense.",
+        maxLength: 22,
+      },
+      "audio.newVoice.designKnobsHint": {
+        description:
+          "Single helper above the Audio quality / Delivery / Talking speed " +
+          "controls on the Voice Design tab. Those knobs still save on the voice " +
+          "for later line TTS. They do not change Voice Design preview clips " +
+          "(or the saved-voice row) you can play in this dialog. 'Generate a " +
+          "line' is later cell TTS, not the Generate previews button.",
+      },
+      "audio.newVoice.designGenerating": {
+        description:
+          "Busy label on the Generate previews button while Inworld is creating " +
+          "the three voice samples. Ellipsis is part of the English.",
+        maxLength: 18,
+      },
+      "audio.newVoice.designDocsLink": {
+        description:
+          "Link next to the Voice Design hint that opens Inworld's Voice Design " +
+          "guide in a new tab. Short noun phrase.",
+      },
+      "audio.newVoice.designPreviewLabel": {
+        description:
+          "Visible label for one of the generated Voice Design preview rows. {n} is " +
+          "the 1-based index (1, 2, or 3).",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designPlayPreview": {
+        description:
+          "Accessible name of the play control on Voice Design preview {n}. Screen " +
+          "readers only; the visible control is a play icon.",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designStopPreview": {
+        description:
+          "Accessible name of the stop/pause control on Voice Design preview {n} " +
+          "while that preview is playing. Screen readers only.",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designSelectPreview": {
+        description:
+          "Accessible group label for the Voice Design preview radio buttons " +
+          "(Preview 1, Preview 2, Preview 3). Screen readers only; not visible text. " +
+          "The chosen radio is the voice that Create/Save will publish.",
+      },
+      "audio.newVoice.designExistingHint": {
+        description:
+          "Helper on the Voice Design tab when editing a voice that was already " +
+          "designed and published. Tells the user they can play the sample they " +
+          "picked (the stored preview clip), generate new previews to replace it, " +
+          "or leave it as-is.",
+      },
+      "audio.newVoice.designSavedLabel": {
+        description:
+          "Row label for the already-published Voice Design voice when editing. " +
+          "Shown next to a play control so the user can hear the saved voice " +
+          "without generating new samples.",
+      },
+      "audio.newVoice.designPlaySaved": {
+        description:
+          "Accessible name of the play control on the saved Voice Design row. " +
+          "Screen readers only.",
+      },
+      "audio.newVoice.designStopSaved": {
+        description:
+          "Accessible name of the stop/pause control on the saved Voice Design " +
+          "row while that clip is playing. Screen readers only.",
+      },
+      "audio.newVoice.errorDesignPreviewRequired": {
+        description:
+          "Footer error when the user hits Create/Save on the Voice Design tab " +
+          "without generating and selecting a preview.",
+      },
+      "audio.newVoice.errorDesignNoProject": {
+        description:
+          "Inline error when Generate previews is clicked without a project and " +
+          "file context (needed to mint a sync token for the worker).",
+      },
+      "audio.newVoice.inworldLanguageLabel": {
+        description:
+          "Form label for the Inworld language combobox on the New Voice dialog. " +
+          "Used on Voice Design and on the prebuilt/clone tabs. The list is every " +
+          "language from Inworld's supportedLanguages catalog, with search.",
+      },
+      "audio.newVoice.inworldLanguagePlaceholder": {
+        description:
+          "Placeholder inside the Inworld language dropdown before the user picks " +
+          "a BCP-47 code. Keep short — it sits in the closed select.",
+        maxLength: 24,
+      },
+      "audio.newVoice.inworldLanguageHint": {
+        description:
+          "Helper under the Inworld language dropdown. Explains that at least one " +
+          "project lane label isn't an Inworld language code, so the user should pick " +
+          "the closest supported language to load matching stock voices.",
+      },
+      "audio.newVoice.inworldLanguageOther": {
+        description:
+          "Last option in the Inworld language dropdown. Choosing it reveals a " +
+          "text field so the user can type a BCP-47 tag that is not in the shortlist. " +
+          "Keep short — it is a select option.",
+        maxLength: 16,
+      },
+      "audio.newVoice.inworldLanguageCodeLabel": {
+        description:
+          "Form label for the raw BCP-47 language-code text field, shown after " +
+          "the user picks Other in the Inworld language dropdown.",
+      },
+      "audio.newVoice.inworldLanguageCodeHint": {
+        description:
+          "Helper under the raw Inworld language-code field. Tells the user to " +
+          "type a BCP-47 tag; sv-SE is an example, do not localize the tag itself.",
+      },
+      "audio.newVoice.errorInworldLanguageRequired": {
+        description:
+          "Inline error when Create/Save is pressed on an Inworld voice while the " +
+          "language dropdown is still empty and no project lane maps onto an Inworld " +
+          "code. Mixed projects with at least one mapped lane can save without a pick.",
+      },
+      "audio.newVoice.audioQualityLabel": {
+        description:
+          "Form label for the Inworld audio-quality row in the New Voice dialog. " +
+          "Paired with a switch that chooses Standard (Flash model) or Highest (TTS-2).",
+      },
+      "audio.newVoice.audioQualityHint": {
+        description:
+          "Tooltip explaining the Audio quality switch: Standard is the faster " +
+          "Flash model; Highest is the TTS-2 model and unlocks Delivery and steering.",
+      },
+      "audio.newVoice.audioQualityStandard": {
+        description:
+          "Value shown to the left of the Audio quality switch when Flash (Standard) is selected. " +
+          "Keep short — it sits in a narrow column beside the toggle.",
+        maxLength: 12,
+      },
+      "audio.newVoice.audioQualityHighest": {
+        description:
+          "Value shown to the left of the Audio quality switch when TTS-2 (Highest) is selected. " +
+          "Keep short — it sits in a narrow column beside the toggle.",
+        maxLength: 12,
+      },
+      "audio.newVoice.steeringBestPractices": {
+        description:
+          "Link at the right end of the Delivery row when Highest (TTS-2) is on. " +
+          "Opens Inworld's steering best-practices page in a new tab. Keep short — " +
+          "it sits with an external-link icon.",
+        maxLength: 24,
+      },
+      "audio.newVoice.deliveryLabel": {
+        description:
+          "Form label for the Inworld Delivery slider (More Stable / Balanced / More Creative) " +
+          "in the New Voice dialog. Delivery is disabled until Audio quality is Highest.",
+      },
+      "audio.newVoice.deliveryHint": {
+        description:
+          "Tooltip for Delivery when Highest quality is on. Explains that More Stable is " +
+          "consistent and More Creative has a wider emotional range.",
+      },
+      "audio.newVoice.deliveryNeedsHighest": {
+        description:
+          "Tooltip for Delivery when Audio quality is still Standard. Explains that the " +
+          "slider only applies on Highest (Inworld TTS 2) because Flash ignores it.",
+      },
+      "audio.newVoice.deliveryStable": {
+        description:
+          "Left tick label under the Delivery slider. Means the most consistent, least " +
+          "varied reading. Short phrase, not a sentence.",
+        maxLength: 16,
+      },
+      "audio.newVoice.deliveryBalanced": {
+        description:
+          "Center tick label under the Delivery slider. Means a middle ground between " +
+          "stability and variation. One word if the target language allows.",
+        maxLength: 16,
+      },
+      "audio.newVoice.deliveryCreative": {
+        description:
+          "Right tick label under the Delivery slider. Means a more varied, expressive " +
+          "reading. Short phrase, not a sentence.",
+        maxLength: 16,
+      },
+      "audio.newVoice.talkingSpeedLabel": {
+        description:
+          "Form label for the Inworld talking-speed slider (0.5× to 1.5×) in the New Voice dialog.",
+      },
+      "audio.newVoice.talkingSpeedHint": {
+        description:
+          "Tooltip for talking speed. 1.0 is the voice's native speed; values below 0.8 " +
+          "can sound less natural. Keep the numeric examples.",
+      },
+      "audio.newVoice.talkingSpeedResetAria": {
+        description:
+          "Accessible name for the circular reset button that returns talking speed to 1.0×. " +
+          "The button has no visible text, only an undo-arrow icon.",
+      },
+      "audio.newVoice.audioQualityHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Audio quality. The visible label " +
+          "is already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.deliveryHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Delivery. The visible label is " +
+          "already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.talkingSpeedHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Talking speed. The visible label " +
+          "is already on the row; this names the help control for screen readers.",
       },
       "audio.newVoice.describeLabel": {
         description:
@@ -486,56 +1044,6 @@ export const audio = defineNamespace({
           "Placeholder example text inside the empty 'describe the voice' textarea, " +
           "showing the kind of description that works well.",
       },
-      "audio.newVoice.kokoroLabel": {
-        description:
-          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
-          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
-          "is the engine's proper name — do not translate it if it appears nearby.",
-      },
-      "audio.newVoice.kokoroPlaceholder": {
-        description:
-          "Placeholder example inside the empty Kokoro voice-id field, showing the " +
-          "format of a real id. The example code itself ('af_bella') is data, not " +
-          "prose — keep it as-is; only 'e.g.' needs translating.",
-      },
-      "audio.newVoice.kokoroGroupAmerican": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for American English speakers.",
-      },
-      "audio.newVoice.kokoroGroupBritish": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for British English speakers.",
-      },
-      "audio.newVoice.kokoroGenderFemale": {
-        description:
-          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroGenderMale": {
-        description:
-          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroEnglishOnlyHint": {
-        description:
-          "Helper under the Kokoro voice dropdown when the project's target language " +
-          "is not English. Tells the user Kokoro only speaks English and names the " +
-          "other engines that can speak other languages. 'Kokoro', 'OmniVoice', " +
-          "'Gemini', and 'MMS' are engine names — do not translate them.",
-      },
-      "audio.newVoice.kokoroPlaySample": {
-        description:
-          "Accessible name of the play button that previews a Kokoro speaker. " +
-          "{name} is the speaker's given name (Heart, Bella, George).",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
-      },
-      "audio.newVoice.kokoroStopSample": {
-        description:
-          "Accessible name of the same button while that speaker's sample is playing.",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
-      },
       "audio.newVoice.mmsLanguageLabel": {
         description:
           "Label for the language-picker field shown only when the MMS engine is " +
@@ -545,12 +1053,12 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.singleVoiceHint": {
         description:
-          "Explanatory sentence shown when the OmniVoice engine is selected, telling " +
-          "the user that engine offers only one built-in voice and pointing them to " +
-          "the Clone tab if they want it to sound like someone specific.",
+          "Explanatory sentence kept for engines that ship a single stock voice. " +
+          "Currently unused in the Inworld picker (which has named voices) but still " +
+          "in the catalog for Clone-tab copy that names the engine.",
         placeholders: {
           engine:
-            "The selected TTS engine's proper display name (e.g. 'OmniVoice'), " +
+            "The selected TTS engine's proper display name (e.g. 'Inworld TTS'), " +
             "already resolved in English by the app — a brand name, do not translate " +
             "the substituted value.",
         },
@@ -1191,7 +1699,7 @@ export const audio = defineNamespace({
         description:
           "Label on the recorder's voice button while a local voice model is " +
           "downloading, so a wait of tens of seconds does not read as a hang. " +
-          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "Only local engines (MMS) report progress. Keep it short — " +
           "the button is about half the panel wide.",
         placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
         maxLength: 18,
@@ -1660,23 +2168,18 @@ export const audio = defineNamespace({
       "audio.voice.lively": { description: "See audio.voice.bright — same class of key." },
       "audio.voice.knowledgeable": { description: "See audio.voice.bright — same class of key." },
       "audio.voice.warm": { description: "See audio.voice.bright — same class of key." },
-      "audio.provider.omnivoiceHint": {
+      "audio.provider.inworldHint": {
         description:
-          "Tooltip on the OmniVoice engine card in the TTS engine picker (New " +
-          "Voice dialog), explaining what running 'on our servers' means: no API key " +
-          "or download, usage-metered, and it supports cloning from a reference clip.",
+          "Tooltip on the Inworld TTS engine card in the TTS engine picker (New " +
+          "Voice dialog). Hosted Inworld has two models: Standard is TTS 2 Flash " +
+          "(faster) and Highest is TTS 2. No user API key, usage-metered, and it " +
+          "supports cloning from a reference clip.",
       },
       "audio.provider.geminiHint": {
         description:
           "Tooltip on the Gemini engine card in the TTS engine picker. 'BYOK' = " +
           "bring your own key — the user must supply their own Google AI key for this " +
           "engine to work.",
-      },
-      "audio.provider.kokoroHint": {
-        description:
-          "Tooltip on the Kokoro engine card in the TTS engine picker, explaining the " +
-          "one-time local model download that happens before this on-device engine " +
-          "can generate audio.",
       },
       "audio.provider.mmsHintSherpa": {
         description:
@@ -1787,11 +2290,6 @@ export const audio = defineNamespace({
           "model download consent dialog (AiModelConsentDialog) — names the feature " +
           "in parentheses since 'Whisper' alone doesn't say what it's for.",
       },
-      "audio.consent.kokoroLabel": {
-        description:
-          "Display name for the Kokoro text-to-speech model in the same consent " +
-          "dialog as audio.consent.whisperLabel, same naming pattern.",
-      },
       "audio.consent.mmsLabel": {
         description:
           "Display name for the MMS multilingual text-to-speech model in the same " +
@@ -1831,24 +2329,24 @@ export const audio = defineNamespace({
         description:
           "Popover heading when Gemini TTS ran (a key was present) but the request " +
           "failed or returned no audio. Distinct from geminiKeyRequiredTitle — the " +
-          "engine is named so it is not confused with an OmniVoice failure.",
+          "engine is named so it is not confused with an Inworld TTS failure.",
       },
-      "audio.aiError.omnivoiceNotConfiguredTitle": {
+      "audio.aiError.inworldNotConfiguredTitle": {
         description:
-          "Popover heading when hosted OmniVoice TTS is not wired on this server " +
-          "(typical for local pnpm dev: missing OMNIVOICE_URL / OMNIVOICE_TOKEN). " +
+          "Popover heading when hosted Inworld TTS is not wired on this server " +
+          "(typical for local pnpm dev: missing INWORLD_API_KEY in sync-worker/.dev.vars). " +
           "Must not be read as a Gemini-key problem.",
       },
-      "audio.aiError.omnivoiceFailedTitle": {
+      "audio.aiError.inworldFailedTitle": {
         description:
-          "Popover heading when OmniVoice TTS was configured but the synthesize " +
-          "call itself failed (Modal/upstream error).",
+          "Popover heading when Inworld TTS was configured but the synthesize " +
+          "call itself failed (upstream vendor error).",
       },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:
-          "Popover heading when a non-OmniVoice clone voice needs Seed-VC conversion " +
+          "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
           "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
-          "omnivoiceNotConfiguredTitle — OmniVoice clones skip this step.",
+          "inworldNotConfiguredTitle — Inworld clones skip this step.",
       },
       "audio.aiError.seedVcFailedTitle": {
         description:
@@ -1895,7 +2393,7 @@ export const audio = defineNamespace({
       },
       "audio.aiError.modelLoadFailedTitle": {
         description:
-          "Popover heading when an on-device model (Whisper/Kokoro/MMS/transformers " +
+          "Popover heading when an on-device model (Whisper/MMS/transformers " +
           "runtime) fails to download or initialize.",
       },
       "audio.aiError.audioFormatUnsupportedTitle": {

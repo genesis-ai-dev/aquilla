@@ -7,11 +7,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { STAT_TILE_GRID } from "@/components/ui/page"
 
 /** The shared spinner pill shown centered on every loading overlay. */
-function LoadingStatusPill({ label }: { label: string }) {
+function LoadingStatusPill({ label, detail }: { label: string; detail?: ReactNode }) {
   return (
     <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
       <Spinner aria-hidden="true" className="size-5" />
-      <span>{label}…</span>
+      <span>{label}…{detail}</span>
     </div>
   )
 }
@@ -20,6 +20,7 @@ type LoadingTemplateProps = Omit<React.ComponentProps<"div">, "children"> & {
   label?: string
   children: ReactNode
   templateClassName?: string
+  statusDetail?: ReactNode
 }
 
 /**
@@ -34,6 +35,7 @@ function LoadingTemplate({
   children,
   className,
   templateClassName,
+  statusDetail,
   ...props
 }: LoadingTemplateProps) {
   return (
@@ -56,7 +58,7 @@ function LoadingTemplate({
         {children}
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
-        <LoadingStatusPill label={label} />
+        <LoadingStatusPill label={label} detail={statusDetail} />
       </div>
     </div>
   )

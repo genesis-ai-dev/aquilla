@@ -196,6 +196,140 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // selected, so the re-record correctly drops it back to needs-re-validation.
     expect(pa.validatedAudioCells).toBe(1)
   })
+
+  // AQU-1083 — the org/project policy reaching the dashboard.
+  async function seedStructuralOrg(orgSettings: string, projectSettings: string | null) {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_settings (org_id, settings, version) VALUES (1, ?, 0)").bind(orgSettings).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    if (projectSettings !== null) {
+      await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings, version) VALUES ('pa', ?, 0)").bind(projectSettings).run()
+    }
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    // 10 cells, 2 of them structural; 6 filled of which 1 structural.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, ai_drafted_count,
+                          structural_cell_count, structural_filled_count, structural_approved_count, structural_ai_drafted_count, last_edit_at)
+       VALUES ('f1','pa','GEN','e1', 10, 6, 4, 2,  2, 1, 1, 1, 1000)`,
+    ).run()
+    // One heading cell that was voiced, one verse that was voiced.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, type, event_id, last_edit_at)
+       VALUES ('pa','f1','h1','source','Chapter 1','heading','e1',1),
+              ('pa','f1','v1','source','In the beginning','verse','e1',1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, approved, event_id, created_ts) VALUES
+        ('pa','f1','h1','ah','generatedVoice','frontier-audio://h.wav',5000,1,0,1,'aeh',1),
+        ('pa','f1','v1','av','recording','frontier-audio://v.wav',7000,1,0,1,'aev',1)`,
+    ).run()
+  }
+
+  const portfolio = async () => {
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<Record<string, number | string>> }
+    return body.projects.find((p) => p.id === "pa")! as unknown as {
+      totalCells: number; filledCells: number; validatedCells: number
+      aiDraftedCells: number; audioCells: number; validatedAudioCells: number; recordedMs: number
+    }
+  }
+
+  it("AQU-1083: counts headings by default, so nothing moves for an org that never opts out", async () => {
+    await seedStructuralOrg("{}", null)
+    const pa = await portfolio()
+    expect(pa.totalCells).toBe(10)
+    expect(pa.filledCells).toBe(6)
+    expect(pa.audioCells).toBe(2)
+  })
+
+  it("AQU-1083: an org that opts out drops structural cells from every rollup", async () => {
+    await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
+    const pa = await portfolio()
+    expect(pa.totalCells).toBe(8)
+    expect(pa.filledCells).toBe(5)
+    expect(pa.validatedCells).toBe(3)
+    expect(pa.aiDraftedCells).toBe(1)
+  })
+
+  it("AQU-1083: audio follows the same policy, so coverage can never exceed the total", async () => {
+    // The trap this closes: audioPct divides audio cells by the TEXT total.
+    // Excluding the heading from the denominator while its generated take
+    // stayed in the numerator would read as more than 100% covered.
+    await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
+    const pa = await portfolio()
+    expect(pa.audioCells).toBe(1)
+    expect(pa.validatedAudioCells).toBe(1)
+    expect(pa.audioCells).toBeLessThanOrEqual(pa.totalCells)
+  })
+
+  it("AQU-1083: recorded minutes are work done, not progress, so they never move", async () => {
+    await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
+    const pa = await portfolio()
+    expect(pa.recordedMs).toBe(12000)
+  })
+
+  it("AQU-1083: a project's own answer overrides its org's", async () => {
+    await seedStructuralOrg(
+      JSON.stringify({ countStructuralCells: false }),
+      JSON.stringify({ countStructuralCells: true }),
+    )
+    const pa = await portfolio()
+    expect(pa.totalCells).toBe(10)
+    expect(pa.audioCells).toBe(2)
+  })
+
+  it("AQU-1083: the per-lane breakdown subtracts the same cells as the headline", async () => {
+    // Caught on a real imported Genesis: the scalar totals dropped from 1540 to
+    // 1533 while the lane row under them still read 1540. The lane rollup is a
+    // separate query over file_section_progress and had no idea about the
+    // policy, so one project reported two different denominators at once.
+    await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress
+         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+          validator_histogram, structural_count, structural_filled_count,
+          structural_validator_histogram, revision, updated_at)
+       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+    ).bind(
+      JSON.stringify({ "0": 4, "1": 6 }),
+      JSON.stringify({ "0": 1, "1": 1 }),
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; totalCells: number; filledCells: number; validatedCells: number
+                        lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number }> }>
+    }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 8, filledCells: 5, validatedCells: 5 })
+    // And it agrees with the numbers printed beside it.
+    expect(pa.lanes[0].totalCells).toBe(pa.totalCells)
+    expect(pa.lanes[0].filledCells).toBe(pa.filledCells)
+  })
+
+  it("AQU-1083: a lane keeps its numbers when the project counts headings", async () => {
+    await seedStructuralOrg("{}", null)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress
+         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+          validator_histogram, structural_count, structural_filled_count,
+          structural_validator_histogram, revision, updated_at)
+       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+    ).bind(
+      JSON.stringify({ "0": 4, "1": 6 }),
+      JSON.stringify({ "0": 1, "1": 1 }),
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number }> }>
+    }
+    expect(body.projects.find((p) => p.id === "pa")!.lanes[0])
+      .toMatchObject({ lane: "", totalCells: 10, filledCells: 6, validatedCells: 6 })
+  })
 })
 
 describe("POST /api/v2/orgs/portfolio", () => {
@@ -206,7 +340,7 @@ describe("POST /api/v2/orgs/portfolio", () => {
     const prepare = vi.fn((query: string) => ({
       bind: (...args: unknown[]) => {
         preparedQueries.push(query)
-        if (query.includes("WITH au AS MATERIALIZED")) aggregateOrgBinds.push(args)
+        if (query.includes("au AS MATERIALIZED")) aggregateOrgBinds.push(args)
         return { all }
       },
     }))
@@ -217,12 +351,18 @@ describe("POST /api/v2/orgs/portfolio", () => {
     // AQU-745: the aggregate carries the org binds for each IN clause plus the
     // per-caller visibility binds appended by PORTFOLIO_VISIBILITY_PREDICATE:
     // <isAdmin 0/1>, then userId ×4.
-    // AQU-1097 inserted a third IN clause (the plan-unit counts) preceded by
-    // the Anywhere-on-Earth cutoff date those counts compare target dates to.
-    expect(aggregateOrgBinds).toEqual([[2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
-    const settingsQuery = preparedQueries.find((query) => query.includes("FROM project_settings ps"))
+    //
+    // Four org scopes, in order: the AQU-1083 policy CTE, the audio scope, the
+    // AQU-1097 plan-unit counts (preceded by the Anywhere-on-Earth cutoff date
+    // those counts compare target dates to), then the outer WHERE.
+    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
+    // Driven FROM projects and left-joined to its settings, so a project with
+    // no settings row still inherits the org's structural-cell answer.
+    const settingsQuery = preparedQueries.find((query) => query.includes("ps.target_lanes"))
     expect(settingsQuery).toContain("ps.validation_count")
     expect(settingsQuery).toContain("ps.target_lanes")
+    expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
+    // Still reads the generated columns rather than parsing the blob.
     expect(settingsQuery).not.toContain("ps.settings AS settings")
   })
 

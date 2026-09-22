@@ -30,6 +30,7 @@ import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
 import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { sha256Hex } from "../../../db/shared/api-credentials"
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
@@ -121,10 +122,15 @@ admin.post("/elevation/request", async (c) => {
   const code = randomSixDigitCode()
   const ttlMin = Number(c.env.ELEVATION_TTL_MINUTES ?? 10)
   const expiresAt = new Date(Date.now() + ttlMin * 60_000).toISOString()
+  // [Pen test 2026-09-21]: store only the digest, matching every other
+  // bearer/PIN-style credential in this codebase (password-reset tokens,
+  // email-verification tokens, access-link PINs) — a read of this table
+  // (backup, replica, support query) during the TTL window no longer
+  // discloses a usable code.
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO admin_elevation_codes (user_id, code, expires_at) VALUES (?, ?, ?)`,
   )
-    .bind(user.id, code, expiresAt)
+    .bind(user.id, await sha256Hex(code), expiresAt)
     .run()
 
   const sent = await sendAdminElevationCodeEmail(c.env, user.email, code, ttlMin)
@@ -168,7 +174,7 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
       WHERE user_id = ? AND code = ? AND expires_at > now()
       ORDER BY id DESC LIMIT 1`,
   )
-    .bind(user.id, code)
+    .bind(user.id, await sha256Hex(code))
     .first<{ id: number }>()
   if (!match) {
     await recordAuthEvent(c.env.AQUILLA_PG, "admin_elevation_verify", identifier, false)
@@ -203,6 +209,25 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
 // Everything below requires an active elevated session (no-op when the console
 // is not hardened — see requireAdminElevation).
 admin.use("*", requireAdminElevation)
+
+/**
+ * GET /api/v2/admin/migration-status — read-only status published by the
+ * migration daemon to the shared snapshots bucket. It is served only after
+ * the platform-admin and elevation middleware above.
+ */
+admin.get("/migration-status", async (c) => {
+  const bucket = c.env.SNAPSHOTS
+  if (!bucket) return c.json({ error: "migration_status_unavailable" }, 503)
+  const prefix = c.env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "")
+  const key = `${prefix ? `${prefix}/` : ""}_migrate/daemon-status.json`
+  const object = await bucket.get(key)
+  if (!object) return c.json({ status: null })
+  try {
+    return c.json({ status: await object.json<unknown>() })
+  } catch {
+    return c.json({ error: "migration_status_invalid" }, 502)
+  }
+})
 
 /**
  * GET /api/v2/admin/admins — the ADMIN_EMAILS allowlist, joined to user

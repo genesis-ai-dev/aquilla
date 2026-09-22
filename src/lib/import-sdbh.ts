@@ -35,6 +35,8 @@ export interface SdbhImportSummary {
   skipped: { book: string; reason: string }[]
   entryCount: number
   senseCount: number
+  /** Contextual meanings (collocations/idioms) that produced cells. */
+  contextualMeaningCount: number
   sourceCellCount: number
   targetCellCount: number
   /** Language code found in the localized edition's senses (e.g. "es"). */
@@ -124,7 +126,7 @@ export async function importSdbh(
         role: "source",
         kind: "sdbh",
         importFormat: "sdbh",
-        parserVersion: "sdbh-import-v1",
+        parserVersion: "sdbh-import-v2",
         sourceLanguage: ctx.sourceLanguage,
         targetLanguage: ctx.targetLanguage,
         orderedBy: "sequence",
@@ -227,6 +229,7 @@ export async function importSdbh(
     skipped,
     entryCount: parsed.entryCount,
     senseCount: parsed.senseCount,
+    contextualMeaningCount: parsed.contextualMeaningCount,
     sourceCellCount,
     targetCellCount,
     targetLanguageCode: localized?.languageCode ?? null,

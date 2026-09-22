@@ -125,6 +125,29 @@ export function summarizeDetectedDirections(directions: Iterable<TextDirection |
   return null
 }
 
+/** Summarize both editor lanes in one pass over cached cell directions. */
+export function summarizePairedDirections<T>(
+  values: Iterable<T>,
+  read: (value: T) => { source: TextDirection | null; target: TextDirection | null },
+): { source: TextDirectionSummary | null; target: TextDirectionSummary | null } {
+  let sourceLtr = false
+  let sourceRtl = false
+  let targetLtr = false
+  let targetRtl = false
+  for (const value of values) {
+    const directions = read(value)
+    if (directions.source === "ltr") sourceLtr = true
+    if (directions.source === "rtl") sourceRtl = true
+    if (directions.target === "ltr") targetLtr = true
+    if (directions.target === "rtl") targetRtl = true
+    if (sourceLtr && sourceRtl && targetLtr && targetRtl) break
+  }
+  return {
+    source: sourceLtr && sourceRtl ? "mixed" : sourceRtl ? "rtl" : sourceLtr ? "ltr" : null,
+    target: targetLtr && targetRtl ? "mixed" : targetRtl ? "rtl" : targetLtr ? "ltr" : null,
+  }
+}
+
 export function resolveTextDirection(
   mode: DirectionMode,
   text: string | undefined | null,

@@ -3609,7 +3609,13 @@
     "editor.view.settings": "bea3f3865295923d",
     "editor.timeline.qualityOriginalTooltip": "345f72f202b2bce8",
     "comments.stale.badge": "a03f2386ae06b211",
-    "comments.drawer.closeLabel": "3530ee6dc03cdc69"
+    "comments.drawer.closeLabel": "3530ee6dc03cdc69",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7211,7 +7217,13 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10798,7 +10810,13 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14401,7 +14419,13 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19330,7 +19354,13 @@
     "workspace.targetAudioLane.previewTooLarge": "97b237a769bd6a42",
     "workspace.targetAudioLane.previewTooLargeDetail": "783026ab3f832707",
     "workspace.targetAudioLane.previewUnavailable": "707dd5a5db8d3e9c",
-    "workspace.targetAudioLane.playClip": "0df2309f5a561ceb"
+    "workspace.targetAudioLane.playClip": "0df2309f5a561ceb",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -24259,6 +24289,12 @@
     "workspace.targetAudioLane.previewTooLarge": "97b237a769bd6a42",
     "workspace.targetAudioLane.previewTooLargeDetail": "783026ab3f832707",
     "workspace.targetAudioLane.previewUnavailable": "707dd5a5db8d3e9c",
-    "workspace.targetAudioLane.playClip": "0df2309f5a561ceb"
+    "workspace.targetAudioLane.playClip": "0df2309f5a561ceb",
+    "terminology.editor.loadFailedTitle": "1bb0303bd4a16725",
+    "terminology.editor.loadFailedDetail": "0d9591252f326022",
+    "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
+    "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
+    "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
   }
 }

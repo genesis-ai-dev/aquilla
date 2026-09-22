@@ -1,30 +1,19 @@
 /**
- * AgentWorkbench.tsx — the editor's three-pane Source | Agent | Target surface.
- *
- * Surface ownership (agent-mode-v2 review-loop redesign): the chat is a
- * NARROW RAIL that narrates — proposals render there as compact receipts
- * with live counters — and the working set is the single review surface,
- * with draft text editable in place before accepting. Accept commits what's
- * in the box (the human post-edits the machine draft), through the same
- * staged-apply outbox path as ever. A job header shows bulk-run progress
- * with Stop, plus session controls (new session, back to editor).
+ * One URL-driven conversation workspace, with optional document, proposal
+ * review, and knowledge views. Chat proposals retain the staged-apply outbox
+ * and compensating Undo paths; contextual tasks retain their own review gate.
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
-import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
-import type { Layout } from "react-resizable-panels"
-import { Button } from "@/components/ui/button"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { Link, useSearchParams } from "react-router-dom"
+import { ArrowLeft, Square } from "lucide-react"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
-import { applyCellScrollAnchor, readCellScrollAnchor } from "@/lib/agent/synchronized-scroll"
 import { buildUndoEvents } from "@/lib/agent/undo"
-import { readAgentWorkbenchLayout, writeAgentWorkbenchLayout } from "@/lib/agent/workbench-layout"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
 import type { TranslatedEditorCommit } from "../TranslatedEditor"
 import {
@@ -38,10 +27,14 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { CONVERSATION_PARAM } from "@/lib/agent/team-channel"
+import { CONVERSATION_PARAM, TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
+import { readAgentWorkspaceView, type AgentWorkspaceView } from "@/lib/agent/workspace-location"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
-import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
+import { AgentChatOptions } from "./AgentChatOptions"
+import type { AgentWorkbenchCell } from "./AgentContextPane"
+import { AgentDocumentContext } from "./AgentDocumentContext"
 import { TeamThreadsView } from "./TeamThreadsView"
+import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
@@ -53,8 +46,6 @@ import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
 // SWARM-TODO stub in ./memory/AgentMemoryTab.tsx.
 const AgentMemoryTab = lazy(() => import("./memory/AgentMemoryTab"))
 
-type WorkbenchTab = "team" | "sessions" | "memory"
-
 export interface AgentWorkbenchProps {
   /** One source of truth in ProjectWorkspace. `pendingPrompt` rides along so
    *  dock quick actions (Summarize book/chapter) run in this surface's chat. */
@@ -63,8 +54,8 @@ export interface AgentWorkbenchProps {
   credits?: CreditsDialProps | null
   /** File display names for the Team tab's thread titles. */
   fileNames?: ReadonlyMap<string, string>
-  /** Minimize to the dock and dismiss the editor Agent tab. */
-  onClose: () => void
+  /** Return destination; following it leaves the Agent tab available. */
+  editorHref: string
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
   /** Reveal the file explorer while remaining in Agent mode. */
@@ -102,7 +93,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, fileNames, editorHref, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -110,24 +101,33 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
   // was applied (that would re-offer applied drafts and drop Undo).
   const decided = state.decided
   const [applying, setApplying] = useState(false)
-  // A conversation in the URL (a dock thread click, a shared link) lands on
-  // the Team surface; otherwise the chat is the default.
-  const [searchParams] = useSearchParams()
-  const conversationParam = searchParams.get(CONVERSATION_PARAM)
-  const [tab, setTab] = useState<WorkbenchTab>(() => (conversationParam ? "team" : "sessions"))
+  const [searchParams, setSearchParams] = useSearchParams()
+  const conversationId = searchParams.get(CONVERSATION_PARAM) ?? TEAM_CHAT_CONVERSATION
+  const view = readAgentWorkspaceView(searchParams)
+  const isConversationView = view === "conversation"
+  const isDocumentView = view === "document"
+  const isReviewView = view === "review"
+  const isKnowledgeView = view === "knowledge"
+  const isTeamChat = conversationId === TEAM_CHAT_CONVERSATION
+  const setView = useCallback((next: AgentWorkspaceView) => {
+    setSearchParams((previous) => {
+      const params = new URLSearchParams(previous)
+      if (next === "conversation") params.delete("view")
+      else params.set("view", next)
+      return params
+    })
+  }, [setSearchParams])
+  // Selection-based requests belong to the main conversation, not the last task.
   useEffect(() => {
-    if (conversationParam) setTab("team")
-  }, [conversationParam])
-  // "Ask AI" hands the workbench a context chip, and dock quick actions hand
-  // it a prompt — both flows must land in the chat, whatever tab was open.
-  useEffect(() => {
-    if (agent.pendingChip || agent.pendingPrompt) setTab("sessions")
-  }, [agent.pendingChip, agent.pendingPrompt])
+    if (!agent.pendingChip && !agent.pendingPrompt) return
+    setSearchParams((previous) => {
+      const params = new URLSearchParams(previous)
+      params.set(CONVERSATION_PARAM, TEAM_CHAT_CONVERSATION)
+      params.delete("view")
+      return params
+    }, { replace: true })
+  }, [agent.pendingChip, agent.pendingPrompt, setSearchParams])
   const panelRef = useRef<WorkingSetPanelHandle>(null)
-  const sourceScrollRef = useRef<HTMLDivElement>(null)
-  const targetScrollRef = useRef<HTMLDivElement>(null)
-  const scrollSourceRef = useRef<"source" | "target" | null>(null)
-  const initialLayout = useMemo(() => readAgentWorkbenchLayout(agent.projectId), [agent.projectId])
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
   const pending = useMemo(() => pendingRows(rows), [rows])
@@ -140,72 +140,13 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
     [rows],
   )
   const hasReviewWork = stageRows.length > 0
-  const workspaceCellsById = useMemo(
-    () => new Map((workspace?.cells ?? []).map((cell) => [cell.cellId, cell])),
-    [workspace?.cells],
-  )
-  const contextCells = useMemo<AgentWorkbenchCell[]>(
-    () => hasReviewWork
-      ? stageRows.map((row) => {
-          const live = workspaceCellsById.get(row.cellId)
-          const source = row.source ?? live?.source ?? ""
-          const target = row.target ?? live?.target ?? ""
-          return {
-            ...live,
-            cellId: row.cellId,
-            fileId: row.fileId ?? live?.fileId ?? "",
-            ref: row.ref ?? live?.ref,
-            source,
-            // A staged/read sighting may carry newer plain text than the live
-            // workspace. Never render stale rich HTML over that newer value.
-            sourceHtml: source === live?.source ? live?.sourceHtml : undefined,
-            target,
-            targetHtml: target === live?.target ? live?.targetHtml : undefined,
-            status: row.status ?? live?.status,
-          }
-        })
-      : workspace?.cells ?? [],
-    [hasReviewWork, stageRows, workspace?.cells, workspaceCellsById],
-  )
-  const contextCellIdsKey = contextCells.map((cell) => cell.cellId).join("\u0000")
-
+  const showDocumentTab = isTeamChat || view === "document"
+  const showReviewTab = view === "review" || (isTeamChat && hasReviewWork)
+  const onVisibleCellIdsChange = workspace?.onVisibleCellIdsChange
   useEffect(() => {
-    const onVisibleCellIdsChange = workspace?.onVisibleCellIdsChange
-    if (!onVisibleCellIdsChange) return
-    if (hasReviewWork) {
-      onVisibleCellIdsChange([])
-      return
-    }
-    const root = targetScrollRef.current
-    if (!root) {
-      onVisibleCellIdsChange([])
-      return
-    }
-    const report = () => {
-      const viewport = root.getBoundingClientRect()
-      const ids = Array.from(root.querySelectorAll<HTMLElement>("article[data-cell-id]"))
-        .filter((row) => {
-          const rect = row.getBoundingClientRect()
-          return rect.bottom > viewport.top && rect.top < viewport.bottom
-        })
-        .map((row) => row.dataset.cellId)
-        .filter((cellId): cellId is string => Boolean(cellId))
-      onVisibleCellIdsChange(ids)
-    }
-    report()
-    const frame = requestAnimationFrame(report)
-    root.addEventListener("scroll", report, { passive: true })
-    const resizeObserver = typeof ResizeObserver !== "undefined"
-      ? new ResizeObserver(report)
-      : null
-    resizeObserver?.observe(root)
-    return () => {
-      cancelAnimationFrame(frame)
-      root.removeEventListener("scroll", report)
-      resizeObserver?.disconnect()
-      onVisibleCellIdsChange([])
-    }
-  }, [contextCellIdsKey, hasReviewWork, workspace?.onVisibleCellIdsChange])
+    if (view !== "document") onVisibleCellIdsChange?.([])
+    if (view === "review" && isTeamChat) panelRef.current?.focusFirstPending()
+  }, [view, isTeamChat, onVisibleCellIdsChange])
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress
@@ -349,44 +290,35 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
           key={proposal.proposalId}
           proposal={proposal}
           counts={{ accepted, edited, rejected, undone, pending: pendingCount, checks }}
-          onReview={() => panelRef.current?.focusFirstPending()}
+          onReview={() => setView("review")}
           onUndo={applying ? undefined : () => undoProposal(proposal)}
         />
       )
     },
-    [decided, enabledRules, agent.resolveCell, applying, undoProposal],
+    [decided, enabledRules, agent.resolveCell, applying, undoProposal, setView],
   )
 
-  const handleLayoutChanged = useCallback((layout: Layout) => {
-    writeAgentWorkbenchLayout(agent.projectId, layout)
-  }, [agent.projectId])
-
-  const synchronizeScroll = useCallback((from: "source" | "target", container: HTMLDivElement) => {
-    if (scrollSourceRef.current && scrollSourceRef.current !== from) {
-      scrollSourceRef.current = null
-      return
-    }
-    const destination = from === "source" ? targetScrollRef.current : sourceScrollRef.current
-    const anchor = readCellScrollAnchor(container)
-    if (!destination || !anchor) return
-    scrollSourceRef.current = from
-    applyCellScrollAnchor(destination, anchor)
-    requestAnimationFrame(() => {
-      if (scrollSourceRef.current === from) scrollSourceRef.current = null
-    })
-  }, [])
+  const renderChannel = (channel: TeamChannelProps) => (
+    <AgentDockView
+      {...agent}
+      conversationPrelude={channel.items.length > 0 || channel.heldQuestions > 0
+        ? <TeamChannel {...channel} conversationRuns={[]} embedded />
+        : undefined}
+      renderProposalOverride={renderProposalOverride}
+      onReviewMemory={() => setView("knowledge")}
+    />
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Tabs
-        value={tab}
-        onValueChange={(next) => setTab(next as WorkbenchTab)}
+        value={view}
+        onValueChange={(next) => {
+          if (next === "conversation" || next === "document" || next === "review" || next === "knowledge") setView(next)
+        }}
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        {/* One compact workbench header: identity, navigation, and actions. */}
-        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5">
           {activeRun && (
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
               <Spinner className="h-3 w-3 shrink-0" />
@@ -404,13 +336,20 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
             className="h-7 w-fit shrink-0 p-0"
             aria-label={t("agentWorkspace.sections")}
           >
-            <TabsTrigger value="team" className="h-full px-2 text-xs">
-              {t("agent.team.tab")}
+            <TabsTrigger value="conversation" className="h-full px-2 text-xs">
+              {t("agentWorkspace.conversation")}
             </TabsTrigger>
-            <TabsTrigger value="sessions" className="h-full px-2 text-xs">
-              {t("agentWorkspace.chat")}
-            </TabsTrigger>
-            <TabsTrigger value="memory" className="h-full px-2 text-xs">
+            {showDocumentTab && (
+              <TabsTrigger value="document" className="h-full px-2 text-xs">
+                {t("agentWorkspace.document")}
+              </TabsTrigger>
+            )}
+            {showReviewTab && (
+              <TabsTrigger value="review" className="h-full px-2 text-xs">
+                {t("agent.team.reviewDrafts")}
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="knowledge" className="h-full px-2 text-xs">
               {t("agentWorkspace.projectKnowledge")}
             </TabsTrigger>
           </TabsList>
@@ -423,169 +362,62 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
                 {t("common.stop")}
               </Button>
             )}
-            <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={reset}
-              >
-                <RotateCcw data-icon="inline-start" />
-                {t("agentWorkspace.newSession")}
-              </Button>
-            </AppTooltip>
-            <AppTooltip content={t("agentWorkspace.collapseHelp")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={onClose}
-                aria-label={t("agentWorkspace.collapsePane")}
-              >
-                <Minimize2 data-icon="inline-start" />
-                {t("agentWorkspace.collapse")}
-              </Button>
-            </AppTooltip>
+            <AgentChatOptions
+              key={JSON.stringify([agent.projectId, agent.author])}
+              onReset={reset}
+              disabled={applying}
+            />
+            <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+              <ArrowLeft aria-hidden data-icon="inline-start" className="rtl:rotate-180" />
+              {t("agentWorkspace.backToEditor")}
+            </Link>
           </span>
         </div>
 
-        <TabsContent value="team" className="flex min-h-0 flex-1 flex-col">
-          {/* jwt/author must mirror AgentDockView's wiring so the Team tab and
-              the Chat tab address the SAME session-store instance (author is
-              the store's owner key — ProjectWorkspace may fall back to a
-              project username when no session exists). */}
+        {isConversationView && <TabsContent value="conversation" className="flex min-h-0 flex-1 flex-col">
           <TeamThreadsView
             projectId={agent.projectId}
             fileNames={fileNames}
             jwt={agent.jwt}
             author={agent.author}
             roleLevel={agent.roleLevel}
+            renderChannel={renderChannel}
           />
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
-          <ResizablePanelGroup
-            id={`agent-workbench-${agent.projectId}`}
-            orientation="horizontal"
-            defaultLayout={initialLayout}
-            onLayoutChanged={handleLayoutChanged}
-            className="min-h-0 flex-1"
-          >
-            <ResizablePanel id="source" minSize="16%">
-              <AgentContextPane
-                kind="source"
-                cells={contextCells}
-                language={workspace?.sourceLanguage}
-                fileName={workspace?.fileName}
-                totalCells={hasReviewWork ? contextCells.length : workspace?.totalCells}
-                focusedCellId={workspace?.focusedCellId}
-                scopeAvailable={workspace?.scopeAvailable}
-                loading={workspace?.loading}
-                onChooseFile={onChooseFile}
-                scrollContainerRef={sourceScrollRef}
-                onScroll={(event) => synchronizeScroll("source", event.currentTarget)}
+        {isDocumentView && <TabsContent value="document" className="flex min-h-0 flex-1 flex-col">
+          <AgentDocumentContext workspace={workspace ?? { cells: [], scopeAvailable: false }} onChooseFile={onChooseFile} />
+        </TabsContent>}
+
+        {isReviewView && <TabsContent value="review" className="flex min-h-0 flex-1 flex-col">
+          {isTeamChat ? (
+            <>
+              <div className="shrink-0 border-b px-3 py-2">
+                <Button variant="ghost" size="sm" onClick={() => setView("conversation")}>
+                  <ArrowLeft aria-hidden data-icon="inline-start" />
+                  {t("agentWorkspace.backToConversation")}
+                </Button>
+              </div>
+              <WorkingSetPanel
+                ref={panelRef}
+                rows={stageRows}
+                showSource
+                title={t("agent.team.reviewDrafts")}
+                language={workspace?.targetLanguage}
+                busy={applying}
+                lintRow={lintRow}
+                onAccept={(row, value) => acceptRows([{ row, value }])}
+                onAcceptAll={(valueFor) => acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))}
+                onReject={rejectRow}
+                onJumpToCell={onJumpToCell}
               />
-            </ResizablePanel>
+            </>
+          ) : (
+            <TeamThreadsView projectId={agent.projectId} fileNames={fileNames} jwt={agent.jwt} author={agent.author} roleLevel={agent.roleLevel} review />
+          )}
+        </TabsContent>}
 
-            <ResizableHandle aria-label={t("agentWorkspace.resizeSourceAgent")} className="bg-border/70 hover:bg-primary/40" />
-
-            <ResizablePanel
-              id="agent"
-              minSize="24%"
-              collapsible
-              collapsedSize={0}
-              onResize={(size, _id, previousSize) => {
-                if (previousSize && previousSize.inPixels > 0 && size.inPixels === 0) onClose()
-              }}
-            >
-              <section aria-label={t("agentWorkspace.agentPane")} className="flex h-full min-h-0 flex-col bg-background">
-                <div className="flex h-9 shrink-0 items-center border-b border-border/70 px-3">
-                  <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{t("agentWorkspace.agent")}</span>
-                  <AppTooltip content={t("agentWorkspace.minimize")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="ml-auto h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-                      onClick={onClose}
-                      aria-label={t("agentWorkspace.minimize")}
-                    >
-                      <Minimize2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </AppTooltip>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  <AgentDockView
-                    {...agent}
-                    renderProposalOverride={renderProposalOverride}
-                    onReviewMemory={() => setTab("memory")}
-                  />
-                </div>
-              </section>
-            </ResizablePanel>
-
-            <ResizableHandle aria-label={t("agentWorkspace.resizeAgentTarget")} className="bg-border/70 hover:bg-primary/40" />
-
-            <ResizablePanel id="target" minSize="16%">
-              {hasReviewWork ? (
-                <div className="h-full min-h-0">
-                  <WorkingSetPanel
-                    ref={panelRef}
-                    rows={stageRows}
-                    showSource={false}
-                    title={t("agentWorkspace.target")}
-                    language={workspace?.targetLanguage}
-                    busy={applying}
-                    lintRow={lintRow}
-                    onAccept={(row, value) => acceptRows([{ row, value }])}
-                    onAcceptAll={(valueFor) =>
-                      acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
-                    }
-                    onReject={rejectRow}
-                    onJumpToCell={onJumpToCell}
-                  />
-                </div>
-              ) : (
-                <AgentContextPane
-                  kind="target"
-                  cells={contextCells}
-                  language={workspace?.targetLanguage}
-                  fileName={workspace?.fileName}
-                  totalCells={workspace?.totalCells}
-                  focusedCellId={workspace?.focusedCellId}
-                  scopeAvailable={workspace?.scopeAvailable}
-                  loading={workspace?.loading}
-                  onChooseFile={onChooseFile}
-                  scrollContainerRef={targetScrollRef}
-                  onScroll={(event) => synchronizeScroll("target", event.currentTarget)}
-                  editable={workspace?.editable}
-                  onCommitTarget={workspace?.onCommitTarget}
-                  isAnonymous={workspace?.isAnonymous}
-                  isCompletionConfigured={workspace?.isCompletionConfigured}
-                  isCompletionAvailable={workspace?.isCompletionAvailable}
-                  completing={workspace?.completing}
-                  onDraftTarget={workspace?.onDraftTarget}
-                  onAiSetupNeeded={workspace?.onAiSetupNeeded}
-                  openCommentCounts={workspace?.openCommentCounts}
-                  onOpenComments={workspace?.onOpenComments}
-                  onOpenHistory={workspace?.onOpenHistory}
-                  currentUsername={workspace?.currentUsername}
-                  validationRequirement={workspace?.validationRequirement}
-                  canValidate={workspace?.canValidate}
-                  onValidationChange={workspace?.onValidationChange}
-                  cellLockHolders={workspace?.cellLockHolders}
-                  onClaimCell={workspace?.onClaimCell}
-                  onReleaseCell={workspace?.onReleaseCell}
-                  onTargetPresenceSelection={workspace?.onTargetPresenceSelection}
-                />
-              )}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </TabsContent>
-
-        <TabsContent value="memory" className="min-h-0 flex-1 overflow-auto">
+        {isKnowledgeView && <TabsContent value="knowledge" className="min-h-0 flex-1 flex-col">
           <Suspense
             fallback={
               <div className="flex items-center justify-center gap-1.5 p-6 text-xs text-muted-foreground">
@@ -596,7 +428,7 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
           >
             <AgentMemoryTab projectId={agent.projectId} roleLevel={agent.roleLevel ?? null} />
           </Suspense>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
     </div>
   )

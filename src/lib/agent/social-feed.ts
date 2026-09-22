@@ -171,3 +171,34 @@ export function buildRunFeed(
   }
   return feed
 }
+
+export type TeamFeedGroupPart =
+  | { kind: "message"; message: TeamFeedMessage }
+  | { kind: "activity"; id: string; messages: TeamFeedMessage[] }
+
+export interface TeamFeedGroup {
+  id: string
+  persona: AgentPersonaId
+  at: string
+  parts: TeamFeedGroupPart[]
+}
+
+/** Preserve feed order and receipts; only adjacent phases may share a disclosure. */
+export function groupRunFeed(feed: readonly TeamFeedMessage[]): TeamFeedGroup[] {
+  const groups: TeamFeedGroup[] = []
+  for (const message of feed) {
+    let group = groups.at(-1)
+    if (!group || group.persona !== message.persona) {
+      group = { id: message.id, persona: message.persona, at: message.at, parts: [] }
+      groups.push(group)
+    }
+    if (message.body.kind === "phase") {
+      const previous = group.parts.at(-1)
+      if (previous?.kind === "activity") previous.messages.push(message)
+      else group.parts.push({ kind: "activity", id: message.id, messages: [message] })
+    } else {
+      group.parts.push({ kind: "message", message })
+    }
+  }
+  return groups
+}

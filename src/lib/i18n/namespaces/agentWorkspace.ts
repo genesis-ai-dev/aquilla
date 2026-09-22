@@ -3,6 +3,17 @@ import { defineNamespace, plural } from "./types"
 export const agentWorkspace = defineNamespace({
   keys: {
     "agentWorkspace.agent": "Agent",
+    "agentWorkspace.conversations": "Conversations",
+    "agentWorkspace.conversation": "Conversation",
+    "agentWorkspace.document": "Document",
+    "agentWorkspace.backToConversation": "Back to conversation",
+    "agentWorkspace.reviewPending": plural({ one: "Review {count} draft", other: "Review {count} drafts" }, "count"),
+    "agentWorkspace.needsReview": "Needs review",
+    "agentWorkspace.agentState": "Agent: {state}",
+    "agentWorkspace.guideDetails": "About the team & shortcuts",
+    "agentWorkspace.startConversation": "What would you like to work on?",
+    "agentWorkspace.draftSuggestion": "Draft untranslated passages",
+    "agentWorkspace.checkSuggestion": "Check translation consistency",
     "agentWorkspace.working": "working…",
     "agentWorkspace.queued": plural({ one: "{count} queued", other: "{count} queued" }, "count"),
     "agentWorkspace.sections": "Agent workbench sections",
@@ -13,6 +24,7 @@ export const agentWorkspace = defineNamespace({
     "agentWorkspace.collapseHelp": "Collapse the Agent pane",
     "agentWorkspace.collapsePane": "Collapse Agent pane",
     "agentWorkspace.collapse": "Collapse",
+    "agentWorkspace.backToEditor": "Back to editor",
     "agentWorkspace.resizeSourceAgent": "Resize source and Agent panes",
     "agentWorkspace.agentPane": "Agent pane",
     "agentWorkspace.minimize": "Minimize Agent",
@@ -52,6 +64,11 @@ export const agentWorkspace = defineNamespace({
       description: "Labels, status copy, accessible names, and explanatory text in the three-pane agent translation workspace and its health indicators.",
     },
     keys: {
+      "agentWorkspace.reviewPending": { description: "Primary action opening pending proposals without applying them.", placeholders: { count: "Number of pending drafts." } },
+      "agentWorkspace.agentState": { description: "Secondary machine status, separate from pending human work.", placeholders: { state: "Localized current agent execution state." } },
+      "agentWorkspace.backToEditor": {
+        description: "Navigate back to the editor without closing the Agent tab, stopping work, or resetting chat.",
+      },
       "agentWorkspace.editing": { description: "Presence status below a target cell.", placeholders: { name: "Display name of the collaborator editing the cell." } },
       "agentWorkspace.chapterPercentProgress": { description: "Chapter progress summary when only percentages are available.", placeholders: { validated: "Validated percentage.", translated: "Translated percentage." } },
       "agentWorkspace.chapterCountProgress": { description: "Chapter progress summary using cell counts.", placeholders: { validated: "Validated cell count.", automatic: "Translated cells awaiting validation.", untranslated: "Untranslated cell count." } },

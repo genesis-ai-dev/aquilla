@@ -139,6 +139,7 @@ export interface TeamConversationRow {
   id: string
   title: string
   preview: string
+  scope?: string
   /** ISO timestamp of the latest activity; null hides the time slot. */
   at: string | null
   /** Count needing the human (drafts to review, open questions). 0 hides it. */
@@ -203,6 +204,7 @@ export function buildConversationRows(args: {
     rows.push({
       id: runThreadId(run.runId),
       title: args.runTitle(run),
+      scope: span ?? undefined,
       preview:
         drafts > 0
           ? args.t("agent.team.draftsReady", { count: drafts })

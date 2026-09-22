@@ -173,6 +173,14 @@ export const agent = defineNamespace({
       "When Autopilot runs, each file becomes a thread where the team narrates its work — what it read, what it drafted, and what is waiting for you.",
     "agent.team.emptyHint": "Start Autopilot from its pill in the editor to see the team at work.",
     "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
+    "agent.team.showActivityUpdates": plural({
+      one: "Show {count} activity update",
+      other: "Show {count} activity updates",
+    }),
+    "agent.team.hideActivityUpdates": plural({
+      one: "Hide {count} activity update",
+      other: "Hide {count} activity updates",
+    }),
     "agent.team.reviewDrafts": "Review drafts",
     "agent.team.unnamedThread": "Autopilot run",
     // v2.1 typical-chat layout: conversations list + active conversation.
@@ -184,6 +192,11 @@ export const agent = defineNamespace({
       one: "{count} draft ready for your review",
       other: "{count} drafts ready for your review",
     }),
+    "agent.team.questionsWaiting": plural({
+      one: "{count} question needs your expertise",
+      other: "{count} questions need your expertise",
+    }),
+    "agent.team.viewQuestions": "View questions",
     // v2.2 three-column layout: dock threads list + step inspector + re-open.
     // (The v2.1 focus toggle went away — collapsing the dock plays that role.)
     "agent.team.newConversation": "New conversation",
@@ -195,6 +208,10 @@ export const agent = defineNamespace({
     "agent.team.inspector.reasons": "Why",
     "agent.team.inspector.details": "Details",
     "agent.team.inspector.noDetails": "This step recorded no further detail.",
+    "agent.team.step.viewDetails": "View details",
+    "agent.team.step.hideDetails": "Hide details",
+    "agent.team.step.viewDetailsAriaLabel": "View details: {step}",
+    "agent.team.step.hideDetailsAriaLabel": "Hide details: {step}",
     "agent.team.spanFallback": "this passage",
     "agent.team.msg.started": "Starting on {span}.",
     "agent.team.msg.reading": "Reading the situation around {span}.",
@@ -224,6 +241,14 @@ export const agent = defineNamespace({
       "This work has finished — there is no one left in this thread to direct.",
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+
+    // ── Shared chat management (AgentChatOptions) ───────────────────────
+    "agent.chatOptions.label": "Chat options",
+    "agent.chatOptions.resetItem": "Reset chat…",
+    "agent.chatOptions.resetTitle": "Reset chat?",
+    "agent.chatOptions.resetDescription":
+      "Clears the messages, chat proposals, and Undo controls shared by {teamChat} and {chat} in this browser. Stops any current chat response and clears queued messages. Project task activity, files, and applied translations are unchanged.",
+    "agent.chatOptions.resetConfirm": "Reset chat",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -901,9 +926,24 @@ export const agent = defineNamespace({
       },
       "agent.team.draftsReady": {
         description:
-          "One-line preview on a run's row in the conversations list when staged " +
-          "drafts await the human — the row's badge shows the same count.",
+          "Pending-review count in a task conversation header and its sidebar " +
+          "preview. Counts only proposals still awaiting review, not historical staging events.",
         placeholders: { count: "How many staged drafts await review." },
+      },
+      "agent.team.questionsWaiting": {
+        description: "Project-wide attention prompt in Team chat and the questions conversation.",
+        placeholders: { count: "Full number of open questions, including any beyond the visible page cap." },
+      },
+      "agent.team.viewQuestions": {
+        description: "Open the existing questions conversation; answers remain in the individual question cards.",
+      },
+      "agent.team.showActivityUpdates": {
+        description: "Expand adjacent routine reading, drafting, or checking updates in a task conversation.",
+        placeholders: { count: "Number of activity messages in this group, not passages or pending drafts." },
+      },
+      "agent.team.hideActivityUpdates": {
+        description: "Collapse routine activity updates again; notes, review links, and outcomes remain visible.",
+        placeholders: { count: "Number of activity messages in this group." },
       },
       "agent.team.msg.started": {
         description:
@@ -997,6 +1037,39 @@ export const agent = defineNamespace({
         placeholders: {
           title: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — not translated.",
         },
+      },
+      "agent.team.step.viewDetails": {
+        description: "Tooltip for the explicit per-message control that opens the step inspector.",
+      },
+      "agent.team.step.hideDetails": {
+        description: "Tooltip for the selected message's control that closes its step inspector.",
+      },
+      "agent.team.step.viewDetailsAriaLabel": {
+        description: "Accessible name identifying which message the details control opens.",
+        placeholders: { step: "The already-localized plain-language step sentence, not raw event data." },
+      },
+      "agent.team.step.hideDetailsAriaLabel": {
+        description: "Accessible name for closing details from the selected message's control.",
+        placeholders: { step: "The already-localized plain-language step sentence." },
+      },
+      "agent.chatOptions.label": {
+        description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
+      },
+      "agent.chatOptions.resetItem": {
+        description: "Menu action that opens confirmation before resetting the shared chat session; it does not create a separate conversation in the task list.",
+      },
+      "agent.chatOptions.resetTitle": {
+        description: "Confirmation title for discarding the current browser's shared chat session.",
+      },
+      "agent.chatOptions.resetDescription": {
+        description: "Explains the actual reset scope: browser-local chat and review state are cleared, chat streaming/queue stop, and project activity and applied translations are preserved.",
+        placeholders: {
+          teamChat: "The already-localized name of the pinned Team chat conversation.",
+          chat: "The already-localized name of the Chat tab.",
+        },
+      },
+      "agent.chatOptions.resetConfirm": {
+        description: "Destructive confirmation button; the existing reset runs only after this is activated.",
       },
       "agent.team.openQuestionAriaLabel": {
         description:

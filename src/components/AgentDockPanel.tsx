@@ -13,7 +13,7 @@
 
 import { useMemo } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bot, Maximize2, SquarePen } from "lucide-react"
+import { Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -29,6 +29,7 @@ import {
 import type { ContextualRunRecord } from "@/lib/contextual/transport"
 import { TeamConversationList } from "./agent/TeamConversationList"
 import { runStatusKey } from "./agent/team-run-status"
+import { agentConversationHref } from "@/lib/agent/workspace-location"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
 
 /** Scripture context that powers the Summarize book/chapter buttons. */
@@ -96,28 +97,15 @@ export function AgentDockPanel({
   const openConversation = (id: string) => {
     // Always explicit — the param is what tells the workbench to land on the
     // Team surface rather than its default Chat tab.
-    navigate(`/project/${projectId}/agent?${CONVERSATION_PARAM}=${encodeURIComponent(id)}`)
+    navigate(agentConversationHref(projectId, id))
   }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium">{t("agent.dock.title")}</span>
+        <span className="text-xs font-medium">{t("agentWorkspace.conversations")}</span>
         <span className="ms-auto flex items-center gap-1">
-          <AppTooltip content={t("agent.team.newConversation")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground"
-              aria-label={t("agent.team.newConversation")}
-              onClick={() => openConversation(TEAM_CHAT_CONVERSATION)}
-            >
-              <SquarePen />
-            </Button>
-          </AppTooltip>
           {onExpand && (
             <AppTooltip content={t("agent.dock.openInEditorTooltip")}>
               <Button

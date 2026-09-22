@@ -10,8 +10,8 @@
  *  - Team chat is time-ordered: Coordinator dispatches (with a quiet "view
  *    updates" affordance), questions addressed to the human, the live
  *    session underneath; Escape is the keyboard way home;
- *  - clicking a step opens the inspector third column with the receipts
- *    (raw event kind/details) behind collapsed sections;
+ *  - explicit step controls open the inspector with original receipts;
+ *    Close/Escape restore focus without leaving the conversation;
  *  - the one composer says where it sends: Team chat → the shared session;
  *    a live run → steering; a FINISHED run with CONTRIBUTOR+ → re-opens the
  *    work (fresh run seeded with the message); finished without the role →
@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { ROLE } from "@/lib/frontier/roles"
 import type {
@@ -223,6 +224,12 @@ describe("TeamThreadsView — the active conversation surface", () => {
     for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
       expect(screen.getAllByText(name).length).toBeGreaterThan(0)
     }
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("list", { name: "Your translation team" })).toBeInTheDocument()
+    expect(screen.queryByText("Your translation team")).not.toBeInTheDocument()
+    fireEvent.click(within(header).getByRole("button", { name: "About Drafter" }))
+    expect(await screen.findByText("What it can do")).toBeInTheDocument()
     view.unmount()
   })
 
@@ -257,6 +264,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(
       within(channel).getByRole("button", { name: "Open the thread for Mark" }),
     ).toHaveTextContent("View updates")
+    expect(screen.getAllByRole("heading", { name: "Team chat", level: 2 })).toHaveLength(1)
+    expect(screen.getAllByTestId("team-roster")).toHaveLength(1)
     view.unmount()
   })
 
@@ -270,26 +279,128 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(await screen.findByText("Put 3 drafts out for your review.")).toBeInTheDocument()
     // The composer says exactly who it is talking to.
     expect(screen.getByTestId("team-composer-scope")).toHaveTextContent("Drafter · MRK 4:1–4:8")
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("status")).toHaveTextContent("3 drafts ready for your review")
+    expect(within(header).getByRole("link", { name: "Review 3 drafts" })).toHaveAttribute(
+      "href", "/project/p1/agent?conversation=run%3Arun-1&view=review",
+    )
+    expect(within(header).getByTestId("team-roster-live-drafter")).toBeInTheDocument()
+    for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
+      expect(within(header).getByRole("button", { name: `About ${name}` })).toBeInTheDocument()
+    }
     view.unmount()
   })
 
-  it("clicking a step opens the inspector with the receipts behind collapsed sections", async () => {
+  it("opens details only from the explicit action and returns focus on close", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
     fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
     const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
 
     fireEvent.click(await screen.findByText("Put 3 drafts out for your review."))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    const trigger = screen.getByRole("button", { name: "View details: Put 3 drafts out for your review." })
+    act(() => trigger.focus())
+    fireEvent.click(trigger)
     const inspector = await screen.findByTestId("team-step-inspector")
+    expect(screen.getByRole("complementary", { name: "Step detail" })).toBe(inspector)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(trigger).toHaveAttribute("aria-controls", inspector.id)
     // The receipts are collapsed by default…
     expect(within(inspector).queryByText("drafts_staged")).not.toBeInTheDocument()
     // …and one click away.
     fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
     expect(within(inspector).getByText("drafts_staged")).toBeInTheDocument()
     expect(within(inspector).getByText("count")).toBeInTheDocument()
-    // Close restores the two-column view.
+    // Focus must return from inside the inspector, not merely remain on its trigger.
+    const close = within(inspector).getByRole("button", { name: "Close step detail" })
+    act(() => close.focus())
+    fireEvent.click(close)
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    fireEvent.click(trigger)
+    expect(await screen.findByTestId("team-step-inspector")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Hide details: Put 3 drafts out for your review." }))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    view.unmount()
+  })
+
+  it("handles Escape inside the inspector before navigating away, and respects consumed keys", async () => {
+    const user = userEvent.setup()
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
+    const trigger = await screen.findByRole("button", { name: "View details: Put 3 drafts out for your review." })
+    act(() => trigger.focus())
+    await user.keyboard("{Enter}")
+    const inspector = await screen.findByTestId("team-step-inspector")
+
+    const consumedEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    consumedEscape.preventDefault()
+    fireEvent(trigger, consumedEscape)
+    expect(inspector).toBeInTheDocument()
+    fireEvent.keyDown(trigger, { key: "Escape", isComposing: true })
+    expect(inspector).toBeInTheDocument()
+
+    act(() => within(inspector).getByRole("button", { name: "Details" }).focus())
+    await user.keyboard("{Escape}")
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("folds routine updates while keeping notes, review links, and failures visible", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    fetchContextualRunActivity.mockResolvedValue({
+      ...activity([
+        { ...stagedEvent, id: "started", kind: "span_started", createdAt: "2026-08-28T12:00:00Z" },
+        { ...stagedEvent, id: "read-1", kind: "phase", phase: "reading", details: { step: "read-first" }, createdAt: "2026-08-28T12:00:01Z" },
+        { ...stagedEvent, id: "read-2", kind: "phase", phase: "reading", spanId: "s2", spanLabel: "MRK 4:9–4:12", createdAt: "2026-08-28T12:00:02Z" },
+        { ...stagedEvent, id: "note", kind: "scene_ready", createdAt: "2026-08-28T12:00:03Z" },
+        stagedEvent,
+        { ...stagedEvent, id: "failed", kind: "span_outcome", status: "failed", createdAt: "2026-08-28T12:00:06Z" },
+      ]),
+      sceneBriefs: [{ spanLabel: "MRK 4:1–4:8", l1Summary: "The speaker addresses a crowd." }],
+    })
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
+    const thread = await screen.findByTestId("team-thread-detail")
+    const toggle = await within(thread).findByRole("button", { name: "Show 2 activity updates" })
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(within(thread).queryByText(/Reading the situation/)).not.toBeInTheDocument()
+    expect(within(thread).getAllByText("Drafter", { exact: true })).toHaveLength(1)
+    expect(within(thread).getAllByText("Coordinator", { exact: true })).toHaveLength(2)
+    expect(within(thread).getByText(/Starting on MRK/)).toBeVisible()
+    expect(within(thread).getByText("The speaker addresses a crowd.")).toBeVisible()
+    expect(within(thread).getByRole("link", { name: "Review drafts" })).toBeVisible()
+    expect(within(thread).getByText(/Hit a problem/)).toBeVisible()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    const steps = within(thread).getAllByText(/Reading the situation/)
+    expect(steps).toHaveLength(2)
+    const inspectTrigger = within(thread).getByRole("button", { name: /^View details: Reading the situation around MRK 4:1/ })
+    fireEvent.click(inspectTrigger)
+    const inspector = await screen.findByTestId("team-step-inspector")
+    fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
+    expect(within(inspector).getByText("phase")).toBeVisible()
+    expect(within(inspector).getByText("read-first")).toBeVisible()
+    fireEvent.click(within(thread).getByRole("button", { name: "Hide 2 activity updates" }))
+    expect(within(thread).queryByText(/Reading the situation/)).not.toBeInTheDocument()
+    expect(inspectTrigger).not.toBeInTheDocument()
     fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
     expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Mark" })).toHaveFocus()
+    expect(within(thread).getByRole("link", { name: "Review drafts" })).toBeVisible()
     view.unmount()
   })
 
@@ -368,6 +479,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
     fireEvent.keyDown(window, { key: "Escape" })
     expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Mark", level: 2 })).not.toBeInTheDocument()
     // Back on Team chat, the composer addresses the team, not a subagent.
     expect(screen.queryByTestId("team-composer-scope")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Ask the agent")).toHaveAttribute(
@@ -401,17 +514,39 @@ describe("TeamThreadsView — the active conversation surface", () => {
   it("consolidates open questions into one conversation, with no second message box", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(
-      decisionsPage({ openCount: 1, decisions: [openQuestion] }),
+      decisionsPage({ openCount: 7, decisions: [openQuestion] }),
     )
-    const view = renderView()
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=team-chat&lane=fr" })
+    const teamHeader = await screen.findByTestId("team-conversation-header")
+    const questionsLink = within(teamHeader).getByRole("link", { name: "View questions" })
+    expect(questionsLink).toHaveAttribute("href", "/project/p1/agent?conversation=questions&lane=fr")
+    fireEvent.click(questionsLink)
+    expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "Escape" })
 
-    // Reachable from the inline Answer affordance in Team chat…
+    // The existing inline Answer affordance still reaches the same conversation.
     fireEvent.click(await screen.findByRole("button", { name: "Open this question" }))
 
     expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Needs your expertise", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("status")).toHaveTextContent("7 questions need your expertise")
+    expect(within(header).queryByRole("link", { name: "View questions" })).not.toBeInTheDocument()
+    expect(within(header).getByTestId("team-roster")).toBeInTheDocument()
     expect(screen.getByTestId("contextual-decision-card")).toBeInTheDocument()
     // DecisionCard owns its own Answer input — the channel composer stands down.
     expect(screen.queryByLabelText("Ask the agent")).not.toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("does not show the empty-team intro when open questions are outside the visible page", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage({ openCount: 4 }))
+    const view = renderView()
+    const header = await screen.findByTestId("team-conversation-header")
+    expect(within(header).getByRole("status")).toHaveTextContent("4 questions need your expertise")
+    expect(within(header).getByRole("link", { name: "View questions" })).toBeInTheDocument()
+    expect(screen.queryByText("The team posts its work here")).not.toBeInTheDocument()
     view.unmount()
   })
 

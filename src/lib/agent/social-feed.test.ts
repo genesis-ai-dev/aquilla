@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest"
 import type { ContextualActivityEvent } from "@/lib/contextual/transport"
-import { buildRunFeed } from "./social-feed"
+import { buildRunFeed, groupRunFeed } from "./social-feed"
 
 let counter = 0
 function ev(overrides: Partial<ContextualActivityEvent> & { kind: string }): ContextualActivityEvent {
@@ -42,6 +42,7 @@ describe("buildRunFeed", () => {
       ],
       sceneBriefs: [{ spanLabel: "MRK 4:1–4:8", l1Summary: "Jesus teaches by the lake." }],
     })
+
     expect(feed.map((m) => [m.persona, m.body.kind])).toEqual([
       ["coordinator", "started"],
       ["drafter", "phase"],
@@ -120,5 +121,57 @@ describe("buildRunFeed", () => {
     const outcome = ev({ kind: "span_outcome", status: "complete" })
     const feed = buildRunFeed({ events: [outcome, started], sceneBriefs: [] })
     expect(feed.map((m) => m.body.kind)).toEqual(["started", "outcome"])
+  })
+})
+
+describe("groupRunFeed", () => {
+  it("groups adjacent teammates without moving messages across another teammate", () => {
+    const feed = buildRunFeed({
+      events: [
+        ev({ kind: "phase", phase: "reading" }),
+        ev({ kind: "scene_ready" }),
+        ev({ kind: "phase", phase: "drafting" }),
+        ev({ kind: "phase", phase: "checking" }),
+        ev({ kind: "phase", phase: "reading", spanId: "s2" }),
+      ],
+      sceneBriefs: [],
+    })
+    const groups = groupRunFeed(Object.freeze(feed))
+    expect(groups.map((group) => group.persona)).toEqual(["drafter", "reviewer", "drafter"])
+    expect(groups.map((group) => group.id)).toEqual([feed[0].id, feed[3].id, feed[4].id])
+    expect(groups.map((group) => group.at)).toEqual([feed[0].at, feed[3].at, feed[4].at])
+    const messages = groups.flatMap((group) =>
+      group.parts.flatMap((part) => part.kind === "activity" ? part.messages : [part.message]),
+    )
+    expect(messages).toEqual(feed)
+    messages.forEach((message, index) => expect(message).toBe(feed[index]))
+  })
+
+  it("bundles routine phases but leaves notes, drafts, and outcomes as messages", () => {
+    const feed = buildRunFeed({
+      events: [
+        ev({ kind: "phase", phase: "reading" }),
+        ev({ kind: "phase", phase: "reading", spanId: "s2" }),
+        ev({ kind: "scene_ready" }),
+        ev({ kind: "phase", phase: "drafting" }),
+        ev({ kind: "drafts_staged", details: { count: 3 } }),
+        ev({ kind: "span_outcome", status: "failed", details: { reasons: ["model refused"] } }),
+      ],
+      sceneBriefs: [],
+    })
+    const groups = groupRunFeed(feed)
+    expect(groups[0].parts).toEqual([
+      { kind: "activity", id: feed[0].id, messages: feed.slice(0, 2) },
+      { kind: "message", message: feed[2] },
+      { kind: "activity", id: feed[3].id, messages: [feed[3]] },
+    ])
+    expect(groups[1].parts).toEqual([
+      { kind: "message", message: feed[4] },
+      { kind: "message", message: feed[5] },
+    ])
+  })
+
+  it("handles an empty feed", () => {
+    expect(groupRunFeed(buildRunFeed({ events: [], sceneBriefs: [] }))).toEqual([])
   })
 })

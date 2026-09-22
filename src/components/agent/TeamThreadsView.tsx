@@ -3,7 +3,7 @@
  *
  * v2.2, the three-column layout (2026-08-28): the conversations LIST lives in
  * the left dock's Agent tab (AgentDockPanel) — this surface is the ACTIVE
- * conversation plus, when a step is clicked, the optional step-inspector
+ * conversation plus, when step details are requested, the optional step-inspector
  * third column. Selection is URL-driven (CONVERSATION_PARAM) so the dock and
  * this pane share one source of truth: absent = Team chat (the orchestrator),
  * `run:<id>` = that autopilot run's conversation, `questions` = the one
@@ -19,7 +19,7 @@
  * aware); only the open run's activity is fetched here.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -54,11 +54,13 @@ import {
 } from "@/lib/contextual/transport"
 import { humanPassageLabel } from "../../../shared/span-label"
 import { AgentCardTrigger } from "./AgentCard"
-import { TeamChannel } from "./TeamChannel"
+import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
+import { AgentDraftReview } from "./AgentDraftReview"
 import { TeamChannelComposer } from "./TeamChannelComposer"
+import { TeamConversationHeader } from "./TeamConversationHeader"
 import { TeamStepInspector } from "./TeamStepInspector"
 import { TeamThreadDetail } from "./TeamThreadDetail"
-import { isRunWorking, runStatusKey } from "./team-run-status"
+import { isRunWorking } from "./team-run-status"
 
 const POLL_MS = 4_000
 
@@ -76,38 +78,8 @@ export interface TeamThreadsViewProps {
   author?: string
   /** Project role level — gates re-opening finished runs by messaging. */
   roleLevel?: number | null
-}
-
-function TeamRoster({
-  activePersonas,
-  projectId,
-  t,
-}: {
-  activePersonas: ReadonlySet<string>
-  projectId: string
-  t: TFunction
-}) {
-  return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
-      <span className="text-[11px] font-medium text-foreground/90">
-        {t("agent.team.rosterTitle")}
-      </span>
-      <ul className="flex items-center gap-1.5" data-testid="team-roster">
-        {AGENT_PERSONA_IDS.map((id) => (
-          <li key={id} className="flex items-center gap-1">
-            <AgentCardTrigger personaId={id} projectId={projectId} size="sm" />
-            {activePersonas.has(id) && (
-              <span
-                data-testid={`team-roster-live-${id}`}
-                aria-label={t("autopilot.status.working")}
-                className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none"
-              />
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
+  renderChannel?: (props: TeamChannelProps) => ReactNode
+  review?: boolean
 }
 
 function TeamEmptyState({ projectId, t }: { projectId: string; t: TFunction }) {
@@ -148,6 +120,8 @@ export function TeamThreadsView({
   jwt,
   author,
   roleLevel,
+  renderChannel,
+  review = false,
 }: TeamThreadsViewProps) {
   const { t } = useI18n()
   const { session } = useFrontierSession()
@@ -166,6 +140,7 @@ export function TeamThreadsView({
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev)
+          next.delete("view")
           if (id === TEAM_CHAT_CONVERSATION) next.delete(CONVERSATION_PARAM)
           else next.set(CONVERSATION_PARAM, id)
           return next
@@ -180,8 +155,19 @@ export function TeamThreadsView({
   const [activityLoading, setActivityLoading] = useState(false)
   // Step inspector (the optional third column) — per selected conversation.
   const [inspectedId, setInspectedId] = useState<string | null>(null)
+  const inspectorId = useId()
+  const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const conversationRef = useRef<HTMLDivElement | null>(null)
+  const closeInspector = useCallback(() => {
+    setInspectedId(null)
+    const trigger = inspectorTriggerRef.current
+    inspectorTriggerRef.current = null
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+    else conversationRef.current?.focus({ preventScroll: true })
+  }, [])
   useEffect(() => {
     setInspectedId(null)
+    inspectorTriggerRef.current = null
   }, [selectedId])
 
   const openDecisions = useMemo(() => decisions?.decisions ?? [], [decisions])
@@ -236,15 +222,21 @@ export function TeamThreadsView({
     }
   }, [projectId, openRun])
 
-  // Esc returns to Team chat — the keyboard way home.
+  // Dismiss details first; a later unhandled Escape returns to Team chat.
   useEffect(() => {
     if (selectedId === TEAM_CHAT_CONVERSATION) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelected(TEAM_CHAT_CONVERSATION)
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return
+      if (inspectedId) {
+        event.preventDefault()
+        closeInspector()
+      } else {
+        setSelected(TEAM_CHAT_CONVERSATION)
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selectedId, setSelected])
+  }, [selectedId, setSelected, inspectedId, closeInspector])
 
   const feed = useMemo(() => (activity ? buildRunFeed(activity) : []), [activity])
   const inspectedMessage = useMemo<TeamFeedMessage | null>(
@@ -304,10 +296,18 @@ export function TeamThreadsView({
     : null
 
   const loading = runs === null && !loadFailed
-  const isEmpty = channelItems.length === 0 && state.runs.length === 0
+  const isEmpty = channelItems.length === 0 && state.runs.length === 0 && openCount === 0
   // The questions conversation hides the composer: DecisionCard owns its own
   // Answer input, and a second box would be two ways to say one thing.
-  const showComposer = selectedId !== QUESTIONS_CONVERSATION
+  const showComposer = !review && selectedId !== QUESTIONS_CONVERSATION && (Boolean(openRun) || !renderChannel)
+  const channelProps: TeamChannelProps = {
+    items: channelItems,
+    titleFor,
+    onOpenThread: setSelected,
+    onOpenQuestions: () => setSelected(QUESTIONS_CONVERSATION),
+    heldQuestions: Math.max(0, openCount - openDecisions.length),
+    conversationRuns: state.runs,
+  }
 
   if (loadFailed && runs === null) {
     return (
@@ -334,10 +334,15 @@ export function TeamThreadsView({
   if (isEmpty) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
-        <TeamEmptyState projectId={projectId} t={t} />
+        {!review && <TeamConversationHeader
+          title={t("agent.team.teamChat")}
+          activePersonas={activePersonas}
+          projectId={projectId}
+        />}
+        {renderChannel ? renderChannel(channelProps) : <TeamEmptyState projectId={projectId} t={t} />}
         {showComposer && (
           <TeamChannelComposer
+            draftScope={{ owner: ownerKey, projectId, conversationId: selectedId }}
             thread={null}
             isConfigured={Boolean(sessionJwt)}
             isStreaming={state.isStreaming}
@@ -357,6 +362,11 @@ export function TeamThreadsView({
         : openRun
           ? runTitle(openRun)
           : ""
+  const questionsParams = new URLSearchParams(searchParams)
+  questionsParams.set(CONVERSATION_PARAM, QUESTIONS_CONVERSATION)
+  const questionsHref = selectedId === TEAM_CHAT_CONVERSATION
+    ? `?${questionsParams.toString()}`
+    : undefined
 
   let conversation: ReactNode
   if (selectedId === QUESTIONS_CONVERSATION) {
@@ -379,6 +389,16 @@ export function TeamThreadsView({
         </div>
       </ScrollArea>
     )
+  } else if (openRun && review) {
+    conversation = (
+      <AgentDraftReview
+        projectId={projectId}
+        run={openRun}
+        fileName={runTitle(openRun)}
+        onBack={() => setSelected(selectedId)}
+        onReviewed={retry}
+      />
+    )
   } else if (openRun) {
     conversation = (
       <TeamThreadDetail
@@ -387,41 +407,43 @@ export function TeamThreadsView({
         feed={feed}
         feedLoading={activityLoading}
         inspectedId={inspectedId}
-        onInspect={(message) =>
-          setInspectedId((current) => (current === message.id ? null : message.id))
-        }
+        inspectorId={inspectorId}
+        onInspect={(message, trigger) => {
+          if (inspectedId === message.id) {
+            closeInspector()
+            return
+          }
+          inspectorTriggerRef.current = trigger
+          setInspectedId(message.id)
+        }}
       />
     )
   } else {
-    conversation = (
-      <TeamChannel
-        items={channelItems}
-        titleFor={titleFor}
-        onOpenThread={setSelected}
-        onOpenQuestions={() => setSelected(QUESTIONS_CONVERSATION)}
-        heldQuestions={Math.max(0, openCount - openDecisions.length)}
-        conversationRuns={state.runs}
-      />
-    )
+    conversation = renderChannel ? renderChannel(channelProps) : <TeamChannel {...channelProps} />
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+      {!review && <TeamConversationHeader
+        title={conversationTitle}
+        run={openRun}
+        openQuestionCount={openCount}
+        questionsHref={questionsHref}
+        activePersonas={activePersonas}
+        projectId={projectId}
+      />}
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* Flat conversation header: name + quiet status. */}
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
-            <span className="min-w-0 truncate text-sm font-medium">{conversationTitle}</span>
-            {openRun && (
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {t(runStatusKey(openRun))}
-              </span>
-            )}
-          </div>
+        <div
+          ref={conversationRef}
+          role="region"
+          aria-label={conversationTitle}
+          tabIndex={-1}
+          className="flex min-w-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           {conversation}
           {showComposer && (
             <TeamChannelComposer
+              draftScope={{ owner: ownerKey, projectId, conversationId: selectedId }}
               thread={composerThread}
               isConfigured={Boolean(sessionJwt)}
               isStreaming={state.isStreaming}
@@ -432,9 +454,10 @@ export function TeamThreadsView({
         </div>
         {inspectedMessage && (
           <TeamStepInspector
+            id={inspectorId}
             message={inspectedMessage}
             sentence={feedMessageText(inspectedMessage, t)}
-            onClose={() => setInspectedId(null)}
+            onClose={closeInspector}
           />
         )}
       </div>

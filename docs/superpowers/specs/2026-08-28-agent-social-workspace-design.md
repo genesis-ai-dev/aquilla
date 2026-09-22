@@ -144,6 +144,145 @@ sidebar. Resolution — `| dock | conversation | optional step inspector |`:
   and selection jumps to the new conversation.
 - One shared refcounted poller (team-conversations.ts) feeds both columns.
 
+## Header refinement (2026-09-14)
+
+The Team surface uses one conversation header: the active conversation's name
+is the headline, its run status is secondary, and the three clickable persona
+avatars share that row. The roster retains its accessible name and live
+indicators without a separate visible roster strip. Empty Team chat uses the
+same header; opening a run or the questions conversation updates its headline.
+The workbench toolbar omits its redundant Agent icon/title while Team is
+selected, but retains its tabs and session controls. Chat and Project knowledge
+keep their existing toolbar identity. File tabs, project navigation, message
+content, review actions, and inspector interactions are unchanged.
+
+## Task conversation refinement (2026-09-14)
+
+Consecutive messages from the same persona share one avatar, name, and opening
+timestamp. Another persona starts a new group; events are never reordered
+across speakers. Within a group, two or more adjacent reading/drafting/checking
+updates start collapsed behind a count-labelled disclosure. A single routine
+update stays visible. Starts, situation notes, staged-draft review links, and
+all outcomes remain visible in their original order.
+
+Expanding activity reveals the original messages, each still inspectable with
+its original timestamp and raw receipt in the step inspector. Expansion
+survives polling refreshes and new activity; an inspected step is not hidden
+when an arriving phase turns a single update into a collapsible group. This is
+presentation only: no new summaries, claims of approval, or backend writes.
+The main Team chat and the document-workspace Chat tab are unchanged.
+
+## Unified conversation and review workspace (2026-09-15)
+
+This supersedes the earlier competing Team/Chat tabs and mandatory
+Source/Agent/Target columns. The default is one **Conversation** view. The
+sidebar owns selection; selecting any conversation, including the already
+selected one, returns to that conversation. The URL owns both conversation
+and view so reloading, history navigation, and shared links agree with the UI.
+Main Team chat keeps the complete chat toolset, attachments, selection chips,
+proposal receipts, and compensating Undo; task conversations keep scoped steering.
+
+Unsent messages belong to the signed-in owner, project, and conversation.
+Switching views must not erase them, and selecting another conversation must
+never retarget the previous conversation's draft. Typed text, context chips,
+and attached artifacts retain their scope until handed off successfully.
+
+**Review drafts** stays inside the selected task and opens pending proposals
+with their source context, explicit human approval controls, previous/next
+navigation, and a return to the conversation. It does not change the preferred
+Audio/Text editor mode. Proposed content stays distinct from committed content;
+review uses the existing contextual decision/approval transport.
+
+**Document** is optional main-chat context: source and target are paired in
+shared-height rows within one scrolling surface. Existing target editing,
+validation, collaboration guards, and reference actions are retained.
+Knowledge is a separate view rather than a competing conversation.
+
+Onboarding offers two prefill-only suggestions, with the team description
+and shortcuts behind a disclosure. Existing work takes precedence over a
+first-run guide. Pending human work is the prominent status; machine activity
+remains secondary. Sidebar dates no longer compete with the task title.
+
+## Human-attention header (2026-09-14)
+
+A task with pending proposals shows its current pending-review count and a
+primary **Review drafts** link beneath the conversation title. The run's
+technical status (including Idle) remains secondary metadata. The count is the
+server's run-scoped `proposedDrafts`, not a sum of historical staging messages;
+zero or unavailable counts do not imply pending work or a completed review.
+The link uses the existing file-review destination and preserves the run's
+target-language lane, including an explicitly empty default lane.
+
+Team chat promotes the full project `openCount` with a **View questions** link
+to the existing questions conversation. The count includes questions beyond
+the visible page cap. In that conversation, the count remains visible but
+the redundant navigation action is omitted; answers stay in DecisionCard.
+Project-wide question counts are not attributed to an individual run.
+These are navigation affordances only: no new approval controls or writes.
+
+## Explicit step inspection (2026-09-14)
+
+Message text uses the app's `select-text` opt-in so the global chrome selection
+lock does not apply; the adjacent details control stays non-selectable. Text
+is not an inspector trigger. Each
+inspectable message has a separate **View details** control with an accessible
+name identifying its step. Controls appear on row hover or keyboard focus for
+fine, hover-capable pointers and stay visible on touch devices; the selected
+control remains visible. Expanding routine activity exposes the same controls.
+Review links remain independent native links, including keyboard activation.
+
+The inspector is a named complementary region associated with its expanded
+trigger. Closing it with its close button, the selected step's **Hide details**
+control, or an unhandled Escape leaves the conversation selected and returns
+focus to that trigger. If its activity group was collapsed and the trigger is
+gone, focus returns to the conversation region instead. A subsequent unhandled
+Escape retains the existing return-to-Team-chat behavior. Consumed Escape
+events and composition cancellation do not dismiss or navigate the workspace.
+
+## Chat controls cleanup (2026-09-14)
+
+The dock's pinned Team chat row is the single entry to that conversation; the
+misleading New conversation shortcut is removed because it only navigated to
+the same chat. The workbench's always-visible New session button is replaced
+by **Chat options → Reset chat…**. Tabs and the prominent Send, Stop, review,
+and question actions keep their existing behavior.
+
+Reset always opens an explicit confirmation explaining the actual scope:
+messages, in-chat proposals, and Undo controls shared by Team chat and Chat
+are cleared in this browser; the current chat response and queued messages
+stop. Project task activity, files, and applied translations are not reset.
+Cancel receives initial focus, cancellation does not call reset, and closing
+the dialog returns focus to Chat options. Reset is unavailable during a
+workbench apply/undo operation. Changing the project or account dismisses the
+confirmation rather than retargeting it to another chat. Confirming calls the
+existing session-store reset without navigating, creating a task, or emitting
+document events.
+
+## Separate visibility, navigation, and closing (2026-09-14)
+
+The workbench has one **Back to editor** link. It follows the existing editor
+return destination without closing the Agent tab, stopping the agent, or
+resetting chat. The tab-strip **Close Agent** control remains the explicit way
+to dismiss that tab. The duplicate inner Minimize Agent control is removed.
+
+Source/chat/target dividers only resize their panes. The chat pane retains its
+24% minimum and is not drag-collapsible; dragging or keyboard resizing must
+never navigate away. Legacy zero-width saved layouts continue to fall back to
+the usable default layout.
+
+**Hide sidebar panel** hides content while retaining the icon rail and current
+main view. **Show sidebar panel** restores the last selected panel instead of
+always opening Files. The workspace owns that selection memory so responsive
+dock unmounts do not lose it. If a remembered panel is no longer available, an
+available panel is shown instead.
+Automatic panel choices during Agent/editor navigation or audio-mode changes
+only affect an already-visible sidebar. A hidden panel and its remembered
+selection stay hidden until an explicit panel control reopens them; navigation
+must not undo a manual collapse.
+The collapsed rail stacks Previously viewed, Back, and Forward vertically so
+the history controls remain inside the viewport. Footer utilities also stack
+within the narrow rail; expanded sidebars retain their horizontal arrangement.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -154,3 +293,31 @@ expand reveals raw); AgentEmptyState (roster, prefill behavior); shell-routing
 (resolveSidebarAgentClick). Worker: draft-tool empty-reply text. No new smoke
 (UI-only; AGENTS.md rule 3); existing agent e2e selectors verified unaffected
 ("Ask the agent" composer, TabStrip "Agent" tab, data-frame-type attrs unchanged).
+Header refinement is covered in TeamThreadsView RTL (empty/channel/run/questions
+headlines, avatar-card access, live indicators, and Escape navigation) and
+AgentWorkbench RTL (Team toolbar identity and switching back to the document
+workspace).
+Task grouping is covered by `buildRunFeed` output passed through `groupRunFeed`
+and the real thread UI, plus TeamThreadsView RTL for disclosure-to-inspector
+behavior and visible notes, failures, and review links. TeamThreadDetail RTL
+covers singleton activity, refresh/append stability, and inspected-step
+visibility.
+Attention-header RTL covers zero/missing/updated pending counts, default and
+non-default review lanes, project-question scope and capped pages, and the
+existing question-card navigation/answer surface.
+Inspector interaction RTL covers passive text, explicit controls, trigger/panel
+association, focus return and its collapsed-group fallback, Escape priority,
+and keyboard activation of the independent review link.
+Chat-options RTL covers confirmation/cancellation, focus, busy-state gating,
+and the real session-store reset. The workbench integration test preserves
+already-applied outbox records and verifies reset emits no undo/delete writes.
+Existing session-store tests cover stopping queued work and persistence of the
+fresh session.
+Visibility/navigation coverage lives in `useDockTabs.test.ts`, `LeftDock.test.tsx`,
+`AgentWorkbench.test.tsx`, and `workbench-layout.test.ts`: controlled/uncontrolled
+panel restoration, responsive remounts, unavailable panels, actual Back-link
+navigation without stopping the shared run, and legacy layout compatibility.
+`useWorkspaceDockTabs.test.ts` guards sticky visibility across view transitions
+and preserves manually selected panels.
+`NavHistoryControls.test.tsx` and `AppShell.test.tsx` cover the collapsed-rail
+history/footer layout that previously clipped the Previously viewed trigger.

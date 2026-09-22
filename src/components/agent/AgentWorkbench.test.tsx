@@ -9,17 +9,11 @@
  * text after accept (and the restored text after undo).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
+import { render as renderUI, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import type { ReactNode } from "react"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import type { AgentFrame } from "@/lib/agent/protocol"
-
-// The workbench reads the conversation query param (v2.2) to decide its
-// landing tab; these tests exercise the review loop, not routing — a bare
-// empty-params stub keeps them router-free.
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
-  return { ...actual, useSearchParams: () => [new URLSearchParams(), vi.fn()] as const }
-})
 
 // Stub the chat rail but keep the workbench seam: render each proposal
 // through renderProposalOverride so the RECEIPT (counters + Undo) is real.
@@ -56,6 +50,21 @@ vi.mock("@/lib/agent/agent-client", () => ({
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
 }))
+vi.mock("@/lib/contextual/transport", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/contextual/transport")>(),
+  fetchContextualRuns: vi.fn().mockResolvedValue({
+    available: true, runs: [], truncated: false, nextCursor: null,
+  }),
+  fetchContextualDecisions: vi.fn().mockResolvedValue({
+    decisions: [], openCount: 0, cap: 3,
+  }),
+  fetchContextualRunActivity: vi.fn().mockResolvedValue({
+    run: null, events: [], sceneBriefs: [], drafts: [], truncated: false,
+    truncatedCollections: { events: false, sceneBriefs: false, drafts: false },
+    draftCounts: { proposed: 0, applied: 0, rejected: 0, superseded: 0 },
+    draftNextCursor: null,
+  }),
+}))
 vi.mock("@/lib/agent/memory-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent/memory-api")>("@/lib/agent/memory-api")
   return {
@@ -73,9 +82,35 @@ vi.mock("@/lib/agent/memory-api", async () => {
 })
 
 import { agentSessionStore } from "@/lib/agent/session-store"
+import { runAgent } from "@/lib/agent/agent-client"
+import { getOutboxRecords, outboxRecordCountAllOwners } from "@/lib/sync/outbox"
 import { AgentWorkbench, type AgentWorkbenchProps } from "./AgentWorkbench"
+import { AgentDockPanel } from "@/components/AgentDockPanel"
+import { fetchContextualRuns } from "@/lib/contextual/transport"
+import { resetTeamConversationsForTesting } from "@/lib/agent/team-conversations"
 
 const PROJECT = `wb-test-${Math.random().toString(36).slice(2)}`
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="workbench-location">{location.pathname}{location.search}</output>
+}
+
+function TestRouter({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter initialEntries={[`/project/${PROJECT}/agent`]}>
+      <Routes>
+        <Route path="/project/:projectId/agent" element={<>{children}</>} />
+        <Route path="/project/:projectId/editor/*" element={<p>Editor destination</p>} />
+      </Routes>
+      <LocationProbe />
+    </MemoryRouter>
+  )
+}
+
+function render(ui: ReactNode) {
+  return renderUI(ui, { wrapper: TestRouter })
+}
 
 function draftRunFrames(): AgentFrame[] {
   return [
@@ -151,7 +186,7 @@ function workbenchProps(): AgentWorkbenchProps {
       resolveCell: () => undefined,
       onApplied: vi.fn(),
     },
-    onClose: () => {},
+    editorHref: `/project/${PROJECT}/editor/file/f1?lane=it`,
     onChooseFile: vi.fn(),
     workspace: {
       fileName: "Mark.md",
@@ -227,97 +262,78 @@ async function primeSessionWithDraftRun(): Promise<void> {
   await waitFor(() => expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false))
 }
 
-beforeEach(() => {
-  agentSessionStore(PROJECT, "alice").reset()
+beforeAll(() => {
+  Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    value: () => [],
+  })
 })
 
-describe("AgentWorkbench three-pane layout", () => {
-  it("always shows source, Agent, and target around the conversation", () => {
+beforeEach(() => {
+  agentSessionStore(PROJECT, "alice").reset()
+  resetTeamConversationsForTesting()
+  vi.mocked(fetchContextualRuns).mockResolvedValue({ available: true, runs: [], truncated: false, nextCursor: null })
+})
+
+describe("AgentWorkbench optional document context", () => {
+  it("starts with one conversation and opens paired document context explicitly", () => {
     render(<AgentWorkbench {...workbenchProps()} />)
-    const sourcePane = screen.getByLabelText("Source pane")
-    const targetPane = screen.getByLabelText("Target pane")
-    expect(sourcePane).toBeInTheDocument()
-    const agentPane = screen.getByLabelText("Agent pane")
-    expect(agentPane).toBeInTheDocument()
-    expect(within(agentPane).getByRole("button", { name: "Minimize Agent" })).toBeInTheDocument()
-    expect(targetPane).toBeInTheDocument()
-    expect(sourcePane).toHaveTextContent("The beginning")
-    expect(targetPane).toHaveTextContent("L'inizio")
-    // The workbench is another presentation of the editor, not a lookalike:
-    // its cells consume the same extracted surfaces as EditorTable.
-    expect(sourcePane.querySelectorAll('[data-editor-cell-surface="source"]')).toHaveLength(2)
-    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target-column"]')).toHaveLength(2)
-    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target"]')).toHaveLength(2)
-    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target-read"]')).toHaveLength(2)
-    expect(within(targetPane).getAllByTestId("health-ribbon")).toHaveLength(2)
-    expect(within(targetPane).getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." })).toBeEnabled()
-    expect(sourcePane.querySelector("strong")).toHaveTextContent("beginning")
-    expect(targetPane.querySelector("em")).toHaveTextContent("inizio")
-    expect(screen.getAllByRole("separator")).toHaveLength(2)
+    expect(screen.getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("tab", { name: "Chat" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Team" })).not.toBeInTheDocument()
+    expect(screen.queryByText("The beginning")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    expect(screen.getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
+    expect(screen.getByTestId("workbench-location")).toHaveTextContent("view=document")
+    expect(screen.getByText("beginning", { selector: "strong" })).toBeInTheDocument()
+    expect(screen.getByText("inizio", { selector: "em" })).toBeInTheDocument()
+    expect(screen.getAllByTestId("health-ribbon")).toHaveLength(2)
+    expect(screen.getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." })).toBeEnabled()
+    expect(screen.queryAllByRole("separator")).toHaveLength(0)
   })
 
-  it("turns the target pane into the review editor when the agent stages drafts", async () => {
+  it("opens staged proposals with paired source in the explicit review view", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.getByLabelText("Target review pane")).toBeInTheDocument()
-    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The house is red")
-    expect(screen.getByLabelText("Target review pane")).not.toHaveTextContent("The house is red")
+    fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
+    expect(screen.getByText("The house is red")).toBeInTheDocument()
+    expect(screen.getByText("La casa è rossa")).toBeInTheDocument()
+    expect(screen.getByTestId("workbench-location")).toHaveTextContent("view=review")
   })
 
   it("uses the editor's real target actions in agent mode", () => {
     const props = workbenchProps()
     render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
 
-    const targetPane = screen.getByLabelText("Target pane")
-    const emptyTarget = targetPane.querySelector('article[data-cell-id="c2"]')
-    expect(emptyTarget).not.toBeNull()
-    const targetActions = within(emptyTarget as HTMLElement)
-
-    fireEvent.click(targetActions.getByRole("button", { name: "Translate with AI" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Translate with AI" })[1])
     expect(props.workspace?.onDraftTarget).toHaveBeenCalledWith("c2")
-
-    fireEvent.click(targetActions.getByRole("button", { name: "Add comment" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Add comment" })[1])
     expect(props.workspace?.onOpenComments).toHaveBeenCalledWith("c2")
-
-    fireEvent.click(targetActions.getByRole("button", { name: "Edit history" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit history" })[1])
     expect(props.workspace?.onOpenHistory).toHaveBeenCalledWith("c2")
   })
 
-  it("reports the target cells visible in the three-pane viewport", () => {
+  it("stops document visibility tracking when returning to the conversation", () => {
     const props = workbenchProps()
     const onVisibleCellIdsChange = vi.fn()
     props.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
-    const view = render(<AgentWorkbench {...props} />)
-
-    const scroll = screen.getByTestId("target-context-scroll")
-    const rows = Array.from(scroll.querySelectorAll<HTMLElement>("article[data-cell-id]"))
-    vi.spyOn(scroll, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 150 } as DOMRect)
-    vi.spyOn(rows[0], "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 100 } as DOMRect)
-    vi.spyOn(rows[1], "getBoundingClientRect").mockReturnValue({ top: 160, bottom: 260 } as DOMRect)
-
-    fireEvent.scroll(scroll)
-    expect(onVisibleCellIdsChange).toHaveBeenLastCalledWith(["c1"])
-
-    // Streaming/completion state may replace cell objects without changing
-    // the viewport. That must not emit a transient empty viewport and abort
-    // an in-flight translate-as-read request.
-    onVisibleCellIdsChange.mockClear()
-    const updated = workbenchProps()
-    updated.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
-    updated.workspace!.cells = updated.workspace!.cells.map((cell) => ({ ...cell }))
-    view.rerender(<AgentWorkbench {...updated} />)
-    expect(onVisibleCellIdsChange).not.toHaveBeenCalledWith([])
+    render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    expect(onVisibleCellIdsChange).toHaveBeenLastCalledWith([])
   })
 
   it("uses the editor's real validation control in agent mode", () => {
     const props = workbenchProps()
     render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." }))
     expect(props.workspace?.onValidationChange).toHaveBeenCalledWith("c1", true)
   })
 
-  it("a read-only run leaves the document panes visible", async () => {
+  it("a read-only run does not turn committed document context into a proposal", async () => {
     scriptedFrames = [
       { type: "run_start", runId: "run-r" },
       { type: "code_start", step: 1, kind: "read", summary: ":file" },
@@ -339,15 +355,103 @@ describe("AgentWorkbench three-pane layout", () => {
     await waitFor(() => expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false))
 
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The beginning")
-    expect(screen.getByLabelText("Target pane")).toHaveTextContent("L'inizio")
+    expect(screen.queryByRole("tab", { name: "Review drafts" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    expect(screen.getByText("beginning", { selector: "strong" })).toBeInTheDocument()
+    expect(screen.getByText("inizio", { selector: "em" })).toBeInTheDocument()
   })
 })
 
 describe("AgentWorkbench review loop", () => {
+  it("navigates back to the editor without stopping or resetting the shared chat", async () => {
+    vi.mocked(runAgent).mockImplementationOnce(({ onFrame, signal }) => {
+      onFrame({ type: "run_start", runId: "navigation-run" })
+      if (!signal) throw new Error("Expected the session store's abort signal")
+      return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
+    })
+    const store = agentSessionStore(PROJECT, "alice")
+    store.send({ wire: "continue working", display: "continue working", jwt: "jwt", request: { projectId: PROJECT } })
+    const before = store.getState()
+    try {
+      render(<AgentWorkbench {...workbenchProps()} />)
+      const back = screen.getByRole("link", { name: "Back to editor" })
+      expect(back).toHaveAttribute("href", `/project/${PROJECT}/editor/file/f1?lane=it`)
+      fireEvent.click(back)
+      expect(await screen.findByText("Editor destination")).toBeInTheDocument()
+      expect(screen.getByTestId("workbench-location")).toHaveTextContent(`/project/${PROJECT}/editor/file/f1?lane=it`)
+      expect(store.getState().sessionId).toBe(before.sessionId)
+      expect(store.getState().runs).toEqual(before.runs)
+      expect(store.getState().isStreaming).toBe(true)
+    } finally {
+      store.stop()
+      await waitFor(() => expect(store.getState().isStreaming).toBe(false))
+    }
+  })
+
+  it("confirms chat reset without undoing or deleting already-applied events", async () => {
+    await primeSessionWithDraftRun()
+    const props = workbenchProps()
+    const onApplied = vi.fn<NonNullable<AgentWorkbenchProps["agent"]["onApplied"]>>()
+    props.agent.onApplied = onApplied
+    render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
+    fireEvent.click(screen.getByRole("button", { name: /Accept remaining/ }))
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getAllByText("✓ accepted")).toHaveLength(2))
+
+    const store = agentSessionStore(PROJECT, "alice")
+    const before = store.getState()
+    const appliedIds = onApplied.mock.calls[0][0]
+    const appliedRecords = await getOutboxRecords(appliedIds)
+    expect(appliedRecords).toHaveLength(2)
+    const eventCount = await outboxRecordCountAllOwners()
+    expect(before.decided.size).toBe(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    let dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    expect(store.getState().sessionId).toBe(before.sessionId)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(store.getState().runs).toEqual(before.runs)
+    expect(store.getState().decided).toEqual(before.decided)
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset chat" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Chat options" })).toHaveFocus())
+    expect(store.getState().sessionId).not.toBe(before.sessionId)
+    expect(store.getState().runs).toEqual([])
+    expect(store.getState().decided.size).toBe(0)
+    expect(await getOutboxRecords(appliedIds)).toEqual(appliedRecords)
+    expect(await outboxRecordCountAllOwners()).toBe(eventCount)
+    expect(screen.getByRole("tab", { name: "Review drafts" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it.each(["project", "account"])("dismisses reset confirmation when its %s changes", async (scope) => {
+    await primeSessionWithDraftRun()
+    const props = workbenchProps()
+    const view = render(<AgentWorkbench {...props} />)
+    const before = agentSessionStore(PROJECT, "alice").getState()
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    expect(await screen.findByRole("alertdialog", { name: "Reset chat?" })).toBeInTheDocument()
+
+    const next = workbenchProps()
+    if (scope === "project") next.agent.projectId = `${PROJECT}-other`
+    else next.agent.author = "bob"
+    view.rerender(<AgentWorkbench {...next} />)
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(agentSessionStore(PROJECT, "alice").getState().sessionId).toBe(before.sessionId)
+    expect(agentSessionStore(PROJECT, "alice").getState().runs).toEqual(before.runs)
+  })
+
   it("accept-all keeps the committed text visible in the grid (regression: rows went blank)", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
 
     // Both drafts pending in the grid.
     expect(screen.getByText("La casa è rossa")).toBeInTheDocument()
@@ -366,34 +470,86 @@ describe("AgentWorkbench review loop", () => {
   it("undo flips accepted rows to undone and restores the pre-draft value", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
 
     fireEvent.click(screen.getByRole("button", { name: /Accept remaining/ }))
     await waitFor(() => expect(screen.getAllByText("✓ accepted")).toHaveLength(2))
 
-    fireEvent.click(screen.getByRole("button", { name: /Undo applied/ }))
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
+    fireEvent.click(await screen.findByRole("button", { name: /Undo applied/ }))
+    fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
     await waitFor(() => expect(screen.getAllByText("↩ undone")).toHaveLength(2))
     // Pre-draft value was empty → the drafted text is gone from the rows.
     expect(screen.queryByText("La casa è rossa")).not.toBeInTheDocument()
   })
 })
 
-describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () => {
-  it("defaults to Chat and offers Project knowledge that lazy-loads its content", async () => {
+describe("AgentWorkbench unified view navigation", () => {
+  it("reselecting the same sidebar task exits another view and restores that conversation", async () => {
+    vi.mocked(fetchContextualRuns).mockResolvedValue({
+      available: true, truncated: false, nextCursor: null,
+      runs: [{
+        runId: "task-1", fileId: "f1", status: "parked", phase: null,
+        spanLabel: "MRK 1:1–1:2", done: 2, total: 2, failed: 0,
+        unitsSpent: 0, callsSpent: 0, proposedDrafts: 2, targetLang: "it",
+        activeDirections: [], lastError: null,
+        createdAt: "2026-09-15T12:00:00Z", updatedAt: "2026-09-15T12:00:00Z",
+      }],
+    })
+    const props = workbenchProps()
+    const fileNames = new Map([["f1", "Mark"]])
+    render(<>
+      <AgentDockPanel projectId={PROJECT} author="alice" fileNames={fileNames} />
+      <AgentWorkbench {...props} fileNames={fileNames} />
+    </>)
+    const list = await screen.findByTestId("team-conversation-list")
+    fireEvent.click(await within(list).findByRole("button", { name: /Mark/ }))
+    expect(await screen.findByRole("heading", { name: "Mark" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Project knowledge" }))
+    expect(screen.getByTestId("workbench-location")).toHaveTextContent("view=knowledge")
+    fireEvent.click(within(list).getByRole("button", { name: /Mark/ }))
+    expect(screen.getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByRole("heading", { name: "Mark" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Review 2 drafts" })).toBeInTheDocument()
+    expect(screen.getByTestId("workbench-location")).not.toHaveTextContent("view=")
+    expect(within(list).getByRole("button", { name: /Mark/ })).toHaveAttribute("aria-current", "true")
+  })
+  it("lets the conversation headline identify the workspace without repeated Agent labels", async () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    const teamTab = screen.getByRole("tab", { name: "Conversation" })
+    const toolbar = teamTab.closest("[role=tablist]")!.parentElement!
+
+    fireEvent.click(teamTab)
+    expect(await screen.findByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
+    expect(within(toolbar).getByRole("tab", { name: "Document" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(toolbar).queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
+    expect(within(toolbar).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText("beginning", { selector: "strong" })).toBeInTheDocument()
+  })
+
+  it("defaults to Conversation and deep-links the lazy-loaded knowledge view", async () => {
     render(<AgentWorkbench {...workbenchProps()} />)
 
-    const chatTab = screen.getByRole("tab", { name: "Chat" })
+    const chatTab = screen.getByRole("tab", { name: "Conversation" })
     expect(chatTab).toHaveAttribute("aria-selected", "true")
     const memoryTab = screen.getByRole("tab", { name: "Project knowledge" })
     expect(memoryTab).toHaveAttribute("aria-selected", "false")
 
     const header = chatTab.closest("[role=tablist]")?.parentElement
     expect(header).not.toBeNull()
-    expect(within(header!).getByText("Agent")).toBeInTheDocument()
-    expect(within(header!).getByRole("button", { name: /New session/ })).toBeInTheDocument()
-    expect(within(header!).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
+    expect(within(header!).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
+    expect(within(header!).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(header!).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))
+    expect(screen.getByTestId("workbench-location")).toHaveTextContent("view=knowledge")
     // The Memory tab lazy-loads W1E's real AgentMemoryTab (Wave-2 seam): once
     // resolved it renders its own Proposed/Approved/Project-brief sub-tabs.
     await waitFor(() =>

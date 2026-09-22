@@ -267,7 +267,8 @@ export function fileCountersRecomputeStmt(
  * A COUNT rather than an increment, so replaying the log twice cannot drift it
  * — the same property that makes `cells.endorsement_count` safe where a stamped
  * `cells.validated` is not. Every writer of a validator row runs this
- * afterwards: validate, unvalidate, and the trim that discards votes.
+ * afterwards, which is now exactly two: validate and unvalidate. Trim used to
+ * be the third and no longer touches votes at all.
  */
 export function audioValidatorCountRecomputeStmt(
   db: AquillaDb,
@@ -1621,23 +1622,23 @@ case 'cell.audio.attach': {
             p.audioId,
           ),
       )
-      // AQU-490: trimming changes what a validator would hear, so their votes
-      // no longer describe this take and are discarded. Denoise gets this for
-      // free by minting a new audio_id; a trim rewrites the same row in place,
-      // and cell_audio.event_id cannot stand in for a content version because
-      // a partial re-attach moves it without changing a sample.
-      stmts.push(
-        db
-          .prepare(
-            `DELETE FROM cell_audio_validators
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
-          )
-          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
-      )
-      stmts.push(
-        audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId),
-      )
-      return ['cell_audio', 'cell_audio_validators']
+      // A TRIM KEEPS ITS VOTES (Sam, 2026-09-21, reversing his earlier call).
+      // This used to delete the take's validator rows on the reasoning that
+      // trimming changes what a validator heard. It is the same take: no new
+      // audio_id is minted, the samples are untouched, and only the playback
+      // window moves — usually by a fraction of a second, to clip a breath.
+      // Making a reviewer re-listen to a whole line for that is not a rule
+      // anyone would defend out loud. Denoise is the genuinely derived case
+      // and is unaffected: it mints a `dn-` id and attaches it, so its take
+      // starts unvalidated for free.
+      //
+      // Dropping the delete also makes this handler honest with the rollup
+      // set below it. `cell.audio.trim` is deliberately absent from
+      // AUDIO_ROLLUP_KINDS because trim "changes no count" — yet it has been
+      // zeroing validator_count with no progress recompute behind it, so the
+      // board went on reporting a trimmed line as validated. Now that is true
+      // rather than merely unnoticed.
+      return ['cell_audio']
     }
 
     case 'cell.audio.place': {

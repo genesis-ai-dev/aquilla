@@ -340,6 +340,11 @@ export function CellVoicePanel({
       voiceId: att.voiceId ?? null,
       referenceAudioId: att.referenceAudioId ?? null,
       durationMs: att.durationMs ?? null,
+      // AQU-490: carried, because this overlay REPLACES the attachment and a
+      // missing optional field silently reads as "nobody validated this". The
+      // second of the two trim call sites; both have to say it.
+      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
+      ...(att.validators ? { validators: att.validators } : {}),
       trimStartMs: start != null ? Math.round(start * 1000) : null,
       trimEndMs: end != null ? Math.round(end * 1000) : null,
     }, trimP)

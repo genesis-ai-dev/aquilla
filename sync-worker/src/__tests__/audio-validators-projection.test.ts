@@ -269,14 +269,15 @@ describe('cell.audio.unvalidate', () => {
 // cell.audio.trim
 // ---------------------------------------------------------------------------
 
-describe('cell.audio.trim discards the take’s votes', () => {
-  // Sam's ruling: a derived take does not inherit validation. Denoise gets that
-  // for free by minting a new audio_id; a trim rewrites the same row in place,
-  // so the votes would otherwise survive a change to what a validator hears.
-  // cell_audio.event_id cannot stand in for a content version — the
-  // transcription re-attach moves it ~800ms after every recording without
-  // changing a sample.
-  it('deletes every vote on the trimmed take and zeroes its count', async () => {
+describe('cell.audio.trim keeps the take’s votes', () => {
+  // REVERSED 2026-09-21. This block used to assert the opposite, on the
+  // reasoning that a trim changes what a validator heard. Sam's call after
+  // using it: it is the same take — no new id, no resampling, just a playback
+  // window moved a fraction of a second to clip a breath — and throwing away
+  // everyone's sign-off for that is not defensible. Denoise remains the real
+  // derived case and needs no rule here at all: it mints a `dn-` id, so its
+  // take is simply a different take with no votes yet.
+  it('leaves every vote in place and does not touch the count', async () => {
     const { db, rows, close } = await makeTestDb()
     await attach(db, 'a1')
     await project(db, 'cell.audio.validate', { audioId: 'a1' }, { author: 'ana', id: 'e1' })
@@ -289,13 +290,16 @@ describe('cell.audio.trim discards the take’s votes', () => {
       { id: 'e3' },
     )
 
-    expect(touches).toContain('cell_audio_validators')
-    expect(await rows<ValidatorRow>('cell_audio_validators')).toHaveLength(0)
-    expect((await rows<AudioRow>('cell_audio'))[0].validator_count).toBe(0)
+    // Not merely "the rows survive": trim must not even CLAIM the validators
+    // table, or every trim in a timeline drag invalidates those caches for
+    // nothing.
+    expect(touches).not.toContain('cell_audio_validators')
+    expect(await rows<ValidatorRow>('cell_audio_validators')).toHaveLength(2)
+    expect((await rows<AudioRow>('cell_audio'))[0].validator_count).toBe(2)
     await close()
   })
 
-  it('leaves a sibling take’s votes alone', async () => {
+  it('touches neither take’s votes when one of two is trimmed', async () => {
     const { db, rows, close } = await makeTestDb()
     await attach(db, 'a1')
     await attach(db, 'a2', { slot: 'track-2' })
@@ -305,7 +309,7 @@ describe('cell.audio.trim discards the take’s votes', () => {
     await project(db, 'cell.audio.trim', { audioId: 'a1', trimStartMs: 50, trimEndMs: null }, { id: 'e3' })
 
     const votes = await rows<ValidatorRow>('cell_audio_validators')
-    expect(votes.map((v) => v.audio_id)).toEqual(['a2'])
+    expect(votes.map((v) => v.audio_id).sort()).toEqual(['a1', 'a2'])
     await close()
   })
 })

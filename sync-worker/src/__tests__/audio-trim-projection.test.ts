@@ -116,11 +116,14 @@ describe('cell.audio.trim', () => {
       [],
     )
     expect(touches).toContain('cell_audio')
-    // The UPDATE, then AQU-490's pair: trimming changes what a validator
-    // heard, so that take's votes are discarded and its count re-derived.
-    expect(recorded).toHaveLength(3)
-    expect(recorded[1].sql).toContain('DELETE FROM cell_audio_validators')
-    expect(recorded[2].sql).toContain('SET validator_count')
+    // The UPDATE and NOTHING ELSE. A trim used to drag two more statements
+    // behind it, deleting that take's votes and re-deriving its count; Sam
+    // reversed that on 2026-09-21 and the negative assertions are here so it
+    // cannot drift back in unnoticed.
+    expect(recorded).toHaveLength(1)
+    expect(touches).not.toContain('cell_audio_validators')
+    expect(recorded.some((r) => r.sql.includes('cell_audio_validators'))).toBe(false)
+    expect(recorded.some((r) => r.sql.includes('validator_count'))).toBe(false)
     const [stmt] = recorded
     expect(stmt.sql).toContain('SET trim_start_ms = ?, trim_end_ms = ?')
     // Trimming a non-selected generated voice must not promote it over the real

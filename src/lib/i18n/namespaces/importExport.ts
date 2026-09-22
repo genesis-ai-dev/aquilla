@@ -943,16 +943,17 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, or VTT",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or VTT " +
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
-      "(.csv/.tsv/.xlsx), or a WebVTT subtitle file (.vtt).",
+      "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -2468,7 +2469,7 @@ export const importExport = defineNamespace({
         description:
           "Caption in small grey text under the drag-and-drop area of the panel " +
           "that fills in the open file's translations, listing the file kinds it " +
-          "accepts. Only the conjunction joining the four format names is " +
+          "accepts. Only the conjunction joining the format names is " +
           "translated; the format names themselves stay as they are.",
       },
       "importExport.fileTarget.description": {
@@ -2485,6 +2486,13 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInSubtitle": {
+        description:
+          "Error shown in red under the drop area when a subtitle file was read " +
+          "successfully but contained no timed caption blocks, so there is nothing " +
+          "to fill in. Single short statement of fact. 'Cues' are the individual " +
+          "timed caption blocks of a subtitle file.",
       },
       "importExport.fileTarget.noCuesInVtt": {
         description:
@@ -2691,11 +2699,12 @@ export const importExport = defineNamespace({
       },
       "importExport.review.orderMatchWarning": {
         description:
-          "Amber warning above the match-review list, shown when the user did not " +
-          "nominate a column holding the reference that identifies each line. It " +
-          "explains that rows were therefore paired top to bottom by position, " +
-          "which is easy to get wrong, and asks the user to eyeball the original " +
-          "text shown beside each row before committing.",
+          "Amber warning above the match-review list, shown when no reference " +
+          "identifying each line was available — either the user did not nominate " +
+          "a spreadsheet column holding one, or the uploaded format (a subtitle " +
+          "file) has none. It explains that rows were therefore paired top to " +
+          "bottom by position, which is easy to get wrong, and asks the user to " +
+          "eyeball the original text shown beside each row before committing.",
       },
       "importExport.review.replacesExisting": {
         description:

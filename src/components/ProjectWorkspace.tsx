@@ -1291,7 +1291,17 @@ export function ProjectWorkspace() {
   // `editorProject` below folds these concepts onto the record it hands the
   // editor. `refreshConcepts` runs after each term.* write acks so blots track
   // the termbase without a reload.
-  const { concepts: localConcepts, refresh: refreshConcepts } = useConcepts({
+  //
+  // AQU-1340: `error`/`isLoading` are read too. `editorProject` can only carry
+  // the concepts themselves, so a failed read would otherwise reach the editor
+  // and the in-workspace glossary as `terminology: []` — indistinguishable from
+  // a project that has no terminology, with every term check silently off.
+  const {
+    concepts: localConcepts,
+    isLoading: conceptsLoading,
+    error: conceptsError,
+    refresh: refreshConcepts,
+  } = useConcepts({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
     tokenReady: !!frontierSession?.jwt,
@@ -11530,6 +11540,27 @@ export function ProjectWorkspace() {
             )}
             {/* FRO-296: offline banner — shown when browser reports no connectivity. */}
             <OfflineBanner />
+            {/* AQU-1340: a failed concepts read compiles to an empty terminology
+                rule set, so term blots and violations silently stop appearing.
+                Say it out loud rather than letting the editor look like a
+                project with no terminology. The glossary surface carries its own
+                error state, so this doesn't double up there. */}
+            {conceptsError && centerSurface !== "terminology" && (
+              <div
+                role="alert"
+                data-testid="terminology-unavailable-banner"
+                className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+              >
+                <span>{t("workspace.terminologyUnavailableBanner")}</span>
+                <button
+                  type="button"
+                  onClick={() => void refreshConcepts()}
+                  className="rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
+                >
+                  {t("common.retry")}
+                </button>
+              </div>
+            )}
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
@@ -11676,6 +11707,12 @@ export function ProjectWorkspace() {
                 // and never a term that was created through the event log.
                 project={editorProject ?? project}
                 patchSettings={patchSettings}
+                // AQU-1340: the record can only carry the terms, so the read's
+                // status travels beside it — otherwise this path renders a
+                // failed read as an empty termbase.
+                conceptsError={conceptsError}
+                conceptsLoading={conceptsLoading}
+                refreshConcepts={refreshConcepts}
               />
             </Suspense>
           </div>

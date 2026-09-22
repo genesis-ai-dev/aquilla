@@ -464,6 +464,15 @@ describe("toFileTargetCells", () => {
     })
   })
 
+  it("carries the line's own timecode label for the review screen, and none for an untimed line", () => {
+    const [timed, untimed] = toFileTargetCells([
+      { ...summaries[0], context: "00:00:01.000 --> 00:00:03.000" },
+      { id: "v1", fileId: "f1", original: "In the beginning", group: "GEN 1:1", context: "" },
+    ])
+    expect(timed.cueRef).toBe("00:00:01.000 --> 00:00:03.000")
+    expect(untimed).not.toHaveProperty("cueRef")
+  })
+
   it("leaves untimed cells untimed, so they keep order matching", () => {
     const [untimed] = toFileTargetCells([{ id: "v1", fileId: "f1", original: "In the beginning", group: "GEN 1:1" }])
     expect(untimed.startMs).toBeUndefined()

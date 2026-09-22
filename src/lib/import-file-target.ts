@@ -36,6 +36,12 @@ export interface FileTargetCellRef extends SourceCellRef {
    *  positional matching aligns by timecode overlap (AQU-1143). */
   startMs?: number
   endMs?: number
+  /** The line's own cue timecode as the editor shows it
+   *  (`00:00:10.000 --> 00:00:10.800`). The review screen prints it beside
+   *  the incoming cue's timecode whenever the two differ (AQU-1360): without
+   *  it a uniform shift, or a cue pulled onto a neighbouring line, reads
+   *  exactly like a perfect pairing. */
+  cueRef?: string
 }
 
 /** The slice of an editor cell summary the file-scoped target import reads.
@@ -48,21 +54,26 @@ export interface FileTargetCellSource {
   translated?: string
   group?: string
   original: string
+  /** The cell view's cue timecode label — empty for an untimed line
+   *  (`useCells` builds it from the same start/end the fields below carry). */
+  context?: string
   /** Cue timing in SECONDS — the cell view's unit (`useCells` divides the
    *  server's `start_ms` by 1000). */
   startTime?: number
   endTime?: number
 }
 
-/** The open file's cells, in display order, as the matchers want them.
+/** One open-file cell as the matchers want it.
  *
- *  This is the seconds → milliseconds seam. Cell views carry cue timings in
- *  seconds while `TargetRow` timings are milliseconds; handing the seconds
- *  through unconverted put every cell within the first few ms of the file, so
- *  overlap matching (AQU-1143) found no counterpart for any cue and a subtitle
- *  target import matched 0 rows. */
-export function toFileTargetCells(summaries: readonly FileTargetCellSource[]): FileTargetCellRef[] {
-  return summaries.map((c) => ({
+ *  This is the seconds → milliseconds seam, and the ONLY implementation of it:
+ *  the workspace reaches it through `fileTargetCellRef` (lib/import/cell-refs),
+ *  so the code the tests cover is the code the dialog runs. Cell views carry
+ *  cue timings in seconds while `TargetRow` timings are milliseconds; handing
+ *  the seconds through unconverted put every cell within the first few ms of
+ *  the file, so overlap matching (AQU-1143) found no counterpart for any cue
+ *  and a subtitle target import matched 0 rows. */
+export function toFileTargetCell(c: FileTargetCellSource): FileTargetCellRef {
+  return {
     cellId: c.id,
     fileId: c.fileId,
     targetEventId: c.targetEventId,
@@ -73,7 +84,13 @@ export function toFileTargetCells(summaries: readonly FileTargetCellSource[]): F
     ...(c.startTime !== undefined && c.endTime !== undefined
       ? { startMs: Math.round(c.startTime * 1000), endMs: Math.round(c.endTime * 1000) }
       : {}),
-  }))
+    ...(c.context ? { cueRef: c.context } : {}),
+  }
+}
+
+/** The open file's cells, in display order, as the matchers want them. */
+export function toFileTargetCells(summaries: readonly FileTargetCellSource[]): FileTargetCellRef[] {
+  return summaries.map(toFileTargetCell)
 }
 
 /** One incoming translation row, from USFM or a mapped spreadsheet. */

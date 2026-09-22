@@ -20,6 +20,8 @@ import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/m
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -2310,11 +2312,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // Bounded retry after a delta/full fetch failure; fenced by generation.
   const fetchRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fetchRetryAttemptsRef = useRef(0)
+  // Tauri offline read branch — this hook, not useCells.ts, is the ACTUAL
+  // workspace cell list (AQU-538 comment at its ProjectWorkspace.tsx call
+  // site). `store` here shadows the module's own `CellStore` local below, so
+  // this holds the LiveStore instance under a distinct name throughout.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStoreRef = useRef(offlineStore)
 
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
   tokenFetcherRef.current = getToken
+  offlineStoreRef.current = offlineStore
 
   useEffect(() => {
     // AQU-538: `lane` flows through here; setRuntime re-partitions the loaded
@@ -2369,6 +2378,38 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+
+    // Tauri offline branch: an offline-ready project's cells live in the
+    // local LiveStore `cells` table (kept live-synced by the Phase 3 sync
+    // adapter), so a read is a synchronous local SQLite query — none of the
+    // IDB cache / `?since=` delta / paginated-stream machinery below applies.
+    // `resolveOfflineStore` returns null for every web request and for a
+    // Tauri request whose project isn't fully downloaded, so this is a pure
+    // no-op for the unchanged HTTP path. Still routes through
+    // `clearConfirmedShadows`/`mergeProtectedRows` — the same guards the
+    // online soft-refetch path uses below — because a local optimistic edit
+    // can still be ahead of whatever's currently materialized in the `cells`
+    // table (its outbox event may not have flushed into LiveStore yet).
+    const offlineStoreLive = resolveOfflineStore(offlineStoreRef.current, pid)
+    if (offlineStoreLive) {
+      try {
+        const startSeq = store.getWriteSeq()
+        const rows = readOfflineFileCells(offlineStoreLive, pid, fid)
+        if (generationRef.current !== gen) return
+        store.clearConfirmedShadows(rows, startSeq)
+        const { rows: kept } = store.mergeProtectedRows(rows, startSeq)
+        store.replaceRows(kept, { full: true })
+        store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
+        fetchRetryAttemptsRef.current = 0
+        setIsError(false)
+        setIsLoading(false)
+      } finally {
+        if (generationRef.current === gen) inFlightRef.current = false
+      }
+      return
+    }
+
     let usedCache = false
 
     if (!soft) {
@@ -2661,6 +2702,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [enabled, fileId, lane, projectId, store])
 
+  // Tauri offline reactivity: doFetch()/revalidateCell() only re-read the
+  // local `cells` table when something calls them (mount, focus regain, a
+  // known local write). The Phase 3 sync adapter can also write into that
+  // table on its own — an incoming remote commit, or this device's own
+  // queued write finally materializing — with nothing else in this hook to
+  // notice. This subscription closes that gap for an offline-ready project.
+  useEffect(() => {
+    const readyStore = resolveOfflineStore(offlineStore, projectId)
+    if (!enabled || !readyStore || !projectId || !fileId) return
+    return subscribeToOfflineFileCells(readyStore, projectId, fileId, () => { void doFetch(true) })
+  }, [projectId, fileId, enabled, offlineStore, doFetch])
+
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
     if (fetchRetryTimerRef.current) clearTimeout(fetchRetryTimerRef.current)
@@ -2696,8 +2749,23 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     const isEnabled = enabledRef.current
+    if (!isEnabled || !pid || !fid) return
+
+    // Tauri offline branch: a LiveStore read for this one cellId is
+    // synchronous, so this skips fetchCellsByIds and the in-flight/retry
+    // bookkeeping built around its async network call entirely.
+    const offlineStoreLive = resolveOfflineStore(offlineStoreRef.current, pid)
+    if (offlineStoreLive) {
+      const startSeq = store.getWriteSeq()
+      const rows = readOfflineFileCells(offlineStoreLive, pid, fid).filter((r) => r.cellId === cellId)
+      store.clearConfirmedShadows(rows, startSeq)
+      store.replaceRowsForCell(cellId, rows)
+      refreshCellsCacheFromStore()
+      return
+    }
+
     const tokenFetcher = tokenFetcherRef.current
-    if (!isEnabled || !pid || !fid || !tokenFetcher) return
+    if (!tokenFetcher) return
     if (cellFetchInFlightRef.current.has(cellId)) {
       cellRevalidateDirtyRef.current.add(cellId)
       return

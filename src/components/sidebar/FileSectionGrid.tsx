@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { Spinner } from "@/components/ui/spinner"
 import { BookHealthSpine, type BookHealthChapter } from "./BookHealthSpine"
@@ -7,22 +8,27 @@ interface Props {
   projectId: string
   fileId: string
   validationCount: number
+  /** AQU-1083: the project's effective structural-cell policy. Flipping it
+   *  changes every number below, so the snapshot has to be revalidated. */
+  countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSectionClick: (sectionLabel: string) => void
-  chapters?: BookHealthChapter[]
+  /** Read the active file’s current health only while this grid is mounted. */
+  getChapters?: () => BookHealthChapter[]
   /**
    * AQU-1326: hold the per-file `/progress` read until the editor's first cell
    * page has painted. The active file is expanded on open, so this grid's fetch
    * otherwise goes out just ahead of the cell stream and takes a slot from it.
    * Deferring costs nothing visible — the same spinner shows either way, and
-   * for the active file the spine renders from `chapters` regardless.
+   * for the active file the spine renders from `getChapters` regardless.
    */
   deferFetch?: boolean
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick, chapters, deferFetch }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch }: Props) {
   const t = useT()
+  const chapters = useMemo(() => getChapters?.(), [getChapters])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
   // soon as a real id arrives, so the gate needs no extra plumbing.
   const { sections, error, retry } = useSectionProgressState(
@@ -30,6 +36,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
     deferFetch ? null : fileId,
     validationCount,
     getTokenForFile,
+    countStructural,
   )
 
   if (!chapters && sections === null) {

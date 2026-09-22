@@ -31,6 +31,21 @@ export const workspace = defineNamespace({
       one: "{count} change was rejected because it conflicted with a newer edit from another session.",
       other: "{count} changes were rejected because they conflicted with newer edits from another session.",
     }),
+    // Tauri offline mode (Phase 3): a locally queued write lost the AD-2 head
+    // CAS on reconnect (someone else committed to the same cell while this
+    // device was offline). See src/lib/offline/conflicts.ts.
+    "workspace.offline.conflictToast": plural({
+      one: "{count} translation couldn't sync — it was changed elsewhere while you were offline.",
+      other: "{count} translations couldn't sync — they were changed elsewhere while you were offline.",
+    }),
+    "workspace.offline.conflictDismiss": "Dismiss",
+    "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
+    // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
+    "workspace.offline.connectivityOnline": "Online",
+    "workspace.offline.connectivityOffline": "Offline",
+    "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
+    "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -263,6 +278,19 @@ export const workspace = defineNamespace({
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
 
+    // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
+    "workspace.alignment.originalHeading": "Original language",
+    "workspace.alignment.originalSub": "— the Greek/Hebrew words behind this verse",
+    "workspace.alignment.originalHelpTooltip":
+      "Every word of the original-language source, with its dictionary form, Strong's number and " +
+      "morphology. Where the model can place a word, its rendering in your translation is shown " +
+      "beside it. Words matched through the dictionary form are marked — treat those as a hint.",
+    "workspace.alignment.originalNoMatch": "no confident match",
+    "workspace.alignment.originalViaLemma": "via lemma",
+    "workspace.alignment.originalViaLemmaTooltip":
+      "Matched through the dictionary form {lemma} rather than the form used in this verse, so it " +
+      "is a weaker guess than a direct match.",
+
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
 
@@ -445,6 +473,17 @@ export const workspace = defineNamespace({
           "with a period. States the cause, not blame.",
         placeholders: {
           count: "How many queued changes were rejected.",
+        },
+      },
+      "workspace.offline.conflictToast": {
+        description:
+          "Title of the toast shown in the Tauri desktop app when one or more " +
+          "translations queued while offline lost to a newer edit from someone " +
+          "else on reconnect (AD-2 head CAS). Paired with a 'Dismiss' action " +
+          "(workspace.offline.conflictDismiss) that clears the whole batch at " +
+          "once. Full sentence with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many translations couldn't sync.",
         },
       },
       "workspace.projectCard.deletedBy": {
@@ -1264,6 +1303,47 @@ export const workspace = defineNamespace({
         placeholders: {
           srcToken: "The source-language word/token — not translated.",
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
+        },
+      },
+      "workspace.alignment.originalHeading": {
+        description:
+          "Heading of the section listing the original-language (biblical Hebrew or " +
+          "Greek) words of the verse being translated, above the statistical " +
+          "alignment links. 'Original language' means the language the scripture " +
+          "was written in, not the project's source text.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalSub": {
+        description:
+          "Muted continuation of workspace.alignment.originalHeading, on the same " +
+          "line. The leading dash joins it to the heading; do not start with a " +
+          "capital. 'Greek/Hebrew' names the two biblical languages.",
+      },
+      "workspace.alignment.originalHelpTooltip": {
+        description:
+          "Tooltip on the help icon beside that heading. 'Dictionary form' is the " +
+          "lemma — the headword an inflected form is listed under; \"Strong's " +
+          "number\" is a standard scripture-word index and stays as-is.",
+      },
+      "workspace.alignment.originalNoMatch": {
+        description:
+          "Shown in place of a target word when the model cannot say which part of " +
+          "the translation renders this original-language word. Lowercase, muted; " +
+          "it is a status, not a heading.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalViaLemma": {
+        description:
+          "Small badge on a row whose target word was found through the word's " +
+          "dictionary form (lemma) rather than the exact form in this verse — a " +
+          "weaker match. Lowercase, very short.",
+        maxLength: 14,
+      },
+      "workspace.alignment.originalViaLemmaTooltip": {
+        description:
+          "Tooltip on that badge, explaining why the match is weaker.",
+        placeholders: {
+          lemma: "The dictionary form of the original-language word — not translated.",
         },
       },
 

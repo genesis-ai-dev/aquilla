@@ -386,6 +386,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "dialog. editor.sync.live is the websocket-connection status indicator in " +
     "the editor's sync badge. A project-linking term of art vs a connectivity " +
     "status word that happen to share the English word 'Live'.",
+  "projectSettings.create.liveModeName":
+    "The emphasized mode word spliced into projectSettings.create.liveIntro's " +
+    "running sentence as a <strong> placeholder ('…a live copy that stays " +
+    "connected…'), so it must take whatever case, gender or article agreement " +
+    "that sentence demands in the target language. editor.sync.live is the " +
+    "standalone websocket-status chip label beside a colored dot, and " +
+    "projectSettings.sourceLink.modeLive is the citation-form badge/radio name " +
+    "of the link mode. A word inside a sentence vs two standalone labels.",
   "projectSettings.section.languages":
     "Card heading for this project's target-language lanes. fileDetails.languages " +
     "is a plain data label in a file-info panel naming which languages a file " +

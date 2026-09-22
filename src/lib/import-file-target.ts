@@ -189,7 +189,7 @@ const CUE_MATCH_TOLERANCE_MS = 500
  *  row whose `ref` is a cue timecode range (`00:01:03.208 --> 00:01:03.667`,
  *  which is how the VTT target import labels its rows) carries its timings
  *  there, so recover them rather than requiring every caller to restate them. */
-function rowTimingMs(row: TargetRow): { startMs: number; endMs: number } | null {
+function rowTimingMs(row: TargetRow): Timing | null {
   if (row.startMs !== undefined && row.endMs !== undefined) {
     return { startMs: row.startMs, endMs: row.endMs }
   }
@@ -198,9 +198,113 @@ function rowTimingMs(row: TargetRow): { startMs: number; endMs: number } | null 
   return { startMs: Math.round(range.start * 1000), endMs: Math.round(range.end * 1000) }
 }
 
-function cellTimingMs(cell: FileTargetCellRef): { startMs: number; endMs: number } | null {
+function cellTimingMs(cell: FileTargetCellRef): Timing | null {
   if (cell.startMs === undefined || cell.endMs === undefined) return null
   return { startMs: cell.startMs, endMs: cell.endMs }
+}
+
+/** A cue's or a line's time range, in milliseconds. */
+interface Timing {
+  startMs: number
+  endMs: number
+}
+
+/** An incoming row that carries a usable time range. `index` is its position
+ *  in the incoming file, which is the display order and the final tie-break. */
+interface TimedRow {
+  row: TargetRow
+  index: number
+  timing: Timing
+}
+
+/** An open-file line that carries a time range. `index` is its display order. */
+interface TimedCell {
+  cell: FileTargetCellRef
+  index: number
+  timing: Timing
+}
+
+interface Candidate {
+  rowAt: number
+  cellAt: number
+  /** Milliseconds the two ranges share; 0 for a pair that only sits within tolerance. */
+  overlap: number
+  /** Milliseconds between two ranges that don't touch; 0 when they overlap. */
+  gap: number
+}
+
+/** What the greedy overlap pass decided, kept so the review checks can ask HOW
+ *  each pairing came about (AQU-1360) — who a row lost its best line to, how
+ *  much overlap a pairing actually has — without running the match twice. */
+interface OverlapAssignment {
+  rows: TimedRow[]
+  /** Start-ordered. */
+  cells: TimedCell[]
+  /** Every candidate pair, in the order the greedy pass considered them. */
+  candidates: Candidate[]
+  cellForRow: Map<number, number>
+  rowForCell: Map<number, number>
+  /** The overlap each assigned row won its line with (0 = a gap-only pairing). */
+  overlapForRow: Map<number, number>
+}
+
+function timedCellsOf(cells: FileTargetCellRef[]): TimedCell[] {
+  return cells
+    .map((cell, index) => ({ cell, index, timing: cellTimingMs(cell) }))
+    .filter((c): c is TimedCell => c.timing !== null)
+    // Start-ordered so a row can stop scanning at the first cell that begins
+    // beyond its reach. Incoming cues are NOT reliably time-ordered (real
+    // partner files carry out-of-order timestamps), so each row rescans from
+    // the front rather than advancing a shared pointer — quadratic in
+    // principle, but on the ~500-cue episode files this exists for that is a
+    // few hundred thousand integer comparisons.
+    .sort((a, b) => a.timing.startMs - b.timing.startMs || a.index - b.index)
+}
+
+/** The AQU-1143 assignment: every row/line pair within tolerance becomes a
+ *  candidate, ranked by overlap (largest first, then smallest gap), and taken
+ *  greedily — each row and each line used at most once. */
+function assignByOverlap(rows: TimedRow[], cells: TimedCell[]): OverlapAssignment {
+  const candidates: Candidate[] = []
+
+  for (let r = 0; r < rows.length; r++) {
+    const timing = rows[r].timing
+    for (let c = 0; c < cells.length; c++) {
+      const cellTiming = cells[c].timing
+      // Cells are start-sorted: once one begins after this row's reach, so
+      // does every cell after it.
+      if (cellTiming.startMs > timing.endMs + CUE_MATCH_TOLERANCE_MS) break
+      if (cellTiming.endMs < timing.startMs - CUE_MATCH_TOLERANCE_MS) continue
+      const overlap =
+        Math.min(timing.endMs, cellTiming.endMs) - Math.max(timing.startMs, cellTiming.startMs)
+      // Disjoint ranges have a negative "overlap" — that magnitude is the gap
+      // between them, which tolerance is measured against.
+      const gap = overlap < 0 ? -overlap : 0
+      if (overlap <= 0 && gap > CUE_MATCH_TOLERANCE_MS) continue
+      candidates.push({ rowAt: r, cellAt: c, overlap: Math.max(overlap, 0), gap })
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      b.overlap - a.overlap ||
+      a.gap - b.gap ||
+      // Deterministic on exact ties (identical grids): keep document order.
+      rows[a.rowAt].index - rows[b.rowAt].index ||
+      cells[a.cellAt].index - cells[b.cellAt].index,
+  )
+
+  const cellForRow = new Map<number, number>()
+  const rowForCell = new Map<number, number>()
+  const overlapForRow = new Map<number, number>()
+  for (const candidate of candidates) {
+    if (cellForRow.has(candidate.rowAt) || rowForCell.has(candidate.cellAt)) continue
+    cellForRow.set(candidate.rowAt, candidate.cellAt)
+    rowForCell.set(candidate.cellAt, candidate.rowAt)
+    overlapForRow.set(candidate.rowAt, candidate.overlap)
+  }
+
+  return { rows, cells, candidates, cellForRow, rowForCell, overlapForRow }
 }
 
 /** Raw positional matching: data row N → file cell N. Empty rows keep their
@@ -263,74 +367,33 @@ export function matchTargetRowsByOverlap(
 ): FileTargetMatchResult {
   // Rows carrying no text can't commit anything, and must not hold a cell
   // hostage — a blank incoming cue never clears an existing translation.
-  const timedRows = rows
-    .map((row, index) => ({ row, index, timing: rowTimingMs(row) }))
-    .filter((r) => r.row.text.trim().length > 0)
+  const incoming = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.text.trim().length > 0)
 
-  const timedCells = cells
-    .map((cell, index) => ({ cell, index, timing: cellTimingMs(cell) }))
-    .filter((c): c is { cell: FileTargetCellRef; index: number; timing: { startMs: number; endMs: number } } =>
-      c.timing !== null,
-    )
-    // Start-ordered so a row can stop scanning at the first cell that begins
-    // beyond its reach. Incoming cues are NOT reliably time-ordered (real
-    // partner files carry out-of-order timestamps), so each row rescans from
-    // the front rather than advancing a shared pointer — quadratic in
-    // principle, but on the ~500-cue episode files this exists for that is a
-    // few hundred thousand integer comparisons.
-    .sort((a, b) => a.timing.startMs - b.timing.startMs || a.index - b.index)
-
-  type Candidate = { rowAt: number; cellAt: number; overlap: number; gap: number }
-  const candidates: Candidate[] = []
-
-  for (let r = 0; r < timedRows.length; r++) {
-    const timing = timedRows[r].timing
+  const timedRows: TimedRow[] = []
+  const timedAt = new Map<number, number>() // incoming index → position in timedRows
+  for (const { row, index } of incoming) {
+    const timing = rowTimingMs(row)
     if (!timing) continue
-    for (let c = 0; c < timedCells.length; c++) {
-      const cellTiming = timedCells[c].timing
-      // Cells are start-sorted: once one begins after this row's reach, so
-      // does every cell after it.
-      if (cellTiming.startMs > timing.endMs + CUE_MATCH_TOLERANCE_MS) break
-      if (cellTiming.endMs < timing.startMs - CUE_MATCH_TOLERANCE_MS) continue
-      const overlap =
-        Math.min(timing.endMs, cellTiming.endMs) - Math.max(timing.startMs, cellTiming.startMs)
-      // Disjoint ranges have a negative "overlap" — that magnitude is the gap
-      // between them, which tolerance is measured against.
-      const gap = overlap < 0 ? -overlap : 0
-      if (overlap <= 0 && gap > CUE_MATCH_TOLERANCE_MS) continue
-      candidates.push({ rowAt: r, cellAt: c, overlap: Math.max(overlap, 0), gap })
-    }
+    timedAt.set(index, timedRows.length)
+    timedRows.push({ row, index, timing })
   }
 
-  candidates.sort(
-    (a, b) =>
-      b.overlap - a.overlap ||
-      a.gap - b.gap ||
-      // Deterministic on exact ties (identical grids): keep document order.
-      timedRows[a.rowAt].index - timedRows[b.rowAt].index ||
-      timedCells[a.cellAt].index - timedCells[b.cellAt].index,
-  )
-
-  const cellForRow = new Map<number, number>()
-  const takenCells = new Set<number>()
-  for (const candidate of candidates) {
-    if (cellForRow.has(candidate.rowAt) || takenCells.has(candidate.cellAt)) continue
-    cellForRow.set(candidate.rowAt, candidate.cellAt)
-    takenCells.add(candidate.cellAt)
-  }
+  const assignment = assignByOverlap(timedRows, timedCellsOf(cells))
 
   const matched: FileTargetMatchedCell[] = []
   const orphans: { ref: string; text: string }[] = []
 
   // Emit in incoming-file order so the review list reads like the user's file.
-  for (let r = 0; r < timedRows.length; r++) {
-    const { row, index } = timedRows[r]
-    const cellAt = cellForRow.get(r)
+  for (const { row, index } of incoming) {
+    const at = timedAt.get(index)
+    const cellAt = at === undefined ? undefined : assignment.cellForRow.get(at)
     if (cellAt === undefined) {
       orphans.push({ ref: row.ref ?? `Row ${index + 1}`, text: row.text })
       continue
     }
-    const cell = timedCells[cellAt].cell
+    const cell = assignment.cells[cellAt].cell
     // The cue's timecode is the only meaningful label a VTT row has — a
     // cue-sourced cell's `canonicalRef` is an opaque group id.
     matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`))

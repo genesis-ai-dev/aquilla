@@ -928,6 +928,8 @@ export async function handleEventsWriteRequest(
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
   const validateTakes = new Map<string, TakeKey>()
+  /** Takes attached earlier in THIS request, by author. */
+  const batchTakeAuthors = new Map<string, string>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -977,6 +979,19 @@ export async function handleEventsWriteRequest(
         validateTakes.set(`${key}\u0000${audioId}`, {
           projectId: e.projectId, fileId: e.fileId, cellId: e.cellId, audioId,
         })
+      }
+    }
+    // AQU-490: who attaches a take IN THIS BATCH. The prefetch below reads
+    // cell_audio, which cannot know about a row this same request is about to
+    // create — and that is exactly the recorder's own save: the modal enqueues
+    // the attach and its auto-validation back to back with no server ack
+    // between them, and the flusher posts them together. So the self-
+    // validation gate was a no-op on the one path it exists to guard.
+    // (Adversarial review, 2026-09-22.)
+    if (e.kind === 'cell.audio.attach') {
+      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
+      if (typeof audioId === 'string' && audioId && e.author) {
+        batchTakeAuthors.set(`${key}\u0000${audioId}`, e.author)
       }
     }
   }
@@ -1556,9 +1571,12 @@ export async function handleEventsWriteRequest(
         if (allowSelf === false && rawEvent.fileId && rawEvent.cellId) {
           const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
           if (typeof audioId === 'string' && audioId) {
-            const recorder = takeRecorders.get(
-              takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId),
-            )
+            const takeKey = takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId)
+            // The stored recorder, or — for a take this very batch is
+            // attaching — the author of that attach. Without the fallback the
+            // check silently passes for every fresh recording, which is the
+            // only case that reliably reaches it.
+            const recorder = takeRecorders.get(takeKey) ?? batchTakeAuthors.get(takeKey)
             if (recorder != null && recorder === callerUsername) {
               rejected.push({
                 id: rawEvent.id ?? '(unknown)',

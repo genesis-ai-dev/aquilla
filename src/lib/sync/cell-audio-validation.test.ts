@@ -67,6 +67,17 @@ describe("cellAudioVotes", () => {
     expect(cellAudioVotes(e)).toBe(1)
   })
 
+  // One take under two slots must count ONCE. No producer does that today,
+  // but the overlay that moves a take between slots does not clear the old
+  // one, and a doubled take doubles the fraction's denominator and emits the
+  // same vote twice (adversarial review, 2026-09-22).
+  it("counts a take once even if two slots point at it", () => {
+    const t = take({ audioId: "a1", validatorCount: 1, validators: ["ana"] })
+    const e = entry([t], { recording: "a1", "track-2": "a1" })
+    expect(selectedDubTakes(e).map((x) => x.audioId)).toEqual(["a1"])
+    expect(cellAudioVotes(e)).toBe(1)
+  })
+
   it("still takes the weakest track when an added track is in play", () => {
     const rec = take({ audioId: "a1", validatorCount: 2 })
     const gen = take({ audioId: "a2", slot: "generatedVoice", voiceId: "preset-narrator", validatorCount: 5 })

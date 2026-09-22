@@ -5,6 +5,7 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import { orgPathContribution } from "../../../db/shared/project-roles"
+import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1465,8 +1466,17 @@ const portfolioCtes = (orgPredicate: string) => `
        -- file, so counting it made audio-first-test read as fully recorded with
        -- 52.9 hours of work done — one clip's duration multiplied across 508
        -- cells — when almost nothing had been dubbed.
+       -- ONE TAKE PER TRACK. The third of three readers of this definition,
+       -- and the last to get the rule: a generated voice left selected beside
+       -- a real recording is silent, so nobody can judge it, and counting it
+       -- held whole projects' tiles below the board's own number (adversarial
+       -- review, 2026-09-22). The recorded-milliseconds sum below deliberately
+       -- keeps every selected dub take: that is hours of audio present, not
+       -- hours left to judge.
        SELECT a.project_id, a.file_id, a.cell_id,
-              MIN(a.validator_count) AS dub_votes,
+              MIN(a.validator_count) FILTER (
+                WHERE ${takeSoundsOnItsTrackSql('a')}
+              ) AS dub_votes,
               SUM(a.duration_ms) AS recorded_ms,
               BOOL_OR(sc.cell_id IS NOT NULL) AS structural
          FROM cell_audio a

@@ -292,3 +292,69 @@ describe("the validator list", () => {
     expect(await screen.findByText(/nobody has validated this take/i)).toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// What an adversarial review found (2026-09-22)
+// ---------------------------------------------------------------------------
+
+describe("the picture and the words agree in every state", () => {
+  // The icon answers "how validated is this LINE"; the label used to answer
+  // "what have I done", a different question. So a line two other people had
+  // finished drew a green double check and announced "not validated".
+  it("a line others have fully validated reads as validated, not as untouched", () => {
+    draw([take({ audioId: "a", validatorCount: 2, validators: ["bo", "cy"] })], { validationRequirement: 2 })
+    expect(button()).toHaveAccessibleName(/^Audio validated/i)
+  })
+
+  it("a line one other person has validated says so, rather than nothing", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
+    expect(button()).toHaveAccessibleName(/someone else has validated/i)
+  })
+
+  // I have given every vote I am allowed to give; one take is blocked for me.
+  // The old label fell through to "not validated — click to validate" and
+  // pointed a screen reader at a button with nothing left to do.
+  it("states the line is unvalidated but does not invite a click it cannot honour", () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "b", slot: "track-2", canValidate: false, blockedReason: "You recorded this" }),
+    ], { validationRequirement: 2 })
+    // The line IS unvalidated — that much is true and worth saying. What must
+    // not appear is "Click to validate" over a button with nothing to give.
+    expect(button()).toHaveAccessibleName(/not validated/i)
+    expect(button()).not.toHaveAccessibleName(/click to validate/i)
+  })
+})
+
+describe("the optimistic vote retires when the server answers", () => {
+  // THE BUG: the guess was never deleted, only ignored while the server
+  // disagreed. Validate here, withdraw somewhere else, and the moment the
+  // server came back to where it started the guess re-armed and painted the
+  // vote back on — permanently, until the row recycled.
+  it("does not resurrect a vote that was withdrawn from another surface", async () => {
+    const onValidationChange = vi.fn().mockResolvedValue(undefined)
+    const takes = [take({ audioId: "a" })]
+    const { rerender } = render(
+      <I18nProvider>
+        <AudioValidationControl cellRef="GEN 1:1" takes={takes} currentUsername="ana"
+          validationRequirement={1} canValidate onValidationChange={onValidationChange} />
+      </I18nProvider>,
+    )
+    await userEvent.click(button()!)
+    expect(button()).toHaveAccessibleName(/Audio validated/i)
+
+    const withMine = [take({ audioId: "a", validatorCount: 1, validators: ["ana"] })]
+    const draw2 = (list: AudioValidationTake[]) => rerender(
+      <I18nProvider>
+        <AudioValidationControl cellRef="GEN 1:1" takes={list} currentUsername="ana"
+          validationRequirement={1} canValidate onValidationChange={onValidationChange} />
+      </I18nProvider>,
+    )
+    // the server confirms my vote…
+    draw2(withMine)
+    expect(button()).toHaveAccessibleName(/Audio validated/i)
+    // …then somewhere else I withdraw it, and the server says so.
+    draw2([take({ audioId: "a" })])
+    expect(button()).toHaveAccessibleName(/not validated/i)
+  })
+})

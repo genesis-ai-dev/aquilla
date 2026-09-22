@@ -1,4 +1,5 @@
 import { verifyTokenForProject } from '../auth'
+import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { walkAnchorChain } from './cells-read-route'
 
@@ -384,9 +385,16 @@ function liveTakeSql(
                      AND a.cell_id = ${cellExpr} AND a.deleted = 0
                      AND a.selected = 1 AND a.role = 'dub'`
   if (!signed) return `EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})`
+  // ONE TAKE PER TRACK, the same rule AUDIO_CTE_SQL applies — and this is the
+  // second of three readers that did not have it. A leftover generated voice
+  // beside a real recording is silent, so nobody can judge it; counting it
+  // here kept sending "go to the next unsigned recording" to lines the board
+  // already called finished, which is the exact disagreement this function's
+  // docstring warns about. Found by an adversarial review, 2026-09-22.
   return `(EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})
            AND NOT EXISTS (SELECT 1 FROM cell_audio a
                             WHERE ${dubTake}
+                              AND ${takeSoundsOnItsTrackSql('a')}
                               AND a.validator_count < ${Math.max(1, Math.floor(threshold))}))`
 }
 

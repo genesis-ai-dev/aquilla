@@ -1,4 +1,4 @@
-import { useMemo, useState, type SyntheticEvent } from "react"
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -84,6 +84,25 @@ export function AudioValidationControl({
    * third was still in flight.
    */
   const [pending, setPending] = useState<Record<string, { value: boolean; atRequest: boolean }>>({})
+
+  // Retire a guess the moment the server's answer for that take has MOVED
+  // from what it was when we asked. Leaving it in the map — which is what
+  // this did — meant a later state that happened to match `atRequest` again
+  // re-armed it: validate here, then withdraw from the Recording tab, and
+  // the gutter painted the vote back on and kept it until the row recycled.
+  // (Adversarial review, 2026-09-22.)
+  useEffect(() => {
+    const stale = takes.filter((take) => {
+      const guess = pending[take.audioId]
+      return guess && guess.atRequest !== take.validators.includes(currentUsername)
+    })
+    if (stale.length === 0) return
+    setPending((current) => {
+      const next = { ...current }
+      for (const take of stale) delete next[take.audioId]
+      return next
+    })
+  }, [takes, pending, currentUsername])
 
   const displayed = useMemo(() => takes.map((take) => {
     const guess = pending[take.audioId]
@@ -187,17 +206,35 @@ export function AudioValidationControl({
     (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
     0,
   )
-  const ariaLabel = allMine && shortBy > 0
-    ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
-    : allMine
-    ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
-    : showFraction
-      ? t("editor.audioValidation.ariaPartlyValidated", {
-          done: mineDone, total: displayed.length, ref: cellRef,
-        })
-      : t("editor.audioValidation.ariaNotValidated", { ref: cellRef })
-
   const clickable = mineToGive.length > 0
+
+  // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
+  // come from `allMine`, a different question — so a line two other people
+  // had fully validated drew a green double check and announced "Audio not
+  // validated, click to validate", and a line where I had just signed off the
+  // last take I was allowed to touch said the same. Four such disagreements
+  // were reachable (adversarial review, 2026-09-22); deriving both from one
+  // value is what stops a fifth.
+  const ariaLabel = state === "full"
+    ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
+    : state === "self"
+      ? (shortBy > 0
+          ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
+          : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
+      : showFraction
+        ? t("editor.audioValidation.ariaPartlyValidated", {
+            done: mineDone, total: displayed.length, ref: cellRef,
+          })
+        : state === "others"
+          ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
+          // "Click to validate" only when a click would DO something. A line
+          // whose remaining takes are all blocked for me — my own recording
+          // on a project that forbids self-validation, say — used to point a
+          // screen reader at a dead button.
+          : clickable
+            ? t("editor.audioValidation.ariaNotValidated", { ref: cellRef })
+            : t("editor.audioValidation.ariaNotValidatedByYou", { ref: cellRef })
+
   const trackLabel = (take: AudioValidationTake) =>
     take.label
     ?? (take.isGenerated
@@ -313,7 +350,15 @@ export function AudioValidationControl({
                           {validator}
                           {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
                         </span>
-                        {validator === currentUsername && take.canValidate && (
+                        {/* Withdrawing is NOT gated on `canValidate`. That
+                            flag is false for a take you recorded yourself on
+                            a project that forbids self-validation — right for
+                            casting a vote, wrong for taking one back. The
+                            recorder auto-validates a fresh take, so flipping
+                            that setting afterwards used to strand the vote
+                            with no way to remove it here. The bulk predicate
+                            already refuses this gate for the same reason. */}
+                        {validator === currentUsername && (
                           <AppTooltip content={t("editor.validation.removeYours")}>
                             <button
                               type="button"

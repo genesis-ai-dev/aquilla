@@ -1284,6 +1284,11 @@ export const editor = defineNamespace({
     "editor.audioValidation.ariaPartlyValidated":
       "You have validated {done} of {total} takes — {ref}. Click to validate the rest.",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
+    "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
+    "editor.audioValidation.ariaOthersValidated": plural({
+      one: "Someone else has validated this audio — {ref}. {count} more validator needed.",
+      other: "Someone else has validated this audio — {ref}. {count} more validators needed.",
+    }),
     "editor.audioValidation.ariaYoursMoreNeeded": plural({
       one: "You have validated this audio — {ref}. {count} more validator needed.",
       other: "You have validated this audio — {ref}. {count} more validators needed.",
@@ -4667,6 +4672,24 @@ export const editor = defineNamespace({
           done: "How many of the line's takes have reached the required number of validators.",
           total: "How many takes the line has, one per track.",
           ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaNotValidatedByYou": {
+        description:
+          "Screen-reader name when the line's audio is not validated and the "
+          + "reader cannot validate what is left — their own recording on a "
+          + "project that forbids self-validation, for instance. Same words as "
+          + "the clickable version minus the invitation to click.",
+        placeholders: { ref: "The line's reference, e.g. GEN 1:1." },
+      },
+      "editor.audioValidation.ariaOthersValidated": {
+        description:
+          "Screen-reader name when somebody ELSE has validated this line's "
+          + "audio but the project needs more validators and the reader is not "
+          + "one of them yet. Matches the filled-mic icon.",
+        placeholders: {
+          ref: "The line's reference, e.g. GEN 1:1.",
+          count: "How many more validators the project still needs.",
         },
       },
       "editor.audioValidation.ariaNotValidated": {

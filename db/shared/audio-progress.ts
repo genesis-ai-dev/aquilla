@@ -48,20 +48,43 @@
  *
  * Reads through idx_cell_audio_file, the partial index on deleted = 0.
  */
+/**
+ * Does this take SOUND on its track? Written once, used by every reader of
+ * "how validated is this cell's audio", because there turned out to be three
+ * of them and only one had the rule.
+ *
+ * Only the default track can hold two takes at once — it owns both the
+ * `recording` and `generatedVoice` slots — and `resolveTargetAudio` plays the
+ * recording when there is one. So a generated voice is silenced exactly when
+ * a recorded dub sits beside it, and that is the whole rule; every added
+ * track owns one slot and the projection already keeps one selected take per
+ * (cell, slot).
+ *
+ * This replaced a ROW_NUMBER partitioned on a `'target-audio'` sentinel. The
+ * sentinel was not safe: `cell_audio.slot` is unconstrained TEXT and 9,568
+ * rows on this machine's dev database literally hold `slot = 'target-audio'`,
+ * so a cell carrying one of those beside a `recording` take would have put
+ * two real tracks in one partition and dropped a whole track's votes out of
+ * the minimum. Not reachable through the shipping client, which quarantines
+ * a track id spelling a legacy slot name — but "cannot happen" reasoning
+ * about slot names has already been wrong here once, and this form needs no
+ * sentinel at all.
+ */
+export function takeSoundsOnItsTrackSql(alias: string): string {
+  return `NOT (${alias}.slot = 'generatedVoice' AND EXISTS (
+              SELECT 1 FROM cell_audio sib
+               WHERE sib.project_id = ${alias}.project_id
+                 AND sib.file_id = ${alias}.file_id
+                 AND sib.cell_id = ${alias}.cell_id
+                 AND sib.deleted = 0 AND sib.selected = 1
+                 AND sib.role = 'dub' AND sib.slot = 'recording'))`
+}
+
 export const AUDIO_CTE_SQL = `SELECT ca.cell_id,
-            MAX(CASE WHEN ca.qualifies = 1 THEN 1 ELSE 0 END) AS has_dub,
-            MIN(CASE WHEN ca.qualifies = 1 AND ca.track_rank = 1 THEN ca.validator_count END) AS dub_votes
-       FROM (SELECT cell_id,
-                    validator_count,
-                    CASE WHEN selected = 1 AND role = 'dub' THEN 1 ELSE 0 END AS qualifies,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY cell_id,
-                                   CASE WHEN slot IN ('recording', 'generatedVoice')
-                                        THEN 'target-audio' ELSE slot END
-                      ORDER BY CASE WHEN selected = 1 AND role = 'dub' THEN 0 ELSE 1 END,
-                               CASE WHEN slot = 'generatedVoice' THEN 1 ELSE 0 END,
-                               audio_id
-                    ) AS track_rank
-               FROM cell_audio
-              WHERE project_id = ? AND file_id = ? AND deleted = 0) ca
+            MAX(CASE WHEN ca.selected = 1 AND ca.role = 'dub' THEN 1 ELSE 0 END) AS has_dub,
+            MIN(CASE WHEN ca.selected = 1 AND ca.role = 'dub'
+                          AND ${takeSoundsOnItsTrackSql('ca')}
+                     THEN ca.validator_count END) AS dub_votes
+       FROM cell_audio ca
+      WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
       GROUP BY ca.cell_id`

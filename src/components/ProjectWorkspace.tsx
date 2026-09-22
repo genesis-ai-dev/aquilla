@@ -8590,10 +8590,19 @@ export function ProjectWorkspace() {
       // The UNGATED map: this action runs from the text lens, where the
       // workspace-wide one is empty by design, and reading that one here is
       // why the run found nothing to do (AQU-490, 2026-09-21).
-      const cells = mergeCellsWithAudio(getActiveCells(), audioValidationByCellId)
+      // THE CUE SIBLING, exactly as the count above already does. On a file
+      // with an audio-cue sibling the takes live on the heard lines, not the
+      // subtitle rows, so the menu counted takes on one set of cells and the
+      // run iterated the other — promising "validate N recordings" and then
+      // returning silently with nothing done. runTranscribeAll documents
+      // having shipped this same failure once already (adversarial review,
+      // 2026-09-22). No `activeFileId` filter either: the cells the takes are
+      // on belong to the sibling file, and `commitAudioValidation` takes a
+      // set of files precisely for that.
+      const cells = audioCueCells
+        ?? mergeCellsWithAudio(getActiveCells(), audioValidationByCellId)
       const targets: Array<{ fileId: string; cellId: string; audioId: string }> = []
       for (const cell of cells) {
-        if (cell.fileId !== activeFileId) continue
         if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue
         for (const take of audioValidationTakes(
           audioEntryFromCell(cell),
@@ -8741,7 +8750,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, t])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —

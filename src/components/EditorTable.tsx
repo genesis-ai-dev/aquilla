@@ -6344,7 +6344,12 @@ function EditorRow({
       takes={audioValidationTakeList}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
-      canValidate={canValidate}
+      // Scope-narrowed, like the text control beside it. The project-wide
+      // answer alone left the mic live on a cell outside the reader's
+      // assignment: the tooltip invited a click, and the handler then refused
+      // it with a console warning and no explanation (adversarial review,
+      // 2026-09-22).
+      canValidate={canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)}
       onValidationChange={emitAudioValidationChange}
     />
   )

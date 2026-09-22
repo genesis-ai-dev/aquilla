@@ -467,6 +467,53 @@ describe('cell.audio.validate — audio validation config', () => {
     expect(body.rejected[0].reason).toMatch(/validating your own recording/)
   })
 
+  // THE BATCH CASE, and the one that matters most: the recorder's own save.
+  // The modal enqueues the attach and its auto-validation back to back with
+  // no server ack between them, and the flusher posts them in ONE request.
+  // The gate read cell_audio in a pre-pass, where a row this same request is
+  // about to create cannot exist — so it silently passed on the single path
+  // it exists to guard (adversarial review, 2026-09-22).
+  it('rejects self-validation of a take attached in the SAME request', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const attach: RawEvent = {
+      id: 'evt-attach-batch', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'bob', payload: { audioId: 'fresh-1', url: 'frontier-audio://fresh-1.webm', slot: 'recording' },
+      clientTs: 199,
+    } as RawEvent
+    const res = await handleEventsWriteRequest(
+      await makeRequest([attach, makeAudioValidateEvent('evt-av-batch', 'bob', 'fresh-1')], await makeToken(400, 'bob')),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    const ids = (body.rejected ?? []).map((r: { id: string }) => r.id)
+    expect(ids).toContain('evt-av-batch')
+    // The attach itself is legitimate — only the vote on it is refused.
+    expect(ids).not.toContain('evt-attach-batch')
+  })
+
+  it('still lets somebody ELSE validate a take attached in the same request', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const attach: RawEvent = {
+      id: 'evt-attach-batch2', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'bob', payload: { audioId: 'fresh-2', url: 'frontier-audio://fresh-2.webm', slot: 'recording' },
+      clientTs: 199,
+    } as RawEvent
+    const res = await handleEventsWriteRequest(
+      await makeRequest([attach, makeAudioValidateEvent('evt-av-batch2', 'carol', 'fresh-2')], await makeToken(400, 'carol')),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    expect((body.rejected ?? []).map((r: { id: string }) => r.id)).not.toContain('evt-av-batch2')
+  })
+
   it('still lets somebody else validate that take', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
@@ -575,4 +622,5 @@ describe('cell.audio.unvalidate — removing somebody else’s vote', () => {
     )
     expect(body.rejected).toHaveLength(0)
   })
+
 })

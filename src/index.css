@@ -317,12 +317,20 @@
        move the viewport — `overflow` on the root propagates to the viewport,
        where `hidden` permits programmatic scrolling and `clip` is not
        propagated at all, so neither keyword closes that door. Worth knowing
-       if a future `scrollIntoView` ever strands the frame. */
-    overflow: hidden;
+       if a future `scrollIntoView` ever strands the frame.
+
+       SCOPED to `html[data-app-frame]`, which AppShell sets while mounted.
+       The blanket version of this rule broke every page rendered OUTSIDE the
+       frame: /privacy-policy is a 3,400px document in the body, and two
+       thirds of it — its analytics opt-out included — became unreachable. */
   }
   html {
     @apply font-sans;
     overscroll-behavior: none;
+  }
+  /* The frame's no-scroll rule, only while the frame is on screen. */
+  html[data-app-frame],
+  html[data-app-frame] body {
     overflow: hidden;
   }
   html.dark {

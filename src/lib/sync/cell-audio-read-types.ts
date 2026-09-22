@@ -159,11 +159,24 @@ export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
   }
 
   const out: AudioAttachmentOut[] = []
+  // Keyed by audioId, because the same take appearing under two slots would
+  // otherwise be counted twice: the fraction's denominator would double, a
+  // click would emit the same vote twice, and the popover would render a
+  // duplicate key. No producer does that today — the server keeps one
+  // selection per slot — but the optimistic overlay writes a take's new slot
+  // without clearing its old one, which is one slot-move away from it
+  // (adversarial review, 2026-09-22).
+  const seen = new Set<string>()
+  const push = (att: AudioAttachmentOut) => {
+    if (seen.has(att.audioId)) return
+    seen.add(att.audioId)
+    out.push(att)
+  }
   for (const slot of Object.keys(selections)) {
     // The two default-track slots are handled together below.
     if (slot === RECORDING_SLOT || slot === GENERATED_VOICE_SLOT) continue
     const att = dubAt(slot)
-    if (att) out.push(att)
+    if (att) push(att)
   }
 
   // ONE TAKE PER TRACK, and the default track is the only one that needs
@@ -176,7 +189,7 @@ export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
   // (2026-09-21). This is that resolution restated over the read shape, which
   // is what keeps the two from drifting.
   const defaultTrack = dubAt(RECORDING_SLOT) ?? dubAt(GENERATED_VOICE_SLOT)
-  if (defaultTrack) out.push(defaultTrack)
+  if (defaultTrack) push(defaultTrack)
   return out
 }
 

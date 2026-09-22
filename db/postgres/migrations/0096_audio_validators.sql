@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS cell_audio_validators (
 CREATE INDEX IF NOT EXISTS idx_cell_audio_validators_user
     ON cell_audio_validators(project_id, username);
 
+-- THE GRANT COMES FIRST, and a policy is not a substitute for it. 0034 says so
+-- outright — tables are enumerated explicitly "so future migrations opt in
+-- deliberately" — and every table-creating migration since has carried this
+-- line. Without it, FORCE ROW LEVEL SECURITY on a table app_runtime has no
+-- privileges over means "permission denied for table cell_audio_validators"
+-- on every statement that touches it. That is not limited to casting a vote:
+-- the per-file audio read joins this table laterally, so opening ANY file's
+-- audio would 500. Local dev hides it completely — schema.sql carries no RLS
+-- at all — so this would have passed every check here and failed on first
+-- contact with a database that has the 0034 chain applied.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE cell_audio_validators TO app_runtime;
+
 -- Every sibling projection table carries a policy (0034). A new one without
 -- would be readable for every project by app_runtime.
 ALTER TABLE cell_audio_validators ENABLE ROW LEVEL SECURITY;

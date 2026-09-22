@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
+import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -59,6 +59,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { takeState } from "@/components/cell/audio-validation-state"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -129,12 +130,17 @@ export interface TargetAudioLaneProps {
    *  absent = no waveforms, which is what this lane's own tests get. */
   projectId?: string | null
   /**
-   * AQU-490: the project's required validator count for audio. Optional and
-   * defaulting to 1, because this lane renders in its own tests and in the
-   * showcase with no project behind it — and 1 is the product default, so an
-   * omission reads as "validated once" rather than as "never validated".
+   * The project's required number of audio validators, for the chip's tick.
+   *
+   * REQUIRED, deliberately. It was optional with a default of 1, and both of
+   * TimelineEditor's lane sites simply never passed it — so every clip in the
+   * product measured itself against a threshold of one and wore a "fully
+   * validated" tick after a single vote, on projects asking for two. A default
+   * is exactly what let that go unnoticed: the lane looked like it was doing
+   * the comparison, and it was, against the wrong number. Now the compiler
+   * asks every caller.
    */
-  validationRequirementAudio?: number
+  validationRequirementAudio: number
   fileId?: string | null
   session?: FrontierSession | null
   /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
@@ -198,6 +204,7 @@ function TargetAudioChip({
   onTrimTarget,
   onOpenRecording,
   validationRequirementAudio = 1,
+  currentUsername = "",
   peaks,
   preview,
 }: {
@@ -247,6 +254,10 @@ function TargetAudioChip({
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
+  /** Who is looking. Blank is safe — `takeState` never reads a blank name as
+   *  a validator, so an absent session degrades to "not mine", never to a
+   *  false single check. */
+  currentUsername?: string
 }) {
   const t = useT()
   const { cell } = chip.item
@@ -288,11 +299,24 @@ function TargetAudioChip({
   // room for it. The source clip is excluded, so an imported film's own
   // soundtrack never wears a tick.
   const chipTake = cell.attachments?.[chip.item.audioId]
-  const chipValidated = Boolean(
-    chipTake
-    && (chipTake.role ?? "dub") === "dub"
-    && (chipTake.validatorCount ?? 0) >= Math.max(1, validationRequirementAudio),
-  )
+  // AQU-490, corrected 2026-09-22: the SAME state machine the gutter reduces
+  // through, not a boolean. A boolean could only ever mean "done", so a chip
+  // wore a double check the moment ONE person had signed it off — which, at a
+  // threshold of two, told the second person their work was finished before
+  // they had started. Depth instead: your own vote below the threshold is a
+  // single check, a met threshold is a double one, and somebody ELSE's lone
+  // vote is nothing at all. (The gutter draws that last case as a filled mic;
+  // the chip has no idle affordance to fill, so it stays bare.)
+  const chipValidationState = chipTake && (chipTake.role ?? "dub") === "dub"
+    ? takeState(
+        {
+          validatorCount: chipTake.validatorCount ?? 0,
+          validators: chipTake.validators ?? [],
+        },
+        currentUsername,
+        validationRequirementAudio,
+      )
+    : null
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -1020,14 +1044,20 @@ function TargetAudioChip({
           <Mic className="h-2.5 w-2.5" />
         </span>
       )}
-      {chipValidated && (
+      {(chipValidationState === "self" || chipValidationState === "full") && (
         <span
           data-testid={`tl-target-${cell.id}-validated`}
-          title={t("workspace.targetAudioLane.takeValidated")}
-          aria-label={t("workspace.targetAudioLane.takeValidated")}
-          className="pointer-events-none absolute bottom-1 right-2 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/80 text-green-600 shadow-sm ring-1 ring-border dark:text-green-400"
+          title={chipValidationState === "full"
+            ? t("workspace.targetAudioLane.takeValidated")
+            : t("workspace.targetAudioLane.takeValidatedByYou")}
+          aria-label={chipValidationState === "full"
+            ? t("workspace.targetAudioLane.takeValidated")
+            : t("workspace.targetAudioLane.takeValidatedByYou")}
+          className="pointer-events-none absolute bottom-1 right-2 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/80 text-green-500 shadow-sm ring-1 ring-border"
         >
-          <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
+          {chipValidationState === "full"
+            ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
+            : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
         </span>
       )}
       {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
@@ -1106,7 +1136,7 @@ export function TargetAudioLane({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
-  validationRequirementAudio = 1,
+  validationRequirementAudio,
   emptyCells,
   emptySpans,
   onAddLineAndRecord,
@@ -1398,6 +1428,7 @@ export function TargetAudioLane({
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
+            currentUsername={session?.username ?? ""}
             peaks={peaksFor.get(chip.item.audioId)}
             preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
           />

@@ -394,6 +394,7 @@ export const workspace = defineNamespace({
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.takeValidated": "This take is validated",
+    "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -1676,6 +1677,14 @@ export const workspace = defineNamespace({
           + "recording has reached the number of validators the project asks "
           + "for. Read-only — the vote itself is cast in the editor, the "
           + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
+      },
+      "workspace.targetAudioLane.takeValidatedByYou": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip that YOU "
+          + "have validated, on a project that asks for more validators than "
+          + "just you. A single tick rather than a double one, matching the "
+          + "editor's margin: your part is done, the line is not.",
         maxLength: 30,
       },
       "workspace.targetAudioLane.recordAudio": {

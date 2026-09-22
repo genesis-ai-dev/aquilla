@@ -62,6 +62,32 @@ describe("collapsed groups", () => {
     expect([...loadCollapsedGroups("p1")]).toEqual(["done"])
   })
 
+  it("leaves a group an older build never heard of expanded", () => {
+    // The forward half of the filter, and the reason `loadCollapsedGroups`
+    // runs the stored array through `isPlanUnitStatus` in both directions.
+    // AQU-1278 added "nearly_complete" to the middle of PLAN_GROUP_ORDER, and
+    // every fold set written before it — every reader's, on first load of the
+    // new build — can only name the five groups that existed. The new group is
+    // therefore absent, so it loads UNFOLDED: visible is the safe way to be
+    // wrong about a fold, because a reader who sees rows they did not expect
+    // folds them, while a reader who is silently missing rows just concludes
+    // the board is broken. Nothing in the stored set is lost on the way.
+    localStorage.setItem("aquilla:planGroups:p1", JSON.stringify(["overdue", "done"]))
+    const loaded = loadCollapsedGroups("p1")
+    expect([...loaded]).toEqual(["overdue", "done"])
+    expect(loaded.has("nearly_complete")).toBe(false)
+  })
+
+  it("slots a newly added group into canonical order once it is folded", () => {
+    // The other half: an old set is not frozen, it is just missing an entry.
+    // Fold the new group and it persists in PLAN_GROUP_ORDER position — between
+    // the dated groups and Done — rather than being appended where it was
+    // added, which is what makes the upgrade invisible to the reader.
+    localStorage.setItem("aquilla:planGroups:p1", JSON.stringify(["overdue", "done"]))
+    saveCollapsedGroups("p1", toggleCollapsedGroup(loadCollapsedGroups("p1"), "nearly_complete"))
+    expect([...loadCollapsedGroups("p1")]).toEqual(["overdue", "nearly_complete", "done"])
+  })
+
   it("survives a corrupt stored value", () => {
     localStorage.setItem("aquilla:planGroups:p1", "{not json")
     expect(loadCollapsedGroups("p1").size).toBe(0)

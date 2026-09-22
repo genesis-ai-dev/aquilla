@@ -1,5 +1,6 @@
 import { verifyTokenForProject } from '../auth'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
+import { walkAnchorChain } from './cells-read-route'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -20,10 +21,15 @@ interface ProgressRow {
   structural_filled_count?: number | string | null
   structural_validator_histogram?: Record<string, number> | string | null
   revision: number | string | bigint
-  // AQU-1098: written by the projection since 0088. Absent on the synthetic
-  // rows plan-route builds, which carry their own audio numbers.
+  // AQU-1098: written by the projection since 0088. Optional for the same
+  // reason the structural trio is — a caller may build a row by hand.
   audio_count?: number | string | null
   audio_validated_count?: number | string | null
+  // AQU-1278: the structural share of the audio pair (0094), subtracted by the
+  // same policy that subtracts the text one. Absent on a row the backfill has
+  // not reached yet, which reads as nothing to subtract — today's behaviour.
+  structural_audio_count?: number | string | null
+  structural_audio_validated_count?: number | string | null
 }
 
 export interface ProgressCounts {
@@ -56,14 +62,57 @@ export interface SectionProgressDetailResponse {
   revision: number
   validationCount: number
   verses: Array<{
+    /**
+     * AQU-1278: the SOURCE cell's id, so the plan board can deep-link the
+     * editor (?cellId=<id>) at the first outstanding cell of a unit. It has to
+     * come from the source row: the target join is a LEFT JOIN, so `t.cell_id`
+     * is NULL for exactly the untranslated verses the link exists to reach.
+     */
+    cellId: string
     ref: string
     filled: boolean
     validated: boolean
+    /**
+     * AQU-1278, round 5: the verse's own takes, so the chapter card can list the
+     * unrecorded verses the way it lists the unvalidated ones. Own cells only —
+     * a dubbing project's takes live on its cue sheet, and a subtitle file has
+     * no chapter card to draw them on.
+     */
+    recorded: boolean
+    audioValidated: boolean
   }>
+}
+
+/**
+ * The four queues a plan link can point at, in the order the board names them:
+ * text before audio, and within each, the job that unblocks the other first.
+ * Mirrors `planOpenKind` on the client.
+ */
+export const PLAN_OPEN_KINDS = ['untranslated', 'unvalidated', 'unrecorded', 'unsigned'] as const
+export type PlanOpenKind = (typeof PLAN_OPEN_KINDS)[number]
+/**
+ * Everywhere a plan link can land: the four queues, plus `first` — the unit's
+ * first cell in document order, outstanding or not. That one exists for a
+ * BOOK inside a Scripture file (Sam, 2026-09-17): the editor deep-links to a
+ * cell and nothing else, so "open Revelation" can only mean "open the Bible
+ * file at Revelation's first verse", and only the server knows which cell
+ * that is.
+ */
+export const PLAN_LANDING_KINDS = [...PLAN_OPEN_KINDS, 'first'] as const
+export type PlanLandingKind = (typeof PLAN_LANDING_KINDS)[number]
+
+export interface PlanFirstOpenResponse {
+  fileId: string
+  /** The unit's section key: a book code, or '' for a whole file. */
+  unit: string
+  kind: PlanLandingKind
+  /** The SOURCE cell to land on, or null when nothing in the unit is outstanding in that queue. */
+  cellId: string | null
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress$/
 const SECTION_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress\/sections\/([^/]+)$/
+const FIRST_OPEN_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress\/first-open$/
 const MAX_VALIDATION_LEVELS = 15
 const BOOK_ORDER = [
   'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
@@ -117,6 +166,13 @@ export function counts(
   })
   const structuralTotal = countStructural ? 0 : Number(row.structural_count) || 0
   const structuralFilled = countStructural ? 0 : Number(row.structural_filled_count) || 0
+  // AQU-1278: recorded headings leave the audio numbers with the headings
+  // themselves. Before this the policy shrank the denominator and left the
+  // numerator alone, so a book whose chapter headings were voiced reported
+  // more audio than it had cells.
+  const structuralAudio = countStructural ? 0 : Number(row.structural_audio_count) || 0
+  const structuralAudioValidated =
+    countStructural ? 0 : Number(row.structural_audio_validated_count) || 0
   return {
     // Clamped at zero: an un-backfilled row has structural counts of 0, but a
     // partially backfilled one must never report a negative denominator.
@@ -124,17 +180,30 @@ export function counts(
     filledCount: Math.max(0, (Number(row.filled_count) || 0) - structuralFilled),
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
-    audioCount: Number(row.audio_count) || 0,
-    audioValidatedCount: Number(row.audio_validated_count) || 0,
+    audioCount: Math.max(0, (Number(row.audio_count) || 0) - structuralAudio),
+    audioValidatedCount: Math.max(
+      0,
+      (Number(row.audio_validated_count) || 0) - structuralAudioValidated,
+    ),
   }
 }
 
+/**
+ * Book order, then chapter order. A key with no chapter number — a book's
+ * front matter section ("GEN"), or a cell reference the importer shaped as
+ * "GEN:h:1" — belongs to its BOOK and sorts BEFORE chapter 1, which is where
+ * the editor shows it and where the file put it. It used to sort after the
+ * last chapter, and with the whole value taken as the book name, after every
+ * known book: "Go to first untranslated" walked past an untranslated title to
+ * land on 1:1, or found nothing at all.
+ */
 function compareSections(a: string, b: string): number {
   const parse = (value: string) => {
-    const match = /^(\S+)\s+(\d+)/.exec(value.trim())
+    const trimmed = value.trim()
+    const match = /^(\S+)\s+(\d+)/.exec(trimmed)
     return match
       ? { book: match[1].toUpperCase(), chapter: Number(match[2]) }
-      : { book: value.toUpperCase(), chapter: Number.POSITIVE_INFINITY }
+      : { book: (trimmed.split(/[\s:]/)[0] ?? trimmed).toUpperCase(), chapter: -1 }
   }
   const left = parse(a)
   const right = parse(b)
@@ -151,12 +220,24 @@ function compareSections(a: string, b: string): number {
   return left.chapter - right.chapter || a.localeCompare(b)
 }
 
+/**
+ * Document order for cells, as their references describe it. Verses sort by
+ * number inside their chapter. Anything a chapter carries that is NOT a verse
+ * — a heading ("GEN 1:0"), text before the first verse ("GEN 2"), a book's
+ * front matter ("GEN:h:1") — sorts to the FRONT of its chapter or book, not
+ * the back: that is where the file has it and where the editor draws it.
+ * A one-chapter book's "TIT:4" is verse 4 of its only chapter.
+ */
 function compareCanonicalRefs(a: string, b: string): number {
   const parse = (value: string) => {
-    const match = /^(\S+)\s+(\d+):(\d+)(?:-(\d+))?/.exec(value.trim())
+    const match = /^([^\s:]+)(?:\s+(\d+))?:(\d+)(?:-(\d+))?/.exec(value.trim())
     return match
-      ? { section: `${match[1]} ${match[2]}`, verse: Number(match[3]), end: Number(match[4] ?? match[3]) }
-      : { section: value, verse: Number.POSITIVE_INFINITY, end: Number.POSITIVE_INFINITY }
+      ? {
+          section: match[2] != null ? `${match[1]} ${match[2]}` : match[1],
+          verse: Number(match[3]),
+          end: Number(match[4] ?? match[3]),
+        }
+      : { section: value, verse: -1, end: -1 }
   }
   const left = parse(a)
   const right = parse(b)
@@ -180,6 +261,194 @@ export async function readValidationCount(db: AquillaDb, projectId: string): Pro
   }
 }
 
+/**
+ * A cell's chapter key, as the projection derives it: everything before the
+ * ':' of `canonical_ref` ("GEN 12" from "GEN 12:4"), or the whole ref where
+ * there is no ':' (a bare "GEN"), or '' where there is no ref at all.
+ */
+function chapterKeySql(alias: string): string {
+  return `BTRIM(CASE
+                  WHEN POSITION(':' IN COALESCE(${alias}.canonical_ref, '')) > 0
+                    THEN SPLIT_PART(${alias}.canonical_ref, ':', 1)
+                  ELSE COALESCE(${alias}.canonical_ref, '')
+                END)`
+}
+
+/**
+ * Does the cell at (`fileExpr`, `cellExpr`) carry a live take — or, with
+ * `signed`, one that is selected AND approved? The definitions are the
+ * projection's (`AUDIO_CTE_SQL`): a cell HAS audio when any take is live, and
+ * is validated when its selected take is approved. Correlated on `s`, the
+ * source-cell alias every query here uses, for the project id.
+ */
+function liveTakeSql(fileExpr: string, cellExpr: string, signed: boolean): string {
+  return `EXISTS (SELECT 1 FROM cell_audio a
+                   WHERE a.project_id = s.project_id AND a.file_id = ${fileExpr}
+                     AND a.cell_id = ${cellExpr} AND a.deleted = 0${
+                       signed ? ' AND a.selected = 1 AND a.approved = 1' : ''
+                     })`
+}
+
+interface FirstOpenRow {
+  cell_id: string
+  canonical_ref: string | null
+  anchor_cell_id: string | null
+  event_id: string
+  start_ms: number | string | null
+  // The queue-specific columns are selected ONLY for the queue that reads
+  // them — see readFirstOpenCell. Absent means "this kind never asks".
+  target_value?: string
+  endorsement_count?: number | string
+  has_take?: boolean
+  take_signed?: boolean
+  cues_unrecorded?: number | string
+  cues_unsigned?: number | string
+}
+
+/**
+ * The cells of one unit in DOCUMENT ORDER, decided the way the editor decides
+ * it: Scripture by canonical reference, a timed file by its start times, and
+ * anything else by walking the anchor chain. One rule per shape, and the
+ * shape is read off the rows rather than off `files.kind`, which falls back
+ * through `role` to 'codex' and cannot be trusted to say what a file is.
+ */
+function inDocumentOrder<T extends FirstOpenRow>(rows: T[]): T[] {
+  if (rows.some((r) => r.canonical_ref)) {
+    const withRef = rows
+      .filter((r) => r.canonical_ref)
+      .sort((a, b) => compareCanonicalRefs(a.canonical_ref!, b.canonical_ref!))
+    return [...withRef, ...rows.filter((r) => !r.canonical_ref)]
+  }
+  if (rows.some((r) => r.start_ms != null)) {
+    const at = (r: T) => (r.start_ms == null ? Number.POSITIVE_INFINITY : Number(r.start_ms))
+    return [...rows].sort((a, b) => at(a) - at(b))
+  }
+  return walkAnchorChain(rows)
+}
+
+/**
+ * AQU-1278, round 5: the first cell of a unit that is outstanding in one
+ * queue — where "Go to first untranslated / unvalidated / unrecorded /
+ * take to sign off" lands.
+ *
+ * Server-side because only the server can answer it for every shape at once.
+ * The client used to walk a book's chapters and read one chapter's verses,
+ * which worked for Scripture and for nothing else: a Word document has no
+ * chapters to walk and a subtitle file's sections are time buckets nobody
+ * plans by, so on both the link opened the file and stopped. And audio could
+ * never be asked at all — the verse detail carried no take state, and on a
+ * dubbing project the takes are not even on this file.
+ *
+ * `unit` is the unit's section key: '' for a whole file, a book code for a
+ * book inside a Scripture file (its scope is every chapter of that book plus
+ * its bare front-matter key). THE CUE SHEET: where the file has an anchored
+ * `audio-cues` sibling, a subtitle cell is "unrecorded" when a cue it links
+ * to has no live take, and "unsigned" when a linked cue's take is not yet
+ * selected and approved — the link lands on the subtitle cell, which is the
+ * one the editor can open, and the cue is a click away from it. Newest sheet
+ * wins, as everywhere. A subtitle cell with no linked cue has nothing to
+ * record and is never a target.
+ *
+ * The structural policy applies: a heading the project does not count is not
+ * a cell to be sent to.
+ */
+export async function readFirstOpenCell(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  unit: string,
+  kind: PlanLandingKind,
+  lane: string,
+): Promise<string | null> {
+  // EACH QUEUE PAYS ONLY FOR ITS OWN QUESTION. This query walks every source
+  // cell of the unit, so anything computed per row is multiplied by the file:
+  // on a whole Bible that is tens of thousands of rows, and this runs on a
+  // click. The text queues never read the audio columns, the audio queues
+  // never read the target join, and `first` reads neither — so each column
+  // and join below is included only for the queue that asks it. Measured on
+  // the fixture Bible this took the common text-queue click from ~12ms to a
+  // fraction of it; production files are twenty times that size.
+  const wantsText = kind === 'untranslated' || kind === 'unvalidated'
+  const wantsAudio = kind === 'unrecorded' || kind === 'unsigned'
+  const [countStructural, validationCount, sheet] = await Promise.all([
+    readCountStructuralCells(db, projectId),
+    // Only the unvalidated queue compares endorsements against the threshold.
+    kind === 'unvalidated' ? readValidationCount(db, projectId) : Promise.resolve(1),
+    // The cue sheet can only matter to the audio queues, and looking it up IS
+    // the direct test for whether this unit records against one — no need to
+    // guess from the file's kind.
+    wantsAudio
+      ? db.prepare(
+          `SELECT id FROM files
+            WHERE project_id = ? AND anchor_file_id = ? AND role = 'audio-cues' AND deleted_at IS NULL
+            ORDER BY id DESC LIMIT 1`,
+        ).bind(projectId, fileId).first<{ id: string }>()
+      : Promise.resolve(null),
+  ])
+  const sheetId = sheet?.id ?? ''
+  const onSheet = sheetId !== ''
+  const key = chapterKeySql('s')
+  const linkedCues = (predicate: string) =>
+    `(SELECT COUNT(*) FROM cell_links l
+       WHERE l.project_id = s.project_id AND l.kind = 'text-audio' AND l.linked = 1
+         AND l.from_file_id = s.file_id AND l.from_cell_id = s.cell_id AND l.to_file_id = ?
+         AND ${predicate})`
+  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
+  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true)
+
+  const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`]
+  const binds: unknown[] = []
+  if (wantsText) {
+    columns.push(`COALESCE(t.value, '') AS target_value`,
+      `COALESCE(t.endorsement_count, 0) AS endorsement_count`)
+  }
+  if (wantsAudio) {
+    if (onSheet) {
+      // On a cue-linked unit the takes live on the SHEET's cells; the unit's
+      // own take state is meaningless and is not asked for.
+      columns.push(`${linkedCues(`NOT ${cueTake}`)} AS cues_unrecorded`,
+        `${linkedCues(`${cueTake} AND NOT ${cueSigned}`)} AS cues_unsigned`)
+      binds.push(sheetId, sheetId)
+    } else {
+      columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take`,
+        `${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed`)
+    }
+  }
+  const targetJoin = wantsText
+    ? `LEFT JOIN cells t
+         ON t.project_id = s.project_id AND t.file_id = s.file_id
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?`
+    : ''
+  if (wantsText) binds.push(lane)
+  binds.push(projectId, fileId)
+  if (unit) binds.push(unit, `${unit} %`)
+
+  const { results } = await db.prepare(
+    `SELECT ${columns.join(`,
+            `)}
+       FROM cells s
+       ${targetJoin}
+      WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+        ${unit ? `AND (${key} = ? OR ${key} LIKE ?)` : ''}
+        ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
+  ).bind(...binds).all<FirstOpenRow>()
+
+  const outstanding = (r: FirstOpenRow): boolean => {
+    const filled = (r.target_value ?? '').trim().length > 0
+    switch (kind) {
+      case 'untranslated': return !filled
+      case 'unvalidated': return filled && Number(r.endorsement_count ?? 0) < validationCount
+      case 'unrecorded': return onSheet ? Number(r.cues_unrecorded ?? 0) > 0 : !r.has_take
+      case 'unsigned': return onSheet ? Number(r.cues_unsigned ?? 0) > 0 : r.has_take === true && !r.take_signed
+      // The unit's first cell, whatever its state — still in document order,
+      // still under the structural policy, so a book opens at its first
+      // COUNTED cell and not on a heading the project does not count.
+      case 'first': return true
+    }
+  }
+  return inDocumentOrder(results ?? []).find(outstanding)?.cell_id ?? null
+}
+
 export async function handleProgressReadRequest(
   request: Request,
   env: ProgressReadEnv,
@@ -188,7 +457,8 @@ export async function handleProgressReadRequest(
   const pathname = url.pathname
   const match = pathname.match(PATH_RE)
   const sectionMatch = pathname.match(SECTION_PATH_RE)
-  if ((!match && !sectionMatch) || request.method !== 'GET') return null
+  const firstOpenMatch = pathname.match(FIRST_OPEN_PATH_RE)
+  if ((!match && !sectionMatch && !firstOpenMatch) || request.method !== 'GET') return null
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
 
@@ -197,7 +467,7 @@ export async function handleProgressReadRequest(
   // ?lane=<tag> selects a non-default lane's rows.
   const lane = url.searchParams.get('lane') ?? ''
 
-  const routeMatch = sectionMatch ?? match!
+  const routeMatch = firstOpenMatch ?? sectionMatch ?? match!
   const projectId = decodeURIComponent(routeMatch[1])
   const fileId = decodeURIComponent(routeMatch[2])
   const authHeader = request.headers.get('Authorization') ?? ''
@@ -206,14 +476,31 @@ export async function handleProgressReadRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
+  if (firstOpenMatch) {
+    const unit = (url.searchParams.get('unit') ?? '').trim()
+    const kindParam = url.searchParams.get('kind') ?? ''
+    if (!(PLAN_LANDING_KINDS as readonly string[]).includes(kindParam)) {
+      return new Response(`unknown kind: ${kindParam}`, { status: 400 })
+    }
+    const kind = kindParam as PlanLandingKind
+    const cellId = await readFirstOpenCell(env.AQUILLA_PG, projectId, fileId, unit, kind, lane)
+    const body: PlanFirstOpenResponse = { fileId, unit, kind, cellId }
+    // A click, not a poll: no ETag, and nothing to keep — the answer moves
+    // with every edit and the reader is about to be taken to it.
+    return Response.json(body, { headers: { 'Cache-Control': 'private, no-store' } })
+  }
+
   if (sectionMatch) {
     const sectionKey = decodeURIComponent(sectionMatch[3]).trim()
     const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
-        `SELECT s.canonical_ref,
+        `SELECT s.cell_id,
+                s.canonical_ref,
                 COALESCE(t.value, '') AS target_value,
-                COALESCE(t.endorsement_count, 0) AS endorsement_count
+                COALESCE(t.endorsement_count, 0) AS endorsement_count,
+                ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
+                ${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id
@@ -222,16 +509,15 @@ export async function handleProgressReadRequest(
             AND t.side = 'target'
             AND t.target_lang = ?
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-            AND BTRIM(CASE
-                  WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
-                    THEN SPLIT_PART(s.canonical_ref, ':', 1)
-                  ELSE COALESCE(s.canonical_ref, '')
-                END) = ?
+            AND ${chapterKeySql('s')} = ?
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
       ).bind(lane, projectId, fileId, sectionKey).all<{
+        cell_id: string
         canonical_ref: string | null
         target_value: string
         endorsement_count: number | string
+        has_take: boolean
+        take_signed: boolean
       }>(),
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
@@ -246,7 +532,17 @@ export async function handleProgressReadRequest(
     // The policy is part of the cache key. Without it a reader who flips the
     // switch keeps being served the arrangement they just changed away from.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${structuralTag}${laneTag}"`
+    // `s2` marks the response SHAPE, the way the file-level ETag below has since
+    // AQU-1098. This key went without a shape marker for as long as the shape
+    // never changed; the day it did — AQU-1278 adding `cellId` to every verse —
+    // it needed one, because nothing else in the key moves when only the shape
+    // moves. Revision, validationCount, the policy and the lane are all
+    // properties of the DATA, so a client holding a pre-cellId body would have
+    // been handed a 304 forever and the plan board's "go to the first
+    // outstanding cell" link would have silently done nothing, on exactly the
+    // chapters a user had already looked at. `s3` is the same lesson applied
+    // again, for the two audio flags each verse carries now.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:s3${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -258,9 +554,12 @@ export async function handleProgressReadRequest(
       verses: rowsResult.results
         .filter((row): row is typeof row & { canonical_ref: string } => Boolean(row.canonical_ref))
         .map((row) => ({
+          cellId: row.cell_id,
           ref: row.canonical_ref,
           filled: row.target_value.trim().length > 0,
           validated: Number(row.endorsement_count) >= validationCount,
+          recorded: row.has_take,
+          audioValidated: row.take_signed,
         }))
         .sort((a, b) => compareCanonicalRefs(a.ref, b.ref)),
     }
@@ -273,7 +572,8 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram,
                 structural_count, structural_filled_count, structural_validator_histogram,
-                revision, audio_count, audio_validated_count
+                revision, audio_count, audio_validated_count,
+                structural_audio_count, structural_audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -319,6 +619,7 @@ export async function handleProgressReadRequest(
       // `files` carries no audio rollup — the projection is the only source,
       // and this branch runs only before it has been backfilled.
       audio_count: 0, audio_validated_count: 0,
+      structural_audio_count: 0, structural_audio_validated_count: 0,
     }]
     source = 'file-counter-fallback'
   }
@@ -330,13 +631,15 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-  // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
-  // a client holding a pre-audio cached body would 304 and keep it forever:
-  // the shape changed without the revision moving. The structural policy is
-  // part of the key for the same reason: flipping it changes every number
-  // without moving the revision either.
+  // `s3` marks the response SHAPE. Without it a client holding a cached body
+  // from an older shape would 304 and keep it forever: the shape changed
+  // without the revision moving. The structural policy is part of the key for
+  // the same reason — flipping it changes every number without moving the
+  // revision either. s2 = audio counts added (AQU-1098); s3 = recorded
+  // headings left those counts (AQU-1278), which the 0094 backfill applies to
+  // existing rows without touching a single event sequence.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s3${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

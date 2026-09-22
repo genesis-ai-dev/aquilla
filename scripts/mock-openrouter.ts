@@ -474,7 +474,7 @@ const server = http.createServer((req, res) => {
   })
 })
 
-const isDirectRun = process.argv.some((arg) =>
+const isDirectRun = process.argv.some((arg: string) =>
   arg.replace(/\\/g, "/").endsWith("scripts/mock-openrouter.ts"),
 )
 

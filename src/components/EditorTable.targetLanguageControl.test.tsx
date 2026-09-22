@@ -145,6 +145,14 @@ function renderTable(
 }
 
 describe("EditorTable — AQU-583 target-language control in the TARGET header", () => {
+  it("left-aligns the Target column header like Source, not flush-right", () => {
+    renderTable(makeProject("fr"), {})
+    const header = screen.getByTestId("table-target-header")
+    expect(header).toHaveTextContent("Target")
+    expect(header.className).not.toContain("justify-end")
+    expect(header.className).not.toContain("text-end")
+  })
+
   it("single-lane project: the target tag is a clickable pill that opens language settings", () => {
     const onEdit = vi.fn()
     renderTable(makeProject("fr"), { onEditTargetLanguage: onEdit })

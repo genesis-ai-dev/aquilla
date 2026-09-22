@@ -303,3 +303,36 @@ describe("makeSyncTokenFetcher", () => {
     ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
   })
 })
+
+describe("pending token requests", () => {
+  const originalFetch = global.fetch
+  afterEach(() => { global.fetch = originalFetch })
+  const ok = (token: string) => new Response(JSON.stringify({ token, expiresIn: 900, role: { level: 400, name: "contributor", source: "override" } }))
+
+  it("shares a pending request and clears it after failure so a retry can succeed", async () => {
+    let finish!: (response: Response) => void
+    const fetchMock = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve })).mockResolvedValueOnce(ok("retry"))
+    global.fetch = fetchMock
+    const getToken = makeSyncTokenFetcher(() => "session", "p", "f", {}, API)
+    const first = getToken(), second = getToken()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    finish(new Response("unavailable", { status: 503 }))
+    expect(await Promise.all([first, second])).toEqual([null, null])
+    expect(await getToken()).toBe("retry")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not share across sessions or let an old response replace the new session cache", async () => {
+    let finishOld!: (response: Response) => void
+    global.fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finishOld = resolve })).mockResolvedValueOnce(ok("new-token"))
+    let jwt = "old-session"
+    const getToken = makeSyncTokenFetcher(() => jwt, "p", "f", {}, API)
+    const old = getToken()
+    jwt = "new-session"
+    expect(await getToken()).toBe("new-token")
+    finishOld(ok("old-token"))
+    await old
+    expect(await getToken()).toBe("new-token")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+})

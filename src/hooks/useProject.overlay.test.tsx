@@ -36,6 +36,11 @@ vi.mock("@/hooks/useProjectSettings", () => ({
       // LaneSwitcher never renders (regression found by the add-target-language
       // e2e journey — overlaySettings silently dropped the key).
       targetLanes: ["es", "swh"],
+      // AQU-207: persisted alignment decisions must survive the overlay or the
+      // glosser and the alignment panel both read an empty list after reload
+      // (the qa-bot walk on PR #548: Confirm/Invalidate PATCHed fine, the BT
+      // never moved, and a cold reload still offered Confirm on the same row).
+      alignmentSeeds: [{ srcToken: "king", tgtToken: "reine", weight: -1 }],
     },
     version: 3,
   }),
@@ -43,6 +48,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => undefined),
+  subscribeProjectRecords: vi.fn(() => () => {}),
 }))
 
 const originalFetch = global.fetch
@@ -104,5 +110,32 @@ describe("useProject — algorithmicChecks settings overlay", () => {
     const { result } = renderHook(() => useProject("p-1"))
     await waitFor(() => expect(result.current.status).toBe("ready"))
     expect(result.current.project?.targetLanes).toEqual(["es", "swh"])
+  })
+
+  it("overlays synced alignmentSeeds so confirmations reach the glosser and panel (AQU-207)", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url === `${API}/api/v2/projects/p-1`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            archivedAt: null,
+            archivedBy: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useProject("p-1"))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect(result.current.project?.alignmentSeeds).toEqual([
+      { srcToken: "king", tgtToken: "reine", weight: -1 },
+    ])
   })
 })

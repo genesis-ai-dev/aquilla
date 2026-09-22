@@ -38,7 +38,7 @@ import {
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES } from '../../../shared/import-contract'
+import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -82,7 +82,9 @@ const MAX_CELLS_PER_REQUEST = 5000
 // Per-field byte caps — generous for a single verse/segment/sentence-sized
 // cell, but enough to stop one malformed/malicious cell from persisting a
 // multi-MB blob into a row that every reader of the file re-fetches.
-const MAX_CELL_TEXT_BYTES = 256 * 1024
+// `MAX_CELL_TEXT_BYTES` lives in shared/import-contract so the browser importer
+// enforces the identical ceiling before uploading (AQU-990); this route stays
+// the trust boundary that re-checks it.
 const MAX_METADATA_BYTES = 64 * 1024
 
 function utf8Bytes(s: string): number {
@@ -126,6 +128,8 @@ interface ImportFileMeta {
   orderedBy?: string
   /** Compact normalized-import summary; per-unit locators are cell metadata. */
   importManifest?: Record<string, unknown>
+  /** Sidebar folder — "OT"/"NT" or a named collection such as a Biblica title. */
+  corpusMarker?: string
 }
 
 interface ImportCell {
@@ -480,8 +484,9 @@ export async function handleBulkImportRequest(
       }
       await runImportBatch(db, finalizeStmts)
     } catch (err) {
+      console.error("[import] finalization failed:", err)
       return withCors(
-        Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
+        Response.json({ error: "Import finalization failed" }, { status: 500 }),
         request,
       )
     }
@@ -540,6 +545,7 @@ export async function handleBulkImportRequest(
         targetTextDirection: f.targetTextDirection,
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
         ...(f.importManifest !== undefined ? { importManifest: f.importManifest } : {}),
+        ...(f.corpusMarker !== undefined ? { corpusMarker: f.corpusMarker } : {}),
       },
       clientTs,
       serverTs: serverTs++,
@@ -706,8 +712,9 @@ export async function handleBulkImportRequest(
     // retaining the same atomic ordering and rollback behavior.
     await runImportBatch(db, stmts)
   } catch (err) {
+    console.error("[import] DB batch failed:", err)
     return withCors(
-      Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
+      Response.json({ error: "DB batch failed" }, { status: 500 }),
       request,
     )
   }

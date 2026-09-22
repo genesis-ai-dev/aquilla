@@ -6,12 +6,16 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
+plus environment/artifact checks. They run no tests, lint, or secret scans.
+QA tests the published preview; its green check proves compilation only.
+
 ## Testing — non-negotiable
 
 Keep test coverage synchronized with behavior without running the entire suite after every coding step:
 
 1. **During implementation, run the directly affected tests.** Run the nearest unit/integration/worker tests and the specific smoke spec(s) covering the changed journey. Use `npx tsx scripts/e2e-up.ts -- <spec>` for targeted smoke coverage. Do not rerun the complete smoke suite after every prompt or incremental edit.
-2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
+2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm scan:secrets`, then `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
 3. **Smoke is for cross-layer product lies only.** A change gets a new `*.smoke.spec.ts` only when all of these are true: (a) a user can lose data, access, or a committed artifact if it breaks; (b) the assertion crosses at least two of SPA, auth-worker, sync-worker, Postgres, R2, or a second browser context; (c) no existing smoke journey already covers that contract — extend that file instead. Otherwise cover the change with Vitest/RTL (`src/**/*.test.tsx`) or a worker unit test. Do not add a Playwright smoke for toggles, dialogs, empty states, keyboard chrome, or single-component UI.
 4. **If your change touches a journey in `e2e/JOURNEYS.md`, extend that spec (or its RTL counterpart).** New cross-layer journeys get a new JOURNEYS row and a new smoke file. UI-only journeys get RTL coverage and a short “covered in RTL” note — not a new smoke file.
 5. **Changed behavior means changed tests at the right level.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the matching RTL test or smoke/page object in the same change. A stale test is a product bug. Prefer deleting a redundant smoke after RTL exists over parking it as non-smoke.
@@ -27,7 +31,7 @@ Keep test coverage synchronized with behavior without running the entire suite a
 15. **Machine speed must not decide correctness in any suite.** Unit, integration, worker, and E2E tests must wait for observable completion rather than elapsed time, and a slow result must never be skipped or treated as optional. Timeouts are stall watchdogs: keep them generous enough for supported slower machines, fail with useful diagnostics when they expire, and do not shorten them merely to speed up feedback. Resource-heavy suites must cap concurrency with settings supported by the installed runner version so they cannot exhaust a smaller machine.
 16. **Record the test-impact analysis before completion.** In the final work summary, name the changed contract or journey, its producers and consumers, the regression test added or updated, and the targeted commands actually run. If no test changed, state why existing coverage exercises the exact changed path; proximity alone is not evidence. When adding a new product area, update `scripts/lib/e2e-impact.ts` so its sentinel is selected even before an exact journey spec changes.
 
-Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
+Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm scan:secrets` then `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
 
 ## Conventions
 
@@ -41,7 +45,10 @@ Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/J
 
 - Snapshots (under redesign) — see Plan 2.
 - Cross-browser. Chromium only for v1.
-- Tauri shell — see Plan 3 for the separate `tauri-driver` suite.
+- Tauri shell — native-surface smoke suite at `e2e/tauri/smoke.spec.ts` (WebdriverIO +
+  `@wdio/tauri-service` embedded provider, not Playwright/tauri-driver — see
+  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Release-gate
+  only (`tauri-release.yml`), not a push gate.
 
 ## Project-level conventions
 
@@ -81,14 +88,27 @@ For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpe
 
 ## Slow-request logs — treat them as failures
 
-Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
-`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
-PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
-90 minutes because the SPA aborts at 15s and an aborted request produces no
-server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
-e2e worker output is a defect to investigate before shipping, not noise — find
-the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
-than raising the threshold.
+`auth-worker`, `sync-worker` and `agent-worker` each log any request that takes
+**≥ 5s**, even when it succeeds — as a `[slow-request]` console line locally and
+a `slow: <METHOD> <path>` warn in PostHog Logs in production (AQU-1005:
+only-error logging hid DB saturation for 90 minutes because the SPA aborts at
+15s and an aborted request produces no server-side error). **Dev flow rule:** a
+`[slow-request]` line in `pnpm dev` / e2e worker output is a defect to
+investigate before shipping, not noise — find the query behind it (Neon
+`pg_stat_statements` or an `EXPLAIN ANALYZE`) rather than raising the threshold.
+
+**The one exception is `agent-worker`'s `POST /sessions/:id/exec`** (AQU-1021): a
+multi-second run there is the contract, not a defect — callers get a 60s default
+budget and may request up to `MAX_TIMEOUT_MS` (300s). Holding it to the 5s bar
+would warn on every normal agent run and train devs to ignore the line, which is
+the signal AQU-1005 exists to protect. So `/exec` warns only when it outlives
+that 300s hard ceiling, which means the timeout race in `exec.ts` failed to fire.
+Every other agent-worker route — including `/health` and bearer-auth rejections
+— is on the shared 5s bar.
+
+Slow requests already **route into PostHog** (OTLP log records, severity `warn`,
+carrying `http.path` / `http.status` / `http.duration_ms`), so alerting is a
+PostHog-side saved-query/alert on `slow:` records rather than more worker code.
 
 ## Issue workflow (Linear — Aquilla team)
 
@@ -149,6 +169,22 @@ Whether an agent may pick an issue up is read straight off the **status** — th
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
 
+**Every new issue is created from one of the Aquilla team's issue templates** — pass
+`template` to `save_issue`: **`Bug Report`** for bugs, **`Feature Request`** for new
+user-facing capabilities, **`Task`** for everything else (chores, improvements, refactors,
+infra). The template applies the matching category label itself (`Task` carries
+`Improvement`), so don't re-pass it. Passing a `description` replaces the template's
+pre-filled body wholesale, so author the body using the template's exact section headings
+with real content — never leave placeholder text, and never invent your own top-level
+structure (extra sections go *after* the template's). ⚠️ All three templates embed status
+`Todo`: always pass `state: Triage` explicitly on create (an explicit `state` overrides the
+template's — verified 2026-08-28) and **check the create response actually says `Triage`**;
+if it came back `Todo`, immediately re-save it. **Agent-created issues are also left
+unassigned** — the team auto-assigns new issues on a rotation, which wins at create time
+even if you pass no assignee; when the create response shows an assignee, immediately
+re-save with `assignee: null` (the response omitting the assignee field confirms it's
+clear).
+
 Status pipeline:
 
 | Status | Meaning | Who/when |
@@ -165,7 +201,10 @@ Status pipeline:
 
 Rules:
 
-1. **Pick up work from `Todo`** → assign it to your name and set **`Dispatched`** (work begun).
+1. **Pick up work from `Todo`** → set **`Dispatched`** (work begun). **Keep the existing
+   assignee** — whoever held the issue in `Todo` owns it through the whole lifecycle; never
+   reassign it to yourself/the runner. Only if it's unassigned, assign it to your name so
+   the claim is visible.
 2. When the fix is committed but not yet deployed → **`Fixed`**.
 3. When the fix is deployed to the **dev branch** for dev-team validation → **`Dev Verification Needed`**.
 4. Once development validation passes and the functionality remains testable on
@@ -198,6 +237,10 @@ makes the work impossible to review or revert cleanly.
   different ticket — heed it and move the stray work to its own worktree.
 - **Untangling after the fact is expensive and lossy** — prevention (isolation at pickup)
   is the whole game.
+- **PRs follow the repo template.** GitHub only auto-fills `.github/pull_request_template.md`
+  for PRs opened in its web UI — API-created PRs (agents, Linear coding sessions, `curl`) get
+  an empty body. When opening a PR, structure the title and body per that template and fill
+  in every section, including the Test Checklist.
 
 > **Reconcile drift:** run **`/issue-audit`** to cross-check the board against `main` — it
 > flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no

@@ -45,13 +45,15 @@ export interface FileSegmentation {
   updatedAt: string
 }
 
-/** One span in the preview. `label` is server-rendered ("MRK 1:1–1:8"). */
+/** One span in the preview. `label` is server-rendered ("Genesis 1:1–8"). */
 export interface SegmentationPreviewSpan {
   startCellId: string
   endCellId: string
   seedSource: string
   cellCount: number
   label: string
+  /** First cell's source text, stripped and truncated — empty when there is none. */
+  excerpt?: string
 }
 
 export interface SegmentationSnapshot {
@@ -88,6 +90,12 @@ export interface SegmentationUpdate {
   note?: string
 }
 
+/** Dry-run preview of auto/fixed without writing the stored row. */
+export interface SegmentationPreviewQuery {
+  strategy: "auto" | "fixed"
+  fixedSize?: number
+}
+
 /** Ceiling for the generation request: MAX_WINDOWS model calls end to end. */
 const GENERATE_TIMEOUT_MS = 180_000
 
@@ -109,10 +117,15 @@ function authHeaders(jwt: string): HeadersInit {
   return { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }
 }
 
-function endpoint(projectId: string, fileId: string): string {
+function endpoint(projectId: string, fileId: string, preview?: SegmentationPreviewQuery): string {
+  const params = new URLSearchParams({ fileId })
+  if (preview?.strategy) params.set("strategy", preview.strategy)
+  if (preview?.strategy === "fixed" && preview.fixedSize !== undefined) {
+    params.set("fixedSize", String(preview.fixedSize))
+  }
   return (
     `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}` +
-    `/contextual/segmentation?fileId=${encodeURIComponent(fileId)}`
+    `/contextual/segmentation?${params.toString()}`
   )
 }
 
@@ -130,9 +143,10 @@ async function throwFromResponse(res: Response, fallback: string): Promise<never
 export async function fetchSegmentation(
   projectId: string,
   fileId: string,
+  preview?: SegmentationPreviewQuery,
 ): Promise<SegmentationSnapshot> {
   const jwt = await requireJwt()
-  const res = await fetchWithTimeout(endpoint(projectId, fileId), { headers: authHeaders(jwt) })
+  const res = await fetchWithTimeout(endpoint(projectId, fileId, preview), { headers: authHeaders(jwt) })
   // Route not deployed for this environment: report unavailable so the dialog
   // explains itself instead of showing an error the user cannot act on.
   if (res.status === 404 || res.status === 501) return UNAVAILABLE

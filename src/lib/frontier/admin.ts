@@ -109,6 +109,45 @@ export interface AdminMe {
   elevatedUntil: string | null
 }
 
+export interface MigrationJobStatus {
+  id: number
+  project_id: number
+  project_name: string
+  namespace: string
+  kind: "content" | "audio"
+  sha: string
+  stage: string
+  attempts: number
+  next_run_at: number
+  updated_at: number
+  error: string | null
+}
+
+export interface MigrationStatus {
+  schemaVersion: number
+  runner: string
+  heartbeatAt: string
+  updatedAt: string
+  dryRun: boolean
+  queue: {
+    projects: Array<{ status: string; count: number }>
+    jobs: Array<{ kind: "content" | "audio"; stage: string; count: number }>
+    recentJobs: MigrationJobStatus[]
+  }
+  active: Array<{
+    jobId: number
+    kind: "content" | "audio"
+    stage: string
+    startedAt: number
+    progress?: { total: number; copied: number; missingOid: number; lfsMiss: number; failed: number; events: number }
+  }>
+  lastInboxPollAt: string | null
+  lastInboxEnqueued: number
+  lastReconcileAt: string | null
+  lastReconcileEnqueued: number
+  reconcileHighWaterMark: string | null
+}
+
 /** Champion/challenger experiment on the default chat model (mirrors auth-worker AbTestConfig). */
 export interface AbTestConfig {
   enabled: boolean
@@ -252,6 +291,14 @@ export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/admins`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { admins: AdminAdmin[] }).admins
+}
+
+export async function getAdminMigrationStatus(jwt: string): Promise<MigrationStatus | null> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/migration-status`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return ((await res.json()) as { status: MigrationStatus | null }).status
 }
 
 export async function getAdminOverview(jwt: string): Promise<AdminOverview> {
@@ -443,4 +490,128 @@ export async function getAdminActivity(jwt: string, limit = 100): Promise<AdminA
   const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { activity: AdminActivity[] }).activity
+}
+
+/**
+ * One agent session in the list response (metadata only, no full convo).
+ * For weekly qualitative product review: see missed tool calls, unhelpful loops,
+ * users having to rephrase.
+ */
+export interface AdminAgentSession {
+  sessionId: string
+  projectId: string
+  userId: number
+  username: string | null
+  projectName: string | null
+  title: string
+  messageCount: number
+  runCount: number
+  lastStatus: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * One agent session's full transcript plus its runs. The convo may contain
+ * unpublished scripture — this is admin-gated and should never be exposed to
+ * non-admins.
+ */
+export interface AdminAgentSessionDetail {
+  session: {
+    sessionId: string
+    projectId: string
+    userId: number
+    username: string | null
+    projectName: string | null
+    title: string
+    convo: unknown[]
+    untrustedActive: boolean
+    createdAt: number
+    updatedAt: number
+  }
+  runs: Array<{
+    runId: string
+    prompt: string
+    model: string
+    status: string
+    promptTokens: number
+    completionTokens: number
+    costCents: number
+    steps: number
+    stagedCount: number
+    startedAt: number
+    endedAt: number | null
+  }>
+}
+
+export async function getAdminAgentSessions(
+  jwt: string,
+  limit = 50,
+  cursor?: string,
+): Promise<{ sessions: AdminAgentSession[]; nextCursor: number | null }> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set("cursor", cursor)
+  const url = `${FRONTIER_BASE}/api/v2/admin/agent-sessions?${params.toString()}`
+  const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { sessions: AdminAgentSession[]; nextCursor: number | null }
+}
+
+export async function getAdminAgentSession(jwt: string, sessionId: string): Promise<AdminAgentSessionDetail> {
+  const url = `${FRONTIER_BASE}/api/v2/admin/agent-sessions/${encodeURIComponent(sessionId)}`
+  const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminAgentSessionDetail
+}
+
+// ── Retention (GET /api/v2/admin/retention) ──────────────────────────────
+// Mirrors auth-worker/src/lib/retention.ts — see there for definitions.
+
+export interface AdminDayNRetention {
+  eligible: number
+  retained: number
+  rate: number | null
+}
+
+export interface AdminWeeklyCohort {
+  weekStart: string
+  size: number
+  retained: number[]
+}
+
+export interface AdminRetention {
+  asOf: string
+  dau: number
+  avgDau7: number
+  wau: number
+  mau: number
+  stickiness: number | null
+  newUsers7: number
+  newUsers30: number
+  totalUsers: number
+  retention: { d1: AdminDayNRetention; d7: AdminDayNRetention; d30: AdminDayNRetention }
+  daily: Array<{ day: string; active: number }>
+  cohorts: AdminWeeklyCohort[]
+}
+
+export async function getAdminRetention(jwt: string, days = 90): Promise<AdminRetention> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/retention?days=${days}`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminRetention
+}
+
+/** Email the weekly|monthly recap to the calling admin now. */
+export async function sendAdminRetentionReport(
+  jwt: string,
+  period: "weekly" | "monthly",
+): Promise<{ subject: string }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/retention/report`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ period }),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { subject: string }
 }

@@ -68,7 +68,7 @@ Offer to inspect existing connected Neon projects or create new ones using the N
 npx -y neonctl@latest init --agent <agent-name>
 ```
 
-Supported `--agent` values: `cursor`, `copilot`, `Codex`, `Codex-desktop`, `codex`, `opencode`, `cline`, `gemini-cli`, `goose`, `zed`.
+Supported `--agent` values: `cursor`, `copilot`, `claude`, `claude-desktop`, `codex`, `opencode`, `cline`, `gemini-cli`, `goose`, `zed`.
 
 This installs the Neon extension (for Cursor/VS Code) or MCP server (for other agents), creates an API key, and adds the `neon-postgres` agent skill to the project.
 

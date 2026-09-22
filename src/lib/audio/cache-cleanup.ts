@@ -3,11 +3,34 @@
 // published when sensitive bytes could not be removed.
 
 import { __resetAudioCacheMemo } from "./bytes-cache"
+import { purgeEgressExportCache } from "@/lib/egress/export-cache"
+import { markOpfsUnavailable } from "@/lib/storage/opfs-availability"
 
 export async function purgeAudioCachesOnSignOut(options: { strict?: boolean } = {}): Promise<void> {
-  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) return
+  // The egress export cache is IndexedDB-backed (zips of everything the user
+  // could read) — purge it BEFORE the OPFS guard so it clears even where OPFS
+  // is unavailable. Strict callers must know when these bytes survive.
+  await purgeEgressExportCache({ strict: options.strict === true })
+  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
+    __resetAudioCacheMemo()
+    return
+  }
+
+  let root: FileSystemDirectoryHandle
   try {
-    const root = await navigator.storage.getDirectory()
+    root = await navigator.storage.getDirectory()
+  } catch {
+    // Safari Private Browsing exposes getDirectory() but rejects every call
+    // with UnknownError. The cache producers treat that as "OPFS unavailable"
+    // and therefore cannot have persisted audio in this browsing context.
+    // Match that contract here instead of permanently blocking logout on a
+    // cleanup target the browser never made available.
+    markOpfsUnavailable()
+    __resetAudioCacheMemo()
+    return
+  }
+
+  try {
     await removeIfExists(root, "audio-peaks", options.strict === true)
     await removeIfExists(root, "lfs-cache", options.strict === true)
     // FORTIFY: the byte cache was MISSED here — it holds the most sensitive
@@ -16,9 +39,12 @@ export async function purgeAudioCachesOnSignOut(options: { strict?: boolean } = 
     // in-memory index memo must go with it or the next put would resurrect
     // entries pointing at deleted files.
     await removeIfExists(root, "audio-bytes", options.strict === true)
-    __resetAudioCacheMemo()
   } catch (error) {
     if (options.strict) throw error
+  } finally {
+    // A partial purge must not leave an index memo that can resurrect entries
+    // already removed before a later strict deletion failed.
+    __resetAudioCacheMemo()
   }
 }
 

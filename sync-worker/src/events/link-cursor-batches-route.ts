@@ -96,7 +96,7 @@ export async function handleLinkCursorBatchesRequest(
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const projectId = decodeURIComponent(match[1]!)
+  const projectId = decodeURIComponent(match[1])
 
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null

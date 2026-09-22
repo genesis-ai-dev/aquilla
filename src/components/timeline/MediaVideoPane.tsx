@@ -44,6 +44,7 @@ import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
 import { videoSyncAction } from "./video-sync"
+import { nextScrubSeek } from "./video-seek-coalesce"
 import {
   forgetStallSample,
   IDLE_STALL_STATE,
@@ -96,8 +97,16 @@ export interface MediaVideoPaneProps {
   cells: CellData[]
   /** A nonce-keyed seek from the timeline. Applied unconditionally, because the
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
-   *  the trailing pad, a gap no section owns) and the picture must still move. */
-  seekSec?: { sec: number; nonce: number } | null
+   *  the trailing pad, a gap no section owns) and the picture must still move.
+   *
+   *  AQU-1117: `play` rides ALONG WITH the seek rather than arriving as a
+   *  separate command, and that is the whole point. "Play from this cue" has to
+   *  start at the cue, not at wherever the film happened to be paused — and the
+   *  seek does not land for two commits after the press. A play issued from the
+   *  press site would sound the old position first and jump afterwards. Carried
+   *  here, the start goes through `requestPlayWhenReady`, which already waits
+   *  on `seeked`/`canplay`, so the first frame heard is the cue's. */
+  seekSec?: { sec: number; nonce: number; play?: boolean } | null
   /** A nonce-keyed play/pause from the timeline (Space). Deliberately a TOGGLE
    *  rather than a desired state: the picture keeps its native controls in the
    *  standalone arrangement, so anything stateful would drift out of step with
@@ -124,6 +133,11 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
+  /** AQU-1119: collapse the video section to a rail. Absent means no button. */
+  onCollapse?: () => void
+  /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
+  onToggleFullscreen?: () => void
+  isFullscreen?: boolean
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -141,6 +155,9 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
+  onCollapse,
+  onToggleFullscreen,
+  isFullscreen,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -629,15 +646,20 @@ export function MediaVideoPane({
   // An explicit seek from the timeline. Applied whatever the queue thinks.
   const seekNonce = seekSec?.nonce
   const seekTarget = seekSec?.sec
-  useEffect(() => {
-    if (seekNonce == null || seekTarget == null) return
+  /** AQU-1117: whether THIS seek also asked the picture to start. Read through
+   *  a ref because the effect below is keyed on the nonce alone (re-running it
+   *  on a changed flag would replay a stale seek); the render that carries a
+   *  new nonce also carries the flag that belongs to it. */
+  const seekWantsPlayRef = useRef(false)
+  seekWantsPlayRef.current = seekSec?.play === true
+  /** A target held back because the element was still seeking. */
+  const pendingScrubSeekRef = useRef<number | null>(null)
+  /** The one place `currentTime` is written for a requested seek, so the
+   *  coalescer and its drain cannot drift apart. */
+  const applySeekRef = useRef<(sec: number) => void>(() => {})
+  applySeekRef.current = (sec: number) => {
     const video = videoRef.current
-    // Deliberately NOT gated on `slaved`: in the standalone arrangement this is
-    // the only thing that moves the picture, and a ruler or chip click that
-    // moved the playhead but not the frame would leave the two contradicting
-    // each other on screen.
     if (!video) return
-    const sec = Math.max(0, seekTarget)
     try {
       video.currentTime = sec
       lastSeekAtRef.current = Date.now()
@@ -649,12 +671,70 @@ export function MediaVideoPane({
     } catch {
       /* not seekable yet */
     }
-    // Say where we are going without waiting to be told we arrived. `seeked`
-    // confirms it below, but a browser may not fire it at all when the element
-    // has not opened yet, and `timeupdate` is silent throughout a seek — so
-    // this is what stops the playhead and the bar's readout from sitting on the
-    // old position after scrubbing a paused film.
     publishPositionRef.current(sec)
+  }
+  /** The element settled — issue whatever the hand asked for meanwhile. */
+  const drainScrubSeek = () => {
+    const decided = nextScrubSeek({
+      seeking: false,
+      pendingSec: pendingScrubSeekRef.current,
+      requestSec: null,
+    })
+    pendingScrubSeekRef.current = decided.pendingSec
+    if (decided.seekSec != null) applySeekRef.current(decided.seekSec)
+  }
+  useEffect(() => {
+    if (seekNonce == null || seekTarget == null) return
+    const video = videoRef.current
+    // Deliberately NOT gated on `slaved`: in the standalone arrangement this is
+    // the only thing that moves the picture, and a ruler or chip click that
+    // moved the playhead but not the frame would leave the two contradicting
+    // each other on screen.
+    if (!video) return
+    const sec = Math.max(0, seekTarget)
+    // AQU-646 stage 5: NEVER TWO SEEKS IN FLIGHT.
+    //
+    // Dragging the playhead asks the picture to move continuously, and hls.js
+    // has a documented way of dying under that — `useHlsVideo`'s own header
+    // says it "stops producing frames without firing an event" after a burst.
+    // So while the element is still seeking the newest target is held, and the
+    // `seeked` below issues it. The trailing edge needs no timer: the last
+    // place the hand asked for is the one sitting in `pendingScrubSeekRef`.
+    //
+    // This guards EVERY seek, not just a scrub — the playback bar's own
+    // scrubber fires an uncapped stream of them too, and it costs nothing here.
+    const decided = nextScrubSeek({
+      seeking: video.seeking,
+      pendingSec: pendingScrubSeekRef.current,
+      requestSec: sec,
+    })
+    pendingScrubSeekRef.current = decided.pendingSec
+    if (decided.seekSec == null) {
+      // Still say where we are GOING, or the head sits on the old frame's
+      // position for as long as the pipeline takes.
+      publishPositionRef.current(sec)
+    } else {
+      applySeekRef.current(decided.seekSec)
+    }
+
+    // AQU-1117: "Play from this cue" — this seek asked for the film as well as
+    // the frame. Issued AFTER the seek above so `requestPlayWhenReady` sees an
+    // element that is either already at the cue or still seeking to it; either
+    // way the first frame it starts on is the cue's, which is what separates
+    // this from a play command sent from the press site.
+    //
+    // Deliberately NOT a toggle. Pressing the button on a second cue while the
+    // film runs must jump and keep running, and a toggle would stop it.
+    // Standalone only (a slaved picture is the queue's to command), and never
+    // while the recorder holds the floor — `suspended`'s own watchdog would
+    // pause it back within 250ms, which is 250ms of the film in the take.
+    if (!seekWantsPlayRef.current || slaved || suspended) return
+    wantPlayRef.current = true
+    stallRef.current = IDLE_STALL_STATE
+    requestPlayWhenReady(video)
+    // The NONCE is the command: re-running on `slaved`, `suspended` or the
+    // stable play helper would replay a seek the user made long ago.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, seekTarget])
 
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
@@ -905,6 +985,7 @@ export function MediaVideoPane({
         src={src}
         onRetry={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
         onChangeVideo={onChangeVideo}
+        onCollapse={onCollapse}
       />
     )
   }
@@ -915,7 +996,12 @@ export function MediaVideoPane({
       data-video-state={slaved ? "slaved" : "standalone"}
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader src={src} />
+      <VideoPaneHeader
+        src={src}
+        onCollapse={onCollapse}
+        onToggleFullscreen={onToggleFullscreen}
+        isFullscreen={isFullscreen}
+      />
       {/* The black field fills everything under the header, and the picture is
           centred in it at the video's own proportions — leftover space becomes
           cinema bars instead of blank page. */}
@@ -1026,7 +1112,13 @@ export function MediaVideoPane({
           // Round 6: a seek's own landing. `timeupdate` is silent for the whole
           // duration of a seek, so on a paused film this is the ONLY event that
           // says where the picture actually ended up.
-          onSeeked={slaved ? undefined : (e) => publishPosition(e.currentTarget.currentTime)}
+          // The DRAIN runs in both arrangements — a slaved picture is scrubbed
+          // through the same nonce path and needs the same protection — while
+          // publishing stays standalone-only, as it always was.
+          onSeeked={(e) => {
+            drainScrubSeek()
+            if (!slaved) publishPosition(e.currentTarget.currentTime)
+          }}
           // Standalone only: the queue is idle here, so it cannot tell the
           // playhead whether anything is running. `ended` is included because
           // it does not imply `pause` on every engine.

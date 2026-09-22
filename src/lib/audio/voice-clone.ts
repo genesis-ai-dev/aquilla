@@ -11,6 +11,7 @@
 // convert route is scoped to the (projectId, fileId) the new audio belongs to.
 
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { errorFromVoiceConvert } from "./tts-engine-error"
 import type { SyncTokenForFile } from "./upload"
 
 /** Stable reference-clip id (object name incl. ext), e.g. "ref-169..-ab12.webm". */
@@ -132,7 +133,7 @@ export async function convertToCloneVoice(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`voice convert failed (${res.status}): ${text || res.statusText}`)
+    throw errorFromVoiceConvert(res.status, text || res.statusText)
   }
   return (await res.json()) as ConvertToCloneVoiceResult
 }

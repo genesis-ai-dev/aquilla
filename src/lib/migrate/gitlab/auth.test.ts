@@ -38,3 +38,37 @@ describe("DEFAULT_FRONTIER_API", () => {
     expect(DEFAULT_FRONTIER_API.endsWith("/")).toBe(false)
   })
 })
+
+// WHY: the nightly sync died for weeks with a bare "401 Unauthorized". The
+// resolver must (a) prefer the direct token when both credential sets are set
+// — so an expired FRONTIER_TOKEN shadows a valid username/password, which the
+// operator needs to know — and (b) tag which path produced the creds so the
+// failure names the secret to rotate.
+import { resolveCredentialsFromEnv, describeCredentialSource } from "./auth"
+
+describe("resolveCredentialsFromEnv", () => {
+  it("uses FRONTIER_TOKEN + GITLAB_URL directly and tags the source", async () => {
+    const creds = await resolveCredentialsFromEnv({ FRONTIER_TOKEN: " tok ", GITLAB_URL: "https://git.example.com/" })
+    expect(creds).toEqual({ gitlabToken: "tok", gitlabUrl: "https://git.example.com", accessToken: "", source: "direct-token" })
+  })
+
+  it("prefers the direct token over username/password when both are set", async () => {
+    const creds = await resolveCredentialsFromEnv({
+      FRONTIER_TOKEN: "tok",
+      GITLAB_URL: "https://git.example.com",
+      FRONTIER_USERNAME: "u",
+      FRONTIER_PASSWORD: "p",
+    })
+    expect(creds.source).toBe("direct-token")
+  })
+
+  it("throws an actionable message when nothing is set", async () => {
+    await expect(resolveCredentialsFromEnv({})).rejects.toThrow(/FRONTIER_USERNAME \+ FRONTIER_PASSWORD/)
+  })
+
+  it("describes each source by its env vars", () => {
+    expect(describeCredentialSource("direct-token")).toMatch(/FRONTIER_TOKEN \+ GITLAB_URL/)
+    expect(describeCredentialSource("frontier-login")).toMatch(/FRONTIER_USERNAME \+ FRONTIER_PASSWORD/)
+    expect(describeCredentialSource(undefined)).toBe("unknown credential path")
+  })
+})

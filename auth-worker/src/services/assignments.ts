@@ -7,6 +7,19 @@
 // So the join is assignment_cells -> cells ON (file_id, cell_id) WHERE
 // side='target' AND validated=1. This keeps slice 1 off the hot cell.commit
 // path (no stored progress counter).
+//
+// AQU-1068: the DENOMINATOR is now derived the same way, for the same reason
+// one level up. `assignments.cells_total` is a stored column stamped once at
+// assignment.create and never recomputed, so a cell removed from a file
+// afterwards left its assignment counting a row that no longer exists —
+// permanently short of 100%, with nothing a person could do about it. Cells
+// only became removable in general with AQU-1068, which is what turned a
+// latent inconsistency into a reachable one. Deriving both halves from the
+// live `cells` projection makes a removal self-healing.
+//
+// The stored column stays — assignment-events.ts still stamps it and the
+// agent's SQL surface documents it — it is simply no longer what anybody
+// reads.
 
 import type { Env } from "../types"
 
@@ -21,6 +34,17 @@ export interface AssigneeWorkload {
   /** Sum of validated assigned cells across those assignments (derived). */
   cellsDone: number
 }
+
+/** The denominator: assigned cells that still EXIST, counted live. Mirrors
+ *  CELLS_DONE_SUBQUERY's join without the validated predicate; `side =
+ *  'source'` is what makes each assigned cell count exactly once, since
+ *  assignment_cells resolved source rows. */
+const CELLS_TOTAL_SUBQUERY = `(
+  SELECT COUNT(*) FROM assignment_cells ac
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                 AND c.cell_id = ac.cell_id AND c.side = 'source'
+   WHERE ac.assignment_id = a.assignment_id
+)`
 
 const CELLS_DONE_SUBQUERY = `(
   SELECT COUNT(*) FROM assignment_cells ac
@@ -70,7 +94,7 @@ export async function getOrgAssignmentWorkload(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
-            a.cells_total      AS cells_total,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
             (SELECT ac.file_id FROM assignment_cells ac
@@ -125,7 +149,7 @@ export async function getProjectAssignmentRoster(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
-            a.cells_total      AS cells_total,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done
        FROM assignments a
        LEFT JOIN users u ON u.id = a.assignee_user_id
@@ -200,7 +224,7 @@ export async function getMyAssignments(
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
-            a.cells_total AS cells_total, a.created_at AS created_at,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             (SELECT ac.file_id FROM assignment_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
@@ -267,7 +291,7 @@ export async function getMyAssignmentsAcrossOrg(
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
-            a.cells_total AS cells_total, a.created_at AS created_at,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             (SELECT ac.file_id FROM assignment_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,

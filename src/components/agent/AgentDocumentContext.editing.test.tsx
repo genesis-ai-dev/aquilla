@@ -43,9 +43,15 @@ function workspace(): AgentDocumentContextProps["workspace"] {
 
 type EditorSurface = HTMLElement & { editor: Editor }
 
+/** AQU-1336: an editable read surface is a button that activates the editor;
+ *  only a read-only surface keeps the textbox role. Locate it by surface. */
+function readSurface(row: HTMLElement) {
+  return row.querySelector<HTMLElement>('[data-editor-cell-surface="target-read"]')!
+}
+
 async function activateEditor(ref = "MRK 1:1") {
   const row = screen.getByRole("article", { name: ref })
-  fireEvent.click(within(row).getByRole("textbox"))
+  fireEvent.click(readSurface(row))
   await waitFor(() => expect(row.querySelector(".ProseMirror")).toBeInTheDocument())
   return row.querySelector(".ProseMirror") as EditorSurface
 }
@@ -87,7 +93,7 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     expect(vi.mocked(data.onTargetPresenceSelection!).mock.calls.some(([id, selection]) => id === "c1" && selection !== null)).toBe(true)
     await activateEditor("MRK 1:2")
     expect(view.container.querySelectorAll(".ProseMirror")).toHaveLength(1)
-    expect(within(screen.getByRole("article", { name: "MRK 1:1" })).getByRole("textbox")).toHaveAttribute("data-editor-cell-surface", "target-read")
+    expect(readSurface(screen.getByRole("article", { name: "MRK 1:1" }))).toHaveAttribute("role", "button")
   })
 
   it("flushes a pending full commit on document unmount", async () => {
@@ -140,8 +146,11 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     expect(row.querySelector(".ProseMirror")).not.toBeInTheDocument()
     expect(within(row).getByText("Bob is editing")).toBeInTheDocument()
     expect(within(row).getByRole("button", { name: "Read-only (imported from git)" })).toBeDisabled()
-    fireEvent.click(within(row).getByRole("button", { name: "2 open comments" }))
-    fireEvent.click(within(row).getByRole("button", { name: "Edit history" }))
+    // AQU-200: comments/history live behind the rail's `⋯`; the popup portals
+    // to the body, so query it off `screen` once the row's overflow is open.
+    fireEvent.click(within(row).getByRole("button", { name: "More actions" }))
+    fireEvent.click(screen.getByRole("button", { name: "2 open comments" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit history" }))
     expect(data.onOpenComments).toHaveBeenCalledWith("c1")
     expect(data.onOpenHistory).toHaveBeenCalledWith("c1")
     view.rerender(<AgentDocumentContext workspace={{ ...data, editable: false }} />)
@@ -225,7 +234,7 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     }]
     render(<AgentDocumentContext workspace={data} />)
     const row = screen.getByRole("article", { name: "MRK 1:1" })
-    expect(within(row).getByRole("textbox").querySelectorAll("[data-idml-slot]")).toHaveLength(2)
+    expect(readSurface(row).querySelectorAll("[data-idml-slot]")).toHaveLength(2)
     const surface = await activateEditor()
     act(() => {
       fireEvent.focus(surface)

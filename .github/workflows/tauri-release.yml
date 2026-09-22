@@ -34,7 +34,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
 
@@ -42,7 +42,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu-')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev xvfb
 
       - run: pnpm install --frozen-lockfile
 
@@ -51,7 +51,20 @@ jobs:
 
       - run: pnpm test
 
+      - run: cargo test
+        working-directory: src-tauri
+
       - run: pnpm run build
+
+      # e2e/tauri/smoke.spec.ts ("Plan 3") — native-shell smoke suite, release-gate only (not
+      # a push gate, see AGENTS.md/docs/superpowers). Builds a debug binary with the
+      # e2e-webdriver feature (embedded WebDriver server, see src-tauri/src/lib.rs) and the
+      # src-tauri/tauri.e2e.conf.json capability grant merged in — neither is ever part of
+      # the real signed build below. A failure here blocks that OS's signed build/publish.
+      - run: pnpm run tauri:build:e2e
+
+      - name: Run Tauri e2e smoke suite
+        run: pnpm run test:e2e:tauri
 
       # Fail loudly (not silently ship a broken/unverifiable auto-updater) if
       # tauri.conf.json still carries the scaffolded placeholder updater

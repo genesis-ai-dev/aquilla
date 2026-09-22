@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import { useCellsAuditStats, type CellAuditStats } from "./useCellsAuditStats"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 import { usePendingOutboxRecords } from "./usePendingOutboxRecords"
 import { applyOutboxOverlay } from "@/lib/sync/audit-stats-overlay"
 
@@ -7,6 +8,7 @@ interface UseCellsAuditStatsWithOverlayOptions {
   enabled: boolean
   fileId: string | null
   getTokenForFile: (fileId: string) => Promise<string | null>
+  lane?: string
 }
 
 /**
@@ -25,8 +27,9 @@ export function useCellsAuditStatsWithOverlay(
   isError: boolean
   revalidate: () => void
   revalidateCellStats: (cellId: string) => void
+  applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
 } {
-  const { byCellId: base, isLoading, isError, revalidate, revalidateCellStats } = useCellsAuditStats(opts)
+  const { byCellId: base, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats } = useCellsAuditStats(opts)
 
   const pending = usePendingOutboxRecords({
     enabled: !!opts.fileId,
@@ -38,5 +41,5 @@ export function useCellsAuditStatsWithOverlay(
     return applyOutboxOverlay({ base, pending })
   }, [base, pending])
 
-  return { byCellId, isLoading, isError, revalidate, revalidateCellStats }
+  return { byCellId, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

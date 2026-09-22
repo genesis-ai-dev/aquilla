@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
 import { render as renderUI, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
+import userEvent from "@testing-library/user-event"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
 // Stub the chat rail but keep the workbench seam: render each proposal
@@ -272,6 +273,12 @@ beforeAll(() => {
 beforeEach(() => {
   agentSessionStore(PROJECT, "alice").reset()
   resetTeamConversationsForTesting()
+  // EditorModeToggle reads the md breakpoint for its mode labels (AQU-980).
+  vi.stubGlobal("matchMedia", vi.fn().mockImplementation(() => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })))
   vi.mocked(fetchContextualRuns).mockResolvedValue({ available: true, runs: [], truncated: false, nextCursor: null })
 })
 
@@ -308,9 +315,14 @@ describe("AgentWorkbench optional document context", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Translate with AI" })[1])
     expect(props.workspace?.onDraftTarget).toHaveBeenCalledWith("c2")
-    fireEvent.click(screen.getAllByRole("button", { name: "Add comment" })[1])
+
+    // AQU-200: comments and history collapsed behind the rail's `⋯`. Open the
+    // second row's overflow, then query off `screen` — the popup portals to
+    // the body, so it is deliberately NOT inside the row element.
+    fireEvent.click(screen.getAllByRole("button", { name: "More actions" })[1])
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
     expect(props.workspace?.onOpenComments).toHaveBeenCalledWith("c2")
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit history" })[1])
+    fireEvent.click(screen.getByRole("button", { name: "Edit history" }))
     expect(props.workspace?.onOpenHistory).toHaveBeenCalledWith("c2")
   })
 
@@ -331,6 +343,37 @@ describe("AgentWorkbench optional document context", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." }))
     expect(props.workspace?.onValidationChange).toHaveBeenCalledWith("c1", true)
+  })
+
+  it("left-aligns the chapter and verse header in the paired document rows", () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    const headers = screen.getAllByTestId("source-context-line")
+    expect(headers).toHaveLength(2)
+    expect(headers[0]).toHaveTextContent("MRK 1:1")
+    expect(headers[1]).toHaveTextContent("MRK 1:2")
+    for (const header of headers) {
+      expect(header.className).toContain("justify-start")
+      expect(header.className).toContain("text-start")
+      expect(header.className).not.toContain("justify-center")
+      expect(header.className).not.toContain("text-center")
+    }
+  })
+
+  it("reports the focused document row for presence", () => {
+    const props = workbenchProps()
+    props.workspace!.onViewCell = vi.fn()
+    render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+
+    const targetCell = document.querySelector('article[data-cell-id="c1"]')
+    expect(targetCell).not.toBeNull()
+
+    fireEvent.focusIn(targetCell as HTMLElement)
+    expect(props.workspace?.onViewCell).toHaveBeenCalledWith("c1")
+
+    fireEvent.focusOut(targetCell as HTMLElement, { relatedTarget: document.body })
+    expect(props.workspace?.onViewCell).toHaveBeenLastCalledWith(null)
   })
 
   it("a read-only run does not turn committed document context into a proposal", async () => {
@@ -517,7 +560,7 @@ describe("AgentWorkbench unified view navigation", () => {
   it("lets the conversation headline identify the workspace without repeated Agent labels", async () => {
     render(<AgentWorkbench {...workbenchProps()} />)
     const teamTab = screen.getByRole("tab", { name: "Conversation" })
-    const toolbar = teamTab.closest("[role=tablist]")!.parentElement!
+    const toolbar = screen.getByTestId("agent-toolbar-row")
 
     fireEvent.click(teamTab)
     expect(await screen.findByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
@@ -541,11 +584,10 @@ describe("AgentWorkbench unified view navigation", () => {
     const memoryTab = screen.getByRole("tab", { name: "Project knowledge" })
     expect(memoryTab).toHaveAttribute("aria-selected", "false")
 
-    const header = chatTab.closest("[role=tablist]")?.parentElement
-    expect(header).not.toBeNull()
-    expect(within(header!).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
-    expect(within(header!).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
-    expect(within(header!).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
+    const header = screen.getByTestId("agent-toolbar-row")
+    expect(within(header).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
+    expect(within(header).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(header).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))
@@ -555,5 +597,69 @@ describe("AgentWorkbench unified view navigation", () => {
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /Proposed/ })).toBeInTheDocument(),
     )
+  })
+})
+
+describe("AgentWorkbench editor chrome (AQU-980)", () => {
+  it("keeps Text / Audio / Agent on the workbench row so you can switch back", async () => {
+    const onLensChange = vi.fn()
+    render(<AgentWorkbench {...workbenchProps()} editorMode={{ lens: "text", onLensChange }} />)
+
+    const row = screen.getByTestId("agent-toolbar-row")
+    expect(row.className).toContain("py-2")
+    expect(row.className).toContain("ps-4")
+    expect(row.className).toContain("pe-2")
+    const agentMode = await within(row).findByRole("tab", { name: "Agent" })
+    expect(agentMode).toHaveAttribute("aria-selected", "true")
+    const textTab = within(row).getByRole("tab", { name: "Text" })
+    const audioTab = within(row).getByRole("tab", { name: "Audio" })
+    expect(textTab).toBeVisible()
+    expect(audioTab).toBeVisible()
+    expect(agentMode).toHaveClass("px-2", "py-1")
+    expect(textTab).toHaveClass("px-2", "py-1")
+    expect(audioTab).toHaveClass("px-2", "py-1")
+    // The view switch and the mode switch share one row; the session actions
+    // (Chat options, Back to editor) follow the mode switch.
+    expect(within(row).getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
+    const chatOptions = within(row).getByRole("button", { name: "Chat options" })
+    expect(agentMode.compareDocumentPosition(chatOptions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(textTab)
+    expect(onLensChange).toHaveBeenCalledWith("text")
+    expect(within(row).queryByRole("button", { name: "Collapse Agent pane" })).not.toBeInTheDocument()
+    expect(within(row).queryByTestId("file-options-menu")).not.toBeInTheDocument()
+  })
+
+  it("puts file-identity options next to the mode switch, not editor tools", async () => {
+    const onRename = vi.fn()
+    render(
+      <AgentWorkbench
+        {...workbenchProps()}
+        editorMode={{ lens: "text", onLensChange: vi.fn() }}
+        fileMenuItems={[
+          { id: "file-rename", label: "Rename", onClick: onRename },
+          { id: "file-export", label: "Export" },
+        ]}
+      />,
+    )
+
+    const row = screen.getByTestId("agent-toolbar-row")
+    await userEvent.click(within(row).getByRole("button", { name: "File options" }))
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible()
+    expect(screen.getByRole("menuitem", { name: "Export" })).toBeVisible()
+    expect(screen.queryByRole("menuitem", { name: "Check file" })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }))
+    expect(onRename).toHaveBeenCalledOnce()
+  })
+
+  it("shows header Collapse only when the workbench was expanded from the sidebar", () => {
+    const onCollapse = vi.fn()
+    render(<AgentWorkbench {...workbenchProps()} onCollapse={onCollapse} />)
+
+    const header = screen.getByTestId("agent-toolbar-row")
+    const collapse = within(header).getByRole("button", { name: "Collapse Agent pane" })
+    expect(collapse).not.toHaveTextContent("Collapse")
+    expect(within(header).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
+    fireEvent.click(collapse)
+    expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 })

@@ -15,8 +15,10 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * Where chips render (ground truth): terminology-chip-plugin is wired into
  * the TARGET editor only (TranslatedEditor via the terminologyConcepts prop,
  * EditorTable.tsx) and scans the target doc for ACTIVE concept sourceTerm
- * matches. The source column's term affordance (SourceWithTermLookup) is
- * exact-word only — wildcards never decorate the source side.
+ * matches. This spec covers that target path. The source column has its own
+ * affordances on the same shared matcher — `SourceWithTermLookup` for plain
+ * text and `decorateTermsInHtml` for a formatted cell (AQU-1135) — so
+ * wildcards decorate the source side too; both are covered in RTL.
  *
  * This spec:
  *   1. Imports sample.md.
@@ -45,13 +47,14 @@ test("wildcard source term creates chip matches in the editor", async ({ alice }
   // editor doc and "sample" matches the wildcard "samp*".
   await ws.editCell(0, "Voici le sample")
 
-  const firstRow = ws.cellRow(0)
-  await expect(firstRow).toBeVisible({ timeout: 5_000 })
+  // editCell commits by blurring, which replaces TipTap with the cheap read
+  // surface. Reopen the committed cell before asserting the TipTap-only term
+  // decoration so render timing cannot decide whether the editor is mounted.
+  const targetEditor = await ws.activateTargetCell(0)
+  await expect(targetEditor).toContainText("Voici le sample")
 
-  // Look for a terminology chip inside the first row.
-  // terminology-chip-plugin renders: span.term-chip with data-source-term and
-  // aria-label="Managed term: samp*" (plus a term-chip-host wrapper span that
-  // also carries data-source-term).
-  const chip = firstRow.locator("span.term-chip, span[data-source-term]").first()
+  // The terminology plugin decorates the matching text inside the active
+  // target editor with the source term that produced the match.
+  const chip = targetEditor.locator('[data-source-term="samp*"]')
   await expect(chip).toBeVisible({ timeout: 5_000 })
 })

@@ -56,6 +56,14 @@ describe("I18nProvider + LanguageSwitcher", () => {
     expect(document.documentElement.dir).toBe("ltr")
   })
 
+  it("opens the language menu upward like the sidebar help menu", async () => {
+    render(<Harness />)
+    await userEvent.click(screen.getByRole("button", { name: "Language" }))
+    const item = await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })
+    expect(item.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(item.closest("[data-align]")).toHaveAttribute("data-align", "start")
+  })
+
   it("switching to an RTL locale mirrors <html dir> and persists the choice", async () => {
     render(<Harness />)
     await pickLanguage("العربية")

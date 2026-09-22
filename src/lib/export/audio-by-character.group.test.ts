@@ -257,3 +257,45 @@ describe("lines nobody has cast", () => {
     expect(characterFileKey("NICODEMUS")).toBe("NICODEMUS")
   })
 })
+
+// ── AQU-646 stage 4: the mix track agrees with the timeline ──────────────────
+//
+// This is the MIX deliverable — every clip laid on silence at its timeline
+// second — and it read `cell.startTime`, which stage 3 stopped being the whole
+// answer when placement moved onto the take. A chip somebody dragged came out
+// of the zip where it USED to be, so the mix and the timeline that produced it
+// disagreed. `targetChipGeom` is the resolver the lane itself draws with.
+describe("placing a take that was dragged", () => {
+  it("groups it at the take's own position, not the line's start", () => {
+    const dragged = cell({
+      id: "c1",
+      startTime: 10,
+      endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: {
+          url: "frontier-audio://a1.wav",
+          type: "audio/wav",
+          durationMs: 1000,
+          targetOffsetMs: 2500,
+        },
+      },
+    } as Partial<CellData>)
+    const [group] = groupAudioByCharacter([dragged], SETTINGS)
+    expect(group.clips[0].startSec).toBeCloseTo(12.5, 3)
+  })
+
+  // Every take made before there was anywhere else to put one, which is all of
+  // them on every existing project — the fallback has to stay exact.
+  it("leaves an unplaced take exactly where its line starts", () => {
+    const plain = cell({
+      id: "c1",
+      startTime: 7,
+      endTime: 9,
+      selectedAudioId: "a1",
+      attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav" } },
+    } as Partial<CellData>)
+    const [group] = groupAudioByCharacter([plain], SETTINGS)
+    expect(group.clips[0].startSec).toBeCloseTo(7, 3)
+  })
+})

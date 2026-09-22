@@ -6,6 +6,7 @@
 // one with execute({docs:"topic"}) only when a task needs it.
 
 import { PROJECT_BOOTSTRAP, QA_SWEEP, FIRST_CYCLE } from "./docs-playbooks"
+import { AGENT_SKILLS } from "../../../../db/shared/agent-skills"
 
 const DRAFTING = `# Drafting cookbook — the canonical draft loop
 
@@ -333,6 +334,11 @@ const COOKBOOKS: Record<string, string> = {
   "playbooks/project-bootstrap": PROJECT_BOOTSTRAP,
   "playbooks/qa-sweep": QA_SWEEP,
   "playbooks/first-cycle": FIRST_CYCLE,
+  // AQU-1294 §2.3: agent skills. The SAME bodies the Agent API serves over
+  // REST /skills/:name and MCP get_skill (db/shared/agent-skills.ts), so an
+  // in-app agent and an external one follow one playbook. L2 like the
+  // playbooks above — not in the resident card.
+  ...Object.fromEntries(AGENT_SKILLS.map((s) => [`skills/${s.name}`, s.body])),
 }
 
 export const COOKBOOK_TOPICS = Object.keys(COOKBOOKS)

@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -251,6 +254,9 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.splitAria": "Split into milestones",
+    "editor.milestone.splitHint":
+      "Show only the cells in the current division. Use the arrows to move to the next one.",
 
     "editor.milestone.chapter.moveBetween": "Move between chapters",
     "editor.milestone.chapter.previous": "Previous chapter",
@@ -360,6 +366,11 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.targetKeyTerms": "Target key terms",
+    "editor.view.targetKeyTermsAlways": "Always",
+    "editor.view.targetKeyTermsFocused": "Focused cell only",
+    "editor.view.targetKeyTermsNever": "Never",
     "editor.view.footnotesHidden": "Hidden",
     "editor.view.footnotesInline": "Inline under cells",
     "editor.view.footnotesTray": "Bottom tray",
@@ -369,6 +380,7 @@ export const editor = defineNamespace({
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -382,6 +394,10 @@ export const editor = defineNamespace({
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.noReferences": "No Bible references",
+    "editor.bibles.noReferencesDescription":
+      "The current cells have no Bible references with chapter and verse numbers. " +
+      "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
       "Scroll the editor to a verse to see it in other bible versions.",
     "editor.bibles.noVersions":
@@ -397,6 +413,23 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
+
+    // — Verse-resources reference sidebar (AQU-461) ————————————————————
+    "editor.resources.openTooltip":
+      "Verse resources: the people, places and terms this verse mentions",
+    "editor.resources.show": "Show verse resources",
+    "editor.resources.hide": "Hide verse resources",
+    "editor.resources.edgeTab": "Helps",
+    "editor.resources.title": "Verse Resources",
+    "editor.resources.scrollHint":
+      "Scroll the editor to a verse to see the people, places and terms it mentions.",
+    "editor.resources.noneForRef": "No linked people, places or terms for {ref}.",
+    "editor.resources.failedToLoad": "Couldn't load resources: {error}",
+    "editor.resources.openMap": "Open map",
+    "editor.resources.mapAria": "Map showing {place} at {coords}",
+    "editor.resources.openExternal": "Open the full article",
+    "editor.resources.openExternalAria": "Open the full article about {entity}",
+    "editor.resources.attribution": "Reference data from the",
 
     // — Translation-notes reference sidebar ——————————————————————————
     "editor.tn.title": "Translation Notes",
@@ -479,6 +512,8 @@ export const editor = defineNamespace({
     }),
     "editor.history.promote": "Promote to current",
     "editor.history.promoteConfirm": "Make this the current value?",
+    "editor.history.restore": "Restore this version",
+    "editor.history.restoreConfirm": "Replace the current text with this version?",
     "editor.history.showIntermediate": "Show intermediate edits",
     "editor.history.hideIntermediate": "Hide intermediate edits",
 
@@ -535,29 +570,12 @@ export const editor = defineNamespace({
       other: "Removed validations from {count} cells",
     }),
 
-    // — Attach-video dialog for a timed file ————————————————————————
-    "editor.video.title": "Attach Video",
-    "editor.video.currentlyAttached": "Currently attached",
-    "editor.video.removeAttachment": "Remove attachment",
-    "editor.video.startOffset": "Start offset (s)",
-    "editor.video.saveOffset": "Save offset",
-    "editor.video.offsetHint":
-      "Seconds to wait before cues align. If your video has an intro, set this to " +
-      "the duration of the intro so subtitles line up correctly.",
-    "editor.video.tabUrl": "From URL",
-    "editor.video.tabUpload": "Upload file",
-    "editor.video.urlLabel": "Video URL",
-    "editor.video.urlHint":
-      "Direct video URL (MP4, WebM, etc). URL syncs across collaborators.",
-    "editor.video.displayNameLabel": "Display name (optional)",
-    "editor.video.displayNamePlaceholder": "Episode 1",
-    "editor.video.saveUrl": "Save URL",
-    "editor.video.enterUrl": "Enter a video URL",
-    "editor.video.storingLocally": "Storing video locally...",
-    "editor.video.dropHint": "Drag a video file here, or",
+    // AQU-646 stage 6I: the attach-video DIALOG is gone (Sam, 2026-08-27) — it
+    // claimed to upload a video and did nothing. Only this one string outlived
+    // it, because four import panels borrow it for their own file pickers. The
+    // `editor.video.` prefix is a misnomer now; it is left alone rather than
+    // renamed, which would be churn across five files for a key name.
     "editor.video.chooseFile": "Choose file",
-    "editor.video.localOnlyHint": "Stored locally on this device only (not synced to peers).",
-    "editor.video.uploadedFallbackName": "Uploaded video",
 
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
@@ -621,6 +639,19 @@ export const editor = defineNamespace({
     "editor.timeline.snapOffTooltip": "Snapping off",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.outputLatencyNote":
+      "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
+    "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
+    // AQU-646 stage 2: the track colour palette. Each names a PAIR — the tone
+    // recorded takes are drawn in, and the near neighbour generated voices get
+    // — so the label is the family, not either exact hue.
+    // Sam's own seven (2026-08-27), named as his spec names them.
+    "editor.timeline.colorCyan": "Cyan",
+    "editor.timeline.colorAzure": "Azure",
+    "editor.timeline.colorViolet": "Violet",
+    "editor.timeline.colorMagenta": "Magenta",
+    "editor.timeline.colorAmber": "Amber",
+    "editor.timeline.colorGreen": "Green",
     "editor.timeline.measureNote": plural({
       one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
       other:
@@ -635,7 +666,6 @@ export const editor = defineNamespace({
     "editor.timeline.measureDismiss": "Dismiss for now",
 
     // — Section-scoped transcription (AQU-928) ————————————————————
-    "editor.timeline.transcribeSelectionEmpty": "No section selected",
     "editor.timeline.transcribeSelectionCount": plural({
       one: "{count} section selected",
       other: "{count} sections selected",
@@ -645,13 +675,19 @@ export const editor = defineNamespace({
       one: "Transcribe {count} section",
       other: "Transcribe {count} sections",
     }),
+    "editor.timeline.transcribeSelectionRecordings": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
     "editor.timeline.transcribeSelectionClear": "Clear selection",
     "editor.timeline.transcribeSelectionHint":
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
     "editor.timeline.transcribeSelectionTooltip":
       "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
-    "editor.timeline.transcribeSelectionEmptyTooltip":
-      "Click a chip on the timeline to pick a section, then transcribe just that section.",
+    "editor.timeline.transcribeSelectionSharedTooltip": plural({
+      one: "Some of these sections are performed by the same heard line, so this runs {count} transcription covering all of them.",
+      other: "Some of these sections are performed by the same heard line, so this runs {count} transcriptions covering all of them.",
+    }),
     "editor.timeline.transcribeSelectionNoAudioTooltip":
       "None of the selected sections has audio to transcribe.",
     "editor.timeline.transcribeSelectionBusyTooltip":
@@ -661,6 +697,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
+    // AQU-1119: the section heading over the dialogue table, opposite the
+    // Video header. It says "Text" and not "Source text" because SOURCE and
+    // TARGET are the two columns underneath it — the section holds both, and
+    // naming it after one of its columns read as a mislabel. Deliberately not
+    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
+    // text" / "Target text", which is right, because a track IS one side.
+    "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
@@ -719,6 +762,90 @@ export const editor = defineNamespace({
     "editor.timeline.sortableTrackRole": "sortable track",
     "editor.timeline.gutterReorderAria":
       "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
+    // AQU-646 stage 2: folders in the track gutter. (Stage 4b retired the
+    // "N tracks" sublabel — a slim folder heading has no room for a second
+    // line, and the summary band says what is inside better.)
+    "editor.timeline.gutterCollapseAria": "Narrow the track names",
+    "editor.timeline.gutterExpandAria": "Show the track names",
+    // AQU-1119: collapsing a whole section of the media lens down to a rail of
+    // one icon, and bringing it back. Each pair is one button in two states —
+    // the collapse control lives in the section's own header, the expand
+    // control IS the rail.
+    "editor.timeline.collapseVideoAria": "Hide the video",
+    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseTimelineAria": "Hide the timeline",
+    "editor.timeline.expandTimelineAria": "Show the timeline",
+    "editor.timeline.collapseTextAria": "Hide the text",
+    "editor.timeline.expandTextAria": "Show the text",
+    // AQU-1119: the other control beside each body section's chevron. Where
+    // the chevron folds ITS OWN section, this one folds the others so this
+    // section has the lens to itself — one button in two states.
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
+    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
+    "editor.timeline.restoreTextAria": "Put the text back in its column",
+    "editor.timeline.folderExpandAria": "Show the tracks in {name}",
+    "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
+    "editor.timeline.trackMenuAria": "Track options for {name}",
+    "editor.timeline.trackRename": "Rename",
+    "editor.timeline.trackColor": "Colour",
+    // AQU-646 stage 7: one hue per track, picked from six swatches, so the
+    // whole vocabulary of axes, weights and previews is gone with the picker.
+    // A colour name and a count is all this menu says now.
+    // AQU-646 stage 6H rev 2: the colour PICKER's own words. Temporary by
+    // design — Sam is using it to craft a palette, and when the palette exists
+    // this dialog and these four keys go with it.
+    "editor.timeline.trackColorCount": plural({
+      one: "Colour {count} track",
+      other: "Colour {count} tracks",
+    }),
+    "editor.timeline.trackNewFolderFrom": "New folder from this track",
+    "editor.timeline.trackNewFolderFromCount": plural({
+      one: "New folder from {count} track",
+      other: "New folder from {count} tracks",
+    }),
+    "editor.timeline.trackLeaveFolder": "Take out of folder",
+    "editor.timeline.trackLeaveFolderCount": plural({
+      one: "Take {count} track out of its folder",
+      other: "Take {count} tracks out of their folders",
+    }),
+    "editor.timeline.trackDelete": "Delete track",
+    "editor.timeline.trackDeleteFolder": "Delete folder",
+    "editor.timeline.trackDeleteCount": plural({
+      one: "Delete {count} track",
+      other: "Delete {count} tracks",
+    }),
+    "editor.timeline.trackAdd": "Add track",
+    "editor.timeline.trackAddTrack": "Audio track",
+    "editor.timeline.trackAddFolder": "Folder",
+    // "Folder" → editor.timeline.trackAddFolder (identical text)
+    // AQU-646 stage 6J: the automatic name is DATA, not copy, so it is built in
+    // code now — see `nextTrackName`. It has to be stable across locales: a
+    // track called "Track 2" is stored under that name and read back by
+    // everyone on the project, whatever language each of them is working in.
+    // The add-track dialog.
+    "editor.timeline.addTrackTitle": "Add an audio track",
+    // "Name" → common.name (identical text)
+    "editor.timeline.addTrackAlignLabel": "Line it up with",
+    "editor.timeline.addTrackAlignHint":
+      "The new track's recordings sit against this track's lines. It can't be changed afterwards.",
+    // "Add track" → editor.timeline.trackAdd (identical text)
+    // The delete confirmation.
+    "editor.timeline.deleteTrackTitle": "Delete {name}?",
+    "editor.timeline.deleteTracksTitle": plural({
+      one: "Delete {count} track?",
+      other: "Delete {count} tracks?",
+    }),
+    "editor.timeline.deleteTrackEmpty": "This track has no recordings on it.",
+    "editor.timeline.deleteTrackTakes": plural({
+      one: "{count} recording on this track will be deleted with it.",
+      other: "{count} recordings on this track will be deleted with it.",
+    }),
+    "editor.timeline.deleteFolderMembers": plural({
+      one: "The {count} track inside it will be moved out, not deleted.",
+      other: "The {count} tracks inside it will be moved out, not deleted.",
+    }),
+    // "Delete" → common.delete (identical text)
     "editor.timeline.rowsShorterAria": "Shorter rows",
     "editor.timeline.rowsShorterTooltip": "Shorter rows — fit more tracks on screen (⌘ + scroll)",
     "editor.timeline.rowsTallerAria": "Taller rows",
@@ -739,6 +866,61 @@ export const editor = defineNamespace({
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
+    // AQU-1068 round 3: WHY a row cannot take an action. A closed set with
+    // one sentence shape — the same string serves the disabled button's tooltip
+    // and the disabled menu item's second line, so the two surfaces cannot
+    // drift. Shown instead of hiding the control, because an absent button
+    // cannot distinguish "not applicable here" from "this feature is broken".
+    //
+    // The media cause carries TWO strings because the question differs by
+    // action: hovering a dead INSERT asks about a new cell, not about the row
+    // it happens to sit beside, so describing the row there answered the
+    // wrong question (round 4, Sam).
+    "editor.row.noRoomReason": "There\u2019s no room here to fit a line.",
+    "editor.row.mediaInsertReason": "Cells can\u2019t be added to imported audio.",
+    "editor.row.mediaRemoveReason":
+      "This row is a piece of the original recording, so it can\u2019t be removed.",
+    "editor.row.idmlReason":
+      "IDML files keep their original layout, so cells can\u2019t be added or removed.",
+    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
+    // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
+    // fragments below — a resolved-and-concatenated list, the house idiom (see
+    // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,
+    // because which clauses appear depends on what the cell actually carries.
+    "editor.removeCell.title": "Remove this cell?",
+    "editor.removeCell.confirmLabel": "Remove it",
+    "editor.removeCell.lead": "This removes the cell and everything on it:",
+    "editor.removeCell.leadNothing":
+      "This removes the cell. There is nothing else attached to it.",
+    "editor.removeCell.translations": plural({
+      one: "its translation in {count} language",
+      other: "its translations in {count} languages",
+    }),
+    "editor.removeCell.takes": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
+    "editor.removeCell.comments": plural({
+      one: "{count} comment",
+      other: "{count} comments",
+    }),
+    "editor.removeCell.validations": plural({
+      one: "{count} validation",
+      other: "{count} validations",
+    }),
+    "editor.removeCell.sharedTakeWarning":
+      "One of those recordings also performs other lines.",
+    "editor.removeCell.milestoneWarning":
+      "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
+    "editor.removeCell.permanent": "This cannot be undone.",
+    // AQU-1068: an insert/removal applies instantly and is corrected if the
+    // server refuses it — the row comes back (or goes away again) on its own,
+    // so the copy explains the reversal rather than asking for an action.
+    "editor.addCell.failedToast": "That cell couldn\u2019t be added, so it has been removed again.",
+    "editor.removeCell.failedToast": "That cell couldn\u2019t be removed, so it has been put back.",
+    "editor.addCell.forbiddenToast": "You don\u2019t have permission to add cells here, so it has been removed again.",
+    "editor.removeCell.forbiddenToast": "You don\u2019t have permission to remove cells here, so it has been put back.",
+    "editor.removeCell.notYetSavedToast": "That cell is still being saved \u2014 try removing it again in a moment.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
@@ -1077,8 +1259,13 @@ export const editor = defineNamespace({
     "editor.row.cellAria": "{ref} cell",
     "editor.row.rowFallbackRef": "row {index}",
     "editor.row.editorAria": "{ref} — {state}",
+    "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // -- CellPresenceBadges: per-row live-collaborator chips --
+    "editor.presence.viewing": "viewing",
+    "editor.presence.editing": "editing",
+    "editor.presence.typing": "typing…",
     "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
     "editor.row.selectAria": "Select cell. Drag to select a range.",
     "editor.state.empty": "empty",
@@ -1100,6 +1287,9 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.searchPlaceholder": "Search lanes…",
+    "editor.lane.searchAriaLabel": "Search lanes",
+    "editor.lane.searchEmpty": "No lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -1122,6 +1312,25 @@ export const editor = defineNamespace({
       "was closed.",
 
     // — Source column ——————————————————————————————————————————————
+    // AQU-1068 item 5: the source cell's one menu, which replaced the pencil
+    // and the hover corner. `editor.source.editText` and the row's insert /
+    // remove / reason strings are reused verbatim as its entries.
+    "editor.cellMenu.trigger": "Cell actions",
+    "editor.cellMenu.editTimestamps": "Edit timestamps",
+    "editor.cellMenu.timingLocked": "Timing is locked for this project.",
+    "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
+    "editor.cellMenu.startLabel": "Start time",
+    "editor.cellMenu.endLabel": "End time",
+    "editor.cellMenu.betweenHint": "Lines either side start {from} and {to}",
+    "editor.cellMenu.afterHint": "The line before starts {from}",
+    "editor.cellMenu.beforeHint": "The line after starts {to}",
+    "editor.cellMenu.badTime": "Type a time like 1:02.5",
+    "editor.cellMenu.invertedTimes": "The end has to come after the start.",
+    "editor.cellMenu.startsBeforePrevious":
+      "This would put the line before the one above it. Its start has to stay after {from}.",
+    "editor.cellMenu.startsAfterNext":
+      "This would put the line after the one below it. Its start has to stay before {to}.",
+    "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
     "editor.source.doneEditing": "Done editing source",
@@ -1166,32 +1375,35 @@ export const editor = defineNamespace({
     // — Expansion tab: back-translation ————————————————————————————
     "editor.bt.label": "Back-translation",
     "editor.bt.explainTooltip":
-      "A reading of this translation back in your reference language. " +
-      "AI can misread, and the project's own pairs can be rough — treat both " +
-      "as checks, not proof.",
+      "A literal back-translation into your source language, for comparing with " +
+      "the original. AI can misread, and the statistical gloss tracks your corpus " +
+      "— treat both as checks, not proof.",
     "editor.bt.needsAiTooltip":
       "Sign in or add an AI model in project settings to generate back-translations",
-    "editor.bt.regenerateTooltip": "Regenerate with AI",
+    "editor.bt.regenerateTooltip": "Regenerate back-translation",
     "editor.bt.regenerateAria": "Regenerate the back-translation",
     "editor.bt.editTooltip": "Edit the back-translation",
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
     "editor.bt.failed": "Back-translation failed",
-    "editor.bt.translateFirst": "Translate this cell to read it back.",
-    "editor.bt.staleWarning": "This reading describes an earlier version of the translation",
+    "editor.bt.translateFirst":
+      "Translate this cell first to generate a back-translation.",
+    "editor.bt.staleWarning":
+      "This back-translation describes an earlier version of the translation",
     "editor.bt.emptyPitch":
-      "See what your translation says when read back, so you can check the " +
-      "meaning carried over.",
-    "editor.bt.readingItBack": "Reading it back…",
-    "editor.bt.readItBack": "Read it back with AI",
+      "Reverse-translate this cell literally, then compare the result with the source.",
+    "editor.bt.readingItBack": "Generating back-translation…",
+    "editor.bt.readItBack": "Generate back-translation",
     "editor.bt.needsAiHint":
-      "Sign in or add an AI model in project settings to generate one.",
-    "editor.bt.contributorCanGenerate": "A contributor can generate one with AI.",
-    "editor.bt.originAi": "AI reading",
-    "editor.bt.originCorrected": "Corrected reading",
+      "Sign in or add an AI model in project settings to generate a back-translation.",
+    "editor.bt.contributorCanGenerate":
+      "A contributor can generate a back-translation.",
+    "editor.bt.originAi": "AI back-translation",
+    "editor.bt.originCorrected": "Hand-corrected",
     "editor.bt.freshLabel": "Matches this translation",
-    "editor.bt.pairsDisagree": "This project's pairs read it differently",
-    "editor.bt.pairsLive": "From this project's own pairs — updates as you translate",
-    "editor.bt.usePairsInstead": "Use this reading",
+    "editor.bt.pairsDisagree": "Statistical gloss differs",
+    "editor.bt.pairsLive":
+      "Statistical gloss from project pairs — updates as you translate",
+    "editor.bt.usePairsInstead": "Use this gloss",
     "editor.bt.statisticalGloss": "Statistical gloss",
     "editor.bt.statisticalGlossSub": "— word-for-word, from this project's own pairs",
     "editor.bt.glossNotEnoughPairs":
@@ -1261,8 +1473,44 @@ export const editor = defineNamespace({
     "editor.navTitle.projectMembers": "Project members",
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
+    "editor.sync.trafficHistory": "Upload and download activity over the past five minutes",
+    "editor.sync.replyHistory": "Observed server replies over the past five minutes",
+    "editor.sync.fiveMinutesAgo": "5 min ago",
+    "editor.sync.historyHelp": "5-second averages. Gaps mean no reply was measured. History builds while this tab is open.",
+    "editor.sync.activityNow": "Now",
+    "editor.sync.pastFiveMinutes": "Past 5 min",
+    "editor.sync.serverReply": "Server reply",
+    "editor.sync.transferredTotal": "{amount} total",
+    "editor.sync.averageReply": "{time} avg",
+    "editor.sync.slowestReply": "Slowest reply: {time}",
+    "editor.sync.replyJustNow": "Last reply just now",
+    "editor.sync.requestCount": plural({ one: "{count} request", other: "{count} requests" }),
+    "editor.sync.failureCount": plural({ one: "{count} failed", other: "{count} failed" }),
+    "editor.sync.replySecondsAgo": plural({ one: "Last reply {count}s ago", other: "Last reply {count}s ago" }),
+    "editor.sync.replyMinutesAgo": plural({ one: "Last reply {count}m ago", other: "Last reply {count}m ago" }),
+    "editor.sync.connection": "Connection",
+    "editor.sync.upload": "Upload",
+    "editor.sync.download": "Download",
+    "editor.sync.responseTime": "Response time",
+    "editor.sync.ping": "Ping",
+    "editor.sync.connectionDetails": "Connection details",
+    "editor.sync.showDetails": "Show connection details",
+    "editor.sync.qualityGood": "Good",
+    "editor.sync.qualityFair": "OK",
+    "editor.sync.qualitySlow": "Slow",
+    "editor.sync.noActivity": "Idle",
+    "editor.sync.waitingForActivity": "Waiting for activity",
+    "editor.sync.activityHelp": "Sync traffic in this tab, not your internet speed. Small transfers are normal. Reply times include server work.",
     "editor.sync.live": "Live",
-    "editor.sync.liveTooltip": "Live — changes are syncing to Cloudflare and across devices",
+    "editor.sync.liveTooltip": "Live — all changes are saved to the server and syncing across devices",
+    "editor.sync.syncing": "Syncing",
+    "editor.sync.syncingTooltip": "Syncing — some changes are still being sent to the server",
+    "editor.sync.retrying": "Retrying",
+    "editor.sync.retryingTooltip":
+      "Retrying — the last attempt to send your changes failed. Edits are saved locally and will be retried.",
+    "editor.sync.reconnecting": "Reconnecting",
+    "editor.sync.reconnectingTooltip":
+      "Reconnecting — the live connection dropped. Edits are saved locally; changes from others may be delayed.",
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
@@ -1340,6 +1588,181 @@ export const editor = defineNamespace({
           "Screen-reader name of the timeline's track-name gutter, which is a " +
           "reorderable list. Names the list and states both ways to reorder it. " +
           "Never visible.",
+      },
+      "editor.timeline.trackMenuAria": {
+        description:
+          "Screen-reader name of the '…' button on a timeline track's row, " +
+          "which opens the same options right-clicking the track does. Never " +
+          "visible — the button is an icon.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTrackTitle": {
+        description:
+          "Title of the confirmation asked before deleting a timeline track. " +
+          "Deleting really deletes: the recordings on the track go with it.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTracksTitle": {
+        description:
+          "The same confirmation when SEVERAL selected timeline tracks are " +
+          "being deleted at once, where naming them all would not fit. The " +
+          "line beneath states how many recordings go with them.",
+        placeholders: { count: "How many tracks are being deleted; it also selects the plural form." },
+      },
+      "editor.timeline.trackColorCount": {
+        description:
+          "Submenu label when several timeline tracks are selected at once. " +
+          "The count is how many of the selected tracks can actually take a " +
+          "colour — source rows cannot — so it may be fewer than are selected.",
+        placeholders: { count: "How many tracks will be recoloured; it also selects the plural form." },
+      },
+      "editor.timeline.trackNewFolderFromCount": {
+        description:
+          "Menu item that creates a folder containing the selected timeline " +
+          "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
+          "FROM tracks, and moving into an existing one is a drag.",
+        placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackLeaveFolderCount": {
+        description:
+          "Menu item that returns the selected timeline tracks to the top " +
+          "level, out of whatever folders they are in. The tracks are not " +
+          "deleted or changed in any other way.",
+        placeholders: { count: "How many tracks leave their folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackDeleteCount": {
+        description:
+          "Menu item that deletes several selected timeline tracks at once. " +
+          "The count is how many of the selection can be deleted — the rows a " +
+          "file derives cannot — so it may be fewer than are selected. A " +
+          "confirmation follows.",
+        placeholders: { count: "How many tracks will be deleted; it also selects the plural form." },
+      },
+      "editor.timeline.deleteTrackTakes": {
+        description:
+          "The warning line in that confirmation, counting the recordings that " +
+          "will be deleted along with the track. Stated plainly because it is " +
+          "the fact the person is being asked to accept.",
+        placeholders: {
+          count:
+            "How many recordings are on the track; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.deleteFolderMembers": {
+        description:
+          "Shown instead when the thing being deleted is a FOLDER. The tracks " +
+          "inside are not deleted with it — they return to the top level — and " +
+          "saying so is what stops the confirmation reading as a threat to them.",
+        placeholders: {
+          count:
+            "How many tracks are inside the folder; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.addTrackAlignHint": {
+        description:
+          "Help text under the 'Line it up with' picker in the add-track " +
+          "dialog. The new track's chips are positioned against the chosen " +
+          "track's lines, and that choice is made once, at creation.",
+      },
+      "editor.timeline.gutterCollapseAria": {
+        description:
+          "Screen-reader name and tooltip of the button that narrows the " +
+          "timeline's whole track-name column to a strip of icons, giving the " +
+          "space to the tracks themselves. Affects every row at once. Doubles " +
+          "as the button's hover tooltip, so it is read as well as heard.",
+      },
+      "editor.timeline.gutterExpandAria": {
+        description:
+          "Screen-reader name and tooltip of the button that widens the " +
+          "timeline's track-name column back out, so every track's full name " +
+          "and description are readable again. Affects every row at once. " +
+          "Doubles as the button's hover tooltip.",
+      },
+      "editor.timeline.collapseVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the video's own " +
+          "header that collapses the whole video section to a 40px rail of one " +
+          "icon, giving its width to the text beside it. Doubles as the " +
+          "button's hover tooltip. Pairs with expandVideoAria.",
+      },
+      "editor.timeline.expandVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed video rail — the " +
+          "strip of one icon that is all that remains of the video section, " +
+          "and which is itself the button that brings the picture back. The " +
+          "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.fullscreenVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the video " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the text — so the picture has the whole media lens " +
+          "to itself. Not browser fullscreen: the app window is unchanged. " +
+          "Pairs with restoreVideoAria, which is the same button pressed.",
+      },
+      "editor.timeline.restoreVideoAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the video " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the video's normal place beside the text, not a table column.",
+      },
+      "editor.timeline.fullscreenTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the text " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the video — so the cells have the whole media lens " +
+          "to themselves. Not browser fullscreen: the app window is " +
+          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTextAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the text " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the text's normal place beside the video.",
+      },
+      "editor.timeline.collapseTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the timeline's " +
+          "toolbar that collapses the whole timeline to a 40px rail of one " +
+          "icon, giving its height to the video and text below it. Doubles as " +
+          "the button's hover tooltip. Pairs with expandTimelineAria.",
+      },
+      "editor.timeline.expandTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
+          "strip of one icon that is all that remains of the timeline, and " +
+          "which is itself the button that brings it back. The name is only " +
+          "ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the text section's " +
+          "header that collapses the dialogue table to a 40px rail of one " +
+          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "section holding the source and target columns, not one of them. " +
+          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
+      },
+      "editor.timeline.expandTextAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed text rail — the " +
+          "strip of one icon that is all that remains of the dialogue table, " +
+          "and which is itself the button that brings it back. The name is " +
+          "only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.folderExpandAria": {
+        description:
+          "Screen-reader name of the triangle that opens a timeline folder and " +
+          "shows the tracks inside it. Never visible — the control is an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
+      },
+      "editor.timeline.folderCollapseAria": {
+        description:
+          "Screen-reader name of the triangle that closes a timeline folder. " +
+          "The tracks inside are hidden and the folder's own row shows a " +
+          "summary of where their audio falls. Never visible — an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
       },
       "editor.timeline.rowsShorterAria": {
         description:
@@ -1451,6 +1874,57 @@ export const editor = defineNamespace({
           "translate the meaning ('what is hurting the score most'), not the image.",
         maxLength: 24,
       },
+      "editor.removeCell.translations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the target-language lanes that hold a translation " +
+          "of the cell. Reads as an item in a sentence, e.g. \u201cits translations in 3 " +
+          "languages\u201d, so it starts lower-case and carries no full stop.",
+        placeholders: {
+          count:
+            "The number of target languages; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.takes": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the voice recordings made against that cell. " +
+          "Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count:
+            "The number of recordings; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.comments": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts every comment on the cell, replies and already- " +
+          "resolved ones included. Reads as an item in a sentence, so no leading capital " +
+          "and no full stop.",
+        placeholders: {
+          count: "The number of comments; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.validations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the reviewers whose approval currently stands on " +
+          "the cell. Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count: "The number of validations; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.milestoneWarning": {
+        description:
+          "Extra warning in the removal confirmation dialog, shown only when the cell " +
+          "being removed is the one carrying a chapter or section heading. Removing it " +
+          "takes that heading out of the chapter navigator.",
+        placeholders: {
+          label:
+            "The heading as it appears in the file, e.g. a chapter number or a section " +
+            "title. Content from the user's own document \u2014 never translate it.",
+        },
+      },
       "editor.health.staleSource": {
         description:
           "Amber warning row in the health popover counting cells whose pinned source text " +
@@ -1460,6 +1934,15 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
       },
       "editor.audio.record": {
         description:
@@ -2036,6 +2519,22 @@ export const editor = defineNamespace({
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
       },
+      "editor.milestone.splitAria": {
+        description:
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
+        screenshot: "editor-table",
+      },
+      "editor.milestone.splitHint": {
+        description:
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
+        screenshot: "editor-table",
+      },
       "editor.milestone.chapter.moveBetween": {
         description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,
       },
@@ -2435,6 +2934,34 @@ export const editor = defineNamespace({
           "resource. Not the user's own comments.",
         maxLength: 32,
       },
+      "editor.view.showHealthIndicators": {
+        description:
+          "Label of the switch that turns the per-row health ribbon, rule " +
+          "infractions, and the confidence overlay on or off. Turning it off " +
+          "lightens the editor on very large files. Applies to this browser only.",
+        maxLength: 32,
+      },
+      "editor.view.targetKeyTerms": {
+        description:
+          "Section heading for the setting that controls subtle highlights on approved " +
+          "terminology found in translated target cells.",
+        maxLength: 28,
+      },
+      "editor.view.targetKeyTermsAlways": {
+        description:
+          "Option that shows approved target key-term highlights in every visible cell.",
+        maxLength: 16,
+      },
+      "editor.view.targetKeyTermsFocused": {
+        description:
+          "Option that shows approved target key-term highlights only in the focused cell.",
+        maxLength: 24,
+      },
+      "editor.view.targetKeyTermsNever": {
+        description:
+          "Option that hides approved target key-term highlights. Violation markers remain visible.",
+        maxLength: 16,
+      },
       "editor.view.footnotesHidden": {
         description:
           "First of three radio options for how footnotes are displayed: not shown " +
@@ -2497,6 +3024,17 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.useAppFontSize": {
+        description:
+          "Tooltip and screen-reader name of the button that drops a column's " +
+          "custom size so it follows the app-wide font size again. Shown only " +
+          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +
@@ -2574,6 +3112,14 @@ export const editor = defineNamespace({
           "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
           "side by side with the user's own translation for comparison.",
         maxLength: 22,
+      },
+      "editor.bibles.noReferences": {
+        description: "Empty-state title when no usable Bible reference is available.",
+      },
+      "editor.bibles.noReferencesDescription": {
+        description:
+          "Explains why parallel text is unavailable for the current cells. " +
+          "Do not imply that the entire file lacks references or suggest scrolling fixes it.",
       },
       "editor.bibles.scrollHint": {
         description:
@@ -2663,6 +3209,98 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
+      },
+      "editor.resources.openTooltip": {
+        description:
+          "Tooltip on the collapsed right-edge tab that opens the verse-resources " +
+          "sidebar. Two halves: the feature's name, then what it shows. 'Resources' " +
+          "here means published reference articles about the things the verse names " +
+          "(a person, a town, a key term), not files or project assets.",
+      },
+      "editor.resources.show": {
+        description:
+          "Screen-reader name of that same collapsed edge tab. Imperative.",
+      },
+      "editor.resources.hide": {
+        description:
+          "Screen-reader name of the X that collapses the verse-resources sidebar " +
+          "back to its edge tab. Nothing is unloaded or lost.",
+      },
+      "editor.resources.edgeTab": {
+        description:
+          "The one word printed vertically down the collapsed edge tab. Extremely " +
+          "tight — it must read rotated 90° in a 36px-wide column. 'Helps' is the " +
+          "field's own term for reference material that assists a translator. " +
+          "Abbreviate rather than let it overflow.",
+        maxLength: 10,
+      },
+      "editor.resources.title": {
+        description:
+          "Heading of the open verse-resources sidebar. Names what the panel lists: " +
+          "reference articles for the entities the currently-viewed verse mentions.",
+        maxLength: 24,
+      },
+      "editor.resources.scrollHint": {
+        description:
+          "Empty state shown before the editor has scrolled to a verse. Explains the " +
+          "interaction: the panel follows the editor's scroll position. Full sentence.",
+      },
+      "editor.resources.noneForRef": {
+        description:
+          "Empty state when a verse IS in view but the corpus links no entities to " +
+          "it — common for non-narrative verses. States the fact; nothing is broken " +
+          "and there is no action to take.",
+        placeholders: {
+          ref: "The verse being viewed, as book/chapter/verse (e.g. 'MAT 2 1'). Not translated.",
+        },
+      },
+      "editor.resources.failedToLoad": {
+        description:
+          "Error line replacing the list when the reference lookup fails (offline, " +
+          "or the upstream corpus is down). The verse itself is unaffected.",
+        placeholders: {
+          error: "Raw English error text from the failed request. Not translated.",
+        },
+      },
+      "editor.resources.openMap": {
+        description:
+          "Link under a place's locator map; opens that location on openstreetmap.org " +
+          "in a new tab, where it can be zoomed. Imperative, very tight — it sits on " +
+          "one 10px line opposite the coordinates.",
+        maxLength: 16,
+      },
+      "editor.resources.mapAria": {
+        description:
+          "Screen-reader description of the locator map image, which is otherwise " +
+          "just tiles. Names the place and reads out its coordinates, since a " +
+          "non-sighted user cannot see the marker.",
+        placeholders: {
+          place: "Name of the biblical place shown, e.g. 'Bethlehem (of Judah)'. Not translated.",
+          coords:
+            "Formatted latitude/longitude, e.g. '31.705°N, 35.210°E'. The N/S/E/W letters are " +
+            "English compass abbreviations. Not translated.",
+        },
+      },
+      "editor.resources.openExternal": {
+        description:
+          "Tooltip on the small external-link icon beside an entity's name; it opens " +
+          "that entity's full reference article on the source site in a new tab.",
+        maxLength: 24,
+      },
+      "editor.resources.openExternalAria": {
+        description:
+          "Screen-reader name of that same icon-only link. Icon-only, so this string " +
+          "is the only name it has, and it must say WHICH entity it opens.",
+        placeholders: {
+          entity: "Name of the person, place or term, e.g. 'Herod'. Not translated.",
+        },
+      },
+      "editor.resources.attribution": {
+        description:
+          "Opening words of the 10px attribution line at the foot of the sidebar. It " +
+          "is followed immediately by links whose text is each data source's proper " +
+          "name, which is not translated — so this string ends mid-phrase on purpose " +
+          "and the names cannot be moved in front of it.",
       },
       "editor.tn.title": {
         description:
@@ -2961,6 +3599,18 @@ export const editor = defineNamespace({
           "Inline confirmation question shown after clicking Promote, with Confirm " +
           "and Cancel beside it. A question, so keep the question mark.",
       },
+      "editor.history.restore": {
+        description:
+          "Link on an older (non-current, non-stale) history entry that makes that " +
+          "entry's text the cell's current value again, as a new edit. Imperative. " +
+          "Nothing is deleted; the newer edits stay in the history.",
+        maxLength: 26,
+      },
+      "editor.history.restoreConfirm": {
+        description:
+          "Inline confirmation question shown after clicking Restore, with Confirm " +
+          "and Cancel beside it. A question, so keep the question mark.",
+      },
       "editor.history.showIntermediate": {
         description:
           "Tiny (10px) disclosure link that expands the folded keystroke-level " +
@@ -3164,124 +3814,13 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.video.title": {
-        description:
-          "Title of the dialog that links a video to a subtitle/timed file so the " +
-          "translator can watch it while timing cues. Title Case in English because " +
-          "it is a dialog title. 'Attach' rather than 'upload' — a URL is not copied.",
-        maxLength: 24,
-      },
-      "editor.video.currentlyAttached": {
-        description:
-          "Muted label above the name of the video already linked to this file. A " +
-          "state description, not an action.",
-        maxLength: 24,
-      },
-      "editor.video.removeAttachment": {
-        description:
-          "Tooltip and screen-reader name of the trash button that unlinks the " +
-          "current video. For an uploaded file it also deletes the local copy; for a " +
-          "URL nothing at the far end is touched.",
-        maxLength: 26,
-      },
-      "editor.video.startOffset": {
-        description:
-          "Label of the numeric field holding how many seconds of the video come " +
-          "BEFORE the first subtitle cue. The '(s)' is the unit abbreviation for " +
-          "seconds — keep an equivalent short unit marker.",
-        maxLength: 22,
-      },
-      "editor.video.saveOffset": {
-        description:
-          "Small button that stores the start-offset value without changing which " +
-          "video is attached. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.offsetHint": {
-        description:
-          "Help text under the start-offset field. Two sentences: what the number " +
-          "means, then the common case (a title sequence) worked through so the user " +
-          "knows what to type. 'Cues' are the timed subtitle entries.",
-      },
-      "editor.video.tabUrl": {
-        description:
-          "First of two tabs in the attach-video dialog: link a video already " +
-          "hosted somewhere by pasting its address.",
-        maxLength: 18,
-      },
-      "editor.video.tabUpload": {
-        description:
-          "Second tab: pick a video file from this computer, stored locally in the " +
-          "browser rather than on the server.",
-        maxLength: 18,
-      },
-      "editor.video.urlLabel": {
-        description:
-          "Form label for the field taking the video's web address.",
-        maxLength: 18,
-      },
-      "editor.video.urlHint": {
-        description:
-          "Help text under the video URL field. Two points: it must be a direct " +
-          "link to the video file itself (the formats in parentheses are file-format " +
-          "names and stay as-is), and unlike an upload a URL is visible to the rest " +
-          "of the team.",
-      },
-      "editor.video.displayNameLabel": {
-        description:
-          "Form label for the optional friendly name shown instead of the raw URL. " +
-          "The '(optional)' must survive — it is what tells the user they can skip it.",
-        maxLength: 28,
-      },
-      "editor.video.displayNamePlaceholder": {
-        description:
-          "Example value in the display-name field. It is a sample title, so " +
-          "translate it as a plausible episode name in the target language rather " +
-          "than as an instruction.",
-        maxLength: 20,
-      },
-      "editor.video.saveUrl": {
-        description:
-          "Full-width confirming button on the URL tab; it attaches the pasted " +
-          "address to the file. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.enterUrl": {
-        description:
-          "Validation error under the URL field when the user pressed the button " +
-          "with the field empty. Imperative — it says what to do, not what went " +
-          "wrong.",
-        maxLength: 28,
-      },
-      "editor.video.storingLocally": {
-        description:
-          "Status text while the chosen video is being written into this browser's " +
-          "local storage. 'Locally' is the reassuring part: nothing is uploaded. " +
-          "Trailing three periods are literal in the English source.",
-      },
-      "editor.video.dropHint": {
-        description:
-          "Line inside the upload drop zone offering drag-and-drop. It ends with " +
-          "'or' on purpose: the file-picker button follows immediately below and " +
-          "completes the sentence.",
-      },
+      // The one survivor of the removed attach-video dialog (stage 6I); the
+      // file pickers in the import panels are what use it now.
       "editor.video.chooseFile": {
         description:
           "Button under the drop zone that opens the operating system's file " +
           "picker. Imperative.",
         maxLength: 18,
-      },
-      "editor.video.localOnlyHint": {
-        description:
-          "Small print under the upload drop zone. The point is the limitation: an " +
-          "uploaded video stays in this browser, so teammates will not see it — " +
-          "unlike a URL. 'Peers' means the other people on the project.",
-      },
-      "editor.video.uploadedFallbackName": {
-        description:
-          "Stand-in name shown for a locally stored video whose original file name " +
-          "was not recorded. A noun phrase, not an action.",
-        maxLength: 24,
       },
       "editor.timeline.title": {
         description:
@@ -3543,6 +4082,20 @@ export const editor = defineNamespace({
           "view no longer lays clips out on that clock, so showing it would drift " +
           "against the audio. Explains an absence — not an error.",
       },
+      "editor.timeline.outputLatencyNote": {
+        description:
+          "Quiet line in the timeline chrome, shown only while the audio output " +
+          "looks like Bluetooth. The app already shifts the playhead by the delay " +
+          "the browser reports; this says the REMAINDER cannot be measured, so the " +
+          "line may still sit slightly ahead of what is heard. Not a warning and " +
+          "not an error — the person can do nothing about it, and nothing is broken.",
+      },
+      "editor.timeline.outputDeviceChangedToast": {
+        description:
+          "Toast shown when playback was stopped because the audio output device " +
+          "changed mid-playback — headphones connected or unplugged. States what " +
+          "happened and why; the person simply presses play again.",
+      },
       "editor.timeline.measureNote": {
         description:
           "Amber notice above the timeline: some recordings were saved before the app " +
@@ -3583,6 +4136,22 @@ export const editor = defineNamespace({
           "Accessible name of the small X that hides the measure notice for this " +
           "visit. 'For now' is deliberate: the notice returns next time the timeline " +
           "opens while unmeasured recordings remain. Never visible.",
+      },
+      "editor.timeline.transcribeSelectionRecordings": {
+        description:
+          "Shown beside the selected-section count when the two differ: several " +
+          "subtitles can be performed by ONE heard line (22.7% of heard lines " +
+          "cover more than one), so the recording is transcribed once and " +
+          "covers all of them. Stating both numbers is how the user learns that " +
+          "before pressing, rather than wondering afterwards.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
+      },
+      "editor.timeline.transcribeSelectionSharedTooltip": {
+        description:
+          "Tooltip explaining why the section count and the recording count " +
+          "differ — the sections share a heard line, and one transcription " +
+          "covers all of them.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
       },
       "editor.timeline.transcribeSelectionCount": {
         description:
@@ -4001,6 +4570,14 @@ export const editor = defineNamespace({
             "editor.state.empty — already translated.",
         },
       },
+      "editor.row.translationAria": {
+        description: "Accessible name of the translation activation button and editor, including source context.",
+        placeholders: {
+          ref: "Human reference or localized row number.",
+          source: "A short excerpt of the source text. Do not translate.",
+          state: "Already localized validation or empty state.",
+        },
+      },
       "editor.row.selectedTooltip": {
         description:
           "Tooltip on a row's selection checkbox when the row IS selected, " +
@@ -4011,6 +4588,21 @@ export const editor = defineNamespace({
         description:
           "Tooltip on the selection checkbox when the row is NOT selected: what a " +
           "click does, then what a drag does.",
+      },
+      "editor.presence.viewing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they have the row selected but hold no edit lock.",
+      },
+      "editor.presence.editing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they hold the edit lock on that cell.",
+      },
+      "editor.presence.typing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row while " +
+          "their live draft text is changing (last change within ~2 seconds).",
       },
       "editor.row.selectedAria": {
         description:
@@ -4085,6 +4677,10 @@ export const editor = defineNamespace({
           "Menu item inside the lane switcher that opens the target-language " +
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
+      },
+      "editor.lane.searchAriaLabel": {
+        description:
+          "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
       },
       "editor.lane.showArchived": {
         description:
@@ -4167,6 +4763,113 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of the read-only source column of one row — the text " +
           "being translated from.",
+      },
+      "editor.cellMenu.trigger": {
+        description:
+          "Screen-reader name of the three-dot button at the top-right of a source " +
+          "cell. It opens the one menu holding every action on that cell: edit its " +
+          "source text, edit its timestamps, insert a cell above or below, remove it.",
+        maxLength: 20,
+      },
+      "editor.cellMenu.editTimestamps": {
+        description:
+          "Menu entry that opens a small form for typing this line's start and end " +
+          "times. Only on files that run on a clock (subtitles, cue sheets). " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.cellMenu.timingLocked": {
+        description:
+          "Why the timestamps entry is unavailable: a project-wide setting locks " +
+          "imported timings against accidental changes. A full sentence — it is " +
+          "shown as a second line inside the menu entry, and in the form itself.",
+      },
+      "editor.cellMenu.unlockInSettings": {
+        description:
+          "Button shown to a maintainer when timing is locked. It does NOT unlock " +
+          "anything — it takes them to the project settings page where the switch " +
+          "lives, because the lock covers the whole project and they should see " +
+          "that before changing it. Imperative.",
+        maxLength: 40,
+      },
+      "editor.cellMenu.startLabel": {
+        description:
+          "Label of the field holding when this line starts. Not bare \"Start\": " +
+          "beside a second field it would read as a verb, and it collides with " +
+          "the recorder's Start button.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.endLabel": {
+        description:
+          "Label of the field holding when this line ends. Pairs with the start " +
+          "field beside it, so the two must read as a matched pair.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.betweenHint": {
+        description:
+          "Hint under the timestamp fields giving the START times of the lines " +
+          "either side. Those two are the only limit: this line may overlap its " +
+          "neighbours as much as it likes, but its start must stay between " +
+          "theirs, or the file's order changes. {from} and {to} are timecodes " +
+          "like 1:02.500.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.afterHint": {
+        description:
+          "The same hint when this is the LAST line, so only the line before " +
+          "bounds it. {from} is a timecode.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+        },
+      },
+      "editor.cellMenu.beforeHint": {
+        description:
+          "The same hint when this is the FIRST line, so only the line after " +
+          "bounds it. {to} is a timecode.",
+        placeholders: {
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.badTime": {
+        description:
+          "Error under a timestamp field that cannot be read as a time. The example " +
+          "is deliberately the short form people actually type; the field accepts " +
+          "longer ones too. Keep the example a plain digits-and-punctuation " +
+          "timecode in every language.",
+      },
+      "editor.cellMenu.startsBeforePrevious": {
+        description:
+          "Error when the start typed would move this line ABOVE the one before " +
+          "it, changing the order of the file. Overlapping that line is fine; " +
+          "starting earlier than it is not. {from} is the previous line's start, " +
+          "a timecode. Nothing is saved.",
+        placeholders: {
+          from: "The START of the line before this one, as a timecode like 1:02.500.",
+        },
+      },
+      "editor.cellMenu.startsAfterNext": {
+        description:
+          "The mirror of the entry above: the start typed would move this line " +
+          "BELOW the one after it. {to} is the next line's start, a timecode. " +
+          "Nothing is saved.",
+        placeholders: {
+          to: "The START of the line after this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.invertedTimes": {
+        description:
+          "Error under the timestamp fields when the end is at or before the " +
+          "start, which is the one span that cannot mean anything. Nothing is " +
+          "saved and what was typed is kept, so the person can see and fix it — " +
+          "silently swapping the two fields would be the worse surprise.",
+      },
+      "editor.cellMenu.saveTimestamps": {
+        description:
+          "Button that commits the typed start and end times. Imperative, one word.",
+        maxLength: 12,
       },
       "editor.source.editText": {
         description:
@@ -4349,10 +5052,10 @@ export const editor = defineNamespace({
       },
       "editor.bt.regenerateTooltip": {
         description:
-          "Tooltip on the enabled regenerate button; it asks the model to read the " +
-          "current translation back again, replacing the existing reading. " +
-          "Imperative.",
-        maxLength: 24,
+          "Tooltip on the enabled regenerate button; it asks the model to " +
+          "back-translate the current target text again, replacing the existing " +
+          "back-translation. Imperative.",
+        maxLength: 28,
       },
       "editor.bt.regenerateAria": {
         description:
@@ -4381,7 +5084,7 @@ export const editor = defineNamespace({
       "editor.bt.translateFirst": {
         description:
           "Empty state of the back-translation tab when the cell has no translation " +
-          "yet: there is nothing to read back. Full sentence.",
+          "yet: there is nothing to back-translate. Full sentence.",
       },
       "editor.bt.staleWarning": {
         description:
@@ -4393,20 +5096,20 @@ export const editor = defineNamespace({
       "editor.bt.emptyPitch": {
         description:
           "Invitation shown when no back-translation exists yet, explaining what the " +
-          "feature is for before the user spends a model call on it. One sentence, " +
-          "wrapped at about 34 characters, so avoid very long words.",
+          "feature is for before the user spends a model call on it. Uses standard " +
+          "Bible-translation / LQA terminology (literal reverse translation, compare " +
+          "to source). One sentence, wrapped at about 34 characters.",
       },
       "editor.bt.readingItBack": {
         description:
           "Label of the generate button while the model is working. Present " +
-          "participle of the same idiom as editor.bt.readItBack.",
-        maxLength: 24,
+          "participle parallel to editor.bt.readItBack.",
+        maxLength: 28,
       },
       "editor.bt.readItBack": {
         description:
-          "Primary button that generates the first back-translation. 'Read it back' " +
-          "is the plain-language version of 'back-translate' — keep it approachable " +
-          "rather than technical. Imperative.",
+          "Primary button that generates the first back-translation. Standard " +
+          "industry noun phrase — same term as the tab label. Imperative.",
         maxLength: 26,
       },
       "editor.bt.needsAiHint": {
@@ -4422,15 +5125,15 @@ export const editor = defineNamespace({
       },
       "editor.bt.originAi": {
         description:
-          "Quiet provenance chip on a model-produced reading. Names the source so " +
-          "the user does not mistake it for a human check. A noun phrase, not a verb.",
-        maxLength: 18,
+          "Quiet provenance chip on a model-produced back-translation. Names the " +
+          "source so the user does not mistake it for a human check. A noun phrase.",
+        maxLength: 22,
       },
       "editor.bt.originCorrected": {
         description:
-          "Quiet provenance chip when a contributor has edited the AI reading. " +
-          "Signals that a human stands behind this wording.",
-        maxLength: 22,
+          "Quiet provenance chip when a contributor has edited the AI " +
+          "back-translation. Signals that a human stands behind this wording.",
+        maxLength: 18,
       },
       "editor.bt.freshLabel": {
         description:
@@ -4440,21 +5143,21 @@ export const editor = defineNamespace({
       },
       "editor.bt.pairsDisagree": {
         description:
-          "Heading of the statistical-clue card when the project's own pairs " +
-          "produce a different wording from the AI reading. This disagreement is " +
-          "the point of the card — keep the contrast.",
+          "Heading of the statistical-clue card when the project's statistical " +
+          "gloss differs from the AI back-translation. This disagreement is the " +
+          "point of the card — keep the contrast.",
       },
       "editor.bt.pairsLive": {
         description:
-          "Heading of the live statistical gloss shown before an AI reading exists. " +
-          "It updates as the translator types. Emphasize that it comes from this " +
-          "project, not from a model.",
+          "Heading of the live statistical gloss shown before an AI back-translation " +
+          "exists. It updates as the translator types. Emphasize project pairs, not " +
+          "a model.",
       },
       "editor.bt.usePairsInstead": {
         description:
-          "Button that adopts the statistical gloss as the saved reading, replacing " +
-          "the AI wording with a human-confirmed project-pairs reading. Imperative.",
-        maxLength: 22,
+          "Button that adopts the statistical gloss as the saved back-translation, " +
+          "replacing the AI wording. Imperative.",
+        maxLength: 18,
       },
       "editor.bt.statisticalGloss": {
         description:
@@ -4740,6 +5443,34 @@ export const editor = defineNamespace({
         screenshot: "workspace-nav",
         maxLength: 24,
       },
+      "editor.sync.trafficHistory": { description: "Upload and download activity over the past five minutes. Connection history chart accessible name." },
+      "editor.sync.replyHistory": { description: "Observed server replies over the past five minutes. Connection history chart accessible name." },
+      "editor.sync.fiveMinutesAgo": { description: "5 min ago. Connection history chart caption." },
+      "editor.sync.historyHelp": { description: "5-second averages. Gaps mean no reply was measured. History builds while this tab is open. Connection history chart caption." },
+      "editor.sync.activityNow": { description: "Column heading for the last five seconds of traffic and latest server reply." },
+      "editor.sync.pastFiveMinutes": { description: "Column heading for rolling five-minute transfer totals and average reply time." },
+      "editor.sync.serverReply": { description: "Label for elapsed request-to-response time, including server processing; not network ping." },
+      "editor.sync.transferredTotal": { description: "Amount of sync payload transferred during the past five minutes.", placeholders: { amount: "Localized byte quantity including unit, e.g. 12 kB." } },
+      "editor.sync.averageReply": { description: "Mean observed server reply time over the past five minutes.", placeholders: { time: "Localized duration including ms unit." } },
+      "editor.sync.slowestReply": { description: "Longest observed server reply time during the past five minutes.", placeholders: { time: "Localized duration including ms unit." } },
+      "editor.sync.replyJustNow": { description: "Freshness label when the last observed server reply arrived under one second ago." },
+      "editor.sync.requestCount": { description: "Number of completed sync HTTP requests in the past five minutes, including failures.", placeholders: { count: "Number of observed completed HTTP requests." } },
+      "editor.sync.failureCount": { description: "Number of transport failures or HTTP error responses in the past five minutes. Not lost edits.", placeholders: { count: "Number of failed requests; zero is shown as 0 failed." } },
+      "editor.sync.replySecondsAgo": { description: "Age of the most recent observed server reply in seconds.", placeholders: { count: "Whole elapsed seconds." } },
+      "editor.sync.replyMinutesAgo": { description: "Age of the most recent observed server reply in minutes.", placeholders: { count: "Whole elapsed minutes." } },
+      "editor.sync.connection": { description: "Connection popover connection label for observed sync activity." },
+      "editor.sync.upload": { description: "Connection popover upload label for observed sync activity." },
+      "editor.sync.download": { description: "Connection popover download label for observed sync activity." },
+      "editor.sync.responseTime": { description: "Connection popover responseTime label for observed sync activity." },
+      "editor.sync.ping": { description: "Tile label in the connection popover for the averaged server reply time.", maxLength: 10 },
+      "editor.sync.connectionDetails": { description: "Title of the dialog with full sync telemetry: history chart, totals, request counts." },
+      "editor.sync.showDetails": { description: "Accessible name of the (i) button in the connection popover that opens the details dialog." },
+      "editor.sync.qualityGood": { description: "Latency band shown beside the median server reply time when replies are under 300 ms.", maxLength: 8 },
+      "editor.sync.qualityFair": { description: "Latency band shown beside the median server reply time when replies are between 300 ms and 1 s.", maxLength: 8 },
+      "editor.sync.qualitySlow": { description: "Latency band shown beside the median server reply time when replies are 1 s or longer.", maxLength: 8 },
+      "editor.sync.noActivity": { description: "Connection popover noActivity label for observed sync activity." },
+      "editor.sync.waitingForActivity": { description: "Connection popover waitingForActivity label for observed sync activity." },
+      "editor.sync.activityHelp": { description: "Plain-language explanation of passively observed sync payload rates and request response times." },
       "editor.sync.live": {
         description:
           "Label of the per-file sync status chip in the editor header when the " +
@@ -4749,6 +5480,34 @@ export const editor = defineNamespace({
       },
       "editor.sync.liveTooltip": {
         description: "Tooltip/aria-label of the sync chip in the editor.sync.live state.",
+      },
+      "editor.sync.syncing": {
+        description:
+          "Label of the sync status chip while queued local edits are still being " +
+          "sent to the server and no attempt has failed yet. A state adjective " +
+          "beside a colored dot.",
+        maxLength: 12,
+      },
+      "editor.sync.syncingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.syncing state.",
+      },
+      "editor.sync.retrying": {
+        description:
+          "Label of the sync status chip when queued local edits exist and the last " +
+          "attempt to send them failed; the app keeps retrying automatically.",
+        maxLength: 12,
+      },
+      "editor.sync.retryingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.retrying state.",
+      },
+      "editor.sync.reconnecting": {
+        description:
+          "Label of the sync status chip when the browser is online but the live " +
+          "websocket connection to the sync server is currently closed and being re-established.",
+        maxLength: 14,
+      },
+      "editor.sync.reconnectingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.reconnecting state.",
       },
       "editor.sync.connecting": {
         description:

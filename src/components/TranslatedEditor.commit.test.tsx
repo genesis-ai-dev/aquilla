@@ -8,6 +8,7 @@ import {
   TranslatedEditor,
   COMMIT_IDLE_MS,
   isPresenceWordBoundary,
+  presenceDraftIdleAction,
   shouldPublishPresenceDraft,
 } from "./TranslatedEditor"
 
@@ -22,6 +23,23 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     expect(shouldPublishPresenceDraft("one two", "one two three four")).toBe(true)
     expect(shouldPublishPresenceDraft("", "one,two ")).toBe(true)
     expect(shouldPublishPresenceDraft("", "don't ")).toBe(false)
+  })
+
+  it("defers a mid-word or sub-batch draft once, then publishes it regardless", () => {
+    // A continuous typist who pauses mid-word must still show up as typing
+    // within two idle windows — the gates delay a draft, they never bury it.
+    const midWord = { atWordBoundary: false, previous: "one", next: "one tw" }
+    expect(presenceDraftIdleAction({ ...midWord, alreadyDeferred: false })).toBe("defer")
+    expect(presenceDraftIdleAction({ ...midWord, alreadyDeferred: true })).toBe("publish")
+    const oneWord = { atWordBoundary: true, previous: "one", next: "one two " }
+    expect(presenceDraftIdleAction({ ...oneWord, alreadyDeferred: false })).toBe("defer")
+    expect(presenceDraftIdleAction({ ...oneWord, alreadyDeferred: true })).toBe("publish")
+    expect(presenceDraftIdleAction({
+      atWordBoundary: true, alreadyDeferred: false, previous: "one", next: "one two three ",
+    })).toBe("publish")
+    expect(presenceDraftIdleAction({
+      atWordBoundary: false, alreadyDeferred: true, previous: "same", next: "same",
+    })).toBe("skip")
   })
 
   it("recognizes only whitespace and Unicode punctuation as publish boundaries", () => {
@@ -92,6 +110,45 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
       vi.advanceTimersByTime(COMMIT_IDLE_MS + 100)
     })
     expect(commits).toHaveLength(0)
+    vi.useRealTimers()
+  })
+
+  // AQU-1334: the idle commit only fires after 1.2 s of quiet. A tab close,
+  // reload, or navigation off the SPA never unmounts the editor, so an edit
+  // made inside that window used to vanish. The page-hide flush must commit
+  // it exactly once — and leave nothing behind for the unmount flush.
+  it("flushes a pending edit on pagehide, once, so closing the tab can't drop it", async () => {
+    vi.useFakeTimers()
+    const commits: { value: string; valueHtml: string }[] = []
+    const { container, unmount } = render(
+      <TranslatedEditor
+        cellId="cell-pagehide"
+        initialPlain="verse text"
+        onCommit={(snap) => { commits.push(snap) }}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    act(() => { fireEvent.focus(pm) })
+
+    // Insert text through the TipTap instance TipTap hangs off its DOM root
+    // (the same transaction path real typing takes), so onUpdate arms the
+    // idle timer and stores the pending snapshot without committing yet.
+    const tiptap = (pm as unknown as { editor?: { commands: { insertContent: (c: string) => boolean } } }).editor
+    expect(tiptap).toBeDefined()
+    act(() => { tiptap?.commands.insertContent("!") })
+    expect(pm.textContent).toBe("!verse text")
+    expect(commits).toHaveLength(0)
+
+    act(() => { window.dispatchEvent(new Event("pagehide")) })
+    expect(commits).toHaveLength(1)
+    expect(commits[0]?.value).toBe("!verse text")
+
+    // Nothing left to flush: the idle timer must not fire a second commit,
+    // and neither must unmount.
+    act(() => { vi.advanceTimersByTime(COMMIT_IDLE_MS + 100) })
+    unmount()
+    expect(commits).toHaveLength(1)
     vi.useRealTimers()
   })
 

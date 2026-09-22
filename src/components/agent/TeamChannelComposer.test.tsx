@@ -6,6 +6,7 @@ import type { ChatComposerHandle, ChatComposerProps } from "@/components/chat/Ch
 import { composerDraftStore, createComposerDraftStore, resetComposerDraftsForTesting } from "@/lib/agent/composer-drafts"
 import { serializeDocJSON } from "@/lib/agent/context-chip"
 import { TeamChannelComposer, type TeamChannelComposerProps, type TeamComposerThread } from "./TeamChannelComposer"
+import type { ContextualSteeringResult } from "@/lib/contextual/transport"
 import { AgentDockView } from "./AgentDockView"
 
 // Only expose the handle for input; editing, JSON persistence and send are the
@@ -31,6 +32,8 @@ vi.mock("./AgentEmptyState", () => ({
 }))
 const { sendContextualSteering, startFileContextualRun } = await import("@/lib/contextual/transport")
 const steer = vi.mocked(sendContextualSteering)
+// AQU-1299: the server routes each message and answers with what it did.
+const STEERED: ContextualSteeringResult = { intent: "direction", applied: true, run: null }
 const start = vi.mocked(startFileContextualRun)
 const scope = { owner: "alice", projectId: "project", conversationId: "run:1" }
 const thread: TeamComposerThread = { runId: "1", personaId: "drafter", scopeLabel: "GEN 1", steerable: true }
@@ -56,7 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   resetComposerDraftsForTesting()
-  steer.mockResolvedValue(undefined)
+  steer.mockResolvedValue(STEERED)
 })
 
 describe("TeamChannelComposer draft ownership", () => {
@@ -104,7 +107,7 @@ describe("TeamChannelComposer draft ownership", () => {
 
   it("preserves newer input in an overlapping same-scope consumer after the outgoing sender unmounts", async () => {
     let resolveSend!: () => void
-    steer.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveSend = resolve }))
+    steer.mockImplementationOnce(() => new Promise<ContextualSteeringResult>((resolve) => { resolveSend = () => resolve(STEERED) }))
     const base = props()
     const consumers = (names: string[]) => <div>{names.map((name) => (
       <section key={name} aria-label={name}><TeamChannelComposer {...base} /></section>
@@ -213,7 +216,7 @@ describe("TeamChannelComposer draft ownership", () => {
 
   it("reports a steering failure in the original scope even when it occurs after unmount", async () => {
     let reject!: (error: Error) => void
-    steer.mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail }))
+    steer.mockImplementationOnce(() => new Promise<ContextualSteeringResult>((_resolve, fail) => { reject = fail }))
     const base = props()
     const first = render(<TeamChannelComposer {...base} />)
     type("Keep the unmounted direction")
@@ -228,7 +231,7 @@ describe("TeamChannelComposer draft ownership", () => {
 
   it("keeps typing enabled during steering and does not erase the newer revision", async () => {
     let resolve!: () => void
-    steer.mockImplementationOnce(() => new Promise<void>((done) => { resolve = done }))
+    steer.mockImplementationOnce(() => new Promise<ContextualSteeringResult>((done) => { resolve = () => done(STEERED) }))
     render(<TeamChannelComposer {...props()} />)
     type("First direction")
     submit()
@@ -275,7 +278,7 @@ describe("TeamChannelComposer draft ownership", () => {
     const onReopened = vi.fn()
     let resolve!: () => void
     start.mockResolvedValue({ runId: "fresh-run" })
-    steer.mockImplementationOnce(() => new Promise<void>((done) => { resolve = done }))
+    steer.mockImplementationOnce(() => new Promise<ContextualSteeringResult>((done) => { resolve = () => done(STEERED) }))
     const base = props()
     const view = render(<TeamChannelComposer {...base} thread={{
       ...thread, steerable: false,

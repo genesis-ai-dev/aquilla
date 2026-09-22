@@ -52,6 +52,11 @@ interface Props {
    *  — the pane is what registers the controller, so in Free timing the bar was
    *  claiming a transport with nothing behind it and every control went dead. */
   videoPaneOnScreen?: boolean
+  /** AQU-646 stage 3h: end of the last cue, for a file with timings and no
+   *  master. 0 (the default) means this file has a master or no timeline. */
+  timelineDurationSec?: number
+  /** The line the virtual playhead is on. Null on every other arrangement. */
+  virtualSoundingCellId?: string | null
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
 }
@@ -65,7 +70,7 @@ function fmtTime(s: number): string {
 
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
-  videoPaneOnScreen = false, below,
+  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, below,
 }: Props) {
   const t = useT()
 
@@ -92,9 +97,18 @@ export function VoicePlaybackBar({
     coreMediaUrl,
     anyCellClockIsFileTime,
     paneOnScreen: videoPaneOnScreen,
+    timelineDurationSec,
+    virtualSoundingCellId,
   })
   const videoController = useVideoController()
-  const drivesVideo = transport.source === "video"
+  // AQU-646 stage 3h: "not the queue", rather than "the video".
+  //
+  // A third engine could have meant a third arm in each of the six branches
+  // below, which is six chances to wire one to the wrong half — the exact
+  // failure `transport.ts` exists to prevent. The virtual clock registers into
+  // the SAME controller store instead, so every one of them stays two-way and
+  // this rename is the whole change.
+  const drivesVideo = transport.source !== "queue"
   const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
 
@@ -253,7 +267,23 @@ export function VoicePlaybackBar({
 
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
-          <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
+          <SpeedButton
+            rate={rate}
+            // EVERY ENGINE THAT IS SOUNDING, not whichever one drives
+            // (2026-08-27, verified by Sam on a real film). The dubs always
+            // fire through the queue's overlay pool no matter who owns the
+            // clock, and the pool takes its speed from the queue's own rate —
+            // which this `? :` never set when a film or the virtual clock was
+            // driving. So takes fired at the right MOMENT (firing reads the
+            // clock) and then played at 1x internally: every take started on
+            // cue and drifted within itself while the film ran fast. The
+            // elements keep their pitch at speed by browser default, same as
+            // the film.
+            onChange={(r) => {
+              setQueueRate(r)
+              if (drivesVideo) videoController?.setRate(r)
+            }}
+          />
           <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
             <SkipBack className="h-4 w-4" />
           </IconButton>

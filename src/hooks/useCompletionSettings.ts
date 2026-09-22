@@ -53,26 +53,44 @@ export function buildCompletionSettings(
 export { resolveProvider }
 export { DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL }
 
+export interface CompletionSettingsSaveExtras {
+  /** Device-local: the Set up AI chooser should not return after this save. */
+  aiProviderChosen?: boolean
+}
+
 /**
  * A hook that provides a safe, race-free way to update completion settings
  * on a project. Always reads the latest from IDB before merging, so
  * multiple callers (checklist, settings page) don't overwrite each other.
+ *
+ * Thin-client (AD-3) projects often have no IDB row yet. A missing row used
+ * to make this a silent no-op — the Set up AI dialog closed, sparkle asked
+ * again, and Project Settings stayed on Frontier. Seed from the in-memory
+ * `project` in that case, same as AiModelsStep's skip path (AQU-701).
  */
 export function useSaveCompletionSettings(
-  projectId: string | undefined,
+  project: ProjectRecord | undefined,
   onUpdated: (p: ProjectRecord) => void,
 ) {
   const save = useCallback(
-    async (overrides: Partial<CompletionSettings>) => {
-      if (!projectId) return
-      const latest = await getProject(projectId)
-      if (!latest) return
+    async (
+      overrides: Partial<CompletionSettings>,
+      extras?: CompletionSettingsSaveExtras,
+    ) => {
+      if (!project) return
+      const latest = (await getProject(project.id)) ?? project
       const merged = buildCompletionSettings(latest.completionSettings, overrides)
-      const updated: ProjectRecord = { ...latest, completionSettings: merged }
+      const updated: ProjectRecord = {
+        ...latest,
+        completionSettings: merged,
+        ...(extras?.aiProviderChosen !== undefined
+          ? { aiProviderChosen: extras.aiProviderChosen }
+          : {}),
+      }
       await updateProject(updated)
       onUpdated(updated)
     },
-    [projectId, onUpdated],
+    [project, onUpdated],
   )
 
   return save

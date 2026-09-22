@@ -6,10 +6,12 @@
 import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
-import { resolveAllowSelfAssignment } from './assignment-authority'
+import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
-import { resolveAllowLineCreation } from './line-creation-authority'
+import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
+import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
+import { makeRequestCache, type RequestCache } from './request-cache'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -18,6 +20,12 @@ export const PROJECT_SENTINEL_FILE_ID = '__project__'
 function isCommentKind(kind: string): boolean {
   return kind === 'comment.create' || kind === 'comment.edit' ||
     kind === 'comment.delete' || kind === 'comment.resolve'
+}
+
+/** `term.*` — project-scoped like comments, so they take the sentinel path too. */
+function isTermKind(kind: string): boolean {
+  return kind === 'term.create' || kind === 'term.update' ||
+    kind === 'term.delete' || kind === 'term.approve' || kind === 'term.reject'
 }
 
 /**
@@ -95,6 +103,12 @@ function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boo
   return typeof payload?.assigneeUserId === 'number' && payload.assigneeUserId === callerUserId
 }
 
+function isAssignmentKind(kind: EventKind): boolean {
+  return kind === 'assignment.create' ||
+    kind === 'assignment.reassign' ||
+    kind === 'assignment.unassign'
+}
+
 // Private symbol — NOT exported. Code outside this file cannot reproduce
 // the brand on a fake AuthorizedEvent, even via Object.assign or JSON.parse/
 // JSON.serialize, because the symbol is unreachable without importing the
@@ -149,14 +163,23 @@ export async function authorize<K extends EventKind>(
   raw: RawEvent<K>,
   secret: string | undefined,
   /**
-   * AQU-496: optional DB handle for the self-assign carve-out below. Only
-   * `assignment.create` ever reads it (one org_settings lookup, memoized
-   * nowhere — callers batching many events should expect one query per
-   * below-floor assignment.create). Omitting `db` simply disables the
-   * carve-out (falls back to the static PROJECT_LEAD floor) rather than
-   * erroring — every existing caller/test that doesn't pass it keeps working.
+   * AQU-496: optional DB handle for the settings-gated carve-outs below
+   * (self-assign, timing lock, line creation, track editing) and, for
+   * assignment events, the org-configured assignment floor (AQU-1037). Reads
+   * go through `cache` when one is supplied, so a batch pays one lookup per
+   * settings row rather than one per event. Omitting `db` simply disables the
+   * carve-outs (falls back to the static floors) rather than erroring — every
+   * existing caller/test that doesn't pass it keeps working.
    */
   db?: AquillaDb,
+  /**
+   * Per-request memo for the settings rows the carve-outs below read
+   * (request-cache.ts). The events route builds one per request and passes
+   * it for every event in the batch so each row is read at most once;
+   * without it, each call gets a throwaway cache — one read per call, the
+   * pre-memo behaviour every existing caller/test relies on.
+   */
+  cache?: RequestCache,
 ): Promise<AuthorizeResult<K>> {
   // 1. Secret must be configured — misconfigured deployment, not a client error.
   if (!secret) {
@@ -166,12 +189,16 @@ export async function authorize<K extends EventKind>(
   if (!token) {
     return { ok: false, status: 401, reason: 'missing token' }
   }
-  // 3a. Project-scoped comment.* events use the sentinel '__project__' fileId.
-  //     For these, we verify via verifyTokenForProject (checks projectId only)
-  //     instead of verifyTokenForDoc (which requires exact fileId match).
-  //     All other events must carry a real fileId (Phase 0).
-  if (raw.fileId === PROJECT_SENTINEL_FILE_ID && isCommentKind(raw.kind)) {
-    // Project-scoped comment path: token must match the event's projectId.
+  // 3a. Project-scoped comment.* and term.* events use the sentinel
+  //     '__project__' fileId. For these, we verify via verifyTokenForProject
+  //     (checks projectId only) instead of verifyTokenForDoc (which requires
+  //     exact fileId match). All other events must carry a real fileId
+  //     (Phase 0).
+  if (
+    raw.fileId === PROJECT_SENTINEL_FILE_ID &&
+    (isCommentKind(raw.kind) || isTermKind(raw.kind))
+  ) {
+    // Project-scoped path: token must match the event's projectId.
     const authResult = await verifyTokenForProject(token, raw.projectId, secret)
     if (!authResult.ok) {
       return authResult
@@ -184,6 +211,26 @@ export async function authorize<K extends EventKind>(
 
     if (tokenClaims.role < requiredRoleFor(raw.kind)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    }
+
+    // AQU-1006 follow-up: the org's termbase floor on top of the static
+    // CONTRIBUTOR floor, for the `term.*` writes that BIND (see
+    // termbase-authority.ts).
+    //
+    // THIS CHECK LIVES HERE, INSIDE THE SENTINEL BRANCH, AND MUST STAY HERE.
+    // The branch RETURNS, so a gate placed further down with the other
+    // conditional floor raises never runs for a project-scoped event — which
+    // is every `term.*` event there is. A termbase gate below this point is a
+    // gate that is always skipped.
+    if (db != null && isTermKind(raw.kind) && isBindingTermWrite(raw.kind, raw.payload)) {
+      const floor = await resolveTermbaseFloor(db, raw.projectId, cache ?? makeRequestCache(db))
+      if (tokenClaims.role < floor) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'managing terminology is not permitted at this clearance; suggest the term instead',
+        }
+      }
     }
 
     const claims: EventClaims = {
@@ -201,6 +248,7 @@ export async function authorize<K extends EventKind>(
   if (!raw.fileId) {
     return { ok: false, status: 400, reason: 'event missing fileId' }
   }
+  const settings = db != null ? (cache ?? makeRequestCache(db)) : undefined
 
   // 4. Verify JWT — fileId is now guaranteed to be a real string.
   const authResult = await verifyTokenForDoc(
@@ -220,8 +268,17 @@ export async function authorize<K extends EventKind>(
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
 
+  // AQU-1037: assignment events replace their historical static
+  // PROJECT_LEAD floor with the project's org-configured floor. The resolver
+  // defaults to PROJECT_LEAD for org-less/unconfigured projects.
+  const assignmentAuthority =
+    db != null && isAssignmentKind(raw.kind)
+      ? await resolveAssignmentAuthority(db, raw.projectId, settings)
+      : null
+  const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+
   // Role gate: check that the token's role is sufficient for this event kind.
-  if (tokenClaims.role < requiredRoleFor(raw.kind)) {
+  if (tokenClaims.role < requiredRole) {
     // AQU-496: assignment.create self-assign carve-out. A below-lead member
     // (CONTRIBUTOR=400+) may still pass here if (a) a DB handle was supplied,
     // (b) the payload assigns the scope to THEMSELVES (never another user —
@@ -232,7 +289,7 @@ export async function authorize<K extends EventKind>(
       db != null &&
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
       isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
-      (await resolveAllowSelfAssignment(db, raw.projectId))
+      assignmentAuthority?.allowSelfAssignment === true
     if (!selfAssignOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
@@ -251,7 +308,7 @@ export async function authorize<K extends EventKind>(
   // the self-assign carve-out above — every existing caller and test that does
   // not pass one keeps working.
   if (db != null && tokenClaims.role < ROLE.MAINTAINER && isLockedTimingEvent(raw.kind, raw.payload)) {
-    if (await resolveTimingLocked(db, raw.projectId)) {
+    if (await resolveTimingLocked(db, raw.projectId, settings)) {
       // Sam's exemption: a line someone added here never came from the client's
       // file, so it has no imported timing to corrupt and stays movable.
       const exempt =
@@ -268,41 +325,81 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // Sam, 2026-08-21: `source.cell.create` / `source.cell.delete` /
-  // `source.cell.reorder` dropped from their old static PROJECT_LEAD floor to
-  // CONTRIBUTOR so the "let people add new lines" project setting can mean
-  // what it says — reorder included because every add and remove BATCHES one
-  // in to keep the anchor chain matching the clock, and a floor that refused
-  // the companion killed the whole batch. The PROJECT_LEAD floor is
-  // re-imposed HERE for whoever is below it: all three pass only while the
-  // project has opted in ("that setting is enabling lines being added or
-  // removed" — the package travels together), and a delete additionally only
-  // for a line a person added by hand — an imported subtitle line stays
-  // lead-only to remove whatever the setting says. Leads and above never
-  // reach these checks; an absent `db` skips them, matching the carve-outs
-  // above.
+  // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule
+  // about cell structure that this perimeter still enforces.
+  //
+  // THE PROJECT'S `cellEditingFloor` TIER IS DELIBERATELY NOT CHECKED HERE, and
+  // its absence is a decision rather than an oversight (Sam, 2026-09-09). The
+  // tier is a PRODUCT rule, enforced where the buttons are drawn — the row's
+  // menu, the timeline's add and remove, the gap inserts, and the agent's
+  // proposal staging in auth-worker all read it from the same shared module. It
+  // exists to stop a project restructuring its files by ACCIDENT, not to stop
+  // somebody determined, and everyone who reaches this code is already a member
+  // the org admitted.
+  //
+  // Enforcing it here refused three legitimate flows, silently, on any project
+  // that had not opted in — all three of which emit these same kinds through
+  // the user's OWN outbox: audio-cue re-import (`handleReconcileAudioCues`),
+  // DCS upstream import and repair, and diarization. Each REPLACES imported
+  // content wholesale, each is maintainer-gated at its own button, and none is
+  // the by-hand restructuring the tier was written to govern.
+  //
+  // What actually protects the client's work is the rule below. An IMPORTED
+  // cell is content from their own file, so taking one back needs MAINTAINER
+  // whatever the tier says; below that rank a person only ever removes a line
+  // somebody added by hand here. `isUserInsertedCell` fails closed, so a cell
+  // row that cannot be read keeps the requirement rather than waiving it.
+  //
+  // Contrast the timing lock (timing-authority.ts) and `allowTrackEditing`
+  // just below, which stay server-enforced and should. Those answer "may this
+  // project's imported TIMINGS move at all" — a question whose wrong answer
+  // corrupts data the client handed us. This one answers "should we draw the
+  // button", and a wrong answer there is a button somebody did not want.
+  //
+  // The external surface keeps its exemption: that is the behaviour it had
+  // before AQU-1068, `emitEventsFloor` holds external callers at PROJECT_LEAD
+  // for these kinds, and an external PlanImport populates a whole new file
+  // through this perimeter. An absent `db` skips the check, matching the
+  // carve-outs above.
   if (
     db != null &&
-    tokenClaims.role < ROLE.PROJECT_LEAD &&
-    (raw.kind === 'source.cell.create' ||
-      raw.kind === 'source.cell.delete' ||
-      raw.kind === 'source.cell.reorder')
+    tokenClaims.src !== 'external' &&
+    raw.kind === 'source.cell.delete' &&
+    tokenClaims.role < ROLE.MAINTAINER
   ) {
-    if (!(await resolveAllowLineCreation(db, raw.projectId))) {
-      return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
-    }
-    if (raw.kind === 'source.cell.delete') {
-      const userInserted =
-        raw.fileId != null &&
-        raw.cellId != null &&
-        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
-      if (!userInserted) {
-        return {
-          ok: false,
-          status: 403,
-          reason: 'only a line someone added by hand can be removed at this clearance',
-        }
+    const userInserted =
+      raw.fileId != null &&
+      raw.cellId != null &&
+      (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+    if (!userInserted) {
+      return {
+        ok: false,
+        status: 403,
+        reason: 'removing an imported cell requires maintainer',
       }
+    }
+  }
+
+  // AQU-646 stage 2: RESTRUCTURING a timeline needs the project to have opted
+  // in, on top of the maintainer floor `file.track.set` already carries.
+  //
+  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. The
+  // self-assign and timing-lock blocks above carry one because both are
+  // conditional floor RAISES on kinds whose static floor was lowered. This
+  // kind's floor was never lowered — it is MAINTAINER in role-policy.ts and
+  // has been since it shipped — so there is nothing to raise and no clearance
+  // that should skip the question. The setting answers *whether* a project
+  // restructures its timelines, not *who* may do it, which is why an OWNER is
+  // refused here too. Two gates means two gates. Adding a role term to make
+  // this resemble its neighbours would open exactly the back door the second
+  // gate exists to close.
+  //
+  // A rename or a reorder is NOT restructuring, and both already ship — see
+  // isGatedTrackPatch for the three clauses that separate them, and why
+  // `patch: null` needs a clause of its own.
+  if (db != null && raw.kind === 'file.track.set' && isGatedTrackPatch(raw.payload)) {
+    if (!(await resolveAllowTrackEditing(db, raw.projectId, settings))) {
+      return { ok: false, status: 403, reason: 'timeline track editing is not enabled for this project' }
     }
   }
 

@@ -101,10 +101,21 @@ export function detectStrongTextDirection(value: string | undefined | null): Tex
 }
 
 export function summarizeTextDirections(values: Iterable<string | undefined | null>): TextDirectionSummary | null {
+  return summarizeDetectedDirections(detectEach(values))
+}
+
+function* detectEach(values: Iterable<string | undefined | null>): Iterable<TextDirection | null> {
+  for (const value of values) yield detectStrongTextDirection(value)
+}
+
+/**
+ * Same summary as `summarizeTextDirections`, over directions the caller has
+ * already detected (and can therefore cache per cell; AQU-1104).
+ */
+export function summarizeDetectedDirections(directions: Iterable<TextDirection | null>): TextDirectionSummary | null {
   let hasLtr = false
   let hasRtl = false
-  for (const value of values) {
-    const direction = detectStrongTextDirection(value)
+  for (const direction of directions) {
     if (direction === "ltr") hasLtr = true
     if (direction === "rtl") hasRtl = true
     if (hasLtr && hasRtl) return "mixed"
@@ -112,6 +123,29 @@ export function summarizeTextDirections(values: Iterable<string | undefined | nu
   if (hasRtl) return "rtl"
   if (hasLtr) return "ltr"
   return null
+}
+
+/** Summarize both editor lanes in one pass over cached cell directions. */
+export function summarizePairedDirections<T>(
+  values: Iterable<T>,
+  read: (value: T) => { source: TextDirection | null; target: TextDirection | null },
+): { source: TextDirectionSummary | null; target: TextDirectionSummary | null } {
+  let sourceLtr = false
+  let sourceRtl = false
+  let targetLtr = false
+  let targetRtl = false
+  for (const value of values) {
+    const directions = read(value)
+    if (directions.source === "ltr") sourceLtr = true
+    if (directions.source === "rtl") sourceRtl = true
+    if (directions.target === "ltr") targetLtr = true
+    if (directions.target === "rtl") targetRtl = true
+    if (sourceLtr && sourceRtl && targetLtr && targetRtl) break
+  }
+  return {
+    source: sourceLtr && sourceRtl ? "mixed" : sourceRtl ? "rtl" : sourceLtr ? "ltr" : null,
+    target: targetLtr && targetRtl ? "mixed" : targetRtl ? "rtl" : targetLtr ? "ltr" : null,
+  }
 }
 
 export function resolveTextDirection(

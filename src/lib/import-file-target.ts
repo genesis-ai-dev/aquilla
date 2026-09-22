@@ -111,15 +111,57 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   sourceText: string
 }
 
+/** Why an incoming row found no line. Absent where the answer is structural
+ *  and needs no explaining (no line carries that ref; more rows than lines). */
+export type TargetOrphanReason =
+  /** No line lies within reach of the cue's timing. */
+  | "noLineInReach"
+  /** The cue's timecode ends before it starts, so it can't be placed. That is
+   *  a broken line in the partner's file, not drift — worth telling them. */
+  | "backwardsTimecode"
+
+/** An incoming row that was not paired with any line. */
+export interface TargetOrphan {
+  ref: string
+  text: string
+  reason?: TargetOrphanReason
+}
+
+/** An open-file line no incoming row covered. Listed by name (AQU-1360): a
+ *  bare "5 cells not covered" in grey read exactly like a clean import. */
+export interface UncoveredLine {
+  cellId: string
+  sourceText: string
+  /** The line's own cue timecode, when it has one. */
+  cellRef?: string
+}
+
 export interface FileTargetMatchResult {
   matched: FileTargetMatchedCell[]
-  orphans: { ref: string; text: string }[]
-  /** Cells in the file no incoming row covered. */
+  orphans: TargetOrphan[]
+  /** Cells in the file no incoming row covered. Always `uncovered.length`. */
   unmatchedSourceCount: number
+  /** Those cells, in display order. */
+  uncovered: UncoveredLine[]
   /** Which policy a ref-less (positional) match actually used, so the review
    *  screen doesn't warn about raw-order alignment when it aligned by
    *  timecode. Absent for ref matching. */
   alignedBy?: "order" | "overlap"
+  /** Subtitle cues the file contained that never became rows: they had no
+   *  text, or a timestamp line the parser couldn't read. Set by the caller
+   *  from the parse report, since the matchers only ever see the rows. */
+  skippedCues?: number
+}
+
+function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCell[]): UncoveredLine[] {
+  const covered = new Set(matched.map((m) => m.cellId))
+  return cells
+    .filter((cell) => !covered.has(cell.cellId))
+    .map((cell) => ({
+      cellId: cell.cellId,
+      sourceText: cell.original,
+      ...(cell.cueRef ? { cellRef: cell.cueRef } : {}),
+    }))
 }
 
 function toMatchedCell(cell: FileTargetCellRef, text: string, ref: string): FileTargetMatchedCell {
@@ -151,7 +193,7 @@ export function matchTargetRowsByRef(
   }
 
   const matched: FileTargetMatchedCell[] = []
-  const orphans: { ref: string; text: string }[] = []
+  const orphans: TargetOrphan[] = []
   const matchedCellIds = new Set<string>()
 
   for (const row of rows) {
@@ -171,10 +213,12 @@ export function matchTargetRowsByRef(
     matched.push(toMatchedCell(cell, row.text, row.ref!))
   }
 
+  const uncovered = uncoveredLines(cells, matched)
   return {
     matched,
     orphans,
-    unmatchedSourceCount: cells.length - matchedCellIds.size,
+    unmatchedSourceCount: uncovered.length,
+    uncovered,
   }
 }
 
@@ -186,16 +230,26 @@ export function matchTargetRowsByRef(
 const CUE_MATCH_TOLERANCE_MS = 500
 
 /** Cue timing for an incoming row, in ms. Explicit `startMs`/`endMs` win; a
- *  row whose `ref` is a cue timecode range (`00:01:03.208 --> 00:01:03.667`,
- *  which is how the VTT target import labels its rows) carries its timings
- *  there, so recover them rather than requiring every caller to restate them. */
-function rowTimingMs(row: TargetRow): Timing | null {
+ *  row whose `ref` is a cue timecode range (`00:01:03.208 --> 00:01:03.667`)
+ *  carries its timings there, so recover them rather than requiring every
+ *  caller to restate them.
+ *
+ *  The single validator for row timing (AQU-1360). A range that ends before it
+ *  starts is reported as `"backwards"` rather than handed on: its "overlap"
+ *  with any line is arithmetic nonsense, and checking HERE — after either
+ *  source — stops the label fallback from resurrecting a range the explicit
+ *  fields already declared broken. It is also NOT the same as no timing: one
+ *  broken cue must not knock the whole file back to matching by position. */
+function rowTimingMs(row: TargetRow): Timing | "backwards" | null {
+  let timing: Timing | null = null
   if (row.startMs !== undefined && row.endMs !== undefined) {
-    return { startMs: row.startMs, endMs: row.endMs }
+    timing = { startMs: row.startMs, endMs: row.endMs }
+  } else {
+    const range = row.ref ? parseCueRange(row.ref) : null
+    if (range) timing = { startMs: Math.round(range.start * 1000), endMs: Math.round(range.end * 1000) }
   }
-  const range = row.ref ? parseCueRange(row.ref) : null
-  if (!range) return null
-  return { startMs: Math.round(range.start * 1000), endMs: Math.round(range.end * 1000) }
+  if (!timing) return null
+  return timing.endMs < timing.startMs ? "backwards" : timing
 }
 
 function cellTimingMs(cell: FileTargetCellRef): Timing | null {
@@ -320,8 +374,7 @@ function matchRowsPositionally(
   cells: FileTargetCellRef[],
 ): FileTargetMatchResult {
   const matched: FileTargetMatchedCell[] = []
-  const orphans: { ref: string; text: string }[] = []
-  let matchedCount = 0
+  const orphans: TargetOrphan[] = []
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
@@ -331,14 +384,15 @@ function matchRowsPositionally(
       orphans.push({ ref: row.ref ?? `Row ${i + 1}`, text: row.text })
       continue
     }
-    matchedCount++
     matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${i + 1}`))
   }
 
+  const uncovered = uncoveredLines(cells, matched)
   return {
     matched,
     orphans,
-    unmatchedSourceCount: cells.length - matchedCount,
+    unmatchedSourceCount: uncovered.length,
+    uncovered,
     alignedBy: "order",
   }
 }
@@ -373,9 +427,11 @@ export function matchTargetRowsByOverlap(
 
   const timedRows: TimedRow[] = []
   const timedAt = new Map<number, number>() // incoming index → position in timedRows
+  const backwards = new Set<number>()
   for (const { row, index } of incoming) {
     const timing = rowTimingMs(row)
-    if (!timing) continue
+    if (timing === "backwards") backwards.add(index)
+    if (!timing || timing === "backwards") continue
     timedAt.set(index, timedRows.length)
     timedRows.push({ row, index, timing })
   }
@@ -383,14 +439,18 @@ export function matchTargetRowsByOverlap(
   const assignment = assignByOverlap(timedRows, timedCellsOf(cells))
 
   const matched: FileTargetMatchedCell[] = []
-  const orphans: { ref: string; text: string }[] = []
+  const orphans: TargetOrphan[] = []
 
   // Emit in incoming-file order so the review list reads like the user's file.
   for (const { row, index } of incoming) {
     const at = timedAt.get(index)
     const cellAt = at === undefined ? undefined : assignment.cellForRow.get(at)
     if (cellAt === undefined) {
-      orphans.push({ ref: row.ref ?? `Row ${index + 1}`, text: row.text })
+      orphans.push({
+        ref: row.ref ?? `Row ${index + 1}`,
+        text: row.text,
+        reason: backwards.has(index) ? "backwardsTimecode" : "noLineInReach",
+      })
       continue
     }
     const cell = assignment.cells[cellAt].cell
@@ -399,10 +459,12 @@ export function matchTargetRowsByOverlap(
     matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`))
   }
 
+  const uncovered = uncoveredLines(cells, matched)
   return {
     matched,
     orphans,
-    unmatchedSourceCount: cells.length - matched.length,
+    unmatchedSourceCount: uncovered.length,
+    uncovered,
     alignedBy: "overlap",
   }
 }
@@ -414,6 +476,9 @@ export function matchTargetRowsByOverlap(
  *  survives an inserted, deleted, or shifted cue. Otherwise — no timings on
  *  either side, e.g. a spreadsheet with no ref column, or a partially timed
  *  file — it falls back to raw order, row N → cell N, exactly as before.
+ *  A row whose timecode runs backwards still counts as timed here: it is
+ *  reported by name as a broken cue, and must not drag every other row back
+ *  to matching by position.
  *
  *  The result's `alignedBy` says which ran, so the review screen only warns
  *  about order alignment when order alignment is what happened. */
@@ -456,17 +521,46 @@ function decodeSubtitleEntities(text: string): string {
  *  to cue N → cell N otherwise — see `matchTargetRowsByOrder`. Entity-decoded
  *  so `&nbsp;` and similar don't appear literally in the imported translation. */
 export function vttToTargetRows(raw: string): TargetRow[] {
+  return vttToTargetRowsWithReport(raw).rows
+}
+
+/** Target rows plus what the parse could not turn into one. */
+export interface TargetRowsReport {
+  rows: TargetRow[]
+  /** Cue blocks in the file that produced no row with text: the cue was empty,
+   *  or its timestamp line was one the parser refused. They vanish from every
+   *  other count, so a file whose translator left cues blank used to review
+   *  as a clean run over fewer rows than it carried (AQU-1360). */
+  skippedCues: number
+}
+
+/** `vttToTargetRows`, reporting the cues that never became rows. */
+export function vttToTargetRowsWithReport(raw: string): TargetRowsReport {
   // Short-form timestamps are padded first. The parser demands strict
   // `HH:MM:SS.mmm`, and a cue it refuses does not arrive untimed — the payload
   // lines after the unmatched timestamp are swallowed and the cue disappears
   // with its words. Positional matching then shifts every later cue onto the
   // wrong cell, which nothing downstream can detect and nobody spots on a
   // 500-row review screen.
-  const cues = extractVttStrings(repairShortFormCueTimestamps(raw).text)
-  return cues.map((cue) => ({
+  const { text, cueLines } = repairShortFormCueTimestamps(raw)
+  const rows: TargetRow[] = extractVttStrings(text).map((cue) => ({
     ref: cue.context,
     text: decodeSubtitleEntities(cue.original).trim(),
+    // Timings ride as DATA, not only inside the label: the frame-rate rescale
+    // (AQU-1360) replaces them while the label keeps showing the file's own
+    // timecode, and a range the parser already holds needn't be re-read.
+    ...(typeof cue.start === "number" && typeof cue.end === "number"
+      ? { startMs: Math.round(cue.start * 1000), endMs: Math.round(cue.end * 1000) }
+      : {}),
   }))
+  return { rows, skippedCues: skippedCueCount(cueLines, rows) }
+}
+
+/** Timestamp lines that opened no row with text. Never negative: a `-->`
+ *  somewhere unexpected can inflate the line count without the parser having
+ *  refused anything. */
+function skippedCueCount(cueLines: number, rows: TargetRow[]): number {
+  return Math.max(0, cueLines - rows.filter((row) => row.text.trim().length > 0).length)
 }
 
 /** Extract target rows from a USFM file: verse bodies + heading/title/intro
@@ -508,12 +602,24 @@ export const CUE_TARGET_EXTENSIONS = new Set(["srt", "sbv"])
  *  read it and SBV rows would silently fall back to raw order.
  */
 export function subtitleToTargetRows(raw: string, ext: string): TargetRow[] {
+  return subtitleToTargetRowsWithReport(raw, ext).rows
+}
+
+/** A timing line as each format writes it — the denominator for skipped cues. */
+const SRT_TIMING_LINE = /^\d{1,2}:\d{2}(?::\d{2})?[.,]\d{1,3}\s*-->/
+const SBV_TIMING_LINE = /^\d+:\d{2}:\d{2}\.\d{3},\d+:\d{2}:\d{2}\.\d{3}$/
+
+/** `subtitleToTargetRows`, reporting the cues that never became rows. */
+export function subtitleToTargetRowsWithReport(raw: string, ext: string): TargetRowsReport {
   const cues = ext === "sbv" ? extractSbvStrings(raw) : extractSrtStrings(raw)
-  return cues.map((cue) => ({
+  const rows: TargetRow[] = cues.map((cue) => ({
     ref: cue.context || undefined,
     text: cue.original,
     ...(cue.start !== undefined && cue.end !== undefined
       ? { startMs: Math.round(cue.start * 1000), endMs: Math.round(cue.end * 1000) }
       : {}),
   }))
+  const timingLine = ext === "sbv" ? SBV_TIMING_LINE : SRT_TIMING_LINE
+  const cueLines = raw.split(/\r\n|\r|\n/).filter((line) => timingLine.test(line.trim())).length
+  return { rows, skippedCues: skippedCueCount(cueLines, rows) }
 }

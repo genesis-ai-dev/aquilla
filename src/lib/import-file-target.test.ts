@@ -4,7 +4,9 @@ import {
   matchTargetRowsByOrder,
   usfmToTargetRows,
   subtitleToTargetRows,
+  subtitleToTargetRowsWithReport,
   vttToTargetRows,
+  vttToTargetRowsWithReport,
   toFileTargetCells,
   type FileTargetCellRef,
   type FileTargetCellSource,
@@ -212,8 +214,53 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
   it("a cue beyond tolerance of every cell is an orphan, never a wrong-cell commit", () => {
     const result = matchTargetRowsByOrder([cueRow(60000, 60800, "way out")], cells)
     expect(result.matched).toHaveLength(0)
-    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out" }])
+    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out", reason: "noLineInReach" }])
     expect(result.unmatchedSourceCount).toBe(4)
+  })
+
+  // AQU-1360: a broken timecode is named, and doesn't drag the file down.
+  it("names a cue whose timecode ends before it starts, from its fields or its label", () => {
+    const result = matchTargetRowsByOrder(
+      [
+        cueRow(1000, 1800, "one"),
+        cueRow(3000, 2000, "backwards by field"),
+        { ref: "00:00:04.800 --> 00:00:04.000", text: "backwards by label" },
+      ],
+      cells,
+    )
+    expect(result.orphans).toEqual([
+      { ref: "cue 3000", text: "backwards by field", reason: "backwardsTimecode" },
+      { ref: "00:00:04.800 --> 00:00:04.000", text: "backwards by label", reason: "backwardsTimecode" },
+    ])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([["c1", "one"]])
+  })
+
+  it("a broken timecode doesn't knock the rest of the file back to matching by position", () => {
+    // Before AQU-1360 one unplaceable cue would have been read as "this row has
+    // no timing", flipping every other row to row-N-to-cell-N.
+    const result = matchTargetRowsByOrder(
+      [cueRow(3000, 2000, "broken"), cueRow(3000, 3800, "three"), cueRow(4000, 4800, "four")],
+      cells,
+    )
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c3", "three"],
+      ["c4", "four"],
+    ])
+  })
+
+  it("lists the lines left without a translation by name, in display order", () => {
+    const named = [
+      cueCell(1, { cueRef: "00:00:01.000 --> 00:00:01.800" }),
+      cueCell(2, { cueRef: "00:00:02.000 --> 00:00:02.800" }),
+      cueCell(3, { cueRef: "00:00:03.000 --> 00:00:03.800" }),
+    ]
+    const result = matchTargetRowsByOrder([cueRow(2000, 2800, "two")], named)
+    expect(result.uncovered).toEqual([
+      { cellId: "c1", sourceText: "source cue 1", cellRef: "00:00:01.000 --> 00:00:01.800" },
+      { cellId: "c3", sourceText: "source cue 3", cellRef: "00:00:03.000 --> 00:00:03.800" },
+    ])
+    expect(result.unmatchedSourceCount).toBe(2)
   })
 
   it("recovers timings from a VTT cue timecode label when none are passed", () => {
@@ -313,6 +360,24 @@ describe("usfmToTargetRows", () => {
     // aligned with source cells imported under the same setting.
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
+  })
+})
+
+describe("subtitleToTargetRowsWithReport (AQU-1360)", () => {
+  it("counts an empty SRT cue as skipped rather than letting it vanish", () => {
+    const srt = [
+      "1", "00:00:01,000 --> 00:00:02,000", "one", "",
+      "2", "00:00:03,000 --> 00:00:04,000", "", "",
+      "3", "00:00:05,000 --> 00:00:06,000", "three", "",
+    ].join("\n")
+    const { rows, skippedCues } = subtitleToTargetRowsWithReport(srt, "srt")
+    expect(rows.map((r) => r.text)).toEqual(["one", "three"])
+    expect(skippedCues).toBe(1)
+  })
+
+  it("counts an SBV block with no text as skipped", () => {
+    const sbv = ["0:00:01.000,0:00:02.000", "one", "", "0:00:03.000,0:00:04.000", "", "0:00:05.000,0:00:06.000", "three"].join("\n")
+    expect(subtitleToTargetRowsWithReport(sbv, "sbv").skippedCues).toBe(1)
   })
 })
 
@@ -533,9 +598,27 @@ describe("vttToTargetRows", () => {
       "Second cue",
     ].join("\n")
     expect(vttToTargetRows(vtt)).toEqual([
-      { ref: "00:00:01.000 --> 00:00:04.000", text: "Hello world" },
-      { ref: "00:00:05.000 --> 00:00:08.000", text: "Second cue" },
+      { ref: "00:00:01.000 --> 00:00:04.000", text: "Hello world", startMs: 1000, endMs: 4000 },
+      { ref: "00:00:05.000 --> 00:00:08.000", text: "Second cue", startMs: 5000, endMs: 8000 },
     ])
+  })
+
+  it("counts the cues that never became rows: empty ones, and ones whose text decodes to nothing", () => {
+    const vtt = [
+      "WEBVTT", "",
+      "00:00:01.000 --> 00:00:02.000", "kept", "",
+      "00:00:03.000 --> 00:00:04.000", "",
+      "00:00:05.000 --> 00:00:06.000", "&nbsp;", "",
+      "00:00:07.000 --> 00:00:08.000", "also kept",
+    ].join("\n")
+    const { rows, skippedCues } = vttToTargetRowsWithReport(vtt)
+    expect(rows.filter((r) => r.text).map((r) => r.text)).toEqual(["kept", "also kept"])
+    expect(skippedCues).toBe(2)
+  })
+
+  it("reports no skipped cues for a clean file", () => {
+    const vtt = ["WEBVTT", "", "00:00:01.000 --> 00:00:02.000", "one"].join("\n")
+    expect(vttToTargetRowsWithReport(vtt).skippedCues).toBe(0)
   })
 
   it("joins multi-line cues into a single row so cell N still lands on cue N", () => {
@@ -622,8 +705,13 @@ describe("vttToTargetRows", () => {
       "You should be sleeping, little one.",
     ].join("\n")
     expect(vttToTargetRows(vtt)).toEqual([
-      { ref: "00:01:03.209 --> 00:01:03.667", text: "Abba?" },
-      { ref: "00:01:06.626 --> 00:01:07.751", text: "You should be sleeping, little one." },
+      { ref: "00:01:03.209 --> 00:01:03.667", text: "Abba?", startMs: 63209, endMs: 63667 },
+      {
+        ref: "00:01:06.626 --> 00:01:07.751",
+        text: "You should be sleeping, little one.",
+        startMs: 66626,
+        endMs: 67751,
+      },
     ])
   })
 

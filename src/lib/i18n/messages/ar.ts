@@ -3725,7 +3725,6 @@ export const ar: Catalog = {
   "projectSettings.validation.requiredTextDescription": "تحتاج الخلايا إلى هذا العدد من المتحقِّقين المختلفين لتُعَدّ متحقَّقًا منها بالكامل.",
   "projectSettings.validation.requiredAudioLabel": "المتحقِّقون المطلوبون (صوتيات)",
   "projectSettings.validation.requiredAudioAppliesNote": "ينطبق على الترجمات الصوتية.",
-  "projectSettings.validation.requiredAudioDisabledNote": "يُفعَّل بمجرد وجود ترجمات صوتية.",
   "projectSettings.validation.minRoleLabel": "الحد الأدنى لدور المتحقِّق",
   "projectSettings.validation.minRoleDescription": "يمكن فقط للمستخدمين الذين يملكون هذا الدور على الأقل الإدلاء بصوت تحقّق. الافتراضي: مراجِع.",
   "projectSettings.validation.allowSelfLabel": "السماح بالتحقّق الذاتي",

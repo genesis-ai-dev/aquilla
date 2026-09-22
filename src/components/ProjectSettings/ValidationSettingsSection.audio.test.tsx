@@ -28,7 +28,6 @@ function draw(over: Record<string, unknown> = {}) {
       projectId="p1"
       validationCount={1}
       validationCountAudio={1}
-      hasAnyAudioData
       onChange={onChange}
       {...over}
     />,
@@ -92,12 +91,12 @@ describe("ValidationSettingsSection — the audio policy", () => {
 // a take existing first, so it is never gated on one.
 describe("the audio threshold input", () => {
   it("is editable even when this device has never seen audio", () => {
-    draw({ hasAnyAudioData: false })
+    draw({})
     expect(screen.getByLabelText(/Required validators \(audio\)/i)).toBeEnabled()
   })
 
   it("still respects the role/offline gate", () => {
-    draw({ hasAnyAudioData: false, disabled: true })
+    draw({ disabled: true })
     expect(screen.getByLabelText(/Required validators \(audio\)/i)).toBeDisabled()
   })
 })

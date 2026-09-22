@@ -57,9 +57,6 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { planHasAudio } from "@/lib/plan/plan-status"
-import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import {
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -439,25 +436,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // yields graceful empty/403 states.
   const { org } = useOrg()
   const { session } = useFrontierSession()
-  // AQU-490: "does this project have audio?" from the SERVER, not only from
-  // this device. `project.hasAnyAudioData` is a latch set when THIS browser
-  // records or attaches something, so on any other device — or for every
-  // project migrated from Codex — it reads false while the project holds
-  // thousands of takes. Sam hit exactly that: a fully dubbed project whose
-  // audio threshold could not be edited "because no audio exists". The plan
-  // read already answers the question for the board; one read here, on the
-  // default lane (audio is shared by every lane), settles it for settings.
-  const planJwt = session?.jwt ?? null
-  const planTokenProjectId = project?.id ?? null
-  const planTokenFileId = project?.files?.[0]?.id ?? project?.id ?? null
-  const getPlanToken = useMemo(
-    () => (planJwt && planTokenProjectId && planTokenFileId
-      ? makeSyncTokenFetcher(() => planJwt, planTokenProjectId, planTokenFileId, { projectName: project?.name })
-      : null),
-    [planJwt, planTokenProjectId, planTokenFileId, project?.name],
-  )
-  const { units: planUnitsForAudio } = useProjectPlan({ projectId: planTokenProjectId, lane: "", getToken: getPlanToken })
-  const projectHasAudio = Boolean(project?.hasAnyAudioData) || planHasAudio(planUnitsForAudio)
   const isCloudProject = !!(project?.syncRole)
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
@@ -2489,7 +2467,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               projectId={id}
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
-              hasAnyAudioData={projectHasAudio}
               validationRoleFloor={validationRoleFloor}
               validationNamedUsers={validationNamedUsers}
               allowSelfValidation={allowSelfValidation}

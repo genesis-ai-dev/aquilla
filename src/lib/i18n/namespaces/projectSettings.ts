@@ -472,8 +472,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
-    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations.",
-    "projectSettings.validation.requiredAudioDisabledNote": "Applies once recordings exist.",
+    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083

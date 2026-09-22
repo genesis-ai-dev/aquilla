@@ -3722,7 +3722,6 @@ export const th: Catalog = {
   "projectSettings.validation.requiredTextDescription": "เซลล์ต้องมีผู้ตรวจสอบที่แตกต่างกันตามจำนวนนี้จึงจะถือว่าตรวจสอบครบถ้วน",
   "projectSettings.validation.requiredAudioLabel": "จำนวนผู้ตรวจสอบที่ต้องการ (เสียง)",
   "projectSettings.validation.requiredAudioAppliesNote": "ใช้กับคำแปลเสียง",
-  "projectSettings.validation.requiredAudioDisabledNote": "เปิดใช้งานเมื่อมีคำแปลเสียงแล้ว",
   "projectSettings.validation.minRoleLabel": "บทบาทผู้ตรวจสอบขั้นต่ำ",
   "projectSettings.validation.minRoleDescription": "เฉพาะผู้ใช้ที่มีบทบาทตั้งแต่ระดับนี้ขึ้นไปเท่านั้นที่สามารถลงคะแนนตรวจสอบได้ ค่าเริ่มต้นคือผู้ตรวจทาน",
   "projectSettings.validation.allowSelfLabel": "อนุญาตให้ตรวจสอบงานตนเอง",

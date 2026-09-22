@@ -41,7 +41,6 @@ interface Props {
   projectId?: string | null
   validationCount: number
   validationCountAudio: number
-  hasAnyAudioData: boolean
   validationRoleFloor?: ValidationRoleFloor
   /** Named-user allowlist (usernames). Empty = any sufficiently-privileged user. */
   validationNamedUsers?: string[]
@@ -102,7 +101,6 @@ export function ValidationSettingsSection({
   projectId = null,
   validationCount,
   validationCountAudio,
-  hasAnyAudioData,
   validationRoleFloor = "reviewer",
   validationNamedUsers = [],
   allowSelfValidation = true,
@@ -158,11 +156,7 @@ export function ValidationSettingsSection({
       />
       <SettingsRow
         label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
-        description={
-          hasAnyAudioData
-            ? t("projectSettings.validation.requiredAudioAppliesNote")
-            : t("projectSettings.validation.requiredAudioDisabledNote")
-        }
+        description={t("projectSettings.validation.requiredAudioAppliesNote")}
         control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input

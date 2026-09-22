@@ -7,7 +7,7 @@
 --   * A NOT VALID FK is STILL enforced against every NEW insert/update, so from
 --     this migration on a bad (project_id, lane_id) pair is rejected at write
 --     time. Only the one-time proof of pre-existing rows is skipped.
---   * Existing rows are all-NULL — lane_id was added empty in 0093 and is filled
+--   * Existing rows are all-NULL — lane_id was added empty in 0097 and is filled
 --     lazily by the backfill (scripts/neon-backfill-lanes.ts). A composite FK
 --     with a NULL member is exempt (MATCH SIMPLE), so the constraint already
 --     holds on legacy data.

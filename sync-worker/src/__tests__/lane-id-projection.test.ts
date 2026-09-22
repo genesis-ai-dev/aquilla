@@ -10,7 +10,7 @@
 //      SAME lane_id, because they run the same SQL against the same (replay-
 //      stable) `lanes` table.
 //   3. It is BEHAVIOR-NEUTRAL until lanes exist — with no matching lane the
-//      subquery is NULL, so lane_id stays NULL (additive column, migration 0093).
+//      subquery is NULL, so lane_id stays NULL (additive column, migration 0097).
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import {

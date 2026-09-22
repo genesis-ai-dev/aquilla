@@ -11,7 +11,7 @@
  *
  * Live projection and rebuild/replay resolve IDENTICALLY — both run this SQL
  * against the same `lanes` side table (not mutated by event replay). With no
- * matching lane the subquery is NULL (additive column, migration 0093).
+ * matching lane the subquery is NULL (additive column, migration 0097).
  *
  *   - side='source' -> the project's single `role='source'` lane.
  *   - side='target' -> the `role='target'` lane whose `legacy_tag` matches.

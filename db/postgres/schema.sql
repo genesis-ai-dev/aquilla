@@ -1101,7 +1101,7 @@ CREATE TABLE IF NOT EXISTS project_member_lane_roles (
 CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
     ON project_member_lane_roles(project_id, user_id);
 
--- First-class lanes with opaque IDs (0092_lanes.sql, AQU-1240 v2). Replaces the
+-- First-class lanes with opaque IDs (0096_lanes.sql, AQU-1240 v2). Replaces the
 -- implicit '' default lane. role='source' (one per project, not lane-addressable)
 -- or 'target' (one per distinct target_lang value, incl. '' = default lane).
 -- id is an opaque 8-hex app-generated value; PRIMARY KEY is (project_id, id).
@@ -1780,7 +1780,7 @@ CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
 -- schema.sql apply must create the referenced table first. Mirrors migration
--- 0098 — NOT VALID (instant, still enforced on new writes). The post-backfill
+-- 0102 — NOT VALID (instant, still enforced on new writes). The post-backfill
 -- cutover VALIDATEs these and adds SET NOT NULL.
 ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
 ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;

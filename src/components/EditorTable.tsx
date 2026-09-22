@@ -147,7 +147,6 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
-import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { CellTakeBlock } from "./CellTakeBlock"
 import { fmtClock } from "./timeline/format"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
@@ -5980,14 +5979,14 @@ function EditorRow({
   // surface that can cast one.
   const commitAudioValidation = useAudioValidationCommit(rowSession?.jwt ?? null)
 
-  // AQU-646: a recorded take IS target content. A line added into a silence may
-  // never get text — the dub is the deliverable — and it still has to be
-  // validatable and countable. `resolveTargetAudio` is the take-aware test: it
-  // matches a clip seeded with THIS cell's id, so the shared imported source
-  // clip (seeded with the file's id) can never masquerade as somebody's work.
-  // The row's `cell` already carries attachments via applyRowOverlays.
-  const hasContent =
-    Boolean(visibleTranslated && visibleTranslated.trim()) || Boolean(resolveTargetAudio(cell))
+  // TEXT, and only text. Under AQU-646 a recorded take counted as target
+  // content here, so that a line added into a silence — where the dub is the
+  // deliverable — could be validated at all: the text control was the only
+  // control there was. Audio has its own now (AQU-490), and Sam's ruling of
+  // 2026-09-22 is that the text control appears only where there is text; a
+  // line with just a recording gets just the mic. Without this, an empty cell
+  // offered a way to "validate" a translation that does not exist.
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // The automatic stage uses the smoothed server-derived estimate. Missing
   // evidence is unknown, not an endorsement-derived zero. Validation is a

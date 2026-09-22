@@ -146,6 +146,36 @@ describe("EditorTable — audio validation across the whole gutter", () => {
   })
 })
 
+describe("EditorTable — a line with only audio", () => {
+  // Sam, 2026-09-22: an audio-only line offered BOTH controls, so you could
+  // "validate" a translation that did not exist. Only the mic now.
+  it("gets the audio control and not the text one", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    const s = store()
+    // Blank the target text on cell-1, keeping its take.
+    s.replaceRows(
+      [...rows("cell-1", "GEN 1:1"), ...rows("cell-2", "GEN 1:2")].map((r) =>
+        r.cellId === "cell-1" && r.side === "target" ? { ...r, value: "" } : r,
+      ),
+      { full: true, maxServerSeq: 2 },
+    )
+    render(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} cellStore={s} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+    await rowOf("bonjour cell-2")
+    // cell-1 has no target text to find it by; it is the grid row that is NOT cell-2.
+    const audioOnly = Array.from(document.querySelectorAll<HTMLElement>("[data-grid-row]"))
+      .find((r) => !r.textContent?.includes("bonjour cell-2"))!
+    expect(audioOnly).toBeDefined()
+    // Its text gutter slot is empty; its audio slot is not.
+    const textGutter = audioOnly.querySelector('[data-testid="validation-gutter"]')
+    expect(textGutter?.querySelector("button")).toBeNull()
+    expect(within(audioOnly).getByTestId("audio-validation-button")).toBeInTheDocument()
+  })
+})
+
 describe("EditorTable — the Recording tab lists added-track takes", () => {
   it("shows a take block for a take that lives only on an added track", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t2", "track-2", "Narration")])]])

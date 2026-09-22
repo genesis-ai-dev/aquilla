@@ -40,6 +40,9 @@ export interface ComputeDeltaArgs {
   newEntry: DcsCatalogEntry
   /** The adapter project's current source cells, keyed by cellId. */
   currentCells: Map<string, CurrentCell>
+  /** AQU-686: the adapter project's persisted `importExcludeFrontMatter`. MUST
+   *  match what the genesis import used — see the note on `classifyAgainstCurrent`. */
+  excludeFrontMatter?: boolean
   signal?: AbortSignal
 }
 
@@ -90,7 +93,12 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
     if (args.signal?.aborted) throw new Error("Delta cancelled")
     fileTexts.set(path, await client.fetchRaw(owner, repoName, newEntry.ref, path, refKind))
   }
-  const parsedFiles = route.parse({ entry: newEntry, manifest, files: fileTexts })
+  const parsedFiles = route.parse({
+    entry: newEntry,
+    manifest,
+    files: fileTexts,
+    options: { excludeFrontMatter: args.excludeFrontMatter },
+  })
 
   return classifyAgainstCurrent(parsedFiles, currentCells)
 }
@@ -108,6 +116,15 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
  * A whole-repo adapter holds every file, so nothing is skipped for it.
  * (A brand-new upstream file is NOT auto-added here — that needs file.create
  * wiring; tracked as a follow-up.)
+ *
+ * AQU-686: both callers MUST re-parse under the adapter project's persisted
+ * `importExcludeFrontMatter`. The classification is "absent from currentCells ⇒
+ * create", so any parse option that changes WHICH cells exist silently reverses
+ * itself here: a project that imported with the front-matter opt-out ON, re-parsed
+ * with it OFF, produces book-name/header/TOC/title/intro cells the adapter
+ * deliberately never imported — every one of them absent from currentCells, so
+ * every one of them a create. The opt-out is undone by the next Door43 sync and
+ * the repair scan reports every held file as diverging.
  */
 function classifyAgainstCurrent(
   parsedFiles: DcsFile[],
@@ -168,6 +185,9 @@ export interface ComputeRepairDeltaArgs {
   entry: DcsCatalogEntry
   /** The adapter project's current source cells, keyed by cellId. */
   currentCells: Map<string, CurrentCell>
+  /** AQU-686: the adapter project's persisted `importExcludeFrontMatter`. MUST
+   *  match what the genesis import used — see the note on `classifyAgainstCurrent`. */
+  excludeFrontMatter?: boolean
   signal?: AbortSignal
 }
 
@@ -208,7 +228,12 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
     fileTexts.set(path, await client.fetchRaw(owner, repoName, entry.ref, path, refKind))
   }
 
-  const parsedFiles = route.parse({ entry, manifest, files: fileTexts })
+  const parsedFiles = route.parse({
+    entry,
+    manifest,
+    files: fileTexts,
+    options: { excludeFrontMatter: args.excludeFrontMatter },
+  })
   return classifyAgainstCurrent(parsedFiles, currentCells)
 }
 

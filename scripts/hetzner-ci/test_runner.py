@@ -2,9 +2,13 @@ import io
 import json
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 import runner
+import webhook
 
 
 class RunnerTests(unittest.TestCase):
@@ -67,3 +71,67 @@ class RunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InterruptedDrainTests(unittest.TestCase):
+    """An interrupted job must never hold the queue hostage.
+
+    A stuck job is worse than a missing report: every later PR silently stops
+    being tested while the runner looks healthy.
+    """
+
+    def setUp(self):
+        self.state = tempfile.TemporaryDirectory()
+        self.addCleanup(self.state.cleanup)
+        patcher = patch.object(webhook, "STATE", Path(self.state.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.jobs = tempfile.TemporaryDirectory()
+        self.addCleanup(self.jobs.cleanup)
+        patcher = patch.object(runner, "JOBS", Path(self.jobs.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def interrupt(self, age):
+        with runner.database() as db:
+            now = time.time()
+            db.execute("INSERT INTO jobs(pr,sha,status,created,updated) VALUES(?,?,?,?,?)",
+                       (716, "a" * 40, "interrupted", now - age, now - age))
+            return db.execute("SELECT id,pr,sha,updated FROM jobs").fetchone()
+
+    def status(self, job_id):
+        with runner.database() as db:
+            return db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()[0]
+
+    def test_a_deliverable_report_closes_the_job(self):
+        job = self.interrupt(age=0)
+        with patch.object(runner, "cleanup_containers"), patch.object(runner, "report"):
+            runner.drain_interrupted({}, job)
+        self.assertEqual(self.status(job[0]), "failed")
+
+    def test_an_undeliverable_report_is_retried_inside_the_grace_window(self):
+        job = self.interrupt(age=0)
+        with patch.object(runner, "cleanup_containers"), \
+             patch.object(runner, "report", side_effect=ConnectionError("github down")):
+            runner.drain_interrupted({}, job)
+        self.assertEqual(self.status(job[0]), "interrupted")
+
+    def test_an_undeliverable_report_gives_up_and_frees_the_queue(self):
+        job = self.interrupt(age=runner.REPORT_GRACE + 1)
+        with patch.object(runner, "cleanup_containers"), \
+             patch.object(runner, "report", side_effect=ConnectionError("github down")):
+            runner.drain_interrupted({}, job)
+        self.assertEqual(self.status(job[0]), "report-failed")
+
+    def test_a_job_that_cannot_be_reported_never_blocks_a_later_pr(self):
+        # The regression that matters: the queue keeps moving.
+        job = self.interrupt(age=runner.REPORT_GRACE + 1)
+        with runner.database() as db:
+            db.execute("INSERT INTO jobs(pr,sha,status,created,updated) VALUES(?,?,?,?,?)",
+                       (717, "b" * 40, "queued", time.time(), time.time()))
+        with patch.object(runner, "cleanup_containers"), \
+             patch.object(runner, "report", side_effect=ConnectionError("github down")):
+            runner.drain_interrupted({}, job)
+        with runner.database() as db:
+            blocking = db.execute("SELECT COUNT(*) FROM jobs WHERE status='interrupted'").fetchone()[0]
+        self.assertEqual(blocking, 0)

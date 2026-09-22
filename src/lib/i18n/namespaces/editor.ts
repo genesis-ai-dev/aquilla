@@ -531,6 +531,7 @@ export const editor = defineNamespace({
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
+    "editor.selection.validateText": "Validate text",
     "editor.selection.validateTooltip": plural({
       one: "Validate {count} cell",
       other: "Validate {count} cells",
@@ -542,15 +543,28 @@ export const editor = defineNamespace({
       "Nothing eligible — untouched AI drafts require individual review",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
-    "editor.selection.removeMyValidations": "Remove my validations",
-    "editor.selection.validateAudio": "Validate recordings",
+    "editor.selection.removeMyValidations": "Remove my text validations",
+    "editor.selection.validateAudio": "Validate audio",
     "editor.selection.validateAudioTooltip": plural({
-      one: "Validate {count} recording in the selection",
-      other: "Validate {count} recordings in the selection",
+      one: "Validate {count} take in the selection",
+      other: "Validate {count} takes in the selection",
+    }),
+    "editor.selection.validateAudioNoTakes": "Nothing recorded in the selection",
+    "editor.selection.validateAudioAllMine": "You have validated every take in the selection",
+    "editor.selection.validateAudioNothingEligible": "No takes here are yours to validate",
+    "editor.selection.removeMyAudioValidations": "Remove my audio validations",
+    "editor.selection.noAudioValidations": "You have not validated any take here",
+    "editor.selection.unvalidateAudioTooltip": plural({
+      one: "Remove your validation from {count} take",
+      other: "Remove your validation from {count} takes",
+    }),
+    "editor.selection.unvalidatedAudioToast": plural({
+      one: "Removed your validation from {count} take",
+      other: "Removed your validation from {count} takes",
     }),
     "editor.selection.validatedAudioToast": plural({
-      one: "Validated {count} recording",
-      other: "Validated {count} recordings",
+      one: "Validated {count} take",
+      other: "Validated {count} takes",
     }),
     "editor.selection.noValidations": "No cells have your validation",
     "editor.selection.unvalidateTooltip": plural({
@@ -1261,18 +1275,18 @@ export const editor = defineNamespace({
     "editor.validation.you": "(you)",
 
     // — Audio validation (AQU-490): the same control, one vote per TAKE ——
-    "editor.audioValidation.notValidatedTooltip": "Recording not validated — click to validate",
+    "editor.audioValidation.notValidatedTooltip": "Audio not validated — click to validate",
     "editor.audioValidation.outOfScopeTooltip": "Outside your assigned files",
     "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
     "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
     "editor.audioValidation.ariaValidated":
-      "Recording validated — {ref}. Click to remove your validation.",
+      "Audio validated — {ref}. Click to remove your validation.",
     "editor.audioValidation.ariaPartlyValidated":
       "{done} of {total} takes validated — {ref}. Click to validate the rest.",
-    "editor.audioValidation.ariaNotValidated": "Recording not validated — {ref}. Click to validate.",
+    "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaYoursMoreNeeded": plural({
-      one: "You have validated this recording — {ref}. {count} more validator needed.",
-      other: "You have validated this recording — {ref}. {count} more validators needed.",
+      one: "You have validated this audio — {ref}. {count} more validator needed.",
+      other: "You have validated this audio — {ref}. {count} more validators needed.",
     }),
     "editor.audioValidation.takesHeading": "Takes on this line",
     "editor.audioValidation.takeFraction": "{done}/{total}",
@@ -3747,6 +3761,59 @@ export const editor = defineNamespace({
           "the selected cells, leaving other reviewers' sign-offs alone. The " +
           "first-person possessive is load-bearing.",
         maxLength: 30,
+      },
+      "editor.selection.validateText": {
+        description:
+          "Label of the selection toolbar's bulk TEXT validation button. Says "
+          + "\"text\" out loud because an audio twin sits beside it and the two "
+          + "are never the same act. A count badge follows.",
+        maxLength: 20,
+      },
+      "editor.selection.validateAudioNoTakes": {
+        description:
+          "Tooltip when the bulk audio validation button is dark because none "
+          + "of the selected lines has a recording at all.",
+        maxLength: 60,
+      },
+      "editor.selection.validateAudioAllMine": {
+        description:
+          "Tooltip when the bulk audio validation button is dark because the "
+          + "reader has already validated every take in the selection.",
+        maxLength: 60,
+      },
+      "editor.selection.validateAudioNothingEligible": {
+        description:
+          "Tooltip when the bulk audio validation button is dark and neither "
+          + "of the plainer reasons applies — the takes are out of the "
+          + "reader's assignment, or are generated voices, which are signed "
+          + "off one at a time.",
+        maxLength: 60,
+      },
+      "editor.selection.removeMyAudioValidations": {
+        description:
+          "Label of the button that withdraws the reader's own validation "
+          + "from every selected recording. The first-person possessive is "
+          + "load-bearing: it never touches anyone else's vote.",
+        maxLength: 34,
+      },
+      "editor.selection.noAudioValidations": {
+        description:
+          "Tooltip when that button is dark because the reader has not "
+          + "validated any take in the selection.",
+        maxLength: 60,
+      },
+      "editor.selection.unvalidateAudioTooltip": {
+        description:
+          "Tooltip on the button that withdraws the reader's own validation "
+          + "from the selected recordings. Counts TAKES, not lines — a line "
+          + "with two tracks holds two.",
+        placeholders: { count: "How many takes the reader's vote comes off." },
+      },
+      "editor.selection.unvalidatedAudioToast": {
+        description:
+          "Toast after withdrawing the reader's own validation from the "
+          + "selected recordings. Counts takes.",
+        placeholders: { count: "How many takes the vote came off." },
       },
       "editor.selection.validateAudio": {
         description:

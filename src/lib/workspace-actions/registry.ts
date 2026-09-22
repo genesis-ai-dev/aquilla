@@ -124,9 +124,12 @@ export const workspaceActions: WorkspaceAction[] = [
             : ""
         return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
       },
-      // Same imperative as the selection-toolbar Validate button — reuse it
-      // rather than mint a duplicate "Validate" string in this namespace.
-      confirmLabelKey: "editor.selection.validate",
+      // Same imperative as the selection toolbar's button — reuse it rather
+      // than mint a duplicate string in this namespace. It names its half now
+      // ("Validate text"), which is what this dialog is about. The bare
+      // "Validate" key stays for the agent card, whose per-row button is not
+      // text-specific and whose accessible name already carries the reference.
+      confirmLabelKey: "editor.selection.validateText",
     },
     run: (_c, args) => args.runBatchValidate(),
   },

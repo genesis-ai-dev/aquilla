@@ -150,7 +150,7 @@ describe("the readout", () => {
   })
 
   // Found in the browser at a threshold of two: the button announced
-  // "Recording validated" on a line whose icon was still a single check. The
+  // "Audio validated" on a line whose icon was still a single check. The
   // label and the picture have to agree.
   it("says how many more are needed when the viewer has validated but the line has not", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })], { validationRequirement: 3 })
@@ -159,7 +159,7 @@ describe("the readout", () => {
 
   it("says plainly validated once the threshold is met", () => {
     draw([take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] })], { validationRequirement: 2 })
-    expect(button()).toHaveAccessibleName(/^Recording validated/i)
+    expect(button()).toHaveAccessibleName(/^Audio validated/i)
   })
 
   it("names its state for a screen reader, with the line's reference", () => {
@@ -212,7 +212,7 @@ describe("casting a vote", () => {
   it("shows my vote before the server has confirmed it", async () => {
     draw([take({ audioId: "a" })])
     await userEvent.click(button()!)
-    expect(button()).toHaveAccessibleName(/Recording validated/i)
+    expect(button()).toHaveAccessibleName(/Audio validated/i)
   })
 
   it("rolls the vote back when the write is refused", async () => {

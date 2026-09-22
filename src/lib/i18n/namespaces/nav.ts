@@ -121,14 +121,14 @@ export const nav = defineNamespace({
       "untranslated",
     ),
     "nav.workspaceActions.completeAll.confirmLabel": "Draft all",
-    "nav.workspaceActions.batchValidate.label": "Batch validate…",
-    "nav.workspaceActions.batchValidateAudio.label": "Validate recordings",
-    "nav.workspaceActions.batchValidateAudio.title": "Validate every recording in this file?",
+    "nav.workspaceActions.batchValidate.label": "Batch validate text…",
+    "nav.workspaceActions.batchValidateAudio.label": "Batch validate audio…",
+    "nav.workspaceActions.batchValidateAudio.title": "Validate every take in this file?",
     "nav.workspaceActions.batchValidateAudio.description": plural({
-      one: "Adds your validation to {takes} recording that you have not signed off yet. Generated voices are skipped.",
-      other: "Adds your validation to {takes} recordings that you have not signed off yet. Generated voices are skipped.",
+      one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
+      other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
     }),
-    "nav.workspaceActions.batchValidate.title": "Batch validate",
+    "nav.workspaceActions.batchValidate.title": "Batch validate text",
     "nav.workspaceActions.batchValidate.description": plural(
       {
         one:

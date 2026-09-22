@@ -22,8 +22,10 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
-import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate } from "@/lib/sync/events-emit"
+import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
+import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
+import { selectedDubTakes } from "@/lib/sync/cell-audio-read-types"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { canPerform } from "@/lib/sync/role-policy"
@@ -185,27 +187,59 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // per Sam's ruling. Never merged: a reviewer signing off translations has
   // not listened to the recordings, and one button doing both would collect
   // sign-off nobody meant to give.
-  const audioTakeTargets = useMemo(() => {
-    if (!audioByCellId) return []
+  /**
+   * The selection's takes, split into what I can still give and what I can
+   * take back. One pass, because both halves walk the same merged cells and
+   * ask the same adapter — and because a second pass is how the two counts
+   * would eventually disagree about the same take.
+   */
+  const { audioTakeTargets, audioRemoveTargets, audioHasAnyTake } = useMemo(() => {
+    const give: Array<{ fileId: string; cellId: string; audioId: string }> = []
+    const back: Array<{ fileId: string; cellId: string; audioId: string }> = []
+    if (!audioByCellId) return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: false }
+    let anyTake = false
     const merged = mergeCellsWithAudio(selectedCells, audioByCellId)
-    const out: Array<{ fileId: string; cellId: string; audioId: string }> = []
     for (const cell of merged) {
-      if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue
       for (const take of audioValidationTakes(
         audioEntryFromCell(cell),
         project,
         { roleLevel: project.syncRole?.level ?? null, username },
         () => "",
       )) {
-        // The same four skips the menu action makes: already mine, out of
-        // scope, no take, and a generated voice.
-        if (!take.canValidate || take.isGenerated) continue
-        if (take.validators.includes(username)) continue
-        out.push({ fileId: cell.fileId, cellId: cell.id, audioId: take.audioId })
+        anyTake = true
+        const target = { fileId: cell.fileId, cellId: cell.id, audioId: take.audioId }
+        if (isBulkAudioValidatableByMe(cell, take, username, myScopes, activeLane)) give.push(target)
+        if (isBulkAudioUnvalidatableByMe(cell, take, username, myScopes, activeLane)) back.push(target)
       }
     }
-    return out
+    return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: anyTake }
   }, [selectedCells, audioByCellId, myScopes, activeLane, project, username])
+
+  /**
+   * Does this FILE have audio at all? The pair's presence turns on this rather
+   * than on the selection: Sam's ruling of 2026-09-22 is that the buttons never
+   * disappear once you are working with audio, only enable and disable. Keying
+   * on the selection is what made "Validate audio" vanish the moment you used
+   * it — the very click that emptied it also hid the way back.
+   *
+   * A text-only file still shows only the text pair, so nothing grows two dead
+   * buttons it can never use.
+   */
+  const fileHasAudio = useMemo(() => {
+    if (!audioByCellId) return false
+    for (const entry of audioByCellId.values()) {
+      if (selectedDubTakes(entry).length > 0) return true
+    }
+    return false
+  }, [audioByCellId])
+
+  /** Why the validate button is dark, in the selection's own terms. */
+  const validateAudioDisabledReason = useMemo(() => {
+    if (audioTakeTargets.length > 0) return null
+    if (!audioHasAnyTake) return t("editor.selection.validateAudioNoTakes")
+    if (audioRemoveTargets.length > 0) return t("editor.selection.validateAudioAllMine")
+    return t("editor.selection.validateAudioNothingEligible")
+  }, [audioTakeTargets, audioRemoveTargets, audioHasAnyTake, t])
 
   const onValidateAudio = useCallback(async () => {
     if (isBusy || audioTakeTargets.length === 0) return
@@ -238,6 +272,34 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     }
   }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t])
 
+  /** The opposite action, which the audio side simply did not have. */
+  const onUnvalidateAudio = useCallback(async () => {
+    if (isBusy || audioRemoveTargets.length === 0) return
+    if (!canPerform("cell.audio.unvalidate", project.syncRole?.level ?? null)) return
+    setRunning({ kind: "validate-audio" })
+    try {
+      for (const target of audioRemoveTargets) {
+        // No `targetUsername`: absent means "my own vote", and removing
+        // somebody else's is a maintainer action that lives elsewhere. No
+        // `targetLang` either — a recording is shared by every language, so a
+        // vote on it is not per-lane and the wire carries none.
+        await emitCellAudioUnvalidate({
+          projectId: project.id,
+          fileId: target.fileId,
+          cellId: target.cellId,
+          audioId: target.audioId,
+          author: username,
+        })
+      }
+      toast.add({
+        type: "success",
+        title: t("editor.selection.unvalidatedAudioToast", { count: audioRemoveTargets.length }),
+      })
+      await commitAudioValidation(audioRemoveTargets.map((target) => target.fileId))
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t])
 
   const onTranslate = useCallback(async () => {
     if (isBusy) return
@@ -387,32 +449,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           </Button>
         </AppTooltip>
       )}
-      {/* AQU-490: beside the text pair, never folded into it. Hidden rather
-          than disabled when the selection holds no validatable take — an
-          always-present dead button on a text-only project is noise.
-          OUTSIDE the `!audioMode` branch, unlike the text actions: this is the
-          one validation the Audio view offers, and the Audio view is where
-          recordings are worked on. It sat inside that branch until 2026-09-21,
-          which made its two guards mutually exclusive — invisible in the audio
-          lens by the branch, invisible in the text lens because the map behind
-          its count was empty there. */}
-      {audioTakeTargets.length > 0 && (
-        <AppTooltip content={t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })}>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onValidateAudio}
-            disabled={isBusy}
-          >
-            {running.kind === "validate-audio" ? <Spinner className="me-1 size-3.5" /> : null}
-            {t("editor.selection.validateAudio")}
-            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
-              {audioTakeTargets.length}
-            </span>
-          </Button>
-        </AppTooltip>
-      )}
       {!audioMode && (
         <>
       <AppTooltip content={
@@ -455,7 +491,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           {running.kind === "validate" ? (
             <Spinner className="me-1 size-3.5" />
           ) : null}
-          {t("editor.selection.validate")}
+          {t("editor.selection.validateText")}
           {validatableCount > 0 && (
             <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {validatableCount}
@@ -483,6 +519,68 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           )}
         </Button>
       </AppTooltip>
+        </>
+      )}
+      {/* AQU-490 — the audio pair, and it is a PAIR: "Validate audio" used to
+          be a lone button that vanished the moment you used it, so the click
+          that emptied it also hid the way back. Sam, 2026-09-22: it behaves
+          like the text pair beside it, always present and merely enabled or
+          disabled, with an opposite action.
+
+          Present once the FILE has audio rather than once the SELECTION has
+          something to validate — that difference is the fix. A text-only file
+          still shows only the text pair, so nothing grows two dead buttons.
+
+          OUTSIDE the `!audioMode` branch, unlike the text actions: the Audio
+          view is where recordings are worked on, and this is the one
+          validation it offers. */}
+      {fileHasAudio && (
+        <>
+          <AppTooltip content={
+            validateAudioDisabledReason
+              ? validateAudioDisabledReason
+              : t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })
+          }>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onValidateAudio}
+              disabled={isBusy || audioTakeTargets.length === 0}
+            >
+              {running.kind === "validate-audio" ? <Spinner className="me-1 size-3.5" /> : null}
+              {t("editor.selection.validateAudio")}
+              {audioTakeTargets.length > 0 && (
+                <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+                  {audioTakeTargets.length}
+                </span>
+              )}
+            </Button>
+          </AppTooltip>
+          <AppTooltip content={
+            audioRemoveTargets.length === 0
+              ? t("editor.selection.noAudioValidations")
+              : t("editor.selection.unvalidateAudioTooltip", { count: audioRemoveTargets.length })
+          }>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onUnvalidateAudio}
+              disabled={isBusy || audioRemoveTargets.length === 0}
+            >
+              {t("editor.selection.removeMyAudioValidations")}
+              {audioRemoveTargets.length > 0 && (
+                <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+                  {audioRemoveTargets.length}
+                </span>
+              )}
+            </Button>
+          </AppTooltip>
+        </>
+      )}
+      {!audioMode && (
+        <>
       {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}

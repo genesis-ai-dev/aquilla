@@ -314,7 +314,12 @@ export function PlanInspector({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+      {/* `overscroll-contain`: the inspector is often SHORTER than its box —
+          a unit with one file and no shortfall fills a third of it — and a
+          wheel over a pane with nothing to scroll chains to whatever is
+          outside it. That is the convention the base stylesheet already
+          names for inner panes; this one was missing it (2026-09-22). */}
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 py-4">
         {failed && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px]"
              role="alert" data-testid="plan-patch-failed">

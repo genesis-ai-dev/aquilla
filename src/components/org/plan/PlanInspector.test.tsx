@@ -860,3 +860,27 @@ describe("the chapter card names front matter in words", () => {
     expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^front matter$/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Scroll containment
+// ---------------------------------------------------------------------------
+
+/**
+ * Sam, 2026-09-22: with the inspector open and the pointer over it, a scroll
+ * took the ENTIRE page away — the app slid off the top and left white space.
+ *
+ * The panel is frequently shorter than its box (a unit with one file and no
+ * shortfall fills a third of it), and a wheel over a pane with nothing left to
+ * scroll chains outward until something moves. The document was that
+ * something. The viewport is now refused outright in the base stylesheet, and
+ * the panel stops chaining in the first place — the convention that stylesheet
+ * already names for inner panes, which this one was missing.
+ */
+describe("PlanInspector — scroll containment", () => {
+  it("contains its own scrolling so a wheel never reaches the page", () => {
+    renderInspector(unit())
+    const body = document.querySelector(".overflow-y-auto")
+    expect(body).not.toBeNull()
+    expect(body!.className).toContain("overscroll-contain")
+  })
+})

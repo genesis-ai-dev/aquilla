@@ -655,6 +655,7 @@ export function OrgProjectsDataTable({
         })}
         rowClassName="group"
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
+        rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
         searchValue={searchValue}

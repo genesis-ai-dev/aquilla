@@ -32,6 +32,7 @@ import {
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 import { flushOutboxBatch } from "./outbox-flush"
+import { journalTargetCommit } from "./outbox-recovery"
 
 // ── Tauri offline routing (Phase 4) test harness ───────────────────────────
 // outbox.ts dynamically `import()`s "@/lib/offline/store" only when
@@ -70,6 +71,7 @@ describe("cqrs outbox", () => {
   }
 
   beforeEach(async () => {
+    localStorage.clear()
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
       const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
@@ -91,6 +93,45 @@ describe("cqrs outbox", () => {
     expect(peek[0].lastError).toBe(null)
     await removeOutboxEvents(["e1"])
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("journals a target commit synchronously before IndexedDB can finish", async () => {
+    setActiveOutboxOwner("alice")
+    const pending = enqueueOutboxEvent(sample)
+    const key = "aquilla:outbox-recovery:v1:e1"
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({
+      ownerKey: "alice", event: { id: "e1", payload: sample.payload },
+    })
+    await pending
+    expect(localStorage.getItem(key)).toBeNull()
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
+  it("recovers a write interrupted before IDB without crossing account boundaries", async () => {
+    journalTargetCommit({
+      id: sample.id, event: sample, ownerKey: "alice", enqueuedAt: 1,
+      attempts: 0, lastAttemptAt: null, lastError: null, status: "pending",
+    })
+    setActiveOutboxOwner("bob")
+    expect(await peekOutboxBatch(10)).toEqual([])
+    setActiveOutboxOwner("alice")
+    const recovered = await peekOutboxBatch(10)
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0].event).toEqual(sample)
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:e1")).toBeNull()
+  })
+
+  it("does not replace a quarantined event when replaying a stale journal", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    await quarantineOutboxEvents([sample.id], { status: 403, reason: "forbidden" })
+    const [existing] = await peekOutboxBatch(10)
+    journalTargetCommit({ ...existing, status: "pending", attempts: 0, lastError: null })
+    await resetOutboxConnectionForTests()
+    setActiveOutboxOwner("alice")
+    const [recovered] = await peekOutboxBatch(10)
+    expect(recovered.status).toBe("failed")
+    expect(recovered.lastError).toEqual({ status: 403, reason: "forbidden" })
   })
 
   it("keeps each account's durable queue isolated across switches", async () => {

@@ -211,11 +211,13 @@ function mapRow(row: CellRowRaw): CellRowOut {
  * the wrong default for a read API that should surface everything in the
  * projection.
  */
-function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
+type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "anchor_cell_id" | "event_id">
+
+function walkAnchorChain<T extends OrderRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
 
   // anchor_cell_id (null → "") → ordered children by event_id.
-  const byAnchor = new Map<string, CellRowRaw[]>()
+  const byAnchor = new Map<string, T[]>()
   const cellIds = new Set<string>()
   for (const r of rows) {
     cellIds.add(r.cell_id)
@@ -231,9 +233,9 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
     bucket.sort((a, b) => (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0))
   }
 
-  const ordered: CellRowRaw[] = []
+  const ordered: T[] = []
   const visited = new Set<string>()
-  const byEventId = (a: CellRowRaw, b: CellRowRaw): number =>
+  const byEventId = (a: T, b: T): number =>
     a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0
 
   // Depth-first descent. Each cell's id becomes the anchor key for the next
@@ -273,7 +275,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // event_id order and walk its descendants, so runs that still chain
   // together stay contiguous behind their orphaned head.
   if (visited.size < rows.length) {
-    const roots: CellRowRaw[] = []
+    const roots: T[] = []
     for (const r of rows) {
       if (visited.has(r.cell_id)) continue
       if (r.anchor_cell_id !== null && !cellIds.has(r.anchor_cell_id)) roots.push(r)
@@ -292,7 +294,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // they'd otherwise drop out entirely, which is the wrong default for a
   // read API that should surface everything in the projection.
   if (visited.size < rows.length) {
-    const orphans: CellRowRaw[] = []
+    const orphans: T[] = []
     for (const r of rows) {
       if (!visited.has(r.cell_id)) orphans.push(r)
     }
@@ -320,7 +322,7 @@ interface Cursor {
 // SWARM-TODO in the PR/issue comment), but it remembers the resulting
 // ORDERED LIST OF IDS (not the row data — cheap, ~40 bytes/id) so every
 // subsequent page for the same version is a single bounded
-// `(side, target_lang, cell_id) IN (...)` point lookup sized to the page,
+// side/lane-scoped `cell_id = ANY(...)` point lookup sized to the page,
 // served by idx_cells_file_scan (0083_cells_scan_index.sql).
 //
 // Keyed by the response ETag: that string is already the exact "identity of
@@ -332,13 +334,52 @@ interface Cursor {
 // the `since=` delta path (unordered by design).
 //
 // Isolate-local only (no DO/KV): correctness never depends on a hit, so a
-// cold isolate or eviction just falls back to the full walk — see the
+// cold isolate or eviction falls back to a narrow ordering read and full walk — see the
 // SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
 // page of a newly-opened file.
 interface ChainCacheItem {
   cellId: string
   side: "source" | "target"
   targetLang: string
+}
+
+async function readPageValues(db: AquillaDb, columns: string, projectId: string, fileId: string, items: ChainCacheItem[]): Promise<CellRowOut[]> {
+  if (items.length === 0) return []
+  // Group by side/lane so each lookup uses the full composite index with
+  // one array parameter, rather than thousands of OR-expanded tuples.
+  const groups = new Map<string, { side: string; lane: string; ids: string[] }>()
+  for (const item of items) {
+    const key = JSON.stringify([item.side, item.targetLang])
+    const group = groups.get(key) ?? { side: item.side, lane: item.targetLang, ids: [] }
+    group.ids.push(item.cellId)
+    groups.set(key, group)
+  }
+  const pageBinds: unknown[] = [projectId, fileId]
+  const predicates = [...groups.values()].map((group) => {
+    // postgres.js unsafe() does not infer array parameter types. Bind an
+    // explicitly escaped array literal; cell IDs remain parameter values.
+    const ids = `{${group.ids.map(id => `"${id.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`
+    pageBinds.push(group.side, group.lane, ids)
+    return "(side = ? AND target_lang = ? AND cell_id = ANY(?::text[]))"
+  })
+  const pageParts = [
+    `SELECT ${columns}`,
+    "FROM cells",
+    "WHERE project_id = ? AND file_id = ?",
+    `AND (${predicates.join(" OR ")})`,
+  ]
+  const pageRes = await db
+    .prepare(pageParts.join(" "))
+    .bind(...pageBinds)
+    .all<CellRowRaw>()
+  const bySlot = new Map<string, CellRowRaw>()
+  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
+  const cells: CellRowOut[] = []
+  for (const item of items) {
+    const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
+    if (row) cells.push(mapRow(row))
+  }
+  return cells
 }
 
 interface ChainCacheEntry {
@@ -809,32 +850,8 @@ export async function handleCellsReadRequest(
       // Bounded point lookup: exactly the page's rows, served by
       // idx_cells_file_scan (project_id, file_id, side, target_lang, cell_id)
       // — independent of file size (AQU-1160 AC1).
-      const tuples = pageItems.map(() => "(?, ?, ?)").join(", ")
-      const pageParts = [
-        `SELECT ${columns}`,
-        "FROM cells",
-        "WHERE project_id = ? AND file_id = ?",
-        `AND (side, target_lang, cell_id) IN (${tuples})`,
-      ]
-      const pageBinds: unknown[] = [projectId, fileId]
-      for (const item of pageItems) pageBinds.push(item.side, item.targetLang, item.cellId)
-      const pageRes = await env.AQUILLA_PG
-        .prepare(pageParts.join(" "))
-        .bind(...pageBinds)
-        .all<CellRowRaw>()
-      // Evidence for AQU-1160 AC1: a page read touches exactly the page's
-      // rows, not the file. Compare against the cache-miss row-count log
-      // below (which logs `allRows.length`, the pre-AQU-1160 full-file cost).
-      console.log(
-        `[cells-read] chain-cache hit file=${fileId} rows=${pageRes.results.length} page=${pageItems.length} totalOrdered=${cached.items.length}`,
-      )
-      const bySlot = new Map<string, CellRowRaw>()
-      for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
-      cells = []
-      for (const item of pageItems) {
-        const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
-        if (row) cells.push(mapRow(row))
-      }
+      cells = await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, pageItems)
+      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length}`)
     }
 
     return Response.json(
@@ -850,8 +867,11 @@ export async function handleCellsReadRequest(
     )
   }
 
+  // Keep the watermark captured before both reads: an edit between ordering
+  // and value hydration must remain eligible for the client's next delta.
+  // Do not refresh that watermark after hydration.
   const parts: string[] = [
-    `SELECT ${columns}`,
+    `SELECT ${useChainCache ? "cell_id, side, target_lang, anchor_cell_id, event_id" : columns}`,
     "FROM cells",
     "WHERE project_id = ? AND file_id = ?",
   ]
@@ -871,7 +891,7 @@ export async function handleCellsReadRequest(
   }
   const sql = parts.join(" ")
 
-  const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<CellRowRaw>()
+  const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<OrderRow | CellRowRaw>()
   const allRows = result.results
   if (useChainCache) {
     // Evidence for AQU-1160 AC1's baseline: this is the pre-cache, full-file
@@ -880,11 +900,11 @@ export async function handleCellsReadRequest(
     console.log(`[cells-read] chain-cache miss file=${fileId} rows=${allRows.length}`)
   }
 
-  let ordered: CellRowRaw[]
+  let ordered: OrderRow[]
   if (cellIdsFilter && cellIdsFilter.length > 0) {
     // Targeted read: skip chain walking; preserve request order so callers
     // patching by index can rely on it. Pagination is moot at this scale.
-    const byId = new Map<string, CellRowRaw[]>()
+    const byId = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       let bucket = byId.get(r.cell_id)
       if (!bucket) {
@@ -906,8 +926,8 @@ export async function handleCellsReadRequest(
     // cell must be walked PER LANE or sibling-lane rows silently drop.
     // Default lane ('') first, then added lanes in name order — for N=1
     // (only '' exists) the output is byte-identical to the pre-lane walk.
-    const sourceRows: CellRowRaw[] = []
-    const targetByLane = new Map<string, CellRowRaw[]>()
+    const sourceRows: OrderRow[] = []
+    const targetByLane = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       if (r.side === "source") sourceRows.push(r)
       else if (r.side === "target") {
@@ -926,7 +946,7 @@ export async function handleCellsReadRequest(
     }
   } else if (sideFilter === "target") {
     // Same per-lane walk for target-only reads.
-    const byLane = new Map<string, CellRowRaw[]>()
+    const byLane = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       const lane = r.target_lang ?? ""
       let bucket = byLane.get(lane)
@@ -971,7 +991,10 @@ export async function handleCellsReadRequest(
 
   return Response.json(
     {
-      cells: slice.map(mapRow),
+      cells: useChainCache
+        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })))
+        // Targeted reads selected all columns above.
+        : (slice as CellRowRaw[]).map(mapRow),
       nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
       total: ordered.length,
       ...(paired ? { completeRows: true } : {}),

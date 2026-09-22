@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { buildGlosser, type BtSeed } from "./bt-glosser"
+import {
+  buildGlosser,
+  btSeedsFromAlignmentSeeds,
+  ALIGNMENT_SEED_BT_WEIGHT,
+  type BtSeed,
+} from "./bt-glosser"
+import type { AlignmentSeed } from "./interlinear"
 
 // ── Deterministic gloss on known pairs ───────────────────────────────────────
 
@@ -466,5 +472,134 @@ describe("buildGlosser — argmax survives candidate collapse", () => {
     const seeds: BtSeed[] = [{ source: "home", target: "casa", weight: 5 }]
     const glosser = buildGlosser(pairs, seeds)
     expect(glosser.gloss("casa")).toBe("home")
+  })
+})
+
+// ── AQU-207: confirmed interlinear alignments feed the statistical BT ─────────
+
+describe("btSeedsFromAlignmentSeeds — AQU-207 adapter", () => {
+  it("maps srcToken/tgtToken positionally without swapping orientation", () => {
+    // Both types are source-language → target-language. A swap here would make
+    // every confirmation train the glosser backwards.
+    expect(btSeedsFromAlignmentSeeds([{ srcToken: "word", tgtToken: "mot", weight: 1 }])).toEqual([
+      { source: "word", target: "mot", weight: ALIGNMENT_SEED_BT_WEIGHT },
+    ])
+  })
+
+  it("carries the sign through so an invalidation penalizes", () => {
+    const [seed] = btSeedsFromAlignmentSeeds([{ srcToken: "word", tgtToken: "mot", weight: -1 }])
+    expect(seed.weight).toBe(-ALIGNMENT_SEED_BT_WEIGHT)
+  })
+
+  it("drops zero-weight and blank-token seeds", () => {
+    expect(
+      btSeedsFromAlignmentSeeds([
+        { srcToken: "word", tgtToken: "mot", weight: 0 },
+        { srcToken: "  ", tgtToken: "mot", weight: 1 },
+        { srcToken: "word", tgtToken: "", weight: 1 },
+      ]),
+    ).toEqual([])
+  })
+})
+
+describe("AQU-207 — a confirmed alignment measurably influences BT output", () => {
+  // These pass the producer's real output (the AlignmentSeed shape that
+  // InterlinearAlignmentPanel.onSeedChange emits, persisted as
+  // ProjectRecord.alignmentSeeds) through the immediate consumer (buildGlosser),
+  // which is the composition the regression escaped at: the seeds were persisted
+  // and fed back into interlinear.ts's own model, but never reached the glosser,
+  // so confirming an alignment left the BT the user reads unchanged.
+
+  it("confirming an alignment changes the gloss for that target token", () => {
+    const pairs = [{ source: "word", target: "mot" }]
+    const before = buildGlosser(pairs, [])
+    expect(before.gloss("mot")).toBe("word")
+
+    // Exactly what the panel emits on Confirm.
+    const confirmed: AlignmentSeed[] = [{ srcToken: "scripture", tgtToken: "mot", weight: 1 }]
+    const after = buildGlosser(pairs, btSeedsFromAlignmentSeeds(confirmed))
+    expect(after.gloss("mot")).toBe("scripture")
+  })
+
+  it("invalidating an alignment demotes it below the runner-up", () => {
+    const pairs = [
+      { source: "word", target: "mot" },
+      { source: "word", target: "mot" },
+      { source: "term", target: "mot" },
+    ]
+    const before = buildGlosser(pairs, [])
+    expect(before.gloss("mot")).toBe("word")
+
+    // Exactly what the panel emits on Invalidate.
+    const invalidated: AlignmentSeed[] = [{ srcToken: "word", tgtToken: "mot", weight: -1 }]
+    const after = buildGlosser(pairs, btSeedsFromAlignmentSeeds(invalidated))
+    expect(after.gloss("mot")).toBe("term")
+  })
+
+  it("leaves the gloss untouched when there are no confirmations", () => {
+    const pairs = [{ source: "word", target: "mot" }]
+    expect(buildGlosser(pairs, btSeedsFromAlignmentSeeds([])).gloss("mot")).toBe(
+      buildGlosser(pairs, []).gloss("mot"),
+    )
+  })
+})
+
+describe("AQU-207 — seeds reach the n-grams the decoder actually consults", () => {
+  // The decoder is greedy longest-n-gram-first. A seed that adjusted only the
+  // bare (target token → source token) entry was never consulted when a longer
+  // n-gram containing that token already had a corpus winner, so the qa-bot
+  // walk on PR #548 saw Invalidate persist a seed and the BT not move. This is
+  // that corpus shape: one scrambled pair teaches the trigram "la reine aime"
+  // → "the king loves" while a real pair teaches "reine" → "queen".
+  const pairs = [
+    { source: "The king loves the city.", target: "La reine aime le jardin" },
+    { source: "The queen loves the garden.", target: "La reine aime le jardin." },
+    { source: "The child loves the dog.", target: "L'enfant aime le chien." },
+    { source: "The king rules the city.", target: "Le roi gouverne la ville." },
+    { source: "The covenant was made.", target: "L'alliance a été faite." },
+    { source: "The dog runs in the garden.", target: "Le chien court dans le jardin." },
+    { source: "The city is large.", target: "La ville est grande." },
+    { source: "The queen is wise.", target: "La reine est sage." },
+    { source: "The child is small.", target: "L'enfant est petit." },
+    { source: "The garden is green.", target: "Le jardin est vert." },
+  ]
+  const target = "La reine aime le jardin"
+  const glossWith = (seeds: AlignmentSeed[]) =>
+    buildGlosser(pairs, btSeedsFromAlignmentSeeds(seeds)).gloss(target)
+
+  it("the unseeded corpus glosses the scrambled trigram as the model learned it", () => {
+    expect(glossWith([])).toContain("king")
+  })
+
+  it("invalidating a token pair stops that rendering even when a longer n-gram carried it", () => {
+    const after = glossWith([{ srcToken: "king", tgtToken: "reine", weight: -1 }])
+    expect(after).not.toContain("king")
+    expect(after).toContain("queen")
+  })
+
+  it("confirming a token pair makes every n-gram containing the token gloss through it", () => {
+    const after = glossWith([{ srcToken: "queen", tgtToken: "reine", weight: 1 }])
+    expect(after).toContain("queen")
+    expect(after).not.toContain("king")
+  })
+
+  it("confirming a pair the corpus disagrees with overrides the corpus winner", () => {
+    expect(glossWith([])).toContain("garden")
+    const after = glossWith([{ srcToken: "city", tgtToken: "jardin", weight: 1 }])
+    expect(after).toContain("city")
+    expect(after).not.toContain("garden")
+  })
+
+  it("invalidating a pair the corpus already rejects changes nothing", () => {
+    expect(glossWith([{ srcToken: "city", tgtToken: "jardin", weight: -1 }])).toBe(glossWith([]))
+  })
+
+  it("a multi-token seed applies to phrases containing the whole target phrase", () => {
+    // A termbase-style rendering: "le jardin" must gloss through "the garden".
+    // The scrambled pair also pairs "le jardin" with "the city"; the seed
+    // decides it.
+    const seeds: BtSeed[] = [{ source: "the garden", target: "le jardin", weight: 3 }]
+    const gloss = buildGlosser(pairs, seeds).gloss("aime le jardin")
+    expect(gloss).toContain("the garden")
   })
 })

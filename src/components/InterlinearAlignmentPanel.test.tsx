@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import {
   buildAlignmentModel,
@@ -221,6 +221,129 @@ describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () =>
       /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),
     )
     expect(helpTooltip).toBeTruthy()
+  })
+})
+
+// ── AQU-207: a decision stays visible ────────────────────────────────────────
+
+describe("InterlinearAlignmentPanel — a decision stays visible (AQU-207)", () => {
+  // Repetitive pairs give Dice a certain "god → gott" (diagonal prior breaks
+  // the tie with "schuf"), so the panel proposes it at high confidence.
+  const n = MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 5
+  const pairs = Array.from({ length: n }, () => ({
+    source: "god created",
+    target: "gott schuf",
+  }))
+
+  it("reports the seed on ✓ and renders the row as confirmed once the parent hands the seed back", () => {
+    const onSeedChange = vi.fn()
+    const { rerender } = render(
+      <InterlinearAlignmentPanel
+        sourceText="god created"
+        targetText="gott schuf"
+        alignmentModel={buildAlignmentModel(pairs, [])}
+        confirmedSeeds={noSeeds}
+        onSeedChange={onSeedChange}
+      />,
+    )
+
+    const confirmBtn = screen.getAllByRole("button", { name: /confirm alignment/i })[0]
+    fireEvent.click(confirmBtn)
+    expect(onSeedChange).toHaveBeenCalledTimes(1)
+    const seed = onSeedChange.mock.calls[0][0] as AlignmentSeed
+    expect(seed.weight).toBe(1)
+
+    // What the parent does: persist the seed, rebuild the model with it, and
+    // pass both back down (ProjectWorkspace.handleAlignmentSeedChange via the
+    // useProject settings overlay).
+    rerender(
+      <InterlinearAlignmentPanel
+        sourceText="god created"
+        targetText="gott schuf"
+        alignmentModel={buildAlignmentModel(pairs, [seed])}
+        confirmedSeeds={[seed]}
+        onSeedChange={onSeedChange}
+      />,
+    )
+
+    const badge = screen.getByText("✓ confirmed")
+    const row = badge.parentElement!
+    expect(row.textContent).toContain(seed.srcToken)
+    expect(row.textContent).toContain(seed.tgtToken)
+    // A decided row offers no further ✓/✕.
+    expect(within(row).queryByRole("button", { name: /confirm alignment/i })).toBeNull()
+    expect(within(row).queryByRole("button", { name: /reject alignment/i })).toBeNull()
+  })
+
+  it("keeps an invalidated pair on screen, struck through, when the model no longer proposes it", () => {
+    // "god → schuf" is never the model's proposal for "god" (it proposes
+    // "gott"), so without synthesis the decision would have no row at all —
+    // exactly what a user sees as "the ✕ did nothing".
+    const seed: AlignmentSeed = { srcToken: "god", tgtToken: "schuf", weight: -1 }
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god created"
+        targetText="gott schuf"
+        alignmentModel={buildAlignmentModel(pairs, [seed])}
+        confirmedSeeds={[seed]}
+        onSeedChange={noop}
+      />,
+    )
+
+    const badge = screen.getByText("✗ rejected")
+    const row = badge.parentElement!
+    expect(row.textContent).toContain("god")
+    expect(row.textContent).toContain("schuf")
+    expect(row.className).toContain("line-through")
+    // No confidence pill: the model has no confidence to report for a pair it
+    // does not propose.
+    expect(within(row).queryByText(/^\d+%$/)).toBeNull()
+    // The live proposal for "god" is still there, undecided, alongside it.
+    expect(screen.getAllByRole("button", { name: /confirm alignment/i }).length).toBeGreaterThan(0)
+  })
+
+  it("does not synthesize a row for a decided pair whose tokens are not in this cell", () => {
+    const seed: AlignmentSeed = { srcToken: "king", tgtToken: "könig", weight: 1 }
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god created"
+        targetText="gott schuf"
+        alignmentModel={buildAlignmentModel(pairs, [seed])}
+        confirmedSeeds={[seed]}
+        onSeedChange={noop}
+      />,
+    )
+    expect(screen.queryByText("✓ confirmed")).toBeNull()
+  })
+})
+
+// ── Row keys are unique per position ─────────────────────────────────────────
+
+describe("InterlinearAlignmentPanel — repeated tokens get distinct row keys", () => {
+  it("renders a verse that repeats a word without a duplicate-key error", () => {
+    const n = MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 5
+    const pairs = Array.from({ length: n }, () => ({
+      source: "you love you",
+      target: "du liebst du",
+    }))
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      render(
+        <InterlinearAlignmentPanel
+          sourceText="you love you"
+          targetText="du liebst du"
+          alignmentModel={buildAlignmentModel(pairs, [])}
+          confirmedSeeds={noSeeds}
+          onSeedChange={noop}
+        />,
+      )
+      // Both "you" positions must be on screen: the panel is per position.
+      expect(screen.getAllByRole("button", { name: /confirm alignment: you translates as du/i }).length).toBe(2)
+      const dupKey = errors.mock.calls.find((call) => String(call[0]).includes("same key"))
+      expect(dupKey).toBeUndefined()
+    } finally {
+      errors.mockRestore()
+    }
   })
 })
 

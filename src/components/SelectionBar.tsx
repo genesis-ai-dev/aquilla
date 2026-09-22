@@ -413,7 +413,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       role="toolbar"
       aria-label={t("editor.selection.actions")}
     >
-      <span className="font-medium">
+      {/* Never wraps: with two validation pairs beside it the label was the
+          only flexible thing left and folded onto four lines. It keeps its
+          width; the buttons take the squeeze (Sam, 2026-09-22). */}
+      <span className="shrink-0 whitespace-nowrap font-medium">
         {t("editor.selection.count", { count: selectedCells.length })}
         {missingCount > 0 && (
           <span className="ms-1 text-muted-foreground">

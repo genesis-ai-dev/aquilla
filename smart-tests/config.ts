@@ -7,7 +7,9 @@ const directory = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   testDir: path.join(directory, "journeys"),
   testMatch: "**/*.spec.ts",
-  fullyParallel: false,
+  // Test-level sharding distributes conditions within the same spec file.
+  // Each isolated database still has exactly one Playwright worker.
+  fullyParallel: true,
   workers: 1,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),

@@ -7113,7 +7113,7 @@ function EditorRow({
               overflowOpen={railOverflowOpen}
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
-              overflowLabel={t("editor.rail.moreActions")}
+              overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
               // AQU-200: AI-generate is the one action that stays a direct
               // button. Validate is the other always-visible action, and it
               // already lives in the row's left gutter — it is not moved.

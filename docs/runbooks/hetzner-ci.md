@@ -1,5 +1,9 @@
 # Hetzner self-hosted e2e
 
+For the shared 4 GB host and automatic Jev PR comments, use the
+[standalone webhook runner](smart-testing-webhook.md). The dedicated-box
+bootstrap below replaces system tools and is not suitable for that shared host.
+
 Dedicated Ubuntu box that runs Aquilla Playwright smoke against the same
 local stack as a laptop (`wrangler dev` + `aquilla-dev-pg`). GitHub Actions
 is the webhook and the job queue. This machine is only the compute.

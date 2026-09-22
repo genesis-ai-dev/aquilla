@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
+import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -79,6 +80,8 @@ export const env = {
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */
 export async function initTestSchema(): Promise<void> {
   await pg.exec(SCHEMA)
+  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
+  await installTestLaneFill((sql) => pg.exec(sql))
 }
 
 /** Truncate every app table + reset identities between tests. */
@@ -87,6 +90,7 @@ export async function resetTestDb(): Promise<void> {
     FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
       EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
     END LOOP; END $$;`)
+  await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
 }
 
 /** No-op: D1 migrations are replaced by the Postgres schema load (initTestSchema). */

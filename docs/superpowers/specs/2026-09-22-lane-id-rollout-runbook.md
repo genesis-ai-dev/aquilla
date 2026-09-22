@@ -2,8 +2,8 @@
 
 Ordered, copy-pasteable steps to take first-class lane IDs live. Run **dev end
 to end first**, confirm, then repeat the identical sequence on **prod**. Every
-schema change is additive or non-blocking; the one destructive-ish step
-(`SET NOT NULL`) is deferred and gated (see §5).
+schema change is additive or non-blocking; the one hard-to-reverse step
+(`SET NOT NULL`, migrations 0100–0107) runs only after verify is clean (§4).
 
 ## 0. Cast & concepts
 
@@ -62,57 +62,51 @@ pnpm neon:verify:lanes:dev --require-complete  # gate: exit 1 if any NULL/orphan
   (`artifact_bindings`, `scene_briefs`, `contextual_runs`, `contextual_drafts`)
   are the likely stragglers — re-run the backfill or resolve the missing lane.
 
-## 4. PR2 — validate the FKs (this PR)
+## 4. PR2 — validate the FKs, then require lane_id
 
-`0099_validate_fk_lane_id.sql` flips all 8 composite FKs from `NOT VALID` to
-VALIDATED (non-blocking scan). Drift-neutral, no behavior change for writers.
+Do this only after §3 is green (`--require-complete`). `neon:apply` runs every
+pending file in order, so merging PR2 and applying before the backfill will
+fail `0100` on purpose (NULLs remain). That failure rolls back just that file;
+fix by finishing the backfill, then apply again.
+
+- `0099_validate_fk_lane_id.sql` flips all 8 composite FKs from `NOT VALID` to
+  VALIDATED (non-blocking scan).
+- `0100`–`0107` make `lane_id` `NOT NULL` on each table, one file per table,
+  via a non-blocking validated CHECK so the lock window stays short. Each file
+  fails and rolls back if that table still has a NULL.
 
 ```
-# after PR2 is merged to dev:
-pnpm neon:apply:dev           # applies 0099 (VALIDATE CONSTRAINT x8)
+# after PR2 is merged to dev, and verify --require-complete passed:
+pnpm neon:apply:dev           # 0099, then 0100..0107
 pnpm neon:status:dev          # clean
-pnpm deploy:aquilla:dev:api   # no code change strictly required; keep in sync
+pnpm neon:verify:lanes:dev --require-complete
+pnpm deploy:aquilla:dev:api
 ```
 
-## 5. NOT NULL cutover — DEFERRED (not in PR2)
-
-The eight `SET NOT NULL` migrations live in
-`db/postgres/deferred-notnull-cutover/` (out of the apply path). They are correct
-and rehearsed but **not shipped yet** because flipping `schema.sql` to `NOT NULL`
-breaks ~75+ PGlite suites via the seed helper. Promote them in a dedicated PR
-(seed-harness overhaul + remove dual-read), then:
-
-```
-pnpm neon:verify:lanes:<env> --require-complete   # MUST pass (0 nulls) first
-pnpm neon:apply:<env>                              # applies 0100..0107
-```
-
-Each is idempotent and self-gating: run against a not-yet-complete table and the
-`VALIDATE CONSTRAINT` step fails loudly and rolls back — that failure is the
-gate, do not force it.
-
-## 6. Prod
+## 5. Prod
 
 Repeat §1 → §4 against prod, in order, only after dev is green:
 
 ```
-pnpm neon:status:prod && pnpm neon:apply:prod         # 0092..0098, then 0099
-pnpm neon:backfill:lanes:prod --apply                 # (between the two applies)
-pnpm neon:verify:lanes:prod --require-complete
+pnpm neon:status:prod && pnpm neon:apply:prod         # first: 0092..0098 only (PR1)
+pnpm neon:backfill:lanes:prod --apply
+pnpm neon:verify:lanes:prod --require-complete        # must pass before PR2 apply
+pnpm neon:apply:prod                                  # then: 0099 + 0100..0107
 pnpm deploy:aquilla:... (prod equivalents)
 ```
 
-## 7. Rollback notes
+## 6. Rollback notes
 
 - Additive columns / indexes / `NOT VALID` FK: harmless to leave; no rollback
   needed. Dual-read tolerates NULL `lane_id`.
 - `VALIDATE CONSTRAINT` (0099): to undo, `ALTER TABLE t VALIDATE`→ there is no
   "invalidate"; drop+re-add `NOT VALID` if ever required (not expected).
 - Backfill: additive only (`lane_id IS NULL` guarded); re-running is safe.
-- The only hard-to-reverse step is `SET NOT NULL` (§5) — which is why it is
-  deferred and gated behind a green `--require-complete` verify.
+- The hard-to-reverse step is `SET NOT NULL` (`0100`–`0107`). It is gated:
+  the migration fails if any `lane_id` is still NULL, and it must not be
+  applied until `--require-complete` is green.
 
-## 8. What is NOT in this rollout
+## 7. What is NOT in this rollout
 
 - **AQU-730 read/write wall** (PR3): the grant substrate ships dormant in PR1
   (`0091`, token mint, `resolveVisibleLanes`). Wiring the wall + the grant

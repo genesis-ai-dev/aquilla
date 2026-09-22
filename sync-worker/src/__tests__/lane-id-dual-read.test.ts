@@ -96,7 +96,7 @@ describe('AQU-1240 slice 7 — dual-read completeness', () => {
 })
 
 describe('GET cells dual-read', () => {
-  it('falls back to target_lang while lane_id is NULL', async () => {
+  it('returns the tag\'s rows when the seed omits lane_id', async () => {
     const { db } = await makeTestDb({
       cells: [
         cell({ cell_id: 's1', side: 'source', event_id: 'es1', value: 'src' }),
@@ -114,7 +114,9 @@ describe('GET cells dual-read', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { cells: Array<{ value: string; laneId: string | null }> }
     expect(body.cells.map((c) => c.value).sort()).toEqual(['es-tag', 'src'])
-    expect(body.cells.find((c) => c.value === 'es-tag')!.laneId).toBeNull()
+    // The test harness fills an omitted lane_id, so the row is addressable by
+    // tag and no longer comes back null.
+    expect(body.cells.find((c) => c.value === 'es-tag')!.laneId).toEqual(expect.any(String))
   })
 
   it('matches by lane_id even when target_lang disagrees, and serializes laneId', async () => {
@@ -172,7 +174,7 @@ describe('GET cell-validators dual-read', () => {
         {
           project_id: PROJECT, file_id: FILE, cell_id: 'c1',
           event_id: 'ev-tag', username: 'bob', decided_ts: 10,
-          target_lang: 'es', lane_id: null,
+          target_lang: 'es',
         },
         {
           project_id: PROJECT, file_id: FILE, cell_id: 'c1',
@@ -194,7 +196,8 @@ describe('GET cell-validators dual-read', () => {
     }
     expect(body.validators.map((v) => v.username).sort()).toEqual(['alice', 'bob'])
     expect(body.validators.find((v) => v.username === 'alice')!.laneId).toBe(ES_LANE)
-    expect(body.validators.find((v) => v.username === 'bob')!.laneId).toBeNull()
+    // Bob's row omitted lane_id; the harness attaches the existing es lane.
+    expect(body.validators.find((v) => v.username === 'bob')!.laneId).toBe(ES_LANE)
   })
 })
 

@@ -1215,10 +1215,16 @@ export const org = defineNamespace({
     // one project, a dub episode in another, a document in a third — so
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.laneMenuAria": "Language shown: {language}. Choose another.",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
     "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
     "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
+    // AQU-1278. Its own pill rather than a share of "in progress", because
+    // this is the one bucket a manager can empty this week. Both plural forms
+    // are identical for the same reason as its two siblings above: the count
+    // is drawn as a bold numeral beside the phrase, never inside it.
+    "org.projectOverview.plan.summaryNearlyCompleteLabel": plural({ one: "nearly complete", other: "nearly complete" }),
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -1234,10 +1240,21 @@ export const org = defineNamespace({
     "org.projectOverview.plan.statusDone": "Done",
     "org.projectOverview.plan.statusOverdue": "Overdue",
     "org.projectOverview.plan.statusSoon": "Due soon",
+    // AQU-1278. Fifteen characters, one over the ceiling the other statuses
+    // carried. Sam's call was to keep the word and lift the ceiling to 16 for
+    // the whole family rather than shorten this one — the six labels sit in
+    // the same pill and are read against each other, so a translator sizing
+    // one of them is sizing all six.
+    "org.projectOverview.plan.statusNearlyComplete": "Nearly complete",
     "org.projectOverview.plan.statusInProgress": "In progress",
     "org.projectOverview.plan.statusNotStarted": "Not started",
     "org.projectOverview.plan.groupHintOverdue": "past target, not marked done",
     "org.projectOverview.plan.groupHintSoon": "target within a week",
+    // The two numbers ARE the rule — `planNearlyCompleteThreshold` in
+    // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
+    // the function, so a change to one is a change to both; the hint exists
+    // because a group nobody can predict the membership of reads as a bug.
+    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
@@ -1246,10 +1263,10 @@ export const org = defineNamespace({
     "org.projectOverview.plan.previousUnit": "Previous unit",
     "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.openInEditor": "Open in the editor",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
-    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
@@ -1272,6 +1289,68 @@ export const org = defineNamespace({
     "org.projectOverview.plan.markedOn": "marked {date}",
     "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
     "org.projectOverview.plan.noTargetDate": "no target date",
+    // ── AQU-1278: the shortfall line ───────────────────────────────────
+    // What a unit still needs, on the row's second line and beside the
+    // inspector's status pill. `planShortfallParts` picks at most two terms,
+    // worst medium first, so these keys are always read as fragments and never
+    // as a sentence. One key per medium because the count governs the noun,
+    // and the join is a key of its own so a language that separates clauses
+    // with a different mark — or with no spaces around it — can say so
+    // instead of inheriting an English middot.
+    "org.projectOverview.plan.shortfallTranslate": plural({ one: "{count} cell to translate", other: "{count} cells to translate" }),
+    "org.projectOverview.plan.shortfallValidate": plural({ one: "{count} cell to validate", other: "{count} cells to validate" }),
+    "org.projectOverview.plan.shortfallRecord": plural({ one: "{count} take to record", other: "{count} takes to record" }),
+    // Never rendered today, and deliberately kept: `AUDIO_JUDGED_ON_RECORDED`
+    // suppresses the audio-validate term because no client emits
+    // `cell.audio.validate` yet (AQU-490 is the missing half), so the count is
+    // zero on every project alive. The words exist so the flip is a constant,
+    // not a copy round.
+    "org.projectOverview.plan.shortfallAudioValidate": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
+    // AQU-1278: the SHORT forms, used when two terms share one line. In full
+    // they read "6 cells to translate \u00b7 8 cells to validate", which wraps in
+    // the narrowest column on the board and takes the row's height with it \u2014
+    // and the second noun is the same word as the first, so the line spends
+    // its width saying "cells" twice. The noun survives in the single-term
+    // case, where there is room and no context to borrow from.
+    "org.projectOverview.plan.shortfallTranslateBrief": plural({ one: "{count} to translate", other: "{count} to translate" }),
+    "org.projectOverview.plan.shortfallValidateBrief": plural({ one: "{count} to validate", other: "{count} to validate" }),
+    "org.projectOverview.plan.shortfallRecordBrief": plural({ one: "{count} to record", other: "{count} to record" }),
+    // Keeps its noun where the other brief forms drop theirs: with both nouns
+    // gone, "6 to validate · 8 to validate" would name one thing twice. Sam's
+    // word for this is "validated", never "sign off" (2026-09-17).
+    "org.projectOverview.plan.shortfallAudioValidateBrief": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
+    "org.projectOverview.plan.shortfallPair": "{first} \u00b7 {second}",
+    // A unit with nothing outstanding that nobody has marked done: it stays in
+    // Overdue where its blown date belongs, and this line is how the row
+    // admits the work itself is finished. Without it that row looks identical
+    // to one with three hundred cells to go.
+    "org.projectOverview.plan.nothingLeft": "Nothing left",
+    // AQU-1278: the second line under that one, on a unit with NO target date.
+    // It used to read "no target date", which is true and useless — the reader
+    // is looking at a finished book and wants to know why it is not in Done.
+    "org.projectOverview.plan.nothingLeftUndone": "not marked done",
+    // AQU-1278: prefixes a row's second line when the unit's assignments have
+    // been read and there are none. Only ever shown for a unit whose
+    // assignments ARE known, so it says "nobody", never "nobody yet loaded".
+    "org.projectOverview.plan.unassignedRow": "unassigned",
+    // Where the outstanding cells actually are. The plural agrees with how
+    // many chapters are in the list, which the caller passes alongside — it is
+    // not in the string, the same arrangement the summary pills use.
+    "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
+    "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
+    // The links out of the plan and into the editor, landing on the first cell
+    // that is actually missing something. Two keys rather than one with a
+    // {kind} placeholder: an inflecting language cannot build "first
+    // untranslated" from a noun it is handed at runtime.
+    "org.projectOverview.plan.goToFirstUntranslated": "Go to first untranslated",
+    "org.projectOverview.plan.goToFirstUnvalidated": "Go to first unvalidated",
+    "org.projectOverview.plan.goToFirstUnrecorded": "Go to first unrecorded",
+    "org.projectOverview.plan.goToFirstUnsigned": "Go to first unvalidated take",
+    // AQU-1278, round 7: what a bar's two percentages stand for, on hover.
+    "org.projectOverview.plan.readoutTranslated": "{done} of {total} translated",
+    "org.projectOverview.plan.readoutValidated": "{done} of {total} validated",
+    "org.projectOverview.plan.readoutRecorded": "{done} of {total} recorded",
+    "org.projectOverview.plan.readoutAudioValidated": "{done} of {total} validated",
     // AQU-1096: the list controls. Neutral throughout — the orphaned
     // filterFiles* keys say "files", which this surface never does.
     "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
@@ -1280,19 +1359,91 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
-    // AQU-1255: the card draws the first few rows and stops. The count lives
-    // in the label so the button says what it opens, to a reader and a screen
-    // reader alike.
-    "org.projectOverview.plan.showAll": "Show all {count}",
-    "org.projectOverview.plan.showFewer": "Show fewer",
     "org.projectOverview.plan.viewStatus": "By status",
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
     "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
-    "org.projectOverview.plan.chapters": "Progress by chapter",
-    "org.projectOverview.plan.sections": "Progress by section",
+    // AQU-1278: fold every group to its header, and back. One button, two labels.
+    "org.projectOverview.plan.collapseAll": "Collapse all",
+    "org.projectOverview.plan.expandAll": "Expand all",
+    "org.projectOverview.plan.collapseAllTooltip": "Fold every group to its header and count.",
+    "org.projectOverview.plan.expandAllTooltip": "Open every group.",
+    // AQU-1278: the in-order arrangement's folders.
+    "org.projectOverview.plan.folderAll": "All files",
+    "org.projectOverview.plan.folderTallyOverdue": plural({ one: "{count} overdue", other: "{count} overdue" }),
+    "org.projectOverview.plan.folderTallySoon": plural({ one: "{count} due soon", other: "{count} due soon" }),
+    "org.projectOverview.plan.folderTallyNearlyComplete": plural({ one: "{count} nearly complete", other: "{count} nearly complete" }),
+    "org.projectOverview.plan.folderTallyInProgress": plural({ one: "{count} in progress", other: "{count} in progress" }),
+    "org.projectOverview.plan.folderTallyNotStarted": plural({ one: "{count} not started", other: "{count} not started" }),
+    "org.projectOverview.plan.folderTallyDone": plural({ one: "{count} done", other: "{count} done" }),
+    // AQU-1278: the heading is just the noun. "Progress by chapter" described
+    // the old stack of per-chapter bars; the grid beneath it now says how it
+    // measures, and the legend sits on this very line saying what the colours
+    // mean, so the words only have to name what is below them.
+    "org.projectOverview.plan.chapters": "Chapters",
+    "org.projectOverview.plan.sections": "Sections",
     "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
     "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
+    // ── AQU-1278: the chapter grid ─────────────────────────────────────
+    // One tile per chapter under the inspector's heading, coloured by what
+    // that chapter is short of. The two summary lines above it answer the
+    // question the grid poses at a glance — how much of this is left — for a
+    // reader who is counting tiles instead of reading them.
+    "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
+    // "all complete", not the bare "complete" this legend would otherwise
+    // read: the catalog already spends that string on autopilot.status.complete
+    // and on the Living Memory brief's status, and the second of those holds a
+    // reviewed entry in duplicate-exceptions.ts. A third key case-folding onto
+    // the same value turns that group into a HARD failure of
+    // no-duplicates.test.ts — an excused group may leave only one other key
+    // colliding — and a swatch label does not earn a fourth exception. The
+    // sense is unchanged: nothing outstanding in either medium.
+    "org.projectOverview.plan.gridLegendComplete": "all complete",
+    "org.projectOverview.plan.gridLegendTextShort": "text short",
+    "org.projectOverview.plan.gridLegendAudioShort": "audio short",
+    // A media file's sections are time ranges, not chapters, so the grid has
+    // nothing to draw. It says why rather than rendering an empty frame, which
+    // reads as a load that failed.
+    // AQU-1278: the chapter card under the grid, opened by clicking a tile.
+    // The title names the chapter the way the reader just clicked it; the line
+    // beside it says what is outstanding in the medium that leads.
+    "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
+    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
+    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
+    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
+    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // The overflow chip at the end of the verse row, when the outstanding
+    // verses outnumber the chips one row can hold.
+    // …and its sibling for a document, which has no sections at all.
+    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
+    // matter — cells with no chapter number, filed before chapter 1.
+    "org.projectOverview.plan.frontMatter": "front matter",
+    "org.projectOverview.plan.tileAria": plural({
+      one: "Chapter {chapter}: {count} cell short",
+      other: "Chapter {chapter}: {count} cells short",
+    }),
+    "org.projectOverview.plan.tileAriaSection": plural({
+      one: "{section}: {count} cell short",
+      other: "{section}: {count} cells short",
+    }),
+    // Audio hangs off the file, not off a target language, so every lane reads
+    // the same recordings — a manager comparing two lanes' audio bars and
+    // finding them identical is seeing the truth, not a stuck filter.
+    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
+    // ── AQU-1278: per-assignment progress ──────────────────────────────
+    // Who owns which slice of a unit, and how far along their slice is.
+    "org.projectOverview.plan.assignedTo": "Assigned to",
+    "org.projectOverview.plan.assign": "Assign",
+    "org.projectOverview.plan.assignmentScope": plural({ one: "{scope} \u00b7 {count} cell", other: "{scope} \u00b7 {count} cells" }),
+    "org.projectOverview.plan.assignmentDue": "due {date}",
+    "org.projectOverview.plan.assignmentNoDeadline": "no deadline",
+    // AQU-1278: the tail of a person's shortfall line — "2 to validate · ch. 12".
+    // Abbreviated because it follows a count on a line three hundred pixels wide.
+    "org.projectOverview.plan.shortfallInChapters": "ch. {list}",
+    "org.projectOverview.plan.unassignedChapters": plural({ one: "{count} chapter is not assigned", other: "{count} chapters are not assigned" }),
+    "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
+    "org.projectOverview.plan.moreAssignees": "{count} more",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2432,6 +2583,12 @@ export const org = defineNamespace({
         description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
         maxLength: 16,
       },
+      "org.projectOverview.plan.laneMenuAria": {
+        description: "Screen-reader name for the menu beside the Plan heading that chooses which target language the plan is counting. Only shown on projects with more than one target language.",
+        placeholders: {
+          language: "The target language the plan is currently showing — a language name or a lane tag. Not translated.",
+        },
+      },
       "org.projectOverview.plan.regionAria": {
         description: "Screen-reader name for the plan list region, which arrow keys navigate.",
       },
@@ -2447,6 +2604,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.summaryInProgressLabel": {
         description:
           "Summary pill. The count is rendered as a bold numeral immediately before this text: \"28\" + \"in progress\". Counts units that are started or due soon but not finished.",
+      },
+      "org.projectOverview.plan.summaryNearlyCompleteLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"9\" + \"nearly complete\". The plural form is selected by that count even though it does not appear in the string. Counts only the units a few cells from finished, which are NOT also counted as in progress.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",
@@ -2477,31 +2638,44 @@ export const org = defineNamespace({
         description: "Screen-reader label for the two stacked audio-progress bars on a plan row.",
         placeholders: { recorded: "Percent recorded — a number.", validated: "Percent validated — a number." },
       },
+      // The six status labels share ONE ceiling, raised 14 → 16 by AQU-1278 to
+      // fit "Nearly complete" without shortening it (Sam's call). They are read
+      // against each other in the same pill, so sizing them apart would only
+      // move the truncation to whichever label a translator wrote longest.
       "org.projectOverview.plan.statusDone": {
         description: "Status of a unit a manager has explicitly marked finished. Can read Done even when its bars are below 100%.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusOverdue": {
         description: "Status of a unit past its target date with no Done mark.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusSoon": {
         description: "Status of a unit whose target date is within a week.",
-        maxLength: 14,
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.statusNearlyComplete": {
+        description:
+          "Status of a started unit whose worse medium is within a few cells of finished — six percent of its cells, or seven cells, whichever is larger. Sits between Due soon and In progress on the board: a blown date still outranks 'almost there'.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusInProgress": {
         description: "Status of a unit with content that is comfortably ahead of its target.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusNotStarted": {
         description: "Status of a unit with no translated text and no recorded audio yet.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.groupHintOverdue": {
         description: "Right-aligned hint on the Overdue group header, explaining what puts a unit there.",
       },
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
+      },
+      "org.projectOverview.plan.groupHintNearlyComplete": {
+        description:
+          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
       },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",
@@ -2528,6 +2702,10 @@ export const org = defineNamespace({
         description: "Tooltip on the down arrow that steps to the next unit.",
         maxLength: 20,
       },
+      "org.projectOverview.plan.openInEditor": {
+        description: "Tooltip on the detail panel's title and on a chapter card's title; each opens what it names in the editor.",
+        maxLength: 30,
+      },
       "org.projectOverview.plan.targetDate": {
         description: "Label for the date a manager plans this unit to be finished by.",
         maxLength: 18,
@@ -2539,9 +2717,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.noTargetSet": {
         description: "Shown instead of a date picker to someone who cannot set dates.",
         maxLength: 28,
-      },
-      "org.projectOverview.plan.targetVisibleHint": {
-        description: "Hint under the target-date picker: the date is not private to the person setting it.",
       },
       "org.projectOverview.plan.targetMaintainerOnly": {
         description: "Explains to a non-maintainer why no date control is offered.",
@@ -2633,6 +2808,117 @@ export const org = defineNamespace({
       "org.projectOverview.plan.noTargetDate": {
         description: "Note beside a started unit that nobody has given a target date.",
       },
+      "org.projectOverview.plan.shortfallTranslate": {
+        description:
+          "One term of the shortfall line — the plan row's second line, and the line beside the inspector's status pill. Says how many cells in this unit still have no target text. Read as a fragment, never as a sentence: at most two terms appear, joined by org.projectOverview.plan.shortfallPair.",
+        placeholders: { count: "Cells with no target text yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallValidate": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate): how many cells have target text that nobody has validated yet. Always listed after the translate term, because a cell nobody has written cannot be validated.",
+        placeholders: { count: "Translated cells still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallRecord": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate), for a file that carries recordings: how many cells have no take recorded against them. A 'take' is one recorded clip for one cell.",
+        placeholders: { count: "Cells with no recording yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallAudioValidate": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate): recorded takes nobody has validated yet. Not rendered anywhere today — audio is judged on what has been recorded until the recording-review UI exists (AQU-490), so this count is zero on every project. Translate it anyway; it appears the day that lands.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallTranslateBrief": {
+        description:
+          "The short form of shortfallTranslate, used when TWO shortfall terms share one line on a plan row — \"6 to translate · 8 to validate\". The noun is dropped because the full pair wraps in the narrowest column on the board, and because both terms count the same thing, so saying it twice buys nothing. Keep it as short as the language allows.",
+        placeholders: { count: "Cells with no target text yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallValidateBrief": {
+        description:
+          "The short form of shortfallValidate (see shortfallTranslateBrief): translated cells nobody has validated yet, worded for a line that already carries another term.",
+        placeholders: { count: "Translated cells still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallRecordBrief": {
+        description:
+          "The short form of shortfallRecord (see shortfallTranslateBrief): cells with no take recorded against them, worded for a line that already carries another term.",
+        placeholders: { count: "Cells with no recording yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallAudioValidateBrief": {
+        description:
+          "The short form of shortfallAudioValidate (see shortfallTranslateBrief): recorded takes nobody has validated yet. Unlike the other brief forms it KEEPS its noun, because beside shortfallValidateBrief with both nouns dropped it would read as the same thing said twice. Not rendered today — audio is judged on what has been recorded until AQU-490 ships.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallPair": {
+        description:
+          "Joins the two terms of a shortfall line — \"6 cells to translate · 34 cells to validate\". A key of its own so a language that separates clauses with a different mark, or without spaces around it, can say so. Do not reorder the two: the first is deliberately the worse of the pair.",
+        placeholders: {
+          first: "The worse shortfall term, already translated and formatted — e.g. '6 cells to translate'.",
+          second: "The second shortfall term, already translated and formatted.",
+        },
+      },
+      "org.projectOverview.plan.nothingLeft": {
+        description:
+          "Replaces the shortfall line on a unit with no outstanding work in it. Such a unit can still sit under Overdue — a blown target date outranks a finished one — and this is how its row admits the work itself is done.",
+      },
+      "org.projectOverview.plan.nothingLeftUndone": {
+        description:
+          "Second line of a plan row whose first line reads 'Nothing left' and which has no target date: every cell is done but no manager has marked the unit complete. A lower-case fragment sitting under the line above, not a sentence.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.unassignedRow": {
+        description:
+          "Prefixes a plan row's second line when nobody holds an assignment covering that unit — \"unassigned · 3 hours ago\". A lower-case fragment before a separator, never a standalone label.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.shortfallWhere": {
+        description:
+          "Tail of the inspector's shortfall line, naming which chapters the outstanding cells are in: \"chapters 3, 4 and 9\". The number of chapters in the list selects the plural form and is passed alongside; like the summary pills, it never appears in the string itself.",
+        placeholders: { list: "The chapter numbers, already joined into one list by the caller — e.g. '3, 4 and 9'. Not translated." },
+      },
+      "org.projectOverview.plan.shortfallWhereMore": {
+        description:
+          "Replaces the bare chapter list on a plan row when the outstanding work is spread over more chapters than the row has room to name. The first few are named and the rest are counted, because a row that listed forty numbers would push everything else off the line.",
+        placeholders: {
+          list: "The first few chapter numbers, already joined for this locale.",
+          count: "How many further chapters are short — a number. The plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.goToFirstUntranslated": {
+        description:
+          "Link in the inspector that opens the editor on this unit, scrolled to the first cell with no target text. Separate from its unvalidated sibling rather than built from a shared phrase, because 'first untranslated' inflects as a whole in most languages.",
+      },
+      "org.projectOverview.plan.goToFirstUnvalidated": {
+        description:
+          "Link in the inspector that opens the editor on this unit, scrolled to the first translated cell nobody has validated. Offered where the outstanding work is validation rather than translation.",
+      },
+      "org.projectOverview.plan.goToFirstUnrecorded": {
+        description:
+          "Link in the inspector and on a board row that opens the editor on this unit, scrolled to the first cell with no recorded take. Offered once the unit's text is finished and the outstanding work is recording. On a dubbing project it lands on the subtitle cell whose linked cue has no take.",
+      },
+      "org.projectOverview.plan.goToFirstUnsigned": {
+        description:
+          "Link that opens the editor at the first recorded take nobody has validated (selected and approved). 'Take' is what keeps it apart from goToFirstUnvalidated, which is about text. Not offered today — audio is judged on what has been recorded until AQU-490 ships.",
+      },
+      "org.projectOverview.plan.readoutTranslated": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside a text bar on the plan board and in its inspector: what that percentage stands for, as cells. \"1,530 of 1,533 translated\". Both numbers arrive already formatted for the reader's locale.",
+        placeholders: { done: "Cells with target text, formatted — e.g. '1,530'.", total: "The unit's cells, formatted — e.g. '1,533'." },
+      },
+      "org.projectOverview.plan.readoutValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside a text bar: how many cells are validated, out of the unit's cells. See readoutTranslated.",
+        placeholders: { done: "Validated cells, formatted.", total: "The unit's cells, formatted." },
+      },
+      "org.projectOverview.plan.readoutRecorded": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside an audio bar: cells with a recorded take, out of the bar's own total — which on a dubbing project is the cue sheet's count, not the file's. See readoutTranslated.",
+        placeholders: { done: "Cells with a take, formatted.", total: "Cells the audio is measured against, formatted." },
+      },
+      "org.projectOverview.plan.readoutAudioValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside an audio bar: takes that have been validated, out of the bar's own total. Same English as readoutValidated on purpose — Sam's word for audio validation is 'validated' (2026-09-17); a language that distinguishes the two may.",
+        placeholders: { done: "Validated takes, formatted.", total: "Cells the audio is measured against, formatted." },
+      },
       "org.projectOverview.plan.filterPlaceholder": {
         description:
           "Placeholder in the plan's filter box. Ends in an ellipsis; the matching aria-label does not. Matches a unit's displayed name and its book code.",
@@ -2650,19 +2936,6 @@ export const org = defineNamespace({
           total: "Units in the project \u2014 a number.",
         },
       },
-      "org.projectOverview.plan.showAll": {
-        description:
-          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
-        placeholders: {
-          count: "Rows the list would draw once expanded — a number.",
-        },
-        maxLength: 18,
-      },
-      "org.projectOverview.plan.showFewer": {
-        description:
-          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
-        maxLength: 16,
-      },
       "org.projectOverview.plan.viewStatus": {
         description:
           "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
@@ -2678,11 +2951,64 @@ export const org = defineNamespace({
           "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
         maxLength: 16,
       },
+      "org.projectOverview.plan.collapseAll": {
+        description:
+          "Button in the plan board's toolbar, after the By status / In order toggle, that folds every status group down to its header and count in one click. Shown while at least one group is open; its twin expandAll takes over once all are folded. Disabled in the In order arrangement, which has no groups.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.expandAll": {
+        description:
+          "The same button as collapseAll once every group on the board is folded: one click opens them all. Keep it the same length as collapseAll so the toolbar does not shift between the two.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.collapseAllTooltip": {
+        description: "Hover text of the collapseAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.expandAllTooltip": {
+        description: "Hover text of the expandAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.folderAll": {
+        description:
+          "Header of the single group the plan board's in-order arrangement draws when a project keeps none of its files in folders — every row sits under it, so it can be folded like any folder. Beside the count of rows.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.folderTallyOverdue": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are overdue. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallySoon": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are due soon. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNearlyComplete": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are nearly complete. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyInProgress": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are in progress. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNotStarted": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are not started. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyDone": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are done. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.chapters": {
-        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+        description: "Inspector heading over the grid of chapter tiles for a Bible book. A plural noun naming what is below it, not a sentence — the colour legend shares this line and the grid says how it measures.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.sections": {
-        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+        description: "Inspector heading over the grid of section tiles for a non-Scripture unit — an episode's scenes, a document's headings. The counterpart of the chapters heading; see it.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.chapterCount": {
         description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
@@ -2691,6 +3017,131 @@ export const org = defineNamespace({
       "org.projectOverview.plan.sectionCount": {
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
+      },
+      "org.projectOverview.plan.chaptersShort": {
+        description:
+          "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
+        placeholders: { count: "Chapters with outstanding cells — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chaptersComplete": {
+        description:
+          "Second summary line above the inspector's chapter grid, counting the chapters with nothing outstanding left in them against the unit's total.",
+        placeholders: {
+          done: "Chapters with nothing outstanding — a number.",
+          total: "Chapters in the unit — a number.",
+        },
+      },
+      "org.projectOverview.plan.gridLegendComplete": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter with nothing outstanding in either medium. Read as one of three fragments in a row — 'all complete · text short · audio short' — so keep it a phrase, not a sentence.",
+      },
+      "org.projectOverview.plan.gridLegendTextShort": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter still missing translated or validated text. Read as one of three fragments in a row.",
+      },
+      "org.projectOverview.plan.gridLegendAudioShort": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter whose text is done but whose recordings are not. Read as one of three fragments in a row.",
+      },
+      "org.projectOverview.plan.chapterTitle": {
+        description:
+          "Heading of the chapter card that opens under the inspector's grid when a reader clicks a tile. A section with no chapter number of its own — a document's \"Scene 4\" — uses its own name instead and never reaches this string.",
+        placeholders: { chapter: "The chapter number — a number, not translated." },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.chapterCellsUntranslated": {
+        description:
+          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
+        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
+        placeholders: {
+          count: "How many takes await validation — a number; the plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.chapterCellsUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
+        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnrecorded": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
+        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.frontMatter": {
+        description:
+          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.tileAria": {
+        description:
+          "Accessible name of one chapter tile in the inspector's grid. A sighted reader gets the colour and the number; a screen-reader user gets this instead, so it must carry both facts on its own.",
+        placeholders: {
+          chapter: "The chapter number — a number, not translated.",
+          count: "Outstanding cells in that chapter — a number, and the one the plural agrees with.",
+        },
+      },
+      "org.projectOverview.plan.tileAriaSection": {
+        description:
+          "Accessible name of a tile that is NOT a numbered chapter — USFM front matter, a one-chapter book, or a document's own section name. Those cannot sit on the numbered grid and must not be announced as \"Chapter Scene 4\", so they name themselves instead.",
+        placeholders: {
+          section: "The section's own key, e.g. a book code or a scene name. Not translated.",
+          count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
+        },
+      },
+      "org.projectOverview.plan.audioSharedAcrossLanes": {
+        description:
+          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
+      },
+      "org.projectOverview.plan.assignedTo": {
+        description:
+          "Label above the inspector's list of the people given part of this unit to work on.",
+      },
+      "org.projectOverview.plan.assign": {
+        description:
+          "Button beside an unassigned slice of a unit that opens the assignee picker — the imperative verb. dialog.assign.submit is the confirm button inside that dialog and reads the same in English by coincidence; a language that splits 'open the picker' from 'commit the choice' needs both.",
+      },
+      "org.projectOverview.plan.assignmentScope": {
+        description:
+          "One row of the inspector's assignment list: what a person has been given and how big it is — \"Chapters 3–9 · 412 cells\". Plural-governed by {count}: a one-cell assignment reads \"· 1 cell\".",
+        placeholders: {
+          scope: "The assigned slice, already formatted by the caller — e.g. 'Chapters 3–9' or a file name. Not translated.",
+          count: "Cells in that slice — a number.",
+        },
+      },
+      "org.projectOverview.plan.assignmentDue": {
+        description:
+          "Tail of an assignment row, saying when that person's slice is due. Lower case: it follows the scope on the same line. org.orgHome.dueDate is the capitalised, standalone version on a project row.",
+        placeholders: { date: "A short calendar date, already formatted." },
+      },
+      "org.projectOverview.plan.assignmentNoDeadline": {
+        description:
+          "Fills the same slot as the due date on an assignment nobody has dated, so the row keeps its shape. Lower case for the same reason.",
+      },
+      "org.projectOverview.plan.shortfallInChapters": {
+        description:
+          "Tail of one person's line in the inspector's Assigned to section, naming which chapters their outstanding work is in — \"2 to validate \u00b7 ch. 12\". Abbreviate 'chapter' the way a reader of this language would in a list: the panel is narrow and the count in front of it has already been shortened for the same reason.",
+        placeholders: {
+          list: "The chapter numbers, already joined into one list by the caller — e.g. '12 and 40'. Not translated.",
+        },
+        maxLength: 12,
+      },
+      "org.projectOverview.plan.unassignedChapters": {
+        description:
+          "Warning under the inspector's assignment list: chapters of this unit nobody has been made responsible for. The count is what makes it actionable, so it stays in the sentence.",
+        placeholders: { count: "Chapters with no assignee — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.everyChapterAssigned": {
+        description:
+          "The reassuring counterpart of the unassigned-chapters warning, shown when nothing in the unit is left over. A full sentence, because it is the end of the story rather than a label.",
+      },
+      "org.projectOverview.plan.moreAssignees": {
+        description:
+          "Overflow chip closing a truncated row of assignee avatars: how many people the row could not fit.",
+        placeholders: { count: "Assignees not shown — a number." },
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

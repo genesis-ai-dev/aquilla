@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import type { Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
 
 export function VoicePickerContent({
   voices,
@@ -20,6 +21,7 @@ export function VoicePickerContent({
   busy,
   onPick,
   footer,
+  showLanguageBadge = false,
 }: {
   voices: Voice[]
   activeId: string | undefined
@@ -27,6 +29,7 @@ export function VoicePickerContent({
   onPick: (voiceId: string) => void
   /** Optional extra row under the list (e.g. "apply to all speaker lines"). */
   footer?: ReactNode
+  showLanguageBadge?: boolean
 }) {
   const t = useT()
   const [query, setQuery] = useState("")
@@ -61,7 +64,12 @@ export function VoicePickerContent({
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
             >
               <VoiceAvatar voice={v} size={20} />
-              <span className="min-w-0 flex-1 truncate">{v.name}</span>
+              <VoiceNameWithLanguage
+                name={v.name}
+                language={v.language}
+                showBadge={showLanguageBadge}
+                className="min-w-0 flex-1"
+              />
               {v.id === activeId && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
             </button>
           ))
@@ -81,11 +89,13 @@ export function VoiceCombobox({
   active,
   busy,
   onPick,
+  showLanguageBadge = false,
 }: {
   voices: Voice[]
   active: Voice
   busy: boolean
   onPick: (voiceId: string) => void
+  showLanguageBadge?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -116,7 +126,12 @@ export function VoiceCombobox({
               </span>
             )}
           </span>
-          <span className="min-w-0 flex-1 truncate text-start font-medium text-foreground">{active.name}</span>
+          <VoiceNameWithLanguage
+            name={active.name}
+            language={active.language}
+            showBadge={showLanguageBadge}
+            className="min-w-0 flex-1 font-medium text-foreground"
+          />
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
       <PopoverContent align="start" side="bottom" className="w-60 p-2">
@@ -124,6 +139,7 @@ export function VoiceCombobox({
           voices={voices}
           activeId={active.id}
           busy={busy}
+          showLanguageBadge={showLanguageBadge}
           onPick={(voiceId) => {
             onPick(voiceId)
             setOpen(false)

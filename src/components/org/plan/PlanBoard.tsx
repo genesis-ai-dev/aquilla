@@ -17,9 +17,19 @@
 // "needs a date" narrowing, and per-group folds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Search, X, ChevronDown, ChevronRight, CalendarOff, AlertTriangle } from "lucide-react"
+import {
+  Search, X, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarOff, AlertTriangle, Folder,
+} from "lucide-react"
+import { groupPlanUnitsByFolder } from "@/lib/plan/plan-folders"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { TableEmptyState } from "@/components/ui/empty"
 import {
   InputGroup,
@@ -28,6 +38,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import {
+  audioFileIds,
   filterPlanUnits,
   groupPlanUnits,
   planHasAudio,
@@ -36,6 +47,8 @@ import {
   PLAN_STATUS_LABEL_KEY,
   type PlanUnit,
   type PlanUnitStatus,
+  planUnitStatus,
+  PLAN_GROUP_ORDER,
 } from "@/lib/plan/plan-status"
 import {
   loadCollapsedGroups,
@@ -44,27 +57,105 @@ import {
   savePlanView,
   toggleCollapsedGroup,
   type PlanViewMode,
+  loadCollapsedFolders,
+  saveCollapsedFolders,
+  toggleCollapsedFolder,
 } from "@/lib/plan/plan-view"
 import type { PlanStatus } from "@/hooks/useProjectPlan"
 import { PLAN_TONE } from "./plan-tone"
 import { PlanRow } from "./PlanRow"
 
 /**
- * AQU-1255: how many unit rows the card draws before it stops and offers
- * "Show all". A full-Bible project renders 60–100+ rows, each with two
- * progress bars, which buries everything below the plan and forces a manager
- * who only wants the headline numbers to scroll past the whole thing. Five
- * keeps the glance value — what is overdue, what is in flight — and leaves
- * the card roughly one screen tall with its header and controls.
+ * The line of small print on the right of each group header. It exists because
+ * a group whose membership nobody can predict reads as a bug — and AQU-1278's
+ * group is the one that most needs it, since "nearly" is a rule rather than a
+ * fact a reader can see in the row. Its hint spells the threshold out.
+ *
+ * TYPE-CHECKED, unlike `PLAN_GROUP_ORDER`: this is an exhaustive Record, so a
+ * status added to the union without a hint here fails the build rather than
+ * rendering a group with a blank margin.
  */
-const PLAN_ROW_CAP = 5
+/** A folder header's tally, one term per status present: "3 done". */
+const FOLDER_TALLY_KEY: Record<PlanUnitStatus, string> = {
+  overdue: "org.projectOverview.plan.folderTallyOverdue",
+  soon: "org.projectOverview.plan.folderTallySoon",
+  nearly_complete: "org.projectOverview.plan.folderTallyNearlyComplete",
+  in_progress: "org.projectOverview.plan.folderTallyInProgress",
+  not_started: "org.projectOverview.plan.folderTallyNotStarted",
+  done: "org.projectOverview.plan.folderTallyDone",
+}
 
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
+  nearly_complete: "org.projectOverview.plan.groupHintNearlyComplete",
   in_progress: "org.projectOverview.plan.groupHintInProgress",
   not_started: "org.projectOverview.plan.groupHintNotStarted",
   done: "org.projectOverview.plan.groupHintDone",
+}
+
+/** One language the plan can be read in. `tag` is "" for the project default. */
+export interface PlanLaneOption {
+  tag: string
+  label: string
+}
+
+/**
+ * Which language the plan is counting, as a menu rather than a caption.
+ *
+ * A MENU, NOT A ROW OF TABS. The Progress card above uses tabs because it has
+ * an "All" and rarely more than a few lanes to show; a project can carry many
+ * target languages, and a row of them would push the summary pills and the
+ * whole control strip onto another line on exactly the projects that need the
+ * board most. The trigger reads as the caption it replaces, so the heading is
+ * still "Plan · Spanish" at a glance and only turns out to be a control when
+ * you go for it.
+ *
+ * NO "ALL" HERE. Every number on this board — a percentage, a shortfall, a
+ * link into the editor — belongs to one language. "All" would have to mean
+ * some blend of them, and the honest blend does not exist.
+ */
+function PlanLanePicker({ lanes, lane, onChange }: {
+  lanes: PlanLaneOption[]
+  lane: string
+  onChange: (lane: string) => void
+}) {
+  const t = useT()
+  // An unknown tag falls back to the first lane rather than rendering blank:
+  // the board IS showing something, and the picker has to name it.
+  const current = lanes.find((l) => l.tag === lane) ?? lanes[0]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-testid="plan-lane-picker"
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="-my-1 ms-1 h-6 gap-1 px-1.5 text-xs font-normal"
+            aria-label={t("org.projectOverview.plan.laneMenuAria", { language: current?.label ?? "" })}
+          >
+            {current?.label}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup value={lane} onValueChange={onChange}>
+          {lanes.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.tag}
+              value={option.tag}
+              data-testid={`plan-lane-option-${option.tag || "default"}`}
+            >
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 /**
@@ -75,10 +166,21 @@ const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
 function PlanStat({ value, label, tone, testId }: {
   value: number
   label: string
-  tone?: "late"
+  /**
+   * AQU-1278: the status this figure counts, which colours the pill from the
+   * SAME table the group headers and the inspector's pill read
+   * (`plan-tone.ts`). Grey for a pill that counts no single status — "5 of 66
+   * done" spans the whole board — and grey was every pill's colour before this,
+   * which made the strip a row of identical lozenges with the one number a
+   * manager acts on hidden among them.
+   *
+   * Overdue's tone IS the destructive pair this used to hard-code, so that pill
+   * does not move; it just stops being a special case.
+   */
+  tone?: PlanUnitStatus
   testId: string
 }) {
-  const late = tone === "late"
+  const toned = tone ? PLAN_TONE[tone] : null
   return (
     // Laid out as inline text, NOT as a flex row: flex would put the numeral
     // and the label in separate boxes with only a `gap` between them, which
@@ -88,12 +190,12 @@ function PlanStat({ value, label, tone, testId }: {
     <span
       data-testid={testId}
       className={`whitespace-nowrap rounded-full px-[11px] py-1 text-[12.5px] ${
-        late ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
+        toned ? `${toned.bg} ${toned.text}` : "bg-muted text-muted-foreground"
       }`}
     >
       <b
         className={`me-0.5 text-sm font-semibold tabular-nums ${
-          late ? "text-destructive" : "text-foreground"
+          toned ? toned.text : "text-foreground"
         }`}
       >
         {value}
@@ -106,6 +208,7 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
+  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
 }: {
   units: PlanUnit[]
   now: number
@@ -133,6 +236,63 @@ export function PlanBoard({
   actions?: React.ReactNode
   /** The one action that creates rows, offered when there are none. */
   emptyAction?: React.ReactNode
+  /**
+   * AQU-1278. Which chapters of a unit are still short, keyed by `planUnitId`
+   * — the row draws them as "chapters 3, 9, 41".
+   *
+   * The board only ROUTES this; it never fetches it. The chapter detail comes
+   * from a per-unit read, and a board that fired one of those per row would
+   * open sixty-six requests to draw a plan nobody has scrolled to yet. The
+   * owner (ProjectOverview) fetches for the rows it decides are worth it and
+   * hands back a map, so a unit with no entry simply draws no chapter line.
+   */
+  shortChaptersByUnit?: ReadonlyMap<string, string[]>
+  /**
+   * AQU-1278. Who is working on each unit, keyed by `planUnitId`.
+   *
+   * Typed structurally rather than imported from `@/lib/sync/assignments`: the
+   * board renders a name and keys by an id, and nothing else about an
+   * assignment record is its business — so the assignment read can grow
+   * fields without touching this signature.
+   */
+  assigneesByUnit?: ReadonlyMap<string, readonly { userId: number; username: string | null }[]>
+  /**
+   * AQU-1278. Open the editor at this unit's FIRST OUTSTANDING CELL — the one
+   * link that turns "4 cells short" into work. Routed, not implemented: the
+   * board has no idea where the editor lives or how a workspace is opened,
+   * and ProjectOverview already owns both.
+   */
+  onOpenShortfall?: (unit: PlanUnit) => void
+  /**
+   * AQU-1278: the language whose numbers the board is showing, named beside
+   * the heading. The lane tabs that choose it live in the Progress card a
+   * screen above, so a reader standing at the board had no way to tell which
+   * language they were reading without scrolling up. Null on a project with
+   * one language, where there is nothing to tell apart.
+   */
+  laneLabel?: string | null
+  /**
+   * AQU-1278 (Sam, 2026-09-17): the languages this plan can be read in, and
+   * which one it is reading.
+   *
+   * THE BOARD HAS ALWAYS BEEN PER-LANGUAGE and never said so where you could
+   * act on it. The only lane control on the page sits inside the Progress card
+   * far above, and nothing there suggests it also decides which language the
+   * plan below is counting — Sam did not know it did. Worse, that control has
+   * an "All" option the plan cannot honour: a plan is one language's, so "All"
+   * quietly fell back to the default lane while the reader believed they were
+   * seeing everything.
+   *
+   * So the board gets its own picker, over REAL LANES ONLY, next to the
+   * heading it labels. It drives the same selection the Progress card does —
+   * one page, one answer to "which language am I looking at" — which turns a
+   * hidden coupling into a visible one. Absent (or a single-lane project), the
+   * static `laneLabel` renders exactly as before.
+   */
+  lanes?: PlanLaneOption[]
+  /** The lane tag being read: "" is the project's default language. */
+  lane?: string
+  onLaneChange?: (lane: string) => void
 }) {
   const t = useT()
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -142,16 +302,15 @@ export function PlanBoard({
   // data is missing.
   const [query, setQuery] = useState("")
   const [needsDateOnly, setNeedsDateOnly] = useState(false)
-  // AQU-1255. Ephemeral for the same reason the filter is: nothing about how
-  // much of the list you opened last week should decide what a reload draws.
-  // But once pressed it holds across filtering and re-arranging — re-hiding
-  // the rows because the reader typed a letter would be a trap.
-  const [showAll, setShowAll] = useState(false)
   // Arrangement is a working style, so it persists globally; folds belong to
   // the project whose groups they hide. See `plan-view.ts`.
   const [view, setView] = useState<PlanViewMode>(() => loadPlanView())
   const [collapsed, setCollapsed] = useState<Set<PlanUnitStatus>>(() => loadCollapsedGroups(projectId))
   useEffect(() => setCollapsed(loadCollapsedGroups(projectId)), [projectId])
+  // The in-order arrangement's folds, kept apart from the status folds: a
+  // reader who folds Season 2 has said nothing about Not started.
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => loadCollapsedFolders(projectId))
+  useEffect(() => setCollapsedFolders(loadCollapsedFolders(projectId)), [projectId])
 
   const chooseView = useCallback((next: PlanViewMode) => {
     setView(next)
@@ -166,6 +325,14 @@ export function PlanBoard({
     })
   }, [projectId])
 
+  const toggleFolder = useCallback((key: string) => {
+    setCollapsedFolders((prev) => {
+      const next = toggleCollapsedFolder(prev, key)
+      saveCollapsedFolders(projectId, next)
+      return next
+    })
+  }, [projectId])
+
   const clearFilters = useCallback(() => {
     setQuery("")
     setNeedsDateOnly(false)
@@ -176,7 +343,75 @@ export function PlanBoard({
     () => filterPlanUnits(units, { query, needsDateOnly }),
     [units, query, needsDateOnly],
   )
-  const groups = useMemo(() => groupPlanUnits(visible, now), [visible, now])
+  const audioFiles = useMemo(() => audioFileIds(units), [units])
+  // `audioFiles` comes from the UNFILTERED units and is handed in rather than
+  // re-derived: see groupPlanUnits' own note on why a search box must not be
+  // able to change which group a row is in.
+  const groups = useMemo(
+    () => groupPlanUnits(visible, now, audioFiles),
+    [visible, now, audioFiles],
+  )
+  // AQU-1278: the in-order arrangement is grouped too — by the project's
+  // folders, the way the editor's sidebar groups its files, with one group
+  // for everything where a project has none. See `plan-folders.ts`.
+  const folders = useMemo(() => groupPlanUnitsByFolder(visible), [visible])
+
+  // AQU-1278: COLLAPSE ALL (Sam, 2026-09-17). One control, two states: it
+  // reads "Collapse all" while any group on screen is open and "Expand all"
+  // once every one is folded. It sets the same per-project folds the group
+  // chevrons set, so a single chevron afterwards opens just that group and
+  // nothing new is remembered. This is what AQU-1255's five-row cap was
+  // reaching for — a board short enough to take in at once — and it gets there
+  // without hiding a row: every header keeps its count.
+  //
+  // "All folded" is judged over the groups DRAWN, not over every status: a
+  // project with no Done units has no Done group to fold, and a button that
+  // never said "Expand all" because an absent group was "still open" would be
+  // a button that never worked. Expanding clears the set outright, so a group
+  // folded earlier and filtered away today comes back open too.
+  //
+  // In the in-order arrangement the same button folds the FOLDERS instead;
+  // each arrangement keeps its own folds.
+  const allFolded = view === "order"
+    ? folders.length > 0 && folders.every((f) => collapsedFolders.has(f.key))
+    : groups.length > 0 && groups.every((g) => collapsed.has(g.status))
+  const toggleAll = useCallback(() => {
+    if (view === "order") {
+      setCollapsedFolders((prev) => {
+        const next = allFolded ? new Set<string>() : new Set([...prev, ...folders.map((f) => f.key)])
+        saveCollapsedFolders(projectId, next)
+        return next
+      })
+      return
+    }
+    setCollapsed((prev) => {
+      const next = allFolded
+        ? new Set<PlanUnitStatus>()
+        : new Set<PlanUnitStatus>([...prev, ...groups.map((g) => g.status)])
+      saveCollapsedGroups(projectId, next)
+      return next
+    })
+  }, [view, allFolded, folders, groups, projectId])
+
+  /**
+   * What a folder header says on its right: how its rows stand, as a tally —
+   * "3 done · 1 nearly complete". A folded folder still says how it stands,
+   * which is the whole reason a folded board is not a hidden one.
+   */
+  const folderTally = useCallback((members: readonly PlanUnit[]): string => {
+    const tally = new Map<PlanUnitStatus, number>()
+    for (const u of members) {
+      const s = planUnitStatus(u, now, audioFiles)
+      tally.set(s, (tally.get(s) ?? 0) + 1)
+    }
+    return PLAN_GROUP_ORDER
+      .filter((s) => (tally.get(s) ?? 0) > 0)
+      .map((s) => t(FOLDER_TALLY_KEY[s] as never, { count: tally.get(s) ?? 0 }))
+      .reduce<string | null>(
+        (acc, part) => (acc == null ? part : t("org.projectOverview.plan.shortfallPair", { first: acc, second: part })),
+        null,
+      ) ?? ""
+  }, [now, audioFiles, t])
 
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
@@ -186,51 +421,33 @@ export function PlanBoard({
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.
   const showAudio = useMemo(() => planHasAudio(units), [units])
+  /**
+   * AQU-1278: which FILES carry recordings. Computed ONCE over the whole board
+   * and handed down, for two reasons that are both bugs if you skip it.
+   *
+   * A row left to judge audio from its own `audioCount` would call every
+   * not-yet-recorded book of a dubbed whole-Bible file "text-only" and declare
+   * it nearly complete on its text alone — the row and the group header would
+   * then disagree about the same unit, since `groupPlanUnits` already judges
+   * this per file across the board.
+   *
+   * And it is derived from `units`, never from `visible`: a filter that hid
+   * the one recorded book must not change what the remaining rows MEAN.
+   */
 
   /**
-   * Every row the current narrowing and arrangement would draw, in drawn
-   * order — before the AQU-1255 cap. Anything filtered out or folded away is
-   * already gone, so a folded group consumes none of the cap.
+   * Every row on screen, in drawn order — which is also exactly what the arrow
+   * keys walk. Anything filtered out or folded away is already gone.
+   *
+   * AQU-1255 used to cap this at the first five and offer a Show all button.
+   * Sam removed it (2026-09-16): a manager opening the plan wants the plan, and
+   * the per-group folds — which persist per project — are the honest way to see
+   * less, because a fold says what it is hiding and a truncation does not.
    */
-  const eligible = useMemo(() => {
-    if (view === "order") return visible
+  const ordered = useMemo(() => {
+    if (view === "order") return folders.flatMap((f) => (collapsedFolders.has(f.key) ? [] : f.units))
     return groups.flatMap((g) => (collapsed.has(g.status) ? [] : g.units))
-  }, [view, visible, groups, collapsed])
-
-  // The cap only exists once there is something to hide behind it: a list of
-  // five or fewer draws in full and offers no button at all.
-  const capped = !showAll && eligible.length > PLAN_ROW_CAP
-
-  /**
-   * The rows the arrows walk: exactly what is on screen, in the order it is
-   * drawn. Stepping onto a row nobody can see would move the inspector for no
-   * visible reason — so a truncated list stops at the fifth row, and Show all
-   * hands the arrows the whole plan.
-   */
-  const ordered = useMemo(
-    () => (capped ? eligible.slice(0, PLAN_ROW_CAP) : eligible),
-    [capped, eligible],
-  )
-
-  /**
-   * Per-group slices for the By status arrangement: the cap is spent across
-   * groups in display order, so a later group can show its header and its
-   * (full, honest) count with no rows beneath it until Show all.
-   */
-  const groupRows = useMemo(() => {
-    const rows: PlanUnit[][] = []
-    let budget = capped ? PLAN_ROW_CAP : Number.POSITIVE_INFINITY
-    for (const group of groups) {
-      if (collapsed.has(group.status)) {
-        rows.push([])
-        continue
-      }
-      const take = group.units.slice(0, budget)
-      budget -= take.length
-      rows.push(take)
-    }
-    return rows
-  }, [groups, collapsed, capped])
+  }, [view, folders, collapsedFolders, groups, collapsed])
 
   useEffect(() => {
     if (orderRef) orderRef.current = ordered
@@ -278,26 +495,52 @@ export function PlanBoard({
     [step, selectedId, onSelect],
   )
 
-  const renderRow = (unit: PlanUnit) => (
-    <PlanRow
-      key={planUnitId(unit)}
-      unit={unit}
-      now={now}
-      showAudio={showAudio}
-      // In Order mode no header above the row carries its status, so the row
-      // carries it itself.
-      showStatus={view === "order"}
-      selected={planUnitId(unit) === selectedId}
-      onSelect={() => onSelect(planUnitId(unit))}
-    />
-  )
+  // Stable per board instance — see the row's memo note.
+  const selectUnit = useCallback((unit: PlanUnit) => onSelect(planUnitId(unit)), [onSelect])
+
+  const renderRow = (unit: PlanUnit) => {
+    const id = planUnitId(unit)
+    return (
+      <PlanRow
+        key={id}
+        unit={unit}
+        now={now}
+        showAudio={showAudio}
+        audioFiles={audioFiles}
+        // AQU-1278. Both maps are looked up HERE rather than passed whole: a
+        // row handed the map would re-render whenever any other row's chapters
+        // or assignees arrived, and on a sixty-six row board that is the whole
+        // board re-rendering once per background read.
+        shortChapters={shortChaptersByUnit?.get(id)}
+        assignees={assigneesByUnit?.get(id)}
+        // The SAME function to every row, never an arrow bound per row: the
+        // row is memoized, and a per-row closure would be fresh on every
+        // board render, turning the memo into pure overhead. The row hands
+        // its own unit back instead.
+        onOpenShortfall={onOpenShortfall}
+        // In Order mode no header above the row carries its status, so the row
+        // carries it itself.
+        showStatus={view === "order"}
+        selected={id === selectedId}
+        onSelect={selectUnit}
+      />
+    )
+  }
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card" data-testid="plan-board">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-[17px] py-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="me-1 text-xs font-semibold text-muted-foreground">
+          <h2 className="me-1 flex items-center text-xs font-semibold text-muted-foreground">
             {t("org.projectOverview.plan.heading")}
+            {lanes && lanes.length > 1 && onLaneChange ? (
+              <PlanLanePicker lanes={lanes} lane={lane ?? ""} onChange={onLaneChange} />
+            ) : laneLabel ? (
+              <span className="font-normal" data-testid="plan-lane-label">
+                {" \u00b7 "}
+                {laneLabel}
+              </span>
+            ) : null}
           </h2>
           <PlanStat
             testId="plan-summary"
@@ -308,14 +551,31 @@ export function PlanBoard({
             <PlanStat
               testId="plan-summary-overdue"
               value={summary.overdue}
-              tone="late"
+              tone="overdue"
               label={t("org.projectOverview.plan.summaryOverdueLabel", { count: summary.overdue })}
+            />
+          )}
+          {/* AQU-1278. BEFORE the in-progress pill, not after it. The strip
+              reads in urgency order like the groups below it do, and nearly
+              complete is the more actionable number of the two: it is the one
+              bucket a manager can actually empty this week. Its count comes
+              out of `inFlight` rather than being added on top — the two pills
+              must never describe the same unit twice. */}
+          {summary.nearlyComplete > 0 && (
+            <PlanStat
+              testId="plan-summary-nearly-complete"
+              value={summary.nearlyComplete}
+              tone="nearly_complete"
+              label={t("org.projectOverview.plan.summaryNearlyCompleteLabel", {
+                count: summary.nearlyComplete,
+              })}
             />
           )}
           {summary.inFlight > 0 && (
             <PlanStat
               testId="plan-summary-in-progress"
               value={summary.inFlight}
+              tone="in_progress"
               label={t("org.projectOverview.plan.summaryInProgressLabel", { count: summary.inFlight })}
             />
           )}
@@ -408,6 +668,26 @@ export function PlanBoard({
             >
               {t("org.projectOverview.plan.viewOrder")}
             </Button>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            {/* After the arrangement toggle, because it acts on whichever
+                grouping the toggle chose: the status groups, or the folders
+                the in-order arrangement is grouped by. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              data-testid="plan-collapse-all"
+              disabled={view === "order" ? folders.length === 0 : groups.length === 0}
+              title={t(allFolded
+                ? "org.projectOverview.plan.expandAllTooltip"
+                : "org.projectOverview.plan.collapseAllTooltip")}
+              onClick={toggleAll}
+            >
+              {allFolded
+                ? <ChevronsUpDown className="h-3 w-3" />
+                : <ChevronsDownUp className="h-3 w-3" />}
+              {t(allFolded ? "org.projectOverview.plan.expandAll" : "org.projectOverview.plan.collapseAll")}
+            </Button>
           </div>
         </div>
       )}
@@ -465,11 +745,45 @@ export function PlanBoard({
           {view === "order" ? (
             // The server already sorts by canonical ordinal then name, so the
             // "in order" arrangement is the payload untouched — no client sort.
-            <ul className="divide-y" data-testid="plan-order-list">
-              {ordered.map(renderRow)}
-            </ul>
+            // AQU-1278 put it in FOLDERS (Sam, 2026-09-17): the project's own,
+            // as the sidebar shows them, or one group for everything. Neutral
+            // headers — no status colour, a folder mark for the dot, and a
+            // tally of the statuses inside on the right.
+            folders.map((folder) => {
+              const folded = collapsedFolders.has(folder.key)
+              return (
+                <section key={folder.key} data-testid={`plan-folder-${folder.key}`}>
+                  <h3 className="contents">
+                    <button
+                      type="button"
+                      data-testid={`plan-fold-folder-${folder.key}`}
+                      aria-expanded={!folded}
+                      onClick={() => toggleFolder(folder.key)}
+                      className="flex w-full items-center gap-2.5 border-y bg-muted px-[17px] py-[11px] text-start text-[12.5px] font-semibold text-foreground/80 transition-colors first:border-t-0 hover:bg-muted/70"
+                    >
+                      {folded
+                        ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                        : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
+                      <Folder className="h-[13px] w-[13px] shrink-0 text-muted-foreground" aria-hidden />
+                      {folder.labelKey ? t(folder.labelKey as never) : folder.label}
+                      <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
+                        {folder.units.length}
+                      </span>
+                      <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
+                        {folderTally(folder.units)}
+                      </span>
+                    </button>
+                  </h3>
+                  {!folded && (
+                    <ul className="divide-y" data-testid="plan-order-list">
+                      {folder.units.map(renderRow)}
+                    </ul>
+                  )}
+                </section>
+              )
+            })
           ) : (
-            groups.map((group, i) => {
+            groups.map((group) => {
               const tone = PLAN_TONE[group.status]
               const folded = collapsed.has(group.status)
               return (
@@ -505,35 +819,12 @@ export function PlanBoard({
                       </span>
                     </button>
                   </h3>
-                  {/* The header and its count render even when the cap left
-                      this group no rows — a heading with "12" and nothing
-                      under it reads as "there is more here", which is what
-                      the Show all button is for. */}
-                  {!folded && groupRows[i].length > 0 && (
-                    <ul className="divide-y">{groupRows[i].map(renderRow)}</ul>
+                  {!folded && group.units.length > 0 && (
+                    <ul className="divide-y">{group.units.map(renderRow)}</ul>
                   )}
                 </section>
               )
             })
-          )}
-          {/* AQU-1255. A real button, so Tab reaches it and Enter/Space work,
-              and its label carries the count — "Show all" alone tells a
-              screen-reader user nothing about what they are opening. */}
-          {eligible.length > PLAN_ROW_CAP && (
-            <div className="border-t px-[17px] py-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                data-testid="plan-show-all"
-                aria-expanded={!capped}
-                onClick={() => setShowAll((v) => !v)}
-              >
-                {capped
-                  ? t("org.projectOverview.plan.showAll", { count: eligible.length })
-                  : t("org.projectOverview.plan.showFewer")}
-              </Button>
-            </div>
           )}
           {filtering && (
             <p className="border-t bg-muted px-[17px] py-2 text-[11.5px] text-muted-foreground"

@@ -28,12 +28,26 @@
 
 import { ROLE } from "./role-policy"
 
-interface MembershipRow {
-  project_exists: boolean | number
-  has_grant: boolean | number
+export type MembershipCheck = "ok" | "revoked"
+
+export interface MembershipDetail {
+  status: MembershipCheck
+  /**
+   * [Pen test 2026-09-21] Live-resolved MAX role_level across every grant
+   * path (direct membership, creator, qualifying org membership, group
+   * grant), or null when there is no grant to resolve (project missing,
+   * fully revoked, or the query failed open). Lets a caller catch a
+   * DOWNGRADE (role_level lowered, not removed) that `status` alone can't
+   * see — see checkProjectMembership's doc comment for why a plain
+   * ok/revoked check misses this.
+   */
+  roleLevel: number | null
 }
 
-export type MembershipCheck = "ok" | "revoked"
+interface MembershipRoleRow {
+  project_exists: boolean | number
+  max_role: number | string | null
+}
 
 /**
  * Returns "revoked" iff the project row exists AND the user has no grant
@@ -47,30 +61,52 @@ export type MembershipCheck = "ok" | "revoked"
  *   - Query error: enforcement degrades to the 15-minute token TTL rather
  *     than 500'ing every write during a partial outage (same philosophy as
  *     safeFirst in auth-worker's role resolver).
+ *
+ * [Pen test 2026-09-21] This ok/revoked signal only catches full removal. A
+ * DIRECT project_members row that is downgraded rather than deleted (e.g.
+ * OWNER -> VIEWER) still has_grant, so this alone reports "ok" and a
+ * still-valid token keeps writing at its old, now-stale role for the rest of
+ * its 15-minute lifetime. Callers on the write perimeter should prefer
+ * checkProjectMembershipDetailed and compare its roleLevel against the
+ * token's claimed role to close that gap.
  */
 export async function checkProjectMembership(
   db: AquillaDb,
   projectId: string,
   userId: number,
 ): Promise<MembershipCheck> {
+  return (await checkProjectMembershipDetailed(db, projectId, userId)).status
+}
+
+/**
+ * Same enforcement contract as checkProjectMembership, but also returns the
+ * live-resolved role level so a write-perimeter caller can detect a
+ * DOWNGRADE (not just a full removal) of the token's claimed role. See the
+ * MembershipDetail doc comment.
+ */
+export async function checkProjectMembershipDetailed(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<MembershipDetail> {
   try {
     const row = await db
       .prepare(
         `SELECT
            EXISTS (SELECT 1 FROM projects WHERE id = ?) AS project_exists,
-           EXISTS (
-             SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
+           (SELECT MAX(role_level) FROM (
+             SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?
              UNION ALL
-             SELECT 1 FROM projects WHERE id = ? AND created_by = ?
+             SELECT ${ROLE.OWNER} AS role_level FROM projects WHERE id = ? AND created_by = ?
              UNION ALL
-             SELECT 1 FROM org_members om
+             SELECT om.role_level FROM org_members om
                JOIN projects p ON p.org_id = om.org_id
               WHERE p.id = ? AND om.user_id = ? AND om.role_level >= ${ROLE.MAINTAINER}
              UNION ALL
-             SELECT 1 FROM group_members gm
+             SELECT gpg.role_level FROM group_members gm
                JOIN group_project_grants gpg ON gpg.group_id = gm.group_id
               WHERE gpg.project_id = ? AND gm.user_id = ?
-           ) AS has_grant`,
+           ) grants) AS max_role`,
       )
       .bind(
         projectId,
@@ -79,17 +115,17 @@ export async function checkProjectMembership(
         projectId, userId,
         projectId, userId,
       )
-      .first<MembershipRow>()
-    if (!row) return "ok"
+      .first<MembershipRoleRow>()
+    if (!row) return { status: "ok", roleLevel: null }
     const projectExists = row.project_exists === true || row.project_exists === 1
-    const hasGrant = row.has_grant === true || row.has_grant === 1
-    if (projectExists && !hasGrant) return "revoked"
-    return "ok"
+    const roleLevel = row.max_role === null || row.max_role === undefined ? null : Number(row.max_role)
+    if (projectExists && roleLevel === null) return { status: "revoked", roleLevel: null }
+    return { status: "ok", roleLevel }
   } catch (err) {
     console.warn(
       `[membership] re-check failed for project=${projectId} user=${userId}; failing open to token TTL:`,
       err,
     )
-    return "ok"
+    return { status: "ok", roleLevel: null }
   }
 }

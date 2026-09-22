@@ -98,6 +98,10 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import {
+  restoreMayPark, stepPendingScroll,
+  type PendingCellScroll, type PendingScrollAttempt,
+} from "./pending-cell-scroll"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
@@ -261,6 +265,7 @@ import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/determin
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
+import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
@@ -494,7 +499,6 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 /** Trailing throttle for row-selection presence (`viewingCell`). */
 const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
-
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
   for (const [key, value] of a) {
@@ -559,7 +563,13 @@ export function ProjectWorkspace() {
   // navigation (or an AQU-646 media→text trace, which also flashes). Set by
   // the restore effect / deep-link / switchLens; consumed by the effect that
   // fires when `cells` are available AND the text editor is mounted.
-  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
+  //
+  // AQU-1278 widened the entry from `{ cellId, flash }` — the shape, the
+  // parking precedence and the give-up rules all live in
+  // `pending-cell-scroll.ts`, where they are tested; these refs only carry
+  // the state between renders.
+  const pendingCellScrollRef = useRef<PendingCellScroll | null>(null)
+  const pendingCellScrollTryRef = useRef<PendingScrollAttempt | null>(null)
   /** Mirrors currentUsername (computed much further down). */
   const currentUsernameRef = useRef<string>("local")
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
@@ -930,8 +940,30 @@ export function ProjectWorkspace() {
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
-    if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
-      pendingCellScrollRef.current = { cellId: savedLoc.cellId, flash: false }
+    //
+    // AQU-1278: …unless a `?cellId=` deep link has already parked one. Both
+    // write the same ref, and declaration order does NOT settle who wins:
+    // effects only run top-down on the MOUNT pass, and this effect re-runs
+    // every time its asynchronously-resolving deps (`project`, `fileIds`,
+    // `projectFiles`) settle — routinely several commits after the deep-link
+    // effect below has already parked. Without this guard the user's remembered
+    // position quietly replaced the cell a "go to the first unvalidated cell"
+    // link had asked for, and the link appeared to land on a random row. The
+    // link is an explicit request; this restore is a convenience, so the link
+    // wins. (It can also not be re-checked from the URL here: when the routed
+    // file isn't in the project yet we redirect to `/editor`, which drops the
+    // query string — the ref is the only surviving record of the intent.)
+    if (
+      savedLoc?.cellId &&
+      savedLoc.fileId === nextFileId &&
+      restoreMayPark(pendingCellScrollRef.current)
+    ) {
+      pendingCellScrollRef.current = {
+        cellId: savedLoc.cellId,
+        flash: false,
+        fileId: nextFileId,
+        source: "restore",
+      }
     }
     const target = `/project/${projectId}/editor/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
@@ -1000,10 +1032,27 @@ export function ProjectWorkspace() {
 
   // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
   // the scroll-restore effect (below) can consume it once cells are loaded.
+  //
+  // AQU-1278 added `&flash=1` (see `editorCellHref`). The flag exists because
+  // this used to hard-code `flash: false` for every caller: the plan board's
+  // "go to the first outstanding cell" link scrolled the row into view with
+  // NOTHING marking which row it was, which from the user's chair is
+  // indistinguishable from a link that did nothing at all. Comments links stay
+  // unflashed — they arrive from a thread that already names the cell — so the
+  // flash is opt-in per link rather than switched on for everybody here.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
-    if (cellId) pendingCellScrollRef.current = { cellId, flash: false }
-  }, [searchParams])
+    if (!cellId) return
+    pendingCellScrollRef.current = {
+      cellId,
+      flash: searchParams.get("flash") === "1",
+      // The link names its file in the path; parking it lets the consumer drop
+      // this entry if the user ends up somewhere else (a link to a file this
+      // project doesn't have gets redirected away before it can ever land).
+      fileId: routeFileId ?? null,
+      source: "link",
+    }
+  }, [searchParams, routeFileId])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
@@ -1014,8 +1063,10 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  // FRO-308: left dock active tab (null = collapsed rail only)
-  const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // FRO-308: left dock active tab (null = collapsed rail only). Last real tab
+  // is restored from localStorage per project so reload returns to Files /
+  // Voices / Agent / Search instead of always landing on Files.
+  const [dockTab, setDockTab] = usePersistedDockTab(projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
   // sheet opens onto the files list instead of a 40px icon strip.
@@ -1782,6 +1833,7 @@ export function ProjectWorkspace() {
     project?.ttsSettings,
     cellSummaries,
     (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+    project?.targetLanguage,
   )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
@@ -5801,12 +5853,18 @@ export function ProjectWorkspace() {
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
       } else if (timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
-        // no edit-focus change.
-        pendingCellScrollRef.current = { cellId: timelineSelectedCellIdRef.current, flash: true }
+        // no edit-focus change. The trace is always within the open file (the
+        // lens switch doesn't navigate), so it parks against `activeFileId`.
+        pendingCellScrollRef.current = {
+          cellId: timelineSelectedCellIdRef.current,
+          flash: true,
+          fileId: activeFileId,
+          source: "trace",
+        }
       }
     }
     setLens(next)
-  }, [lens, setLens, activeFile, cellStore])
+  }, [lens, setLens, activeFile, activeFileId, cellStore])
 
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -5955,13 +6013,44 @@ export function ProjectWorkspace() {
   // mounts (the ref attaches during commit, before effects run — same pass);
   // the id-based scroll also fixes the store-vs-display index mismatch on
   // time-ordered files.
+  //
+  // AQU-1278: this park can now GIVE UP, which it previously could not.
+  // `scrollToCellId` returns false for an id the open file doesn't have — a
+  // cell deleted since the link was written, a remembered position in a file
+  // that has since been re-imported, a plan-board link to a file the redirect
+  // above swapped out — and the old body only cleared the ref on success. So
+  // one stale id re-ran this scroll on EVERY cell-store version bump for the
+  // rest of the session (a version bump is one committed keystroke), and it
+  // followed the user into other files, where it would hijack their scroll
+  // position the moment an unrelated file happened to contain a matching id.
+  // Two exits now: the attempt budget, and leaving the file it was parked for.
   useEffect(() => {
     const pending = pendingCellScrollRef.current
     if (!pending) return
     if (readAtVersion(cellStoreVersion, () => cellStore.getCellCount()) === 0) return
-    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: pending.flash }) ?? false
-    if (ok) pendingCellScrollRef.current = null
-  }, [cellStore, cellStoreVersion, lens])
+    const editor = editorRef.current
+    // No text editor mounted (media lens). Wait for it rather than spending an
+    // attempt — that wait IS the AQU-646 media→text trace's mechanism.
+    if (!editor) return
+
+    const giveUp = () => {
+      pendingCellScrollRef.current = null
+      pendingCellScrollTryRef.current = null
+    }
+    // The decision — arrival, departure, the budget, and whether scrolling
+    // now would hijack a file this cell was never parked for — is
+    // `stepPendingScroll`'s, and tested there. This effect only executes it.
+    const step = stepPendingScroll(pending, pendingCellScrollTryRef.current, activeFileId)
+    if (step.kind === "give-up") {
+      giveUp()
+      return
+    }
+    pendingCellScrollTryRef.current = step.attempt
+    const ok = step.kind === "try"
+      ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
+      : false
+    if (ok || step.last) giveUp()
+  }, [activeFileId, cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -12819,6 +12908,8 @@ export function ProjectWorkspace() {
           fileId={activeFileId}
           session={frontierSession ?? null}
           targetLanguage={project.targetLanguage}
+          targetLanes={project.targetLanes}
+          archivedLanes={project.archivedLanes}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
         />

@@ -45,16 +45,48 @@ import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
+import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
+import {
+  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+} from "./plan/plan-derive"
+import {
+  numberedBookCodes,
+  planSectionLabel,
+} from "@/lib/plan/plan-section"
 import { RightSidebarPanel } from "@/components/RightSidebarPanel"
 import { useIsLgUp } from "@/components/AppShell"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { planHasAudio } from "@/lib/plan/plan-status"
+import { mergeUnitAssignees } from "@/lib/plan/plan-assignees"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { planUnitId, planUnitLabel, type PlanUnit } from "@/lib/plan/plan-status"
+import {
+  audioFileIds,
+  planUnitIsNearlyComplete,
+  planUnitId,
+  planUnitLabel,
+  planOpenKind,
+  planUnitShortfall,
+  type PlanOpenKind,
+  type PlanUnit,
+} from "@/lib/plan/plan-status"
+import { type PlanSection } from "@/hooks/usePlanUnitSections"
+import {
+  getFileProgress,
+  getPlanFirstOpenCell,
+  prefetchFileProgress,
+} from "@/lib/progress/file-progress-resource"
+import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
 import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import {
+  getProjectAssignments,
+  getProjectUnitAssignees,
+  getUnitAssignments,
+  type UnitAssignee,
+  type AssigneeWorkload,
+  type UnitAssignment,
+} from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
@@ -309,6 +341,28 @@ function StatBar({ label, value, total, fillClass, suffix }: {
 
 
 
+// ── AQU-1278: the plan's two background reads ────────────────────────────────
+
+/** Stable empty maps, so an untouched state never re-renders a consumer. */
+const NO_FILE_SECTIONS: ReadonlyMap<string, PlanSection[]> = new Map()
+const NO_UNIT_ASSIGNMENTS: ReadonlyMap<string, UnitAssignment[]> = new Map()
+const NO_ASSIGNMENTS: readonly UnitAssignment[] = []
+
+/**
+ * Cache key for one unit's assignments, WITH THE LANE IN IT.
+ *
+ * The per-unit read measures translated/validated in the lane it was asked
+ * for, so the same unit's row means different numbers on the Spanish tab and
+ * the French one. Keying by unit alone would hand the inspector the previous
+ * lane's counts for the frame between the tab switch and the new response —
+ * the one frame a manager is most likely to be reading. Keying by both means a
+ * lane switch simply misses, and a miss renders nothing rather than a lie.
+ */
+function unitAssignmentsKey(unitId: string, lane: string): string {
+  return `${unitId}\u0000${lane}`
+}
+
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
@@ -523,11 +577,65 @@ export function ProjectOverview() {
   // the summary and Due soon in its row because two clocks disagreed.
   const [selectedPlanUnitId, setSelectedPlanUnitId] = useState<string | null>(null)
   const [planCsvCopied, setPlanCsvCopied] = useState(false)
+  /**
+   * The lane every plan read is measured in. "All" (null) and the default-lane
+   * tab both mean the default lane server-side, exactly as the progress reads
+   * resolve them — see the lane-tab note above.
+   */
+  const planLane = selectedLaneTag ?? ""
+  /**
+   * ONE token for the whole plan, not one per read.
+   *
+   * AQU-1278 gave this page four more readers — the inspector's chapter
+   * breakdown, the board's short-chapter sweep, the chapter detail behind the
+   * "go to the first outstanding cell" link, and the assignment panel — on top
+   * of the plan read itself, and the inspector remounts on every unit a manager
+   * clicks. The old closure POSTed /sync-token on every single call, so walking
+   * ten books minted ten tokens before a single bar was drawn.
+   *
+   * THE JWT IS PART OF THE CACHE KEY, and so is the project/file scope. A
+   * sync-token is minted for one identity and one project: the sync-worker
+   * authors events from the TOKEN's identity, so serving account A's token
+   * after a switch to account B would attribute B's work to A (AQU-616), and a
+   * token minted for another project is simply refused. Neither an account
+   * switch nor a route change remounts this component, so nothing else would
+   * catch either.
+   *
+   * SWARM-TODO(AQU-1278): `makeSyncTokenFetcher` (lib/sync/sync-token) is this
+   * exact cache, already written and already tested, and this should be one
+   * call to it. It cannot be adopted from here yet: ProjectOverview.test.tsx
+   * mocks "@/lib/sync/sync-token" with `fetchSyncToken` alone, so importing a
+   * second name from that module fails 55 tests in a file this lane does not
+   * own. Swap it in — deleting everything below — as soon as that mock carries
+   * the name.
+   */
+  const planTokenCache = useRef<{ scope: string; token: string; expiresAtMs: number } | null>(null)
   const getPlanToken = useMemo(() => {
     if (!id || !jwt) return null
-    return async () => {
-      const token = await fetchSyncToken(jwt, id, firstFileId ?? id, { projectName: project?.name })
-      return token.token
+    const tokenFileId = firstFileId ?? id
+    const scope = `${jwt}\u0000${id}\u0000${tokenFileId}`
+    return async (): Promise<string | null> => {
+      const now = Date.now()
+      const cached = planTokenCache.current
+      // Re-mint inside the last 30s of the token's life, so a read never
+      // starts with a credential that expires mid-flight.
+      if (cached && cached.scope === scope && cached.expiresAtMs > now + 30_000) return cached.token
+      try {
+        const minted = await fetchSyncToken(jwt, id, tokenFileId, { projectName: project?.name })
+        planTokenCache.current = {
+          scope,
+          token: minted.token,
+          // Seconds on the wire. A response without a usable `expiresIn` must
+          // not cache forever OR read as already expired: one minute, then
+          // re-mint.
+          expiresAtMs: now + (Number.isFinite(minted.expiresIn) ? minted.expiresIn * 1000 : 60_000),
+        }
+        return minted.token
+      } catch {
+        // Null, not a throw: every reader here is typed for "no token" and
+        // renders its own unreadable state. See useFileProgressResource.
+        return null
+      }
     }
   }, [id, jwt, firstFileId, project?.name])
   const {
@@ -535,7 +643,7 @@ export function ProjectOverview() {
     patchUnit: patchPlanUnit,
     status: planStatus,
     refresh: refreshPlan,
-  } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  } = useProjectPlan({ projectId: id ?? null, lane: planLane, getToken: getPlanToken })
   /**
    * The rows the board is actually drawing, in drawn order. The board owns the
    * filter, the arrangement and the folds that decide this, so the inspector's
@@ -550,6 +658,335 @@ export function ProjectOverview() {
     [planUnits, selectedPlanUnitId],
   )
   const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  /**
+   * Which FILES carry recordings. Audio expectation is judged per file, never
+   * per project (`planShowAudio` above answers the different question "does
+   * this project track audio at all") — a project holding one dubbed episode
+   * beside sixty-five text books would otherwise owe a recording for every
+   * verse in the Bible. See `audioFileIds`.
+   */
+  const planAudioFiles = useMemo(() => audioFileIds(planUnits), [planUnits])
+
+  // ── AQU-1278: the two background reads the board and inspector cannot make ──
+  //
+  // Both live here rather than in the components that draw them, and for the
+  // same reason: the board draws up to sixty-six rows and the inspector
+  // remounts on every click, so any fetch either of them owned would multiply
+  // by the number of rows or by the number of units a manager walks through.
+
+  /** Every file's section rows, keyed by file id. The chapter grain of the plan. */
+  const [planFileSections, setPlanFileSections] =
+    useState<ReadonlyMap<string, PlanSection[]>>(NO_FILE_SECTIONS)
+  /** One unit's assignments, keyed by `unitAssignmentsKey` (unit + lane). */
+  const [planUnitAssignments, setPlanUnitAssignments] =
+    useState<ReadonlyMap<string, UnitAssignment[]>>(NO_UNIT_ASSIGNMENTS)
+  /** Bumped after an assign, to re-read a list nothing pushes to (AD-3). */
+  const [planAssignmentsNonce, setPlanAssignmentsNonce] = useState(0)
+
+  /**
+   * The files whose sections the board actually needs, as ONE string.
+   *
+   * ONLY the files that own a NEARLY-COMPLETE unit. Chapter grain exists on the
+   * board for exactly one line — "chapters 12 and 40" under a row's shortfall —
+   * and that line only renders on a nearly-complete row. Reading every file in
+   * the project would have a fifty-document project fetching fifty files'
+   * sections on arrival to draw nothing at all, before anyone had scrolled to
+   * the plan. On the whole-Bible case that motivated this, the set is one file
+   * either way. The inspector's own chapter read is separate and fires on
+   * selection.
+   *
+   * The dependency below is this key rather than the unit list, and that is
+   * load-bearing: `planUnits` is re-minted by every plan read, including the
+   * one that follows a manager setting a single target date — which cannot
+   * move a chapter and must not re-read every file's sections. The ids are
+   * rebuilt from the key inside the effect so the dependency is honest rather
+   * than silenced with a lint suppression.
+   */
+  const planFileKey = useMemo(
+    () => Array.from(new Set([
+      ...planUnits
+        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles))
+        .map((u) => u.fileId),
+      // AQU-1278: plus whichever file the OPEN unit belongs to, nearly complete
+      // or not. The inspector's "N chapters are not assigned" counts the unit's
+      // chapters against what its assignments cover, and without its sections
+      // loaded that line never appears on a book in mid-flight — which is the
+      // book a manager is most likely to be staffing. It reads through the same
+      // freshness-gated resource the inspector's own hook uses, so a unit
+      // already on screen costs no extra request.
+      ...(selectedPlanUnit ? [selectedPlanUnit.fileId] : []),
+    ])).sort().join("\u0000"),
+    [planUnits, tableNow, planAudioFiles, selectedPlanUnit],
+  )
+
+  useEffect(() => {
+    if (!id || !getPlanToken || planFileKey === "") return
+    const fileIds = planFileKey.split("\u0000")
+    let cancelled = false
+    void (async () => {
+      // PREFETCH FIRST, and never a bare getFileProgress per file.
+      // `prefetchFileProgress` is queued at two in flight and skipped outright
+      // for a file already read in the last thirty seconds; `getFileProgress`
+      // has no freshness check and mints a sync token on every call, so calling
+      // it across sixty-six files would be sixty-six token POSTs and sixty-six
+      // uncapped parallel GETs — which is exactly the pile the prefetch queue
+      // exists to prevent.
+      try {
+        for (const fileId of fileIds) {
+          prefetchFileProgress(id, fileId, () => getPlanToken(), planLane)
+        }
+      } catch {
+        // Warming the queue is best-effort. If the queue itself refuses the
+        // work the reads below still run — uncapped, but they run — and a
+        // rejected fire-and-forget effect must never surface as an unhandled
+        // rejection in a PM's console.
+      }
+      // Then read the results back one at a time. This JOINS the queue rather
+      // than racing it: `loadResource` hands back the in-flight promise for a
+      // file the queue has already begun, and a file still waiting its turn
+      // joins this request when the queue reaches it. Either way each file is
+      // fetched once, and the await keeps the fan-out to one extra request.
+      for (const fileId of fileIds) {
+        try {
+          const body = await getFileProgress(id, fileId, () => getPlanToken(), planLane)
+          if (cancelled) return
+          // AQU-1278: labelled through the shared classifier, over the whole
+          // file's keys — a bare book code is chapter 1 for a one-chapter book
+          // and front matter beside real chapters, and only the other keys say
+          // which. The grid upstairs reaches the same answer the same way.
+          const numbered = numberedBookCodes(body.sections.map((s) => s.key))
+          const rows: PlanSection[] = body.sections.map((section) => ({
+            key: section.key,
+            label: planSectionLabel(section.key, numbered),
+            totalCount: section.totalCount,
+            filledCount: section.filledCount,
+            validatedCount: section.validatedCount,
+            // Optional on the wire — an older worker simply does not know.
+            // Absent reads as none, which is right for a bar that draws at zero.
+            audioCount: section.audioCount ?? 0,
+            audioValidatedCount: section.audioValidatedCount ?? 0,
+          }))
+          setPlanFileSections((prev) => new Map(prev).set(fileId, rows))
+        } catch {
+          // One unreadable file draws no chapter line. It must not take the
+          // other sixty-five down with it, so the loop keeps going.
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [id, getPlanToken, planLane, planFileKey])
+
+  // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
+  // can hold it still; this memo only caches it against the three inputs.
+  const planShortChaptersByUnit = useMemo(
+    () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles),
+    [planUnits, planFileSections, planAudioFiles],
+  )
+
+  // AQU-1278, round 6: who is on EVERY unit, read once per project and again
+  // after each assignment made from the inspector (the nonce). Null until it
+  // lands and null when the org's member-progress floor refuses it, which is
+  // the difference between "not yet" and "not for you" — both draw no chips.
+  const [projectAssignees, setProjectAssignees] = useState<UnitAssignee[] | null>(null)
+  useEffect(() => {
+    if (!jwt || !id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await getProjectUnitAssignees(jwt, id)
+        if (!cancelled) setProjectAssignees(rows)
+      } catch {
+        if (!cancelled) setProjectAssignees(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [jwt, id, planAssignmentsNonce])
+
+  const selectedUnitFileId = selectedPlanUnit?.fileId ?? null
+  const selectedUnitSectionKey = selectedPlanUnit?.sectionKey ?? null
+
+  useEffect(() => {
+    if (!jwt || !id || selectedUnitFileId == null || selectedUnitSectionKey == null) return
+    // Through `planUnitId`, never a hand-rolled "file:section" — the board
+    // reads this map by that function's output, and two spellings of one id is
+    // a map that silently never hits.
+    const cacheKey = unitAssignmentsKey(
+      planUnitId({ fileId: selectedUnitFileId, sectionKey: selectedUnitSectionKey }),
+      planLane,
+    )
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await getUnitAssignments(
+          jwt, id, selectedUnitFileId, selectedUnitSectionKey, planLane,
+        )
+        if (!cancelled) setPlanUnitAssignments((prev) => new Map(prev).set(cacheKey, rows))
+      } catch {
+        // Below the org's member-progress floor (403), or offline. Either way
+        // the section renders nothing; a half-read list of assignees would say
+        // "only these two people are on this book", which is a false claim.
+        if (!cancelled) {
+          setPlanUnitAssignments((prev) => {
+            if (!prev.has(cacheKey)) return prev
+            const next = new Map(prev)
+            next.delete(cacheKey)
+            return next
+          })
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [jwt, id, selectedUnitFileId, selectedUnitSectionKey, planLane, planAssignmentsNonce])
+
+  /**
+   * Who is on each row, for the avatar chips.
+   *
+   * AQU-1278, round 6: read ONCE for the whole project, so every row has its
+   * people from the first paint. Until this read existed the board could only
+   * learn a unit's assignees from the per-unit read the inspector fires, and a
+   * row showed its chips the moment its inspector had been opened once and
+   * nothing before that (Sam, 2026-09-16). The per-unit read still overlays
+   * where it has been made — it is the fresher of the two after an assignment
+   * lands — and until the project-wide read arrives (or where the org's floor
+   * refuses it) the map holds only what the inspector has learned, exactly as
+   * before. `mergeUnitAssignees` owns the rule and is tested on its own.
+   */
+  const assigneesByUnit = useMemo(
+    () => mergeUnitAssignees(planUnits, projectAssignees, (unitId) =>
+      planUnitAssignments.get(unitAssignmentsKey(unitId, planLane))
+        ?.map((row) => ({ userId: row.assigneeUserId, username: row.username })),
+    ),
+    [planUnits, projectAssignees, planUnitAssignments, planLane],
+  )
+
+  /**
+   * The selected unit's own assignments, AS THREE STATES, not two.
+   *
+   * `undefined` means the question has not been answered — the read is still
+   * in flight, or it failed, or the org's floor refused it. An empty array
+   * means it was answered and nobody is assigned. Collapsing the two is what
+   * made the panel tell a manager that every chapter of a fully staffed book
+   * was unassigned whenever the request 5xx'd. The board already draws this
+   * distinction (`mergeUnitAssignees`); the inspector now draws it too.
+   */
+  const selectedUnitAssignmentRows = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return planUnitAssignments.get(unitAssignmentsKey(planUnitId(selectedPlanUnit), planLane))
+  }, [selectedPlanUnit, planUnitAssignments, planLane])
+  /** The same, flattened for the panel, which renders nothing either way. */
+  const selectedUnitAssignments = selectedUnitAssignmentRows ?? NO_ASSIGNMENTS
+
+  // How many of the selected unit's chapters nobody holds — the judgment,
+  // its three-state assignment answer included, lives in `plan-derive.ts`.
+  /**
+   * The selected unit's own section keys.
+   *
+   * Shared by the unassigned count below and the assignment panel, which needs
+   * the WHOLE unit's keys to tell a book's front matter ("GEN" beside "GEN 1",
+   * "GEN 2" …) from a one-chapter book, where the same bare code IS chapter 1.
+   * A row judging from its own assignment's keys alone read front matter as
+   * chapter 1 and named a chapter the person was not assigned to.
+   */
+  const selectedUnitSectionKeys = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return unitSectionKeys(selectedPlanUnit, planFileSections.get(selectedPlanUnit.fileId))
+  }, [selectedPlanUnit, planFileSections])
+
+  const selectedUnassignedChapters = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return unassignedChapterCount(
+      selectedPlanUnit,
+      planFileSections.get(selectedPlanUnit.fileId),
+      selectedUnitAssignmentRows,
+    )
+  }, [selectedPlanUnit, selectedUnitAssignmentRows, planFileSections])
+
+  /**
+   * Open the editor at a unit's first outstanding cell.
+   *
+   * ONE REQUEST, answered by the server (`readFirstOpenCell`). This used to
+   * walk the unit's chapters client-side and read one chapter's verses, which
+   * worked for Scripture and for nothing else — a document has no chapters to
+   * walk and a subtitle file's sections are time buckets, so on both the link
+   * opened the file and stopped. Audio could never be asked at all. Now the
+   * server orders the unit's cells the way the editor does and answers for
+   * every queue, cue sheets included.
+   *
+   * THE LANE IS ALWAYS PASSED, including as the empty default. An ABSENT lane
+   * param means "no deep-link intent, leave the editor in whatever language it
+   * was last in" (see `resolveDeepLinkLane`), so a link built from a surface
+   * that is itself lane-scoped must always say which lane, or the reader lands
+   * on the right cell in someone else's language.
+   *
+   * Nothing resolvable — a read that fails, a queue with nothing in it — still
+   * opens the FILE. A link that silently does nothing is worse than one that
+   * lands nearby.
+   */
+  const openPlanShortfall = useCallback(
+    async (unit: PlanUnit, kind?: PlanOpenKind) => {
+      if (!id || !getPlanToken) return
+      const hasAudio = planAudioFiles.has(unit.fileId)
+      const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio))
+      let cellId: string | null = null
+      if (wanted) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
+          )
+        } catch {
+          cellId = null
+        }
+      }
+      // `flash` only rides with a cell: a scroll with no marker looks, from the
+      // reader's chair, exactly like a link that did nothing.
+      openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
+    },
+    [id, getPlanToken, planLane, planAudioFiles, openWorkspace],
+  )
+
+  /**
+   * Open the editor on a unit — the inspector's title link (Sam, 2026-09-17).
+   *
+   * A whole-file unit is the file, opened at its top. A BOOK inside a
+   * Scripture file is that book's FIRST CELL: the editor deep-links to a cell
+   * and nothing else, so a file-level link would drop the reader at Genesis 1
+   * whichever book they clicked, and Sam ruled that intolerable. The server
+   * answers `first` in the same document order the queues use; nothing
+   * resolvable (an older worker, a failed read, a book with no cells) still
+   * opens the file, as `openPlanShortfall` does. The flash rides with the
+   * cell, as it does on every cell link: the editor scrolls the row into the
+   * middle of the screen, under the previous book's last verses, and without
+   * a marker "open Ruth" looks like it opened Philemon.
+   */
+  // Identity-stable for the memoized rows — an inline arrow at the call site
+  // would re-render all of them on every overview render. The `void` keeps a
+  // rejected navigation out of the unhandled-rejection channel, as the old
+  // inline wrapper did.
+  const handleOpenShortfall = useCallback(
+    (unit: PlanUnit) => { void openPlanShortfall(unit) },
+    [openPlanShortfall],
+  )
+
+  const openPlanUnit = useCallback(
+    async (unit: PlanUnit) => {
+      if (!id) return
+      let cellId: string | null = null
+      if (unit.sectionKey && getPlanToken) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
+          )
+        } catch {
+          cellId = null
+        }
+      }
+      openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
+    },
+    [id, getPlanToken, planLane, openWorkspace],
+  )
+
   // AQU-1094/1095: setting a date and marking a unit done are maintainer work,
   // the same floor the project deadline uses. Read the FRESH role from
   // useProject, not the cached syncRole snapshot.
@@ -572,22 +1009,15 @@ export function ProjectOverview() {
   // for the default lane, the lane tag itself for any other. Derived here
   // rather than read off `selectedLane`, which is declared further down.
   const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
-  const planInspector = selectedPlanUnit ? (
-    <PlanInspector
-      key={planUnitId(selectedPlanUnit)}
-      unit={selectedPlanUnit}
-      now={tableNow}
-      canPlan={canPlan}
-      showAudio={planShowAudio}
-      projectId={id ?? null}
-      getToken={getPlanToken}
-      lane={selectedLaneTag ?? ""}
-      languageLabel={planLanguageLabel}
-      onPatch={patchPlanUnit}
-      onClose={() => setSelectedPlanUnitId(null)}
-      onStep={stepPlanUnit}
-    />
-  ) : null
+  /**
+   * How many target languages this project carries: its declared extra lanes
+   * plus the default one, which is a real language and always exists (AQU-728).
+   * Counted from the project record rather than from the portfolio's `lanes`,
+   * which only lists lanes that already have progress in them — a lane added
+   * this morning has none, and the inspector's "audio is shared by every
+   * language" note is exactly as true on the day a second lane is created.
+   */
+  const planLaneCount = (project?.targetLanes?.length ?? 0) + 1
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -619,6 +1049,100 @@ export function ProjectOverview() {
   )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
+
+  /**
+   * AQU-1278: the inspector's Assign affordance. Same authority the Team card's
+   * Assign panel asks for (`canOpenAssignUi` over the org's assignmentMinRole,
+   * with AQU-496's self-assign carve-out), and never on an archived project —
+   * nothing about an archive should invite new work into it.
+   */
+  const planAssignTarget: PlanAssignTarget | undefined = useMemo(() => {
+    if (!canAssign || isArchived || !jwt || !id || selectedUnitFileId == null) return undefined
+    return {
+      projectId: id,
+      activeFileId: selectedUnitFileId,
+      files: (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+      targetLanes: project?.targetLanes ?? [],
+      jwt,
+      author: session?.username ?? "",
+      roleLevel: project?.syncRole?.level ?? 0,
+      allowSelfAssignment: orgSettings.allowSelfAssignment,
+      assignmentMinRole: orgSettings.assignmentMinRole,
+      // AssignModal resolves the caller from `author` against the roster it
+      // fetches, which is the only identity this page actually has — the
+      // overview never reads the caller's numeric user id.
+      callerUserId: null,
+      onAssigned: () => {
+        setPlanAssignmentsNonce((n) => n + 1)
+        void handleAssigned()
+      },
+    }
+  }, [
+    canAssign, isArchived, jwt, id, selectedUnitFileId, project?.files, project?.targetLanes,
+    project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
+    orgSettings.assignmentMinRole, handleAssigned,
+  ])
+
+  const planInspector = selectedPlanUnit ? (
+    <PlanInspector
+      key={planUnitId(selectedPlanUnit)}
+      unit={selectedPlanUnit}
+      now={tableNow}
+      canPlan={canPlan}
+      showAudio={planShowAudio}
+      projectId={id ?? null}
+      getToken={getPlanToken}
+      lane={planLane}
+      languageLabel={planLanguageLabel}
+      laneCount={planLaneCount}
+      // The SAME set the board judges by. Audio expectation is a fact about a
+      // file, so a text-only book inside a dubbed file must read the same way
+      // in this panel as it does in the row that opened it — without this the
+      // two sit six inches apart disagreeing about one unit.
+      audioFiles={planAudioFiles}
+      assignments={
+        <PlanAssignments
+          assignments={selectedUnitAssignments}
+          now={tableNow}
+          lane={planLane}
+          defaultLaneLabel={project?.targetLanguage ?? ""}
+          unassignedChapters={selectedUnassignedChapters}
+          unitSectionKeys={selectedUnitSectionKeys}
+          // Per FILE, not per project: a person assigned text in a book whose
+          // file carries no recordings is not short a single take, and the
+          // audio bar on their row would be a column of zeroes saying they are.
+          //
+          // AQU-1278: and never on a unit that records against a CUE SHEET. An
+          // assignment holds subtitle cells; the takes live on a different
+          // file's cells, so an assignee's recorded count on a dubbing project
+          // is structurally zero however much of the episode they have dubbed.
+          // Sam ruled this a real gap and a later ticket — **TODO: assignment-
+          // level audio on dubbing projects** — and text-only until then.
+          showAudio={assignmentsShowAudio(selectedPlanUnit, planAudioFiles)}
+          minRole={orgSettings.memberProgressViewMinRole}
+          viewerRoleLevel={projectRoleLevel}
+          ready={orgSettings.hasFetched}
+          assign={planAssignTarget}
+        />
+      }
+      onPatch={patchPlanUnit}
+      onClose={() => setSelectedPlanUnitId(null)}
+      onStep={stepPlanUnit}
+      onGoToFirstOpen={(kind) => { void openPlanShortfall(selectedPlanUnit, kind) }}
+      // AQU-1278: a verse chip in the chapter card. Unlike the link above it
+      // this needs no search — the chapter detail already told the inspector
+      // which cell — so it is a straight navigation, with the lane pinned and
+      // the flash on, exactly as `openPlanShortfall` ends.
+      onOpenCell={(cellId) => {
+        if (!id) return
+        openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, cellId, planLane, true))
+      }}
+      // AQU-1278: the title opens the unit itself — the file, or a book's
+      // first cell — for the reader who wants the editor rather than the
+      // first gap in it (Sam, 2026-09-17). See `openPlanUnit`.
+      onOpenUnit={() => { void openPlanUnit(selectedPlanUnit) }}
+    />
+  ) : null
 
   const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(
     id,
@@ -658,6 +1182,21 @@ export function ProjectOverview() {
   ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  /**
+   * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
+   * board's own picker. The plan is one language's answer — "All" has no
+   * meaning for a shortfall or a link into the editor — and `planLane` has
+   * always resolved a null (All) selection to the default lane anyway. The
+   * picker shows the lane actually being counted, and choosing one sets the
+   * page's single lane selection, so the Progress card above agrees with it.
+   */
+  const planLaneOptions = useMemo(
+    () => projectLanes.map((l) => ({
+      tag: l.lane,
+      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+    })),
+    [projectLanes, project?.targetLanguage, t],
+  )
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
@@ -1486,6 +2025,17 @@ export function ProjectOverview() {
                 orderRef={planOrderRef}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
+                shortChaptersByUnit={planShortChaptersByUnit}
+                assigneesByUnit={assigneesByUnit}
+                onOpenShortfall={handleOpenShortfall}
+                laneLabel={showLaneTabs ? planLanguageLabel : null}
+                lanes={planLaneOptions}
+                lane={planLane}
+                // Wrapped, not passed straight to the setter: the menu calls
+                // its handler with (value, eventDetails), and a setState that
+                // is handed a second argument today is one refactor away from
+                // being handed something it would read as an updater.
+                onLaneChange={(next) => setSelectedLaneTag(next)}
                 emptyAction={
                   <Button
                     size="sm"

@@ -19,12 +19,35 @@
 // never itself translated, so the matches must not be run through `t()`.
 
 import { t } from "@/lib/i18n/standalone"
+import {
+  OMNIVOICE_FAILED_BODY,
+  OMNIVOICE_NOT_CONFIGURED_BODY,
+  SEED_VC_FAILED_BODY,
+  SEED_VC_NOT_CONFIGURED_BODY,
+} from "./tts-engine-error"
+
+/** Shown when hosted drafting has no OpenRouter key. Names the setting to
+ *  change and states that a user-supplied key is not Aquilla-billed. */
+const OPENROUTER_KEY_REQUIRED_BODY =
+  "This server has no OpenRouter key for hosted AI. In Project Settings → Advanced LLM, switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
+
+/** Drafting/chat-proxy failures. Must not be classified as TTS/voice errors. */
+function isTextGenerationFailure(lowered: string): boolean {
+  return lowered.includes("completion failed")
+}
 
 export type ErrorCategory =
   | "missing-gemini-key"
+  | "missing-openrouter-key"
+  | "gemini-failed"
+  | "omnivoice-not-configured"
+  | "omnivoice-failed"
+  | "seed-vc-not-configured"
+  | "seed-vc-failed"
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
+  | "tts-not-configured"
   | "translation-failed"
   | "git-project-unsupported"
   | "sign-in-required"
@@ -41,11 +64,21 @@ export type ErrorCategory =
   | "unknown"
 
 /** Pull an HTTP status out of the messages we format locally, e.g.
- *  `Completion failed: 413 {"error":…}` or `Failed to fetch models: 500 …`.
+ *  `Completion failed: 413 {"error":…}` or `voice/tts failed (503): …`.
  *  Deliberately anchored to a "failed/error/status/http" lead-in so a bare
- *  three-digit number inside a provider payload isn't mistaken for a status. */
+ *  three-digit number inside a provider payload isn't mistaken for a status.
+ *
+ *  THE OPTIONAL PARENTHESIS IS NOT COSMETIC. Every audio error this app
+ *  formats writes the status in brackets — `voice/tts failed (503)`,
+ *  `audio upload failed (500)`, `voice convert failed (502)`, `Gemini TTS
+ *  failed (500)` — and without the `\(?` none of them parsed. Only the
+ *  completions path's bare `failed: 413` did. So the `rate-limited`,
+ *  `provider-unavailable` and `provider-rejected` branches below had never
+ *  once fired for an audio failure: every one of them fell through to
+ *  `unknown`, which is why a voice failure read as a raw server fragment
+ *  however carefully those branches were worded. */
 function extractStatus(lowered: string): number | null {
-  const match = lowered.match(/(?:failed|error|status|http)[:\s]+(\d{3})\b/)
+  const match = lowered.match(/(?:failed|error|status|http)[:\s]+\(?(\d{3})\b/)
   return match ? Number(match[1]) : null
 }
 
@@ -68,6 +101,13 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (
     m.includes("daily ai limit") ||
     m.includes("daily_budget_exceeded") ||
+    // The TTS budget's own code, which reaches us as a raw JSON body:
+    // `voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}`. Without
+    // this it matched nothing here, and `looksLikeMachineDump` saw the braces
+    // and swapped the whole thing for "the AI request didn't finish" — the
+    // one failure where the user CAN do something (wait, or switch provider)
+    // wearing the one message that says nothing at all.
+    m.includes("daily_limit_exceeded") ||
     m.includes("resets at midnight") ||
     m.includes("global_budget_exceeded") ||
     m.includes("platform ai capacity")
@@ -109,12 +149,93 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
-  if (m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
-      m.includes("gemini") && m.includes("key")) {
+  // AQU-1158: a completion/chat-proxy failure is never a voice-engine
+  // problem. The hosted drafting path returns
+  // `OPENROUTER_API_KEY is not configured`; the old `api_key` heuristic
+  // below swallowed that and titled it "Gemini API key required".
+  if (
+    m.includes("openrouter_api_key") ||
+    m.includes("openrouter api key") ||
+    m.includes("openrouter_not_configured")
+  ) {
+    return {
+      category: "missing-openrouter-key",
+      title: t("audio.aiError.openRouterKeyRequiredTitle"),
+      body: OPENROUTER_KEY_REQUIRED_BODY,
+      raw,
+    }
+  }
+
+  // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
+  // heuristic. A local sync-worker 503 ("TTS not configured") is OmniVoice,
+  // not a missing Google key; sending people to Gemini settings is a lie.
+  // Text-generation failures must not take these branches either.
+  if (!isTextGenerationFailure(m) && (
+    m.includes("this line uses omnivoice") ||
+    m.includes("tts not configured") ||
+    (m.includes("voice/tts") && (status === 503 || m.includes("not configured")))
+  )) {
+    return {
+      category: "omnivoice-not-configured",
+      title: t("audio.aiError.omnivoiceNotConfiguredTitle"),
+      body: OMNIVOICE_NOT_CONFIGURED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("omnivoice tts failed") ||
+    m.includes("omnivoice couldn't generate") ||
+    m.includes("voice/tts failed")
+  ) {
+    return {
+      category: "omnivoice-failed",
+      title: t("audio.aiError.omnivoiceFailedTitle"),
+      body: OMNIVOICE_FAILED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("this clone voice needs seed-vc") ||
+    m.includes("voice conversion not configured")
+  ) {
+    return {
+      category: "seed-vc-not-configured",
+      title: t("audio.aiError.seedVcNotConfiguredTitle"),
+      body: SEED_VC_NOT_CONFIGURED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("voice cloning (seed-vc) failed") ||
+    m.includes("voice cloning (seed-vc) couldn't") ||
+    m.includes("voice convert failed")
+  ) {
+    return {
+      category: "seed-vc-failed",
+      title: t("audio.aiError.seedVcFailedTitle"),
+      body: SEED_VC_FAILED_BODY,
+      raw,
+    }
+  }
+
+  // Gemini TTS only. A generic "api_key" substring (OPENROUTER_API_KEY,
+  // "invalid api key", …) is not a Gemini-voice failure.
+  if (
+    !isTextGenerationFailure(m) &&
+    (m.includes("gemini") && (m.includes("api key") || m.includes("api_key") || m.includes("apikey") || m.includes("key")))
+  ) {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add your Gemini API key to use Gemini voices, or switch this project to a local TTS provider (Kokoro or MMS).",
+      body: "Add a Gemini API key to use this Gemini voice, or switch the line to OmniVoice (hosted, no key) or a local engine (Kokoro or MMS).",
+      raw,
+    }
+  }
+  if (m.includes("gemini tts failed") || (m.includes("gemini") && m.includes("did not include audio"))) {
+    return {
+      category: "gemini-failed",
+      title: t("audio.aiError.geminiFailedTitle"),
+      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to OmniVoice.",
       raw,
     }
   }
@@ -137,6 +258,32 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "translation-not-configured",
       title: t("audio.aiError.translationNotConfiguredTitle"),
       body: "Set up a completion provider for this project before generating voice on untranslated cells.",
+      raw,
+    }
+  }
+  // NOT SET UP IS NOT A TEMPORARY OUTAGE, and the ordering here is the whole
+  // point: the server answers 503 for this, so with `extractStatus` finally
+  // parsing brackets the branch below would call it `provider-unavailable` and
+  // say "this is usually temporary — try again in a moment." It is not
+  // temporary and retrying will never fix it. Since OmniVoice is the DEFAULT
+  // engine, that would be the wrong advice on the single most likely voice
+  // failure in the app.
+  //
+  // Matched on the specific server strings rather than a bare "not
+  // configured": this module also categorizes drafting and agent failures,
+  // and telling someone their *translation* provider is a voice problem would
+  // be its own small lie.
+  if (
+    m.includes("tts not configured") ||
+    m.includes("voice conversion not configured") ||
+    m.includes("voice generation not configured")
+  ) {
+    return {
+      category: "tts-not-configured",
+      title: t("audio.aiError.ttsNotConfiguredTitle"),
+      // Worded to follow its own title rather than repeat it — the recorder
+      // renders the two as one sentence.
+      body: "Switch this project to a local voice (Kokoro or MMS), which runs in the browser, or ask an administrator to configure the server voice service.",
       raw,
     }
   }

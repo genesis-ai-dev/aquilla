@@ -6,6 +6,7 @@
 
 import { sourceArtifactDescriptor } from "../../../shared/import-contract"
 import { isAuthorizedAdminBearer } from "../lib/admin-auth"
+import type { ReadonlyR2Bucket } from "../lib/readonly-r2"
 import { gitlabLfsKey } from "./migrate-audio-copy-route"
 import { buildSourceArtifactPersistenceStatements } from "./source-artifact-persistence"
 import { sourceObjectKey } from "./source-upload-route"
@@ -16,7 +17,9 @@ const UUID_NAMESPACE = "7f3c8a91-2b4d-4e6f-9a8c-1d3e5f2b4a6c"
 
 export interface MigrateSourceArtifactCopyEnv {
   SNAPSHOTS: R2Bucket
-  LFS_SRC?: R2Bucket
+  /** GitLab's LFS object-storage bucket. Enforced read-only — see
+   *  lib/readonly-r2.ts — not just documented as such. */
+  LFS_SRC?: ReadonlyR2Bucket
   AQUILLA_PG?: AquillaDb
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
@@ -53,8 +56,8 @@ async function uuidV5(seed: string): Promise<string> {
   input.set(value, namespace.byteLength)
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", input))
   const bytes = digest.slice(0, 16)
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
   return formatUuid(bytes)
 }
 
@@ -206,7 +209,8 @@ export async function handleMigrateSourceArtifactCopyRequest(
     await env.AQUILLA_PG.batch(statements)
   } catch (error) {
     if (copied && !existing) await env.SNAPSHOTS.delete(key)
-    return Response.json({ error: `source metadata write failed: ${String(error)}` }, { status: 500 })
+    console.error("[migrate-source-artifact-copy] metadata write failed:", error)
+    return Response.json({ error: "source metadata write failed" }, { status: 500 })
   }
 
   return Response.json({

@@ -18,6 +18,8 @@
 // A take that is not a WAV (a webm mic take) is passed through unchanged and
 // relies on the manifest instead — see `audio-per-line.ts`.
 
+import { resolvePcmWindow } from "@/lib/audio/pcm-window"
+
 /** `bext` is a fixed 602-byte payload before any coding history. */
 const BEXT_PAYLOAD_BYTES = 602
 
@@ -82,7 +84,7 @@ interface Chunk {
 
 function readChunks(bytes: Uint8Array): { chunks: Chunk[]; valid: boolean } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const tag = (o: number) => String.fromCharCode(bytes[o]!, bytes[o + 1]!, bytes[o + 2]!, bytes[o + 3]!)
+  const tag = (o: number) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3])
   if (bytes.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return { chunks: [], valid: false }
   const chunks: Chunk[] = []
   let at = 12
@@ -162,4 +164,122 @@ export function withBwfTimestamp(wav: Uint8Array, info: BextInfo): Uint8Array {
   // RIFF size counts everything after the size field itself.
   new DataView(bytes.buffer).setUint32(4, total - 8, true)
   return bytes
+}
+
+// ---------------------------------------------------------------------------
+// Trimming a WAV without decoding it (2026-08-27)
+// ---------------------------------------------------------------------------
+//
+// The per-line export hands over a take's stored bytes untouched, but the take
+// carries non-destructive trims, and `take-margins.ts` gives essentially EVERY
+// recorded take a head trim at birth to undo the pre-roll anchor shift. So the
+// exported file was the whole recording while its BWF timestamp said the
+// audible start: the line landed late in a DAW by exactly its head trim, with
+// the material the trim was hiding audible in front of it.
+//
+// Sam's ruling (2026-08-27) is that an export contains what you hear. For a
+// PCM WAV that costs no decoder at all — audio frames are fixed width, so the
+// window is a byte range: `byteOffset = sampleIndex * blockAlign`. Anything
+// that is not plain PCM (a compressed payload in a WAV wrapper, or a webm/mp3
+// take) cannot be cut this way and is passed through untouched, which the
+// caller counts and reports rather than hiding.
+
+/** What a `fmt ` chunk says about frame layout. Only the fields a byte-range
+ *  slice needs; everything else in the chunk is left alone. */
+export interface WavFormat {
+  /** 1 = PCM, 3 = IEEE float. Anything else is compressed and not sliceable. */
+  audioFormat: number
+  channels: number
+  sampleRate: number
+  bitsPerSample: number
+  /** Bytes per audio FRAME — one sample across every channel. The whole point:
+   *  a frame is the unit a cut may fall on. */
+  blockAlign: number
+}
+
+/** Read `fmt `, or null when this is not a WAV we can reason about. */
+export function readWavFormat(bytes: Uint8Array): WavFormat | null {
+  const { chunks, valid } = readChunks(bytes)
+  if (!valid) return null
+  const fmt = chunks.find((c) => c.id === "fmt ")
+  // 16 bytes is the smallest legal `fmt `; shorter means truncated.
+  if (!fmt || fmt.size < 16) return null
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const audioFormat = view.getUint16(fmt.start, true)
+  const channels = view.getUint16(fmt.start + 2, true)
+  const sampleRate = view.getUint32(fmt.start + 4, true)
+  const bitsPerSample = view.getUint16(fmt.start + 14, true)
+  const stated = view.getUint16(fmt.start + 12, true)
+  // Prefer the stated blockAlign, but a zero or absurd one is repairable from
+  // the fields that cannot be zero — an encoder getting this wrong should not
+  // cost the trim.
+  const derived = Math.max(1, Math.floor((channels * bitsPerSample) / 8))
+  const blockAlign = stated > 0 ? stated : derived
+  if (channels <= 0 || sampleRate <= 0 || bitsPerSample <= 0) return null
+  return { audioFormat, channels, sampleRate, bitsPerSample, blockAlign }
+}
+
+/**
+ * Return `wav` cut down to `[trimStartMs, trimEndMs)`.
+ *
+ * Returns the input UNCHANGED — never a throw — whenever the cut cannot be
+ * made honestly: not a RIFF/WAVE file, no readable `fmt `, a compressed
+ * payload, no `data` chunk, or a window that covers the whole clip. A caller
+ * can hand every take through this and compare identity to learn whether
+ * anything happened.
+ *
+ * The window arithmetic is `resolvePcmWindow`'s, shared with the transcribe
+ * path and the mixed-character export, so all three agree about what a trim
+ * selects — including its defensive rule that an inverted or empty window
+ * falls back to the whole clip rather than producing silence.
+ */
+export function trimWav(
+  wav: Uint8Array,
+  trim: { trimStartMs?: number | null; trimEndMs?: number | null },
+): Uint8Array {
+  if (trim.trimStartMs == null && trim.trimEndMs == null) return wav
+  const fmt = readWavFormat(wav)
+  // 1 = PCM, 3 = IEEE float. A compressed payload has no fixed frame width, so
+  // a byte offset means nothing in it.
+  if (!fmt || (fmt.audioFormat !== 1 && fmt.audioFormat !== 3)) return wav
+
+  const { chunks } = readChunks(wav)
+  const data = chunks.find((c) => c.id === "data")
+  if (!data || data.size < fmt.blockAlign) return wav
+
+  const totalFrames = Math.floor(data.size / fmt.blockAlign)
+  const win = resolvePcmWindow(totalFrames, fmt.sampleRate, trim)
+  if (win.isFull || win.length <= 0) return wav
+
+  const from = data.start + win.start * fmt.blockAlign
+  const to = data.start + win.end * fmt.blockAlign
+  const body = wav.subarray(from, to)
+
+  // Rebuild rather than splice, for the same reason `withBwfTimestamp` does:
+  // pad bytes and chunks we do not understand survive in place, and the RIFF
+  // size is recomputed from what was actually written.
+  const parts: Uint8Array[] = []
+  const header = new Uint8Array(12)
+  header.set(wav.subarray(0, 12))
+  parts.push(header)
+  for (const chunk of chunks) {
+    const payload = chunk.id === "data" ? body : wav.subarray(chunk.start, chunk.start + chunk.size)
+    const head = new Uint8Array(8)
+    const hv = new DataView(head.buffer)
+    for (let i = 0; i < 4; i += 1) hv.setUint8(i, chunk.id.charCodeAt(i))
+    hv.setUint32(4, payload.byteLength, true)
+    parts.push(head, payload)
+    if (payload.byteLength % 2 === 1) parts.push(new Uint8Array(1))
+  }
+
+  let total = 0
+  for (const part of parts) total += part.byteLength
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const part of parts) {
+    out.set(part, at)
+    at += part.byteLength
+  }
+  new DataView(out.buffer).setUint32(4, total - 8, true)
+  return out
 }

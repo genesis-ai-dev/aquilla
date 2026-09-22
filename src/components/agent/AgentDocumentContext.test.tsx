@@ -78,7 +78,8 @@ describe("AgentDocumentContext paired document", () => {
   it("reuses pane content without reserving action or absent validation gutters in the text lane", () => {
     const data = workspace()
     const view = render(<AgentDocumentContext workspace={{ ...data, onOpenHistory: vi.fn() }} />)
-    const pairedReadHtml = screen.getAllByRole("textbox")[0].innerHTML
+    // AQU-1336: the editable read surface is a button, so locate it by surface.
+    const pairedReadHtml = document.querySelector('[data-editor-cell-surface="target-read"]')!.innerHTML
     const target = view.container.querySelector('[data-editor-cell-surface="target-column"]')!
     expect(target).not.toHaveClass("pr-9")
     expect(target).toHaveClass("px-2")
@@ -88,7 +89,7 @@ describe("AgentDocumentContext paired document", () => {
     expect(rail.parentElement).toHaveClass("[&_button]:min-h-6", "[&_button]:min-w-6")
     view.unmount()
     render(<AgentContextPane kind="target" {...data} />)
-    expect(screen.getAllByRole("textbox")[0].innerHTML).toBe(pairedReadHtml)
+    expect(document.querySelector('[data-editor-cell-surface="target-read"]')!.innerHTML).toBe(pairedReadHtml)
     expect(screen.getByTestId("target-context-scroll")).toHaveClass("overflow-y-auto")
   })
 
@@ -161,7 +162,8 @@ describe("AgentDocumentContext paired document", () => {
     act(() => row.focus())
     expect(row).toHaveAttribute("data-focused", "true")
     expect(onFocus).toHaveBeenCalledExactlyOnceWith("c2")
-    const button = within(row).getByRole("button", { name: "Edit history" })
+    // AQU-200: the keyboard-reachable control in the row is the rail's `⋯`.
+    const button = within(row).getByRole("button", { name: "More actions" })
     act(() => button.focus())
     fireEvent.mouseLeave(row)
     expect(row.querySelector('[data-slot="cell-action-rail"]')).toHaveAttribute("data-revealed", "true")

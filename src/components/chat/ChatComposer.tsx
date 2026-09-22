@@ -27,7 +27,7 @@ import StarterKit from "@tiptap/starter-kit"
 import { ArrowUp, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupText,
+  InputGroup, InputGroupAddon, InputGroupButton,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -257,9 +257,6 @@ const ScopedChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fun
           </div>
           <InputGroupAddon align="block-end">
             {attachAction}
-            <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
-              {t("workspace.chatComposer.keyboardHint")}
-            </InputGroupText>
             {isStreaming ? (
               <span className="ms-auto flex items-center gap-1">
                 {queueWhileStreaming && (

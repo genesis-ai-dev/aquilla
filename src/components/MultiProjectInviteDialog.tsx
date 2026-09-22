@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react"
-import { Check } from "lucide-react"
+import { Check, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -67,12 +69,22 @@ export function MultiProjectInviteDialog({
     raw: "",
   })
   const [selections, setSelections] = useState<Record<string, RoleLevel>>({})
+  const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
   const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
   const [topError, setTopError] = useState<string | null>(null)
   const [done, setDone] = useState<Record<string, "ok"> | null>(null)
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
+  // AQU-1150: the filter is presentational only — it narrows which rows are
+  // RENDERED, never `selections`. A project checked before the operator types
+  // stays selected (and stays in the count, and still gets a grant on submit)
+  // even while filtered out of view, which is what "I picked these three, now
+  // let me find the fourth" requires.
+  const visibleProjects = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : projects
+  }, [projects, query])
   const isEmailMode = recipient.mode === "email"
   const emailLooksValid = /\S+@\S+\.\S+/.test(recipient.raw.trim())
   const canSubmit =
@@ -123,7 +135,7 @@ export function MultiProjectInviteDialog({
         const jwt = session.jwt
         const results = await Promise.all(
           selectedIds.map((projectId) =>
-            createServerInvite(jwt, projectId, selections[projectId]!, undefined, email)
+            createServerInvite(jwt, projectId, selections[projectId], undefined, email)
           )
         )
         const errors: Record<string, string> = {}
@@ -139,7 +151,17 @@ export function MultiProjectInviteDialog({
         })
         setPerProjectError(errors)
         setDone(successes)
-        if (Object.keys(successes).length > 0) onSuccess?.()
+        const sent = Object.keys(successes).length
+        if (sent > 0) {
+          // AQU-1149: the row badges vanish with the dialog, so the only trace
+          // of the outcome has to live at page level. Counts successes only —
+          // the failures stay inline, where the operator can act on them.
+          toast.add({
+            type: "success",
+            title: t("org.multiProjectInviteDialog.invitedToast", { count: sent, email }),
+          })
+          onSuccess?.()
+        }
         return
       }
       // If the typeahead already verified the user, skip the redundant
@@ -171,7 +193,17 @@ export function MultiProjectInviteDialog({
       })
       setPerProjectError(errors)
       setDone(successes)
-      if (Object.keys(successes).length > 0) onSuccess?.()
+      const added = Object.keys(successes).length
+      if (added > 0) {
+        toast.add({
+          type: "success",
+          title: t("org.multiProjectInviteDialog.addedToast", {
+            count: added,
+            username: target.username,
+          }),
+        })
+        onSuccess?.()
+      }
     } catch (err) {
       setTopError(toUserFacingError(err, "project").message)
     } finally {
@@ -183,6 +215,7 @@ export function MultiProjectInviteDialog({
     if (busy) return
     setRecipient({ mode: "username", raw: "" })
     setSelections({})
+    setQuery("")
     setPerProjectError({})
     setTopError(null)
     setDone(null)
@@ -251,77 +284,99 @@ export function MultiProjectInviteDialog({
                 {t("org.multiProjectInviteDialog.noProjectsAvailable")}
               </p>
             ) : (
-              <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
-                {projects.map((p) => {
-                  const isSelected = p.id in selections
-                  const errorMsg = perProjectError[p.id]
-                  const isDone = done?.[p.id] === "ok"
-                  return (
-                    <li
-                      key={p.id}
-                      className={`px-3 py-2 text-sm ${
-                        isSelected ? "bg-muted/40" : ""
-                      }`}
-                    >
-                      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                        <button
-                          type="button"
-                          role="checkbox"
-                          aria-checked={isSelected}
-                          aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: p.name })}
-                          onClick={() => toggleProject(p.id)}
-                          disabled={busy}
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
-                            isSelected
-                              ? "bg-primary border-primary text-primary-foreground"
-                              : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
+              <>
+                <div className="relative mt-1.5">
+                  <Search
+                    className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t("org.multiProjectInviteDialog.searchPlaceholder")}
+                    aria-label={t("org.multiProjectInviteDialog.searchProjectsAriaLabel")}
+                    disabled={busy}
+                    className="h-8 ps-7 text-xs"
+                  />
+                </div>
+                {visibleProjects.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-muted-foreground py-2">
+                    {t("org.orgProjectsDataTable.noSearchMatch")}
+                  </p>
+                ) : (
+                  <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
+                    {visibleProjects.map((p) => {
+                      const isSelected = p.id in selections
+                      const errorMsg = perProjectError[p.id]
+                      const isDone = done?.[p.id] === "ok"
+                      return (
+                        <li
+                          key={p.id}
+                          className={`px-3 py-2 text-sm ${
+                            isSelected ? "bg-muted/40" : ""
                           }`}
                         >
-                          {isSelected && <Check className="h-3.5 w-3.5" />}
-                        </button>
-                        <AppTooltip content={p.name}>
-                          <span className="min-w-0">
+                          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                             <button
                               type="button"
+                              role="checkbox"
+                              aria-checked={isSelected}
+                              aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: p.name })}
                               onClick={() => toggleProject(p.id)}
                               disabled={busy}
-                              className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
+                              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
+                                isSelected
+                                  ? "bg-primary border-primary text-primary-foreground"
+                                  : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
+                              }`}
                             >
-                              {p.name}
+                              {isSelected && <Check className="h-3.5 w-3.5" />}
                             </button>
-                          </span>
-                        </AppTooltip>
-                        {isDone ? (
-                          <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                            <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
-                          </span>
-                        ) : isSelected ? (
-                          <RoleSelect
-                            options={roleChoices}
-                            value={selections[p.id]}
-                            onValueChange={(level) =>
-                              setProjectRole(p.id, level as RoleLevel)
-                            }
-                            disabled={busy}
-                            size="sm"
-                            className="shrink-0"
-                            aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}
-                          />
-                        ) : (
-                          <span aria-hidden className="w-0" />
-                        )}
-                      </div>
-                      {errorMsg && (
-                        <AppTooltip content={errorMsg} className="max-w-xs">
-                          <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
-                            {errorMsg}
-                          </p>
-                        </AppTooltip>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+                            <AppTooltip content={p.name}>
+                              <span className="min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleProject(p.id)}
+                                  disabled={busy}
+                                  className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
+                                >
+                                  {p.name}
+                                </button>
+                              </span>
+                            </AppTooltip>
+                            {isDone ? (
+                              <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                                <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
+                              </span>
+                            ) : isSelected ? (
+                              <RoleSelect
+                                options={roleChoices}
+                                value={selections[p.id]}
+                                onValueChange={(level) =>
+                                  setProjectRole(p.id, level as RoleLevel)
+                                }
+                                disabled={busy}
+                                size="sm"
+                                className="shrink-0"
+                                aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}
+                              />
+                            ) : (
+                              <span aria-hidden className="w-0" />
+                            )}
+                          </div>
+                          {errorMsg && (
+                            <AppTooltip content={errorMsg} className="max-w-xs">
+                              <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
+                                {errorMsg}
+                              </p>
+                            </AppTooltip>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </>
             )}
             {selectedIds.length > 0 && (
               <p className="mt-1 text-[10px] text-muted-foreground">

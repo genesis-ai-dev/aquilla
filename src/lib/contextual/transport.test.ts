@@ -230,6 +230,32 @@ describe("steering", () => {
       runId: RUN.runId,
     })
   })
+
+  it("reports a plain direction as a direction", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ steering: { id: "s1" } }, 201))
+    const result = await sendContextualSteering(RUN.runId, "Prefer shorter sentences")
+    expect(result).toMatchObject({ intent: "direction", applied: false })
+  })
+
+  it("surfaces the server's run-command verdict (AQU-1299)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "stop", applied: true }))
+    const result = await sendContextualSteering(RUN.runId, "stop")
+    expect(result).toMatchObject({ intent: "stop", applied: true })
+  })
+
+  it("reports an unapplied command without treating it as a failure", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "pause", applied: false }))
+    await expect(sendContextualSteering(RUN.runId, "hold on")).resolves.toMatchObject({
+      intent: "pause",
+      applied: false,
+    })
+  })
 })
 
 describe("project Autopilot observability", () => {
@@ -242,6 +268,38 @@ describe("project Autopilot observability", () => {
     expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/overview")
     expect(lastRequest().init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
     expect(result).toMatchObject({ available: true, doneSpans: 3, proposedDrafts: 2 })
+  })
+
+  it("polls conditionally: sends the retained ETag and replays the body on 304", async () => {
+    // WHY: auth-worker answers an unchanged poll with 304 and no body so the
+    // 4s poll loop moves no bytes. If the transport forgot the ETag, or threw
+    // on 304, every poll would be a full fetch — or the panel would flip into
+    // its refresh-warning state on a cache hit.
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ files: [], activeRuns: 1, doneSpans: 3, totalSpans: 8, failedSpans: 0,
+        unitsSpent: 14, proposedDrafts: 2, appliedDrafts: 1 }),
+      { status: 200, headers: { "Content-Type": "application/json", ETag: 'W/"abc"' } },
+    ))
+    const first = await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).not.toHaveProperty("If-None-Match")
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304, headers: { ETag: 'W/"abc"' } }))
+    const second = await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).toMatchObject({ "If-None-Match": 'W/"abc"' })
+    expect(second).toEqual(first)
+    expect(second).toMatchObject({ available: true, doneSpans: 3 })
+
+    // A changed body arrives as a fresh 200 with a new tag, replacing the retained one.
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ files: [], activeRuns: 0, doneSpans: 8, totalSpans: 8, failedSpans: 0,
+        unitsSpent: 20, proposedDrafts: 5, appliedDrafts: 1 }),
+      { status: 200, headers: { "Content-Type": "application/json", ETag: 'W/"def"' } },
+    ))
+    const third = await fetchContextualOverview(PROJECT_ID)
+    expect(third).toMatchObject({ doneSpans: 8, proposedDrafts: 5 })
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }))
+    await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).toMatchObject({ "If-None-Match": 'W/"def"' })
   })
 
   it("POSTs the project-wide start contract and preserves mixed results", async () => {

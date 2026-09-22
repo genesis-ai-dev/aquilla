@@ -6,10 +6,17 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { ArrowLeft, Square } from "lucide-react"
+import { ArrowLeft, Minimize2, Square } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
+import {
+  EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS,
+  EDITOR_SURFACE_TOOLBAR_CLASS,
+} from "@/components/editor-surface-toolbar"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
@@ -27,6 +34,7 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 import { CONVERSATION_PARAM, TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
 import { readAgentWorkspaceView, type AgentWorkspaceView } from "@/lib/agent/workspace-location"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
@@ -56,10 +64,20 @@ export interface AgentWorkbenchProps {
   fileNames?: ReadonlyMap<string, string>
   /** Return destination; following it leaves the Agent tab available. */
   editorHref: string
+  /** Header Collapse — only when the workbench was expanded from the sidebar dock. */
+  onCollapse?: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
   /** Reveal the file explorer while remaining in Agent mode. */
   onChooseFile?: () => void
+  /** Text / Audio / Agent switch — same control as the editor chapter row. */
+  editorMode?: {
+    lens: EditorLens
+    timeOrdered?: boolean
+    onLensChange: (lens: EditorLens) => void
+  }
+  /** File-identity ⋯ (rename / move / export / delete). Editor-only tools stay off this surface. */
+  fileMenuItems?: OverflowMenuItem[]
   /** Live document context flanking the Agent pane. */
   workspace?: {
     cells: AgentWorkbenchCell[]
@@ -88,12 +106,13 @@ export interface AgentWorkbenchProps {
     cellLockHolders?: ReadonlyMap<string, string>
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void
+    onViewCell?: (cellId: string | null) => void
     onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
     onVisibleCellIdsChange?: (cellIds: string[]) => void
   }
 }
 
-export function AgentWorkbench({ agent, credits, fileNames, editorHref, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollapse, onJumpToCell, onChooseFile, editorMode, fileMenuItems, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -117,6 +136,9 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onJumpTo
       return params
     })
   }, [setSearchParams])
+  const handleViewChange = useCallback((next: string) => {
+    if (next === "conversation" || next === "document" || next === "review" || next === "knowledge") setView(next)
+  }, [setView])
   // Selection-based requests belong to the main conversation, not the last task.
   useEffect(() => {
     if (!agent.pendingChip && !agent.pendingPrompt) return
@@ -311,69 +333,91 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onJumpTo
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Tabs
-        value={view}
-        onValueChange={(next) => {
-          if (next === "conversation" || next === "document" || next === "review" || next === "knowledge") setView(next)
-        }}
-        className="flex min-h-0 flex-1 flex-col gap-0"
-      >
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5">
-          {activeRun && (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
-              <Spinner className="h-3 w-3 shrink-0" />
-              <span className="truncate">
-                {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
-              </span>
+      {/* Own Tabs root for the view switch so the Text/Audio/Agent switch
+          (also Tabs) is not nested. Same chrome as the editor chapter row. */}
+      <div data-testid="agent-toolbar-row" className={cn(EDITOR_SURFACE_TOOLBAR_CLASS, "flex-wrap")}>
+        {activeRun && (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Spinner className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
             </span>
-          )}
-          {state.queued.length > 0 && (
-            <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
-          )}
+          </span>
+        )}
+        {state.queued.length > 0 && (
+          <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
+        )}
 
-          <TabsList
-            variant="line"
-            className="h-7 w-fit shrink-0 p-0"
-            aria-label={t("agentWorkspace.sections")}
-          >
-            <TabsTrigger value="conversation" className="h-full px-2 text-xs">
-              {t("agentWorkspace.conversation")}
-            </TabsTrigger>
+        <Tabs value={view} onValueChange={handleViewChange} className="gap-0">
+          <TabsList aria-label={t("agentWorkspace.sections")}>
+            <TabsTrigger value="conversation">{t("agentWorkspace.conversation")}</TabsTrigger>
             {showDocumentTab && (
-              <TabsTrigger value="document" className="h-full px-2 text-xs">
-                {t("agentWorkspace.document")}
-              </TabsTrigger>
+              <TabsTrigger value="document">{t("agentWorkspace.document")}</TabsTrigger>
             )}
             {showReviewTab && (
-              <TabsTrigger value="review" className="h-full px-2 text-xs">
-                {t("agent.team.reviewDrafts")}
-              </TabsTrigger>
+              <TabsTrigger value="review">{t("agent.team.reviewDrafts")}</TabsTrigger>
             )}
-            <TabsTrigger value="knowledge" className="h-full px-2 text-xs">
-              {t("agentWorkspace.projectKnowledge")}
-            </TabsTrigger>
+            <TabsTrigger value="knowledge">{t("agentWorkspace.projectKnowledge")}</TabsTrigger>
           </TabsList>
+        </Tabs>
 
-          <span className="ml-auto flex shrink-0 items-center gap-1">
-            {credits && <CreditsDial {...credits} />}
-            {state.isStreaming && (
-              <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
-                <Square data-icon="inline-start" />
-                {t("common.stop")}
+        <div className="ms-auto flex shrink-0 items-center gap-2">
+          {editorMode ? (
+            <>
+              <EditorModeToggle
+                lens={editorMode.lens}
+                onChange={editorMode.onLensChange}
+                agentActive
+                timeOrdered={editorMode.timeOrdered}
+              />
+              <OverflowMenu
+                items={fileMenuItems ?? []}
+                triggerVariant="outline"
+                triggerSize="icon"
+                triggerClassName={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
+                ariaLabel="File options"
+                testId="file-options-menu"
+              />
+            </>
+          ) : null}
+          {credits && <CreditsDial {...credits} />}
+          {state.isStreaming && (
+            <Button type="button" variant="outline" size="sm" onClick={stop}>
+              <Square data-icon="inline-start" />
+              {t("common.stop")}
+            </Button>
+          )}
+          <AgentChatOptions
+            key={JSON.stringify([agent.projectId, agent.author])}
+            onReset={reset}
+            disabled={applying}
+          />
+          <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            <ArrowLeft aria-hidden data-icon="inline-start" className="rtl:rotate-180" />
+            {t("agentWorkspace.backToEditor")}
+          </Link>
+          {onCollapse ? (
+            <AppTooltip content={t("agentWorkspace.collapseHelp")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                onClick={onCollapse}
+                aria-label={t("agentWorkspace.collapsePane")}
+              >
+                <Minimize2 />
               </Button>
-            )}
-            <AgentChatOptions
-              key={JSON.stringify([agent.projectId, agent.author])}
-              onReset={reset}
-              disabled={applying}
-            />
-            <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              <ArrowLeft aria-hidden data-icon="inline-start" className="rtl:rotate-180" />
-              {t("agentWorkspace.backToEditor")}
-            </Link>
-          </span>
+            </AppTooltip>
+          ) : null}
         </div>
+      </div>
 
+      <Tabs
+        value={view}
+        onValueChange={handleViewChange}
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
         {isConversationView && <TabsContent value="conversation" className="flex min-h-0 flex-1 flex-col">
           <TeamThreadsView
             projectId={agent.projectId}

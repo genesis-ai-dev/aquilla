@@ -40,6 +40,12 @@ import {
 } from "../types"
 import { resolveProjectRole, isLinkRoleLevel } from "../services/project-permissions"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
+import {
+  ACCESS_LINK_REDEEM_MAX_PER_IP,
+  countRecentEvents,
+  ipIdentifier,
+  recordAuthEvent,
+} from "../utils/rate-limit"
 
 const accessLinks = new Hono<AuthHonoEnv>()
 
@@ -106,6 +112,44 @@ accessLinks.post("/", authMiddleware, zValidator("json", createSchema), async (c
     .first<{ id: number; username: string }>()
   if (!targetUser) {
     return c.json({ error: "target user not found" }, 404)
+  }
+
+  // [Pen test] Authorization & access control (2026-09-08): redemption below
+  // mints a full, unscoped login session for the bound account — not merely
+  // project access. Until now `userId` was trusted at face value, so any
+  // project_lead+ caller (trivially every user, via their own personal
+  // project) could target an arbitrary numeric userId platform-wide and
+  // immediately redeem a real login as that account: full cross-tenant
+  // account takeover, IDOR on `userId`. This route's own design comment says
+  // a link binds a "pre-provisioned" account — enforce that: the target must
+  // not already have a footprint outside this project/org. A genuinely fresh
+  // translator account (the intended flow) always clears this; an
+  // established account with memberships elsewhere never does.
+  const projectOrg = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = projectOrg?.org_id ?? null
+  const foreignFootprint =
+    orgId === null
+      ? await c.env.AQUILLA_PG.prepare(
+          `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+           UNION ALL
+           SELECT 1 FROM org_members WHERE user_id = ?`,
+        )
+          .bind(userId, projectId, userId)
+          .first()
+      : await c.env.AQUILLA_PG.prepare(
+          `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+           UNION ALL
+           SELECT 1 FROM org_members WHERE user_id = ? AND org_id != ?`,
+        )
+          .bind(userId, projectId, userId, orgId)
+          .first()
+  if (foreignFootprint) {
+    return c.json(
+      { error: "target user already has access elsewhere on the platform" },
+      403,
+    )
   }
 
   const grantedRole = clampLinkRole(roleLevel ?? ROLE.CONTRIBUTOR)
@@ -185,6 +229,18 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
 
   const token = c.req.param("token")
   const { pin } = c.req.valid("json")
+  const ipIdent = ipIdentifier(c.req.header("CF-Connecting-IP") || "unknown")
+
+  // Per-IP throttle, in addition to the per-token lockout below — checked
+  // before touching the DB for the token lookup so a throttled caller can't
+  // keep using this endpoint as a token/PIN oracle. See the [Pen test]
+  // comment on ACCESS_LINK_REDEEM_MAX_PER_IP for why this exists.
+  const ipFailures = await countRecentEvents(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, {
+    onlyFailures: true,
+  })
+  if (ipFailures >= ACCESS_LINK_REDEEM_MAX_PER_IP) {
+    return c.json({ error: "Too many attempts. Please try again later." }, 429)
+  }
 
   const link = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, user_id, pin_hash, role_level, created_by,
@@ -198,10 +254,22 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
   // Unknown / revoked / expired / locked all collapse to the same dead-link
   // response — no branch is observable to the caller.
   const now = new Date()
-  if (!link) return c.json(DEAD_LINK, 401)
-  if (link.revoked_at) return c.json(DEAD_LINK, 401)
-  if (link.expires_at && new Date(link.expires_at) < now) return c.json(DEAD_LINK, 401)
-  if (link.locked_until && new Date(link.locked_until) > now) return c.json(DEAD_LINK, 401)
+  if (!link) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.revoked_at) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.expires_at && new Date(link.expires_at) < now) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.locked_until && new Date(link.locked_until) > now) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
 
   let pinOk = false
   try {
@@ -236,6 +304,7 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     } catch (err) {
       console.error("[access-links] attempt bump failed:", err)
     }
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }
 
@@ -249,8 +318,10 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     .first<{ username: string }>()
   if (!boundUser) {
     // Bound account was deleted after mint — the link is dead.
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }
+  await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, true)
 
   try {
     await c.env.AQUILLA_PG.prepare(

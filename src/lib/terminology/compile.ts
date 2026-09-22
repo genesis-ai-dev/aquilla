@@ -4,10 +4,17 @@
  * Produces rules that feed directly into the existing rule-engine so
  * terminology violations are DERIVED on read — no materialized verdicts.
  *
+ * AQU-1230: the compilation itself moved to ./compile-core, which is
+ * alias-free and worker-importable, so the Agent API's effective-prompt
+ * preview compiles a project's terminology into the SAME rules — and therefore
+ * the same injected prompt block — as the editor. This module is the app-facing
+ * entry point and the only place that knows about i18n: `name`/`description`
+ * are display strings and play no part in prompt injection.
+ *
  * Rules produced per active concept:
  *   preferred / admitted renderings → one `source-requires-target` rule
- *     (source contains sourceTerm ⇒ target must contain at least one approved
- *      rendering; absence = "term not rendered with an approved rendering")
+ *     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
+ *      approved rendering, and extra renderings in the target are also a miss)
  *   each forbidden rendering → one `target-forbids` rule per rendering
  *     (source contains sourceTerm AND target contains forbidden text ⇒ violation)
  *
@@ -15,16 +22,23 @@
  */
 
 import type { TranslationRule } from "@/lib/parsers/types"
-import type { Concept } from "./types"
-import { termToRegexSource } from "./match"
+import type { Concept, TermMatchingSettings } from "./types"
+import { conceptToRegexSource, termToRegexSource } from "./match"
 import { t } from "@/lib/i18n/standalone"
 
-/**
- * Escape a string for safe use inside a RegExp literal. Only used to build the
- * STABLE rule `id` discriminator for forbidden renderings (other code groups by
- * id, so the scheme must not change) — NOT for match patterns, which go through
- * the shared wildcard-aware matcher in ./match.
- */
+// AQU-1271's source-form matcher (`conceptToRegexSource`, below) reaches
+// `./types` for `Concept`/`TermMatchingSettings`, which is not
+// alias-free-reachable (types.ts imports `@/lib/i18n/messages/en`), so this
+// app-facing entry point compiles inline rather than delegating to
+// `./compile-core` (AQU-1230's worker-safe core, still used directly by
+// `sync-worker/src/external/prompt-preview.ts`). That core stays on the plain
+// `termToRegexSource` source match — no termMatching settings — for its
+// worker-side callers.
+
+/** Escape a string for safe use inside a RegExp literal. Only used to build
+ *  the STABLE rule `id` discriminator for forbidden renderings (other code
+ *  groups by id, so the scheme must not change) — NOT for match patterns,
+ *  which go through the shared wildcard-aware matcher in ./match. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -35,7 +49,10 @@ function escapeRegex(s: string): string {
  * Only `active` concepts produce rules. The returned rules use existing
  * TranslationRule check types — no new check kinds are introduced.
  */
-export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
+export function compileConceptsToRules(
+  concepts: Concept[],
+  termMatching?: TermMatchingSettings,
+): TranslationRule[] {
   const rules: TranslationRule[] = []
   const now = new Date().toISOString()
 
@@ -47,12 +64,14 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
     )
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-    // Wildcard-aware source pattern (grac* matches grace/graced/gracia, etc.).
-    // termToRegexSource returns null for empty/whitespace terms → skip concept.
-    const sourcePattern = termToRegexSource(concept.sourceTerm)
+    // AQU-1271: the SOURCE side goes through the concept matcher, so the rule
+    // engine sees the same surface forms as chips, stats and the term page —
+    // wildcards plus mark-folding, project affixes, extra forms and exclusions.
+    // Returns null for empty/whitespace terms → skip concept.
+    const sourcePattern = conceptToRegexSource(concept, termMatching)
     if (sourcePattern === null) continue
 
-    // source-requires-target: source contains the term ⇒ target must have an approved rendering.
+    // source-requires-target: each source instance needs a counterpart rendering.
     if (approved.length > 0) {
       // Alternation of all approved renderings, each wildcard-aware. Drop any
       // empty rendering pattern. rule-engine compiles this with /i (+/u for
@@ -81,6 +100,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
           type: "source-requires-target",
           sourcePattern,
           targetPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }
@@ -112,6 +132,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
         check: {
           type: "target-forbids",
           targetPattern: forbiddenPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }

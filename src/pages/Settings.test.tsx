@@ -6,6 +6,14 @@ import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurit
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
+
 vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
@@ -34,6 +42,8 @@ const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     exportMinRole: null,
+    egressMinRole: 700,
+    canEgress: true,
     patch: mockPatch,
     settings: {},
     orgRules: [],
@@ -54,14 +64,22 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     // AQU-496: self-assignment authority — default leads-only.
     allowSelfAssignment: false,
+    // AQU-1037: assigning work to others defaults to Project lead.
+    assignmentMinRole: 500,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
+    // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
+    commentCreateMinRole: 200,
+    commentResolveMinRole: 400,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
   canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditEgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditCommentFloors: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => {
@@ -152,6 +170,7 @@ describe("Security settings page", () => {
     expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
     expect(screen.getByLabelText(/who can export/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
     expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
     expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
   })
@@ -166,6 +185,15 @@ describe("Security settings page", () => {
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
     expect(toast.add).not.toHaveBeenCalled()
+  })
+
+  it("patches the egress floor on change — an owner opens Data egress to maintainers (AQU-907)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByLabelText(/who can use data egress/i)).toBeDefined())
+
+    await pickSelectOption(/who can use data egress/i, /maintainer \(600\)/i)
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ egressMinRole: 600 }))
   })
 
   it("surfaces a server error when the export save fails", async () => {

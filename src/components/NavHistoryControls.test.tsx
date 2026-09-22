@@ -40,13 +40,18 @@ describe("NavHistoryControls", () => {
     expect(previouslyViewed).toHaveAttribute("data-variant", "ghost")
   })
 
-  it("stacks the clock and both arrows when placed in a collapsed rail", () => {
-    render(<NavHistoryControls vertical />)
-    expect(screen.getByRole("group", { name: "Page history" })).toHaveClass("flex-col")
+  it("stacks the clock above the arrows when orientation is vertical", () => {
+    render(<NavHistoryControls orientation="vertical" />)
+
+    const group = screen.getByRole("group", { name: "Page history" })
+    expect(group).toHaveAttribute("data-orientation", "vertical")
+    expect(group).toHaveClass("flex-col")
+
     const back = screen.getByRole("button", { name: "Back to Alpha" })
     const forward = screen.getByRole("button", { name: "Forward" })
-    expect(back.closest("[data-slot=button-group]")).toHaveAttribute("data-orientation", "vertical")
-    expect(back.closest("[data-slot=button-group]")).toContainElement(forward)
+    const arrowGroup = back.closest("[data-slot=button-group]")
+    expect(arrowGroup).toHaveAttribute("data-orientation", "vertical")
+    expect(arrowGroup).toContainElement(forward)
     expect(screen.getByRole("button", { name: "Previously viewed" })).toBeInTheDocument()
     fireEvent.click(back)
     expect(nav.goBack).toHaveBeenCalledTimes(1)

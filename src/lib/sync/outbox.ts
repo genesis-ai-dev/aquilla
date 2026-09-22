@@ -6,9 +6,17 @@
  * "just enqueued" from "retried, kept by the server" (401/403 quarantine
  * waiting on a fresh token). Updates are best-effort via `markOutboxAttempt`;
  * a failed write doesn't block the flusher.
+ *
+ * Tauri desktop offline routing (Phase 4): `enqueueOutboxEvent(s)` first check
+ * whether the event should instead land in LiveStore's local `event_queue`
+ * (src/lib/offline/schema.ts) — see `routeToOfflineQueueIfEligible` below.
+ * This is a no-op everywhere except the Tauri desktop app, so the browser
+ * SPA's write path (the vast majority of real traffic) is unaffected.
  */
 
-import type { CqrsRawEvent } from "./outbox-types"
+import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { journalTargetCommit, clearJournalRecord, recoverJournal } from "./outbox-recovery"
 
 const DB_NAME = "aquilla-cqrs-outbox"
 /** v3: new records carry the account that created them. */
@@ -59,6 +67,14 @@ let dbPromise: Promise<IDBDatabase> | null = null
 let activeOwnerKey: string | null | undefined
 let activeOwnerVersion = 0
 
+/**
+ * Explicit account boundary for background work. Foreground callers omit this
+ * and continue to follow the currently published account boundary.
+ */
+export interface OutboxOwnerScope {
+  ownerKey: string | null
+}
+
 /** Set synchronously with the app's published account boundary. */
 export function setActiveOutboxOwner(ownerKey: string | null): void {
   if (activeOwnerKey === ownerKey) return
@@ -77,6 +93,17 @@ function belongsToOwner(
   ownerKey: string | null | undefined,
 ): boolean {
   return ownerKey === undefined || record.ownerKey === ownerKey
+}
+
+function ownerForScope(scope?: OutboxOwnerScope): string | null | undefined {
+  return scope ? scope.ownerKey : activeOwnerKey
+}
+
+function belongsToMutationScope(
+  record: Pick<OutboxRecord, "ownerKey">,
+  scope?: OutboxOwnerScope,
+): boolean {
+  return !scope || record.ownerKey === scope.ownerKey
 }
 
 /**
@@ -154,7 +181,13 @@ async function openDb(): Promise<IDBDatabase> {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onerror = () => reject(req.error ?? new Error("IDB open failed"))
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        void recoverJournal(req.result, STORE).then(() => resolve(req.result), (error) => {
+          req.result.close()
+          dbPromise = null
+          reject(error)
+        })
+      }
       req.onupgradeneeded = (ev) => {
         const db = req.result
         const tx = req.transaction
@@ -193,11 +226,73 @@ async function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
+/**
+ * Tauri desktop offline routing (Phase 4): the three event kinds that make
+ * sense to keep working entirely offline. Everything else (cell
+ * create/delete/reorder, comments, terminology, …) always goes through the
+ * normal IndexedDB → HTTP outbox path, even offline in Tauri — the UI is
+ * expected to disable those controls when offline; this module isn't
+ * responsible for blocking them.
+ */
+const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEventKind>([
+  "target.cell.commit",
+  "cell.validate",
+  "cell.unvalidate",
+])
+
+/**
+ * Tauri-only: if `event` is one of the offline-routable kinds AND its project
+ * has a ready local LiveStore copy, commit it straight into LiveStore's
+ * `event_queue` (Phase 3's sync adapter owns flushing those to the server) and
+ * return true — the caller must NOT also write it to IndexedDB.
+ *
+ * The LiveStore-backed modules (store.ts, offline-reads.ts, schema.ts) are
+ * dynamically imported here rather than statically at the top of this file:
+ * this file is on every web-build code path, and is-tauri.ts's whole reason
+ * for existing separately is to let modules like this one check the runtime
+ * without pulling LiveStore/OPFS/wa-sqlite into the plain browser SPA bundle.
+ * Checking the kind first (a synchronous Set lookup) also means the common
+ * case — an event kind that never routes offline — never pays for the import
+ * or a store round-trip at all.
+ */
+async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
+  if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
+  const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
+    import("@/lib/offline/store"),
+    import("@/lib/offline/offline-reads"),
+    import("@/lib/offline/schema"),
+  ])
+  const store = await getOfflineStore()
+  if (!isProjectOfflineReady(store, event.projectId)) return false
+  store.commit(
+    offlineEvents.eventQueued({
+      id: event.id,
+      projectId: event.projectId,
+      fileId: event.fileId ?? null,
+      cellId: event.cellId ?? null,
+      kind: event.kind,
+      payload: event.payload,
+      parentId: event.parentId ?? null,
+      author: event.author,
+      schemaVersion: event.schemaVersion,
+      clientTs: new Date(event.clientTs),
+      createdAt: new Date(),
+    }),
+  )
+  return true
+}
+
 export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
+  // Tauri desktop offline routing (Phase 4): eligible kinds on a
+  // ready-for-offline project bypass IndexedDB entirely — LiveStore's
+  // event_queue (+ its own sync adapter) fully replaces the IDB outbox for
+  // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
+  // adds no overhead to the browser SPA's write path.
+  if (isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) return
+
   // Capture before IndexedDB opens. A transition that lands during that await
   // must not reclassify an edit initiated by the previous account.
   const ownerKey = activeOwnerKey
-  const db = await openDb()
   const rec: OutboxRecord = {
     id: event.id,
     enqueuedAt: Date.now(),
@@ -208,21 +303,43 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
     status: "pending",
     ownerKey,
   }
+  // pagehide cannot await openDb or a transaction. Persist the same event
+  // synchronously first, preserving the account that initiated this write.
+  if (ownerKey !== undefined) journalTargetCommit(rec)
+  const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("enqueue tx failed"))
     tx.oncomplete = () => resolve()
     tx.objectStore(STORE).put(rec)
   })
+  clearJournalRecord(event.id)
   notifyOutboxChanged()
 }
 
 /** Enqueue many events in ONE transaction and fire a SINGLE change
  *  notification. Used by bulk import so a large batch produces one overlay
  *  rebuild + one badge refresh instead of N. Same-id `put` overwrites, so a
- *  re-enqueue of already-queued events is a no-op (idempotent). */
+ *  re-enqueue of already-queued events is a no-op (idempotent).
+ *
+ *  Tauri desktop offline routing (Phase 4): the batch is partitioned first —
+ *  events eligible for offline routing (see `routeToOfflineQueueIfEligible`)
+ *  are committed individually into LiveStore's event_queue and never touch
+ *  IndexedDB; the remainder still go through the one-transaction/one-notify
+ *  IndexedDB write below, unchanged. */
 export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
   if (events.length === 0) return
+
+  let remaining = events
+  if (isTauriRuntime()) {
+    const toIndexedDb: CqrsRawEvent[] = []
+    for (const event of events) {
+      if (!(await routeToOfflineQueueIfEligible(event))) toIndexedDb.push(event)
+    }
+    remaining = toIndexedDb
+  }
+  if (remaining.length === 0) return
+
   const ownerKey = activeOwnerKey
   const db = await openDb()
   const now = Date.now()
@@ -231,7 +348,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
     tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
-    for (const event of events) {
+    for (const event of remaining) {
       const rec: OutboxRecord = {
         id: event.id,
         enqueuedAt: now,
@@ -258,6 +375,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
 export async function markOutboxAttempt(
   ids: string[],
   outcome: { error: OutboxAttemptError | null; at?: number },
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -278,7 +396,7 @@ export async function markOutboxAttempt(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const newAttempts = (rec.attempts ?? 0) + 1
         const next: OutboxRecord = {
           id: rec.id,
@@ -313,6 +431,7 @@ export async function markOutboxAttempt(
 export async function stampOutboxError(
   ids: string[],
   error: OutboxAttemptError,
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -331,7 +450,7 @@ export async function stampOutboxError(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -350,8 +469,11 @@ export async function stampOutboxError(
 }
 
 /** Oldest-first rows (all statuses), at most `limit`. */
-export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
-  const ownerKey = activeOwnerKey
+export async function peekOutboxBatch(
+  limit: number,
+  scope?: OutboxOwnerScope,
+): Promise<OutboxRecord[]> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -506,8 +628,11 @@ export async function getOutboxRecordsForCell(
 }
 
 /** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
-export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecord[]> {
-  const ownerKey = activeOwnerKey
+export async function peekPendingOutboxBatch(
+  limit: number,
+  scope?: OutboxOwnerScope,
+): Promise<OutboxRecord[]> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -534,8 +659,8 @@ export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecor
 }
 
 /** Count of records that have permanently failed (exceeded retry cap). */
-export async function outboxFailedCount(): Promise<number> {
-  const ownerKey = activeOwnerKey
+export async function outboxFailedCount(scope?: OutboxOwnerScope): Promise<number> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -571,6 +696,7 @@ export async function outboxFailedCount(): Promise<number> {
 export async function quarantineOutboxEvents(
   ids: string[],
   error: OutboxAttemptError,
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -589,7 +715,7 @@ export async function quarantineOutboxEvents(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -615,7 +741,10 @@ export async function quarantineOutboxEvents(
  * (reset backoff + force a flush) so the retry happens immediately rather than
  * after the next backoff window.
  */
-export async function requeueOutboxEvents(ids: string[]): Promise<void> {
+export async function requeueOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
   try {
@@ -632,7 +761,7 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -658,7 +787,10 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
  * the record keeps its status/lastError and stays in the inspector (where it
  * can be retried or discarded). No-op for ids that don't exist.
  */
-export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
+export async function acknowledgeOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
   try {
@@ -676,7 +808,7 @@ export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as OutboxRecord | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         store.put({ ...rec, acknowledgedAt: at })
       }
     }
@@ -694,8 +826,10 @@ export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
  * after the max-attempt cap would have been reached under the old policy.
  * The caller should also call flushNow() to drain immediately.
  */
-export async function requeueTransientlyFailedOutboxEvents(): Promise<void> {
-  const ownerKey = activeOwnerKey
+export async function requeueTransientlyFailedOutboxEvents(
+  scope?: OutboxOwnerScope,
+): Promise<void> {
+  const ownerKey = ownerForScope(scope)
   let db: IDBDatabase
   try {
     db = await openDb()
@@ -738,7 +872,10 @@ export async function requeueTransientlyFailedOutboxEvents(): Promise<void> {
   notifyOutboxChanged()
 }
 
-export async function removeOutboxEvents(ids: string[]): Promise<void> {
+export async function removeOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
@@ -747,14 +884,22 @@ export async function removeOutboxEvents(ids: string[]): Promise<void> {
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
     for (const id of ids) {
-      store.delete(id)
+      if (!scope) {
+        store.delete(id)
+        continue
+      }
+      const request = store.get(id)
+      request.onsuccess = () => {
+        const record = request.result as OutboxRecord | undefined
+        if (record && belongsToMutationScope(record, scope)) store.delete(id)
+      }
     }
   })
   notifyOutboxChanged()
 }
 
-export async function outboxPendingCount(): Promise<number> {
-  const ownerKey = activeOwnerKey
+export async function outboxPendingCount(scope?: OutboxOwnerScope): Promise<number> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {

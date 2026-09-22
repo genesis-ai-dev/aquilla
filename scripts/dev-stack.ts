@@ -32,6 +32,9 @@
 //
 // Flags:
 //   --no-sync     skip sync-worker (rare; some flows need only auth)
+//   --no-mock-llm skip scripts/mock-openrouter.ts and do not inject
+//                 OPENROUTER_API_KEY=mock. Hosted chat then 500s with
+//                 OPENROUTER_API_KEY is not configured (AQU-1158 local repro).
 //   --no-sandbox  skip the agent-worker sandbox service. Without this flag,
 //                 an explicitly configured endpoint is used first; otherwise
 //                 a local container is auto-started when Docker is available.
@@ -67,6 +70,7 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -125,6 +129,8 @@ const MANAGE_PG_CONTAINER = !EXTERNAL_PG_URL
 
 const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
+const WITHOUT_MOCK_LLM =
+  args.includes("--no-mock-llm") || process.env.DEV_STACK_NO_MOCK_LLM === "1"
 // --no-sandbox forces the agent-worker to be skipped even when Docker is up.
 const WITHOUT_SANDBOX = args.includes("--no-sandbox")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
@@ -344,7 +350,7 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
@@ -495,6 +501,8 @@ async function reconcilePgSchema(
     patched.push("rebuilt file_section_progress PK with target_lang")
   }
 
+  await finalizeProgressSchema(run)
+
   // AQU-AGENT: the Agent API changeset lifecycle added the transitional
   // 'committing' status (schema.sql line ~782, used by commit.ts). The generic
   // loop above never touches CHECK constraints, so a container created before
@@ -595,7 +603,10 @@ async function main(): Promise<void> {
   // Without a real OpenRouter key, boot the scripted mock so the agent and
   // chat paths work end-to-end (deterministic model, zero cost). A real key
   // in auth-worker/.dev.vars wins — no mock, no overrides.
-  const useMockLlm = !identityHasRealOpenRouterKey()
+  const useMockLlm = !WITHOUT_MOCK_LLM && !identityHasRealOpenRouterKey()
+  if (WITHOUT_MOCK_LLM) {
+    console.log("[dev-stack] mock OpenRouter skipped (--no-mock-llm)")
+  }
   if (useMockLlm) {
     await freePort(MOCK_LLM_PORT)
     console.log(`[dev-stack] starting mock OpenRouter on :${MOCK_LLM_PORT}… (no real OPENROUTER_API_KEY in auth-worker/.dev.vars)`)
@@ -828,7 +839,9 @@ async function main(): Promise<void> {
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
-      : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+      : WITHOUT_MOCK_LLM
+        ? `         llm      -> skipped (--no-mock-llm; hosted chat 500s without OPENROUTER_API_KEY)`
+        : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

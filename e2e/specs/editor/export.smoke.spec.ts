@@ -3,7 +3,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 import { readFile, writeFile } from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import JSZip from "jszip"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 async function writeMinimalDocx(filePath: string): Promise<void> {
   const zip = new JSZip()
@@ -39,9 +43,12 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
  *    Playwright intercepts as a download event, named after the source file.
  *  - A DOCX source artifact is persisted atomically and can be downloaded in
  *    its original structure without a missing-source error.
+ *  - Download original (AQU-656) returns the imported USFM bytes; Export source
+ *    injects the committed translation into the same file.
  *
  * What this does NOT cover:
- *  - USFM/PPTX side-car round-trips (need fixtures + server code path).
+ *  - USFM/PPTX reconstructed round-trips other than the original-vs-injected
+ *    identity check below (need extra fixtures + server code path).
  *  - Format conversions (covered by export-format-switch.smoke.spec.ts).
  *  - Project-scope zip (different code path; covered by manual verification).
  */
@@ -116,4 +123,42 @@ test("DOCX import records its source and downloads the original structure", asyn
   expect(await downloaded.file("word/document.xml")!.async("string"))
     .toContain("Round-trip source paragraph")
   await expect(dialog.getByText(/Downloaded roundtrip-source\.docx/i)).toBeVisible()
+})
+
+test("Download original returns imported USFM bytes, not the translation-injected export", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `Original USFM ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  const fixture = path.resolve(__dirname, "../../fixtures/sample.usfm")
+  await ws.importFile(fixture)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+
+  const marker = `AQU656-${Date.now()}`
+  const verseIndex = await ws.cellIndexWithSource("In the beginning God created")
+  await ws.editCell(verseIndex, marker)
+
+  const [originalDownload] = await Promise.all([
+    alice.waitForEvent("download", { timeout: 15_000 }),
+    ws.clickDownloadOriginal(),
+  ])
+  expect(originalDownload.suggestedFilename()).toMatch(/sample\.usfm$/i)
+  const originalPath = await originalDownload.path()
+  expect(originalPath).not.toBeNull()
+  const originalText = await readFile(originalPath!, "utf8")
+  expect(originalText).toContain("In the beginning God created the heavens and the earth.")
+  expect(originalText).not.toContain(marker)
+
+  const [sourceDownload] = await Promise.all([
+    alice.waitForEvent("download", { timeout: 15_000 }),
+    ws.clickExportSource(),
+  ])
+  const sourcePath = await sourceDownload.path()
+  expect(sourcePath).not.toBeNull()
+  const injected = await readFile(sourcePath!, "utf8")
+  expect(injected).toContain(marker)
 })

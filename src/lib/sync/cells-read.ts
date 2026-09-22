@@ -11,6 +11,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
+import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
 // the read-API module rather than reaching into cells-read-types directly.
@@ -32,7 +33,7 @@ async function readJson<T>(res: Response): Promise<T> {
     const body = await res.text().catch(() => "")
     throw new CellsReadError(res.status, body)
   }
-  return (await res.json()) as T
+  return readSyncJson<T>(res)
 }
 
 function authHeaders(jwt: string): Record<string, string> {
@@ -105,7 +106,7 @@ async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < CELL_READ_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(url, fetchInit(jwt))
+      const res = await observedSyncFetch(url, fetchInit(jwt))
       return await readJson<T>(res)
     } catch (error) {
       lastError = error
@@ -118,21 +119,41 @@ async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
   throw lastError
 }
 
+/** Page size the SPA asks the files listing for. */
+export const FILES_PAGE_SIZE = 100
+
 /**
- * GET /api/v1/projects/:projectId/files
+ * GET /api/v1/projects/:projectId/files?limit=100&cursor=
  *
- * Returns every file in the project, ordered by recency (most-recent first).
- * Counters are projected from the event log — never out of date by more than
- * an onSave debounce window (~2s).
+ * Returns every file in the project, ordered by recency (most-recent first),
+ * fetched in pages of FILES_PAGE_SIZE and concatenated. Counters are projected
+ * from the event log — never out of date by more than an onSave debounce
+ * window (~2s). A worker that predates paging returns the full list with no
+ * cursor, which this loop handles as a single page.
  */
 export async function fetchProjectFiles(
   projectId: string,
   jwt: string,
 ): Promise<FileSummary[]> {
-  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
-  const res = await fetch(url, fetchInit(jwt))
-  const body = await readJson<{ files: FileSummary[] }>(res)
-  return body.files
+  const base = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
+  const files: FileSummary[] = []
+  const seen = new Set<string>()
+  let cursor: string | null = null
+  do {
+    const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
+    if (cursor) params.set("cursor", cursor)
+    const res = await observedSyncFetch(`${base}?${params.toString()}`, fetchInit(jwt))
+    const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
+    for (const f of body.files) {
+      // A file edited between two page fetches can move ahead of the cursor
+      // and reappear; keep the first copy.
+      if (seen.has(f.fileId)) continue
+      seen.add(f.fileId)
+      files.push(f)
+    }
+    cursor = body.nextCursor ?? null
+  } while (cursor)
+  return files
 }
 
 /**
@@ -146,7 +167,7 @@ export async function fetchDeletedFiles(
   jwt: string,
 ): Promise<FileSummary[]> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files?trash=1`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const res = await observedSyncFetch(url, { headers: authHeaders(jwt) })
   const body = await readJson<{ files: FileSummary[] }>(res)
   return body.files
 }
@@ -164,12 +185,14 @@ export async function fetchFile(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}`
-  const res = await fetch(url, fetchInit(jwt))
+  const res = await observedSyncFetch(url, fetchInit(jwt))
   const body = await readJson<{ file: FileSummary }>(res)
   return body.file
 }
 
 export interface FetchFileCellsOptions {
+  /** Keep all sides/lanes of each cell together on a page. */
+  paired?: boolean
   /** Restrict to a single side. Omit to fetch both source and target rows
    *  — the default for the editor table which renders them paired. */
   side?: "source" | "target"
@@ -190,6 +213,8 @@ export interface FetchFileCellsOptions {
  *  locally (cells-read-types is owned elsewhere this wave); `maxServerSeq`
  *  is absent when talking to a pre-M2-1 server. */
 export interface CellsPageWithMeta extends CellsPage {
+  /** Server confirms this page contains complete source/target row groups. */
+  completeRows?: boolean
   maxServerSeq?: number | null
   /** AQU-943: the project incarnation this page's watermark belongs to.
    *  Absent when talking to a pre-AQU-943 server. */
@@ -209,6 +234,7 @@ export async function fetchFileCells(
   jwt: string,
 ): Promise<CellsPageWithMeta> {
   const params = new URLSearchParams()
+  if (opts.paired) params.set("paired", "1")
   if (opts.side) params.set("side", opts.side)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
@@ -342,8 +368,9 @@ export async function fetchCellsByIds(
 /**
  * Stream every page of cells for a file. Invokes `onPage(rows, isLast)` after
  * each successful page fetch so the caller can render incrementally instead
- * of waiting for the whole file. Pages arrive in server order: source rows in
- * anchor-chain order first, then target rows in anchor-chain order.
+ * of waiting for the whole file. With `paired`, each page contains complete
+ * source/target/lane groups in source-chain order, followed by target-only
+ * groups. Otherwise the legacy order is sources then targets.
  *
  * `onPage` may return `false` (or a Promise resolving to `false`) to abort
  * pagination — typically because the caller switched files mid-stream and
@@ -358,6 +385,11 @@ export async function fetchCellsByIds(
  * mid-stream — and because the server paginates by offset, a row that shifted
  * across a page boundary may have been skipped entirely (a torn snapshot), so
  * callers must NOT mint a `?since=` cursor from such a stream (audit B2).
+ * (AQU-1160: the server may now serve a page's rows from an ordered-id cache
+ * keyed by the same watermark instead of re-walking the file, but the cursor
+ * is still an offset into that ordering and the cache is invalidated exactly
+ * when the watermark changes — so this torn-snapshot reasoning, and the "no
+ * `?since=` cursor from a mid-stream watermark change" rule, are unaffected.)
  */
 export async function streamFileCells(
   projectId: string,
@@ -365,19 +397,29 @@ export async function streamFileCells(
   jwt: string,
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
-  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
+  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null; total?: number }) => void,
   lane?: string,
+  paired = false,
 ): Promise<void> {
   let cursor: string | undefined
-  // Hard cap on page iterations as a safety belt against a malformed nextCursor
-  // loop. At max page size (2000) this allows up to 200k cells per file.
-  const MAX_PAGES = 100
+  // A SPA can arrive before its worker deployment. Older workers ignore the
+  // opt-in and return columns, so buffer their entire response before paint.
+  const legacyRows: CellRow[] = []
+  let legacy = false
+  // Paired reads combine the old side/lane streams, so allow enough pages
+  // for a translated Bible plus additional target languages.
+  const MAX_PAGES = paired ? 1000 : 100
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane }, jwt)
-    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch })
+    // Keep the first paint small; amortize subsequent network/database work.
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : 2000 }, jwt)
+    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch, total: page.total })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
-    const cont = await onPage(page.cells, isLast)
+    legacy ||= paired && page.completeRows !== true
+    if (legacy) legacyRows.push(...page.cells)
+    // Empty callbacks preserve the caller's cancellation fence while an old
+    // worker is buffering; they never expose an incomplete editable row.
+    const cont = await onPage(legacy ? (isLast ? legacyRows : []) : page.cells, isLast)
     if (cont === false) return
     if (isLast) return
     cursor = nextCursor

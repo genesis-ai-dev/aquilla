@@ -9,6 +9,8 @@ import { FRONTIER_CHAT_URL } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 import { useSaveCompletionSettings } from "@/hooks/useCompletionSettings"
+import { customProviderNeedsKey } from "@/lib/completion/completion-service"
+import { getUserApiKey, setUserApiKey } from "@/lib/store/user-api-keys"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface AiProviderStepProps {
@@ -34,10 +36,15 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
   const [customModel, setCustomModel] = useState(
     currentProvider === "custom" ? (project.completionSettings?.model ?? "") : ""
   )
+  const [customApiKey, setCustomApiKey] = useState(
+    currentProvider === "custom"
+      ? (project.completionSettings?.apiKey ?? getUserApiKey("completion") ?? "")
+      : (getUserApiKey("completion") ?? "")
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+  const saveSettings = useSaveCompletionSettings(project, onUpdated)
 
   async function handleSave() {
     if (selected === "frontier" && !session) {
@@ -48,15 +55,25 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
       setError(t("projectSettings.advancedLlm.endpointRequiredError"))
       return
     }
+    const customKey = customApiKey.trim()
+    if (selected === "custom" && customProviderNeedsKey(customEndpoint) && !customKey) {
+      setError(t("projectSettings.advancedLlm.apiKeyRequiredError"))
+      return
+    }
     setError(null)
     setBusy(true)
     try {
       const isFrontier = selected === "frontier"
-      await saveSettings({
-        provider: isFrontier ? "frontier" : "custom",
-        endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
-        model: isFrontier ? "" : customModel.trim(),
-      })
+      await saveSettings(
+        {
+          provider: isFrontier ? "frontier" : "custom",
+          endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
+          model: isFrontier ? "" : customModel.trim(),
+          ...(!isFrontier && customKey ? { apiKey: customKey } : {}),
+        },
+        { aiProviderChosen: true },
+      )
+      if (!isFrontier && customKey) setUserApiKey("completion", customKey)
       onSaved?.()
     } finally {
       setBusy(false)
@@ -115,6 +132,27 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder="gpt-4"
               className="text-sm"
+            />
+          </div>
+          <div>
+            <FieldLabel htmlFor="ai-key" className="text-xs">
+              {customProviderNeedsKey(customEndpoint)
+                ? t("projectSettings.field.apiKeyRequired")
+                : (
+                  <>
+                    {t("projectSettings.field.apiKey")}{" "}
+                    <OptionalMark />
+                  </>
+                )}
+            </FieldLabel>
+            <Input
+              id="ai-key"
+              type="password"
+              value={customApiKey}
+              onChange={(e) => setCustomApiKey(e.target.value)}
+              placeholder={t("settings.personalProvider.apiKeyPlaceholder")}
+              className="text-sm"
+              autoComplete="off"
             />
           </div>
         </div>

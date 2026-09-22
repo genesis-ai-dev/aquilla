@@ -105,6 +105,21 @@ describe("addConcept — selection → draft concept", () => {
     })
     expect(updated.terminology![0].createdBy).toBe("translator-alice")
   })
+
+  it("creates an active concept with a rendering and caseSensitive flag", () => {
+    const project = makeProject()
+    const updated = addConcept(project, {
+      sourceTerm: "grace",
+      renderings: [{ rendering: "favor", status: "preferred" }],
+      status: "active",
+      createdBy: "testuser",
+      caseSensitive: true,
+    })
+    const concept = updated.terminology![0]
+    expect(concept.status).toBe("active")
+    expect(concept.renderings).toEqual([{ rendering: "favor", status: "preferred" }])
+    expect(concept.caseSensitive).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -119,7 +134,7 @@ describe("draft concept visibility", () => {
       renderings: [],
       status: "draft",
     })
-    // TerminologyPage lists all concepts regardless of status.
+    // The glossary editor reads every status from this array (drafts render as pending rows).
     expect(updated.terminology!.some((c) => c.sourceTerm === "redemption")).toBe(true)
   })
 

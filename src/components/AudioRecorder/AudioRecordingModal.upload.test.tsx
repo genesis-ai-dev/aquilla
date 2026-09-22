@@ -8,7 +8,7 @@
 // can waste someone's time: a doomed upload while offline, and a file that was
 // never going to play, sent to R2 anyway.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -47,9 +47,10 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({ generateCellVoice: vi.fn(
 // happy-dom will never load, and every upload here would sit for its full 15s
 // timeout before the attach event fires.
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 1000) }))
+const injectAttach = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: vi.fn(),
-  injectOptimisticAudioAttachment: vi.fn(),
+  injectOptimisticAudioAttachment: (...args: unknown[]) => injectAttach(...args),
   injectOptimisticAudioRemove: vi.fn(),
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
@@ -79,6 +80,7 @@ vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {})
 vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
+import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -88,19 +90,24 @@ const cell = {
 
 const onTakeSaved = vi.fn()
 
-function renderModal() {
-  return render(
+function modalEl(targetSlot?: string) {
+  return (
     <AudioRecordingModal
       open
       project={project}
       cells={[cell]}
       activeCellId="c1"
       username="sam"
+      targetSlot={targetSlot}
       onActiveCellChange={() => {}}
       onTakeSaved={onTakeSaved}
       onClose={() => {}}
-    />,
+    />
   )
+}
+
+function renderModal(targetSlot?: string) {
+  return render(modalEl(targetSlot))
 }
 
 /** Drive the hidden input the way a file picker does — `files` is read-only, so
@@ -117,6 +124,7 @@ describe("AudioRecordingModal — upload a file", () => {
     recorderState.value = { kind: "idle" }
     attachmentsState.byCellId = new Map()
     emitAttach.mockClear()
+    injectAttach.mockClear()
     uploadSpy.mockClear()
     onTakeSaved.mockClear()
   })
@@ -168,6 +176,64 @@ describe("AudioRecordingModal — upload a file", () => {
     expect(screen.getByTestId("rec-upload")).toBeEnabled()
   })
 
+  // ── The review's blocker (2026-08-27) ─────────────────────────────────────
+  //
+  // Stage 3 gave `attachAudioFileToCell` a `slot` and threaded it into the
+  // EMIT, but left `slot: "recording"` hard-coded in the optimistic shadow a
+  // few lines below. An upload aimed at an added track therefore painted onto
+  // the DEFAULT dub row — stealing its selection — and could never be
+  // confirmed, because `shadowConfirmed` looks the selection up by slot and
+  // finds the default row's own take there. The emit half was always right,
+  // which is exactly why only asserting the emit (as the case above does)
+  // could not see it.
+  const TRACK_SLOT = "01a04395-3ed1-7c6b-9f2e-6d5a1c0b8e42"
+
+  it("an upload to an added track reaches BOTH the event and the optimistic take on that track's slot", async () => {
+    renderModal(TRACK_SLOT)
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled())
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ cellId: "c1", slot: TRACK_SLOT })
+    // THE HALF THAT WAS BROKEN. Without it the take appears on the default row.
+    await waitFor(() => expect(injectAttach).toHaveBeenCalled())
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: TRACK_SLOT })
+    // …and the two must agree, or the shadow can never confirm against the row
+    // the server actually wrote.
+    const injected = injectAttach.mock.calls[0][2] as { slot: string }
+    const emitted = emitAttach.mock.calls[0][0] as { slot: string }
+    expect(injected.slot).toBe(emitted.slot)
+  })
+
+  it("the default dub row is still the answer when no track is named", async () => {
+    renderModal()
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(injectAttach).toHaveBeenCalled())
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: "recording" })
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ slot: "recording" })
+  })
+
+  // Reopening the recorder on a different track re-aims the upload. This holds
+  // today through a two-hop coincidence — `recordingTakes` is memoised on
+  // `ownSlots`, which is memoised on `targetSlot`, so the upload callback is
+  // rebuilt whenever the track changes — which is exactly why it is worth
+  // pinning: nothing about the upload path states that dependency itself, and
+  // the day someone decouples the takes list from the track this is the test
+  // that notices. (The review read the missing `targetSlot` dependency as a
+  // live stale-closure bug; it is not one, for the reason above. The name is
+  // listed in that array now regardless, as an honest dependency.)
+  it("follows the track the modal was REOPENED on, not the one it first opened on", async () => {
+    const { rerender } = renderModal("trk-first")
+    // Only the target track changes — no new takes, no cell change — so a
+    // callback that is not rebuilt on `targetSlot` keeps the stale one.
+    rerender(modalEl("trk-second"))
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled())
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ slot: "trk-second" })
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: "trk-second" })
+  })
+
   it("offline: the upload button is disabled", () => {
     onlineState.value = false
     renderModal()
@@ -181,5 +247,115 @@ describe("AudioRecordingModal — upload a file", () => {
     expect(await screen.findByTestId("rec-error-message")).toHaveTextContent(/doesn't look like an audio file/)
     expect(uploadSpy).not.toHaveBeenCalled()
     expect(emitAttach).not.toHaveBeenCalled()
+  })
+})
+
+// ── AQU-1216: an upload is not a performance ────────────────────────────────
+//
+// Stage 5 gave the upload path the recorded path's auto-advance so that
+// "keeping a take means the same thing either way". In the operator's hands
+// that reads as a bug rather than a symmetry: there is no moment of finishing
+// to move on FROM, so the modal jumped to the next line half a second after the
+// file landed, and — in the film layout, where the takes list is a collapsed
+// disclosure — nothing on screen ever showed the take. "I uploaded
+// successfully, but it only showed up in the Takes dropdown."
+//
+// Two halves, and they fail independently: STAY (the advance is not scheduled)
+// and SHOW (the list opens itself). The recorded path keeps its advance — that
+// half is pinned in AudioRecordingModal.tts.test.tsx's SUB-50 block, which is
+// the test that notices if this fix is over-applied.
+
+const twoCells = [
+  cell,
+  { ...(cell as unknown as Record<string, unknown>), id: "c2", original: "next", translated: "suivant" },
+] as unknown as CellData[]
+
+/** One take already on the cell, so the takes list has something to list. */
+const ONE_TAKE = new Map<string, unknown>([["c1", {
+  selectedAudioId: null,
+  attachments: {
+    "audio-c1-1000.webm": {
+      audioId: "audio-c1-1000.webm",
+      url: "frontier-audio://audio-c1-1000.webm",
+      slot: "recording", label: "Take 1", mimeType: "audio/webm",
+      voiceId: null, referenceAudioId: null, durationMs: 1000,
+      trimStartMs: null, trimEndMs: null,
+    },
+  },
+}]])
+
+/** The film layout — the one where the takes list starts collapsed. */
+const filmProject = {
+  id: "p1", name: "P", ttsSettings: {},
+  files: [{ id: "f1", name: "ep.vtt", coreMediaUrl: "https://cdn.example.com/ep.mp4" }],
+} as unknown as ProjectRecord
+
+describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () => {
+  const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
+
+  beforeEach(() => {
+    onlineState.value = true
+    recorderState.value = { kind: "idle" }
+    attachmentsState.byCellId = new Map()
+    emitAttach.mockClear()
+    uploadSpy.mockClear()
+    onActiveCellChange.mockClear()
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+  })
+  afterEach(() => {
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+  })
+
+  function renderTwo(project: ProjectRecord) {
+    return render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={twoCells}
+        activeCellId="c1"
+        username="sam"
+        onActiveCellChange={onActiveCellChange}
+        onClose={() => {}}
+      />,
+    )
+  }
+
+  it("with auto-advance ON, uploading does NOT jump to the next line", async () => {
+    renderTwo(project)
+    // Auto-advance really is on — otherwise this passes for the wrong reason,
+    // and the default is the whole point (it is what the operator hit).
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the attach DID happen
+    expect(await screen.findByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
+
+    // Well past the 450ms advance window the recorded path schedules.
+    await new Promise((r) => setTimeout(r, 700))
+    expect(onActiveCellChange).not.toHaveBeenCalled()
+    // …and the note is still here on THIS line, which is the operator-visible
+    // half of "you did not lose your place".
+    expect(screen.getByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
+  })
+
+  it("opens the collapsed takes list so the new take is reachable without a hunt", async () => {
+    attachmentsState.byCellId = ONE_TAKE
+    renderTwo(filmProject)
+    // The film layout, and the list starts shut — the state the take used to
+    // disappear into.
+    expect(screen.getByTestId("rec-video")).toBeInTheDocument()
+    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
+    )
+    // Not just the flag: the rows are actually rendered, each with the audition
+    // control that makes the take listenable on the spot.
+    expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
   })
 })

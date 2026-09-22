@@ -99,10 +99,14 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
   diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
-  discovery — see `docs/AGENT-API.md`). PR previews do **not** get an isolated per-PR
-  sync-worker/auth-worker fork — non-draft PRs deploy to the single shared, route-free
-  `aquilla-web-preview` Worker (`wrangler.toml` `[env.preview]`) and point at the shared
-  `development` API backend; see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
+  discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
+  auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by
+  `scripts/cloudflare-stack-preview.mjs` alongside `aquilla-web-preview`, sharing development
+  Hyperdrive/R2). **But a preview sync-worker cannot call a preview auth-worker** — that
+  subrequest 404s, so anything crossing the sync→auth seam (`AUTH_WORKER_URL`: DraftCells,
+  brief-summary render, Monday push) is NOT exercisable on a preview. See
+  "Preview limitations" in `docs/DEPLOYMENT-ENVIRONMENTS.md` before trusting a preview QA
+  result for those paths.
 - **`agent-worker/`** — Worker `aquilla-agent-sandbox`: container-backed Durable Object for
   sandboxed agent code execution (see `docs/AGENT-SANDBOX.md`). Server-side only — auth-worker
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads
@@ -123,9 +127,10 @@ repository commands; unnamed profiles use local-only Worker names. See
 - **Source of truth:** the append-only `events` table in Postgres (owned by sync-worker).
   Every write is an event with a `parent_id` (prior winning event on the same
   `(project, file, cell)`); the projection (`cells`, `files`, `cell_validators`) lands as
-  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). For v1
-  single-editor reliability, `*.cell.commit` projects **last-write-wins**; chain-mutating
-  events keep first-child.
+  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). Chain-mutating
+  events (`*.cell.create|commit|delete|reorder`) are a **head compare-and-swap**: they project
+  only if `parentId` is the cell's current head for that side/lane; stale siblings are
+  logged, `200`-accepted, and reported in `stale[]` (AQU-1154).
 - **Reads (thin client, AD-3):** read hooks under `src/lib/sync/*-read.ts` fetch from
   sync-worker HTTP on demand (`useCells`, `useProject`, `useCellHistory`, …). Plain
   `useState` + race-guarded `useEffect` — React Query is installed but only `useQueryClient`
@@ -165,3 +170,5 @@ TypeScript, no `any`. ES6+ (`const`/`let`, arrow fns, async/await, `?.`/`??`). R
 Tailwind v4 + shadcn/ui (`components.json`, primitives in `src/components/ui/`) + `@base-ui/react`;
 icons are lucide. Use the `components.json` aliases (`@/components/ui`, `@/lib/utils`).
 Target files under ~500 lines. See `AGENTS.md` for the (non-negotiable) testing rules.
+When opening a PR, structure the title and body per `.github/pull_request_template.md`
+(API-created PRs don't get GitHub's auto-fill — see AGENTS.md).

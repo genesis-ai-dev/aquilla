@@ -8,11 +8,14 @@ import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
+import { resolveBuildBranch, resolveBuildDate, resolveBuildSha } from "./scripts/build-info.ts"
+import { phonemizerBrowserUnpackPlugin } from "./scripts/vite-phonemizer-browser.ts"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
 import type { BrandId } from "./src/branding/types.ts"
 
-// Cloudflare Pages exposes CF_PAGES_BRANCH / CF_PAGES_COMMIT_SHA in CI builds.
-// Locally we fall back to git so dev shells still show something useful.
+// CI (Cloudflare Workers Builds) exports the branch/commit; locally we fall back
+// to git so dev shells still show something useful. Precedence and the
+// detached-HEAD guard live in scripts/build-info.ts so they can be unit-tested.
 function git(args: string[]): string {
   try {
     return execFileSync("git", args, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
@@ -21,8 +24,9 @@ function git(args: string[]): string {
   }
 }
 const pkgVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string
-const buildBranch = process.env.CF_PAGES_BRANCH || git(["rev-parse", "--abbrev-ref", "HEAD"]) || "unknown"
-const buildSha = (process.env.CF_PAGES_COMMIT_SHA || git(["rev-parse", "HEAD"])).slice(0, 7)
+const buildBranch = resolveBuildBranch(process.env, git(["rev-parse", "--abbrev-ref", "HEAD"]))
+const buildSha = resolveBuildSha(process.env, git(["rev-parse", "HEAD"]))
+const buildDate = resolveBuildDate(git(["log", "-1", "--format=%cI"]))
 
 function resolveBuildBrand(): BrandId {
   const raw = process.env.BRAND ?? "aquilla"
@@ -50,6 +54,7 @@ export default defineConfig(({ mode }) => ({
     __APP_VERSION__: JSON.stringify(pkgVersion),
     __APP_BRANCH__: JSON.stringify(buildBranch),
     __APP_SHA__: JSON.stringify(buildSha),
+    __APP_BUILT_AT__: JSON.stringify(buildDate),
   },
   server: {
     // Bind to 127.0.0.1 explicitly; "localhost" can resolve to ::1 on
@@ -84,11 +89,12 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [
+    phonemizerBrowserUnpackPlugin(),
     react(),
-    // React Compiler is RC and expensive at compile time. Skip it for the
-    // test build — the compiler isn't what we're testing, and including it
-    // turned the E2E orchestrator into a memory hog on dev machines.
-    ...(mode === "test" ? [] : [babel({ presets: [reactCompilerPreset()] })]),
+    // Keep routine tests cheap, but let typing diagnostics exercise the same
+    // compiler as the normal local/release app: E2E_REACT_COMPILER=1.
+    ...(mode === "test" && process.env.E2E_REACT_COMPILER !== "1"
+      ? [] : [babel({ presets: [reactCompilerPreset()] })]),
     tailwindcss(),
     // isomorphic-git pulls in node:crypto, node:buffer, etc.
     nodePolyfills({
@@ -100,10 +106,23 @@ export default defineConfig(({ mode }) => ({
       name: "version-json",
       writeBundle() {
         mkdirSync("dist", { recursive: true })
-        writeFileSync("dist/version.json", JSON.stringify({ sha: buildSha }))
+        // `sha` drives useUpdateCheck; `branch`/`builtAt` let support date a
+        // deployed build without a screenshot of the footer (AQU-1023).
+        writeFileSync(
+          "dist/version.json",
+          JSON.stringify({ sha: buildSha, branch: buildBranch, builtAt: buildDate }),
+        )
       },
     },
   ],
+  // Audio workers must not inherit Node shims. phonemizer is rewritten onto
+  // the browser unpack path in this worker plugin (and the root plugin above).
+  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
+  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
+  worker: {
+    format: "es",
+    plugins: () => [phonemizerBrowserUnpackPlugin()],
+  },
   resolve: {
     alias: [
       // The SPA consumes live workspace source during dev/tests/build, while
@@ -137,14 +156,25 @@ export default defineConfig(({ mode }) => ({
       "@base-ui/react/input",
       "@base-ui/react/menu",
       "@base-ui/react/scroll-area",
-      // Audio AI deps imported only inside Web Workers. Without pre-inclusion
-      // the first transcription/TTS click triggers a mid-flight Vite re-
-      // optimize, which forces a full page reload (white-screen) and kills
-      // the in-progress model download. These are big — pre-bundling them
-      // up front keeps the dev server boot a few seconds slower instead.
+      // Audio AI deps imported only inside Web Workers. transformers stays
+      // pre-bundled so the first transcribe click does not re-optimize the
+      // main graph. kokoro-js/phonemizer are excluded below — they must be
+      // worker-bundled without Node shims.
       "@huggingface/transformers",
-      "kokoro-js",
+      // src/lib/offline/store.ts isn't statically reachable yet (Tauri-only,
+      // not wired into App.tsx), so Vite's crawler never discovers this deep
+      // Effect-based dependency tree on cold start. Without pre-inclusion,
+      // the first call to getOfflineStore() triggers a mid-session
+      // re-optimize + full reload (white screen, cleared console).
+      "@livestore/livestore",
+      "@livestore/adapter-web",
+      "@livestore/react",
     ],
+    // Prebundling kokoro-js with the main-thread Node polyfills injects
+    // `process.versions.node` into phonemizer. The worker then loads that
+    // optimized dep, Buffer.from-crashes the espeak unpack, and generate
+    // fails with an empty identifier list. Bundle it in the worker instead.
+    exclude: ["kokoro-js", "phonemizer"],
   },
   build: {
     // hls.js (~508kB), dash.js (~961kB), and web-worker AI bundles (whisper,
@@ -195,6 +225,8 @@ export default defineConfig(({ mode }) => ({
       ".claude/worktrees/**",
       ".claire/**",
       "e2e/**",
+      "smart-tests/journeys/**",
+      "smart-tests/.venv/**",
       // Each worker has its own vitest config + local node_modules. Running
       // their tests from root pulls in worker-local deps the root install
       // doesn't have. deploy-workers.yml runs each worker's tests in its

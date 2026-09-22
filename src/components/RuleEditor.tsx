@@ -15,9 +15,10 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
-import { X } from "lucide-react"
+import { LaneCombobox } from "@/components/LaneCombobox"
+import { ChevronDown, X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -39,11 +40,15 @@ export function escapeRegex(s: string): string {
  * is passed through verbatim; only the "couldn't even tell you why" fallback
  * is app copy. Standalone `t()`: called directly in RuleEditor.test.ts with no
  * provider/component in scope.
+ *
+ * `flags` is optional so the autofix editor can reject a bad flag string
+ * ("gg", "gx") the same way it rejects a bad pattern — `new RegExp()` throws on
+ * either, and an autofix is stored as pattern + flags together.
  */
-export function validateRegex(pattern: string): string | null {
+export function validateRegex(pattern: string, flags?: string): string | null {
   if (!pattern) return null
   try {
-    new RegExp(pattern)
+    new RegExp(pattern, flags)
     return null
   } catch (e) {
     return e instanceof Error ? e.message : standaloneT("rules.editor.invalidRegexFallback")
@@ -52,6 +57,23 @@ export function validateRegex(pattern: string): string | null {
 
 type Side = "source" | "target"
 type Mode = "required" | "forbidden" | "match"
+
+/**
+ * The `side` values a mode can actually express as a `RuleCheck`.
+ *
+ * There is no source-side prohibition in the union: `target-forbids` constrains
+ * the target, and `source-requires-target` also constrains the target (its
+ * source pattern only decides *when* the rule applies). `match` covers both
+ * sides at once, so it shows no side picker at all.
+ *
+ * Offering "source" for `forbidden`/`required` was a dead end — `buildCheck`
+ * returned `null`, so Save failed with "Pattern is required" even though the
+ * pattern was filled, while the plain-language sentence claimed the rule
+ * applied to the source.
+ */
+export function sidesForMode(mode: Mode): Side[] {
+  return mode === "match" ? ["source", "target"] : ["target"]
+}
 
 function buildCheck(
   side: Side,
@@ -128,15 +150,31 @@ interface RuleEditorProps {
   onCancel: () => void
   /** Optional class override for the outer shell (e.g. dialog embed). */
   className?: string
+  /**
+   * AQU-609: the project's NAMED target-language lanes (excluding `''`). When
+   * non-empty, an "Applies to" picker offers project scope ("All lanes"), the
+   * default lane, or one named lane. Omit for org-rule editors and single-lane
+   * projects — the rule then keeps its existing scope (or `project` on create).
+   */
+  lanes?: string[]
+  /** Display label for the default (`''`) lane, e.g. the project's base
+   *  target language. Falls back to a generic string. */
+  defaultLaneLabel?: string
 }
 
-export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: RuleEditorProps) {
+export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel }: RuleEditorProps) {
   const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
   const [description, setDescription] = useState(initialRule?.description ?? "")
   const [severity, setSeverity] = useState<"major" | "minor">(initialRule?.severity ?? "minor")
   const [enabled, setEnabled] = useState(initialRule?.enabled ?? true)
+  // AQU-609: `null` = every lane (project scope); a string = that lane only
+  // (`''` is the default lane, per the AQU-538 convention).
+  const [laneChoice, setLaneChoice] = useState<string | null>(() =>
+    initialRule?.scope === "lane" ? initialRule.lane ?? "" : null,
+  )
+  const showLanePicker = (lanes?.length ?? 0) > 0
 
   // Decode existing check into side/mode/pattern
   const [side, setSide] = useState<Side>(() => {
@@ -179,6 +217,19 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
   // ── Validation ──
   const patternError = useMemo(() => isLiteral ? null : validateRegex(pattern), [pattern, isLiteral])
   const sourcePatternError = useMemo(() => isLiteral ? null : validateRegex(sourcePattern), [sourcePattern, isLiteral])
+  // The autofix is always a regex (there is no literal toggle for it), and it is
+  // persisted on the rule — an unvalidated one saves fine and only blows up
+  // later, wherever the fix is applied. Validate pattern + flags together.
+  const autofixError = useMemo(
+    () => (showAutofix && afPattern ? validateRegex(afPattern, afFlags) : null),
+    [showAutofix, afPattern, afFlags],
+  )
+
+  /** Switch mode, snapping `side` back to a value the new mode can express. */
+  function selectMode(next: Mode) {
+    setMode(next)
+    if (!sidesForMode(next).includes(side)) setSide("target")
+  }
 
   // ── Debounced draft check for live preview ──
   const [debouncedCheck, setDebouncedCheck] = useState<RuleCheck | null>(null)
@@ -217,7 +268,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       ? t("rules.editor.sourceAndTargetPatternRequired")
       : t("rules.editor.patternRequired")
     : null
-  const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError
+  const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError && !autofixError
 
   function handleSave() {
     setAttempted(true)
@@ -233,12 +284,22 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       has_autofix: !!autofix,
     })
 
+    // Scope: the lane picker decides when shown; otherwise preserve the rule's
+    // existing scope (an org-rule edit must not silently flip to `project`).
+    const scoped: Pick<TranslationRule, "scope" | "lane"> = showLanePicker
+      ? laneChoice === null
+        // `lane: undefined` on purpose: an update spreads over the old rule, so
+        // a lane→all-lanes change must overwrite the stale `lane` field.
+        ? { scope: "project", lane: undefined }
+        : { scope: "lane", lane: laneChoice }
+      : { scope: initialRule?.scope ?? "project", lane: initialRule?.lane }
+
     onSave({
       name: name.trim(),
       description: description.trim(),
       severity,
       source: "user",
-      scope: "project",
+      ...scoped,
       check: currentCheck!,
       enabled,
       autofix,
@@ -278,7 +339,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         </Field>
         <Field>
           <FieldLabel htmlFor="re-desc" className="text-xs">
-            {t("common.descriptionOptional")} <OptionalMark />
+            {t("common.descriptionOptional")}
           </FieldLabel>
           <Input
             id="re-desc"
@@ -299,7 +360,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
               <button
                 key={m}
                 type="button"
-                onClick={() => setMode(m)}
+                onClick={() => selectMode(m)}
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                   mode === m
                     ? "bg-primary text-primary-foreground"
@@ -316,26 +377,38 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           </div>
         </div>
 
-        {/* Side only shows when not "match" (match implies both sides) */}
+        {/* Side only shows when not "match" (match implies both sides).
+            A side the mode can't express stays visible but disabled with the
+            reason spelled out (AQU-427 convention: explain, don't hide) — the
+            alternative was a Save that failed with a pattern error. */}
         {mode !== "match" && (
           <div>
             <FieldLabel className="text-xs">{t("rules.editor.sideLabel")}</FieldLabel>
             <div className="mt-1 flex gap-1">
-              {(["source", "target"] as Side[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSide(s)}
-                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                    side === s
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {s === "source" ? t("editor.column.source") : t("editor.column.target")}
-                </button>
-              ))}
+              {(["source", "target"] as Side[]).map((s) => {
+                const supported = sidesForMode(mode).includes(s)
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={!supported}
+                    onClick={() => setSide(s)}
+                    className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                      side === s
+                        ? "bg-primary text-primary-foreground"
+                        : supported
+                          ? "bg-muted text-muted-foreground hover:bg-muted/80"
+                          : "bg-muted/50 text-muted-foreground/50 cursor-not-allowed"
+                    }`}
+                  >
+                    {s === "source" ? t("editor.column.source") : t("editor.column.target")}
+                  </button>
+                )
+              })}
             </div>
+            <p className="mt-1 max-w-56 text-[10px] text-muted-foreground">
+              {t("rules.editor.sideTargetOnlyNote")}
+            </p>
           </div>
         )}
 
@@ -360,6 +433,47 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             ))}
           </div>
         </div>
+
+        {/* AQU-609: lane scope — only for multi-lane project-rule editors.
+            A searchable combobox, not a button row or plain dropdown:
+            projects can carry 150+ lanes. Values are prefix-encoded
+            ("scope:project" / "lane:<tag>") because the default lane's tag is
+            the empty string. */}
+        {showLanePicker && (
+          <div>
+            <FieldLabel className="text-xs">{t("rules.editor.laneLabel")}</FieldLabel>
+            <LaneCombobox
+              options={[
+                { value: "scope:project", label: t("rules.editor.lane.allLanes") },
+                { value: "lane:", label: defaultLaneLabel || t("rules.editor.lane.defaultLane") },
+                ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: l })),
+              ]}
+              value={laneChoice === null ? "scope:project" : `lane:${laneChoice}`}
+              onValueChange={(v) =>
+                setLaneChoice(v === "scope:project" ? null : v.slice("lane:".length))
+              }
+              searchPlaceholder={t("editor.lane.searchPlaceholder")}
+              searchAriaLabel={t("editor.lane.searchAriaLabel")}
+              emptyText={t("editor.lane.searchEmpty")}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-1"
+                  aria-label={t("rules.editor.laneLabel")}
+                >
+                  {laneChoice === null
+                    ? t("rules.editor.lane.allLanes")
+                    : laneChoice === ""
+                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                      : laneChoice}
+                  <ChevronDown className="size-3.5 text-muted-foreground" />
+                </Button>
+              }
+            />
+          </div>
+        )}
 
         <div className="flex items-end">
           <label className="flex items-center gap-1.5 text-xs">
@@ -463,7 +577,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? t("rules.editor.hideAutofix") : <>{t("rules.editor.addAutofix")} <OptionalMark /></>}
+          {showAutofix ? t("rules.editor.hideAutofix") : t("rules.editor.addAutofix")}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
@@ -480,7 +594,8 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                   value={afPattern}
                   onChange={(e) => setAfPattern(e.target.value)}
                   placeholder={t("rules.editor.patternLabel")}
-                  className="mt-1 font-mono text-xs"
+                  className={`mt-1 font-mono text-xs ${autofixError ? "border-destructive" : ""}`}
+                  aria-invalid={!!autofixError}
                 />
               </div>
               <div>
@@ -496,15 +611,26 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                 />
               </div>
               <div>
-                <FieldLabel className="text-[10px]">{t("rules.editor.flagsLabel")}</FieldLabel>
+                <FieldLabel htmlFor="re-af-flags" className="text-[10px]">
+                  {t("rules.editor.flagsLabel")}
+                </FieldLabel>
                 <Input
+                  id="re-af-flags"
                   value={afFlags}
                   onChange={(e) => setAfFlags(e.target.value)}
                   placeholder="gi" // i18n-exempt regex flags syntax example, not natural-language text
-                  className="mt-1 font-mono text-xs"
+                  className={`mt-1 font-mono text-xs ${autofixError ? "border-destructive" : ""}`}
+                  aria-invalid={!!autofixError}
                 />
               </div>
             </div>
+            {/* Surfaced as soon as the pattern or flags are bad — not only once
+                a sample is typed — because it now blocks Save. */}
+            {autofixError && (
+              <p className="text-xs text-destructive">
+                {t("rules.editor.invalidAutofixPattern")}: {autofixError}
+              </p>
+            )}
             {/* Sample before/after */}
             <div>
               <FieldLabel htmlFor="re-af-sample" className="text-[10px]">
@@ -524,18 +650,15 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                   <span className="text-green-700 dark:text-green-400">{afPreview}</span>
                 </div>
               )}
-              {afSample && afPreview === null && afPattern && (
-                <p className="mt-1 text-xs text-destructive">{t("rules.editor.invalidAutofixPattern")}</p>
-              )}
             </div>
           </div>
         )}
       </div>
 
       {/* Actions — match Terminology Add dialog DialogFooter */}
-      {attempted && (checkError || patternError || sourcePatternError) && (
+      {attempted && (checkError || patternError || sourcePatternError || autofixError) && (
         <FieldError>
-          {checkError ?? patternError ?? sourcePatternError}
+          {checkError ?? patternError ?? sourcePatternError ?? autofixError}
         </FieldError>
       )}
       <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">

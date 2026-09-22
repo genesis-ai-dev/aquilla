@@ -12,6 +12,7 @@
 // Both callers-optional: with no window the output is byte-identical to before.
 
 import { memo } from "react"
+import { useScrubGesture } from "./useScrubGesture"
 import { secToPx, pxToSec } from "@/lib/timeline/scale"
 import { fmtClock, niceTickSec } from "./format"
 
@@ -22,6 +23,13 @@ export interface TimelineRulerProps {
   viewStartSec?: number
   viewEndSec?: number
   onScrub(sec: number): void
+  /** AQU-646 stage 5: the drag became real — take the transport. Fires once,
+   *  past the intent threshold, never on a plain click. */
+  onScrubStart?(): void
+  /** The pointer moved during a drag, coalesced to one call per frame. */
+  onScrubMove?(sec: number): void
+  /** Released (or cancelled). The caller lands this through its ordinary seek. */
+  onScrubEnd?(sec: number): void
 }
 
 function TimelineRulerImpl({
@@ -30,6 +38,9 @@ function TimelineRulerImpl({
   viewStartSec,
   viewEndSec,
   onScrub,
+  onScrubStart,
+  onScrubMove,
+  onScrubEnd,
 }: TimelineRulerProps) {
   const step = niceTickSec(pxPerSec)
   // Non-finite/negative means "not reported yet" — fall back to a one-step
@@ -44,6 +55,18 @@ function TimelineRulerImpl({
   // slide around as you scroll.
   for (let t = Math.floor(from / step) * step; t <= to; t += step) ticks.push(t)
   const width = secToPx(spanSec, pxPerSec)
+
+  // AQU-646 stage 5: this band is a scrub surface now, as well as a place to
+  // click. `onScrubMove` absent means no drag is wanted at all, which is what
+  // every existing caller and every existing test gets.
+  const scrub = useScrubGesture({
+    pxPerSec,
+    durationSec: spanSec,
+    onScrubStart,
+    onScrubMove: onScrubMove ?? (() => {}),
+    onScrubEnd,
+    disabled: !onScrubMove,
+  })
 
   return (
     <div
@@ -74,9 +97,13 @@ function TimelineRulerImpl({
       // relative -> sticky is safe: sticky is still "positioned", so the
       // absolutely positioned ticks below keep this element as their
       // containing block.
-      className="sticky top-0 z-20 h-7 select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
+      className="sticky top-0 z-20 h-7 cursor-col-resize touch-none select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
       style={{ width: `${width}px` }}
+      onPointerDown={scrub.onPointerDown}
       onClick={(e) => {
+        // The browser fires `click` after a drag as well, and seeking twice
+        // would fight the landing seek the drag already issued.
+        if (scrub.consumeDragClick()) return
         const rect = e.currentTarget.getBoundingClientRect()
         onScrub(pxToSec(e.clientX - rect.left, pxPerSec))
       }}

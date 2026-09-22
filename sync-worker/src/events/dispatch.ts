@@ -19,9 +19,11 @@ import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
+import { handleFileCorpusSet } from './handlers/file-corpus-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
+import { handleTermEvent, type TermEventKind } from './handlers/term-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
 import type { DispatchOutcome } from './handlers/types'
 
@@ -88,6 +90,7 @@ export function dispatchEvent(
     case 'cell.audio.remove':
     case 'cell.audio.rename':
     case 'cell.audio.trim':
+    case 'cell.audio.place':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
@@ -168,6 +171,17 @@ export function dispatchEvent(
         ),
       }
 
+    case 'file.corpus.set':
+      return {
+        ok: true,
+        result: handleFileCorpusSet(
+          db,
+          authed as AuthorizedEvent<'file.corpus.set'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
     case 'file.track.set':
       // The only handler that validates a payload shape, so the only one that
       // can refuse — it returns the outcome itself rather than a bare result.
@@ -177,6 +191,21 @@ export function dispatchEvent(
         serverTs,
         opts.serverSeq,
       )
+
+    case 'term.create':
+    case 'term.update':
+    case 'term.delete':
+    case 'term.approve':
+    case 'term.reject':
+      return {
+        ok: true,
+        result: handleTermEvent(
+          db,
+          authed as AuthorizedEvent<TermEventKind>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
 
     case 'comment.create':
     case 'comment.edit':

@@ -16,9 +16,9 @@ const SECRET = 'progress-secret'
 const PROJECT = 'project-progress'
 const FILE = 'file-progress'
 
-function source(cellId: string, canonicalRef: string) {
+function source(cellId: string, canonicalRef: string, type: string | null = 'verse') {
   return {
-    project_id: PROJECT, file_id: FILE, cell_id: cellId, side: 'source',
+    project_id: PROJECT, file_id: FILE, cell_id: cellId, side: 'source', type,
     value: `source ${cellId}`, canonical_ref: canonicalRef, event_id: `source-${cellId}`,
     last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
   }
@@ -69,11 +69,18 @@ describe('file_section_progress projection', () => {
       validator_histogram: Record<string, number>
       revision: number
     }>('file_section_progress')
-    expect(projected).toHaveLength(3)
+    // file + GEN 1 + GEN 2 + the AQU-1093 book row for GEN.
+    expect(projected).toHaveLength(4)
     expect(projected.find((row) => row.scope === 'file')).toMatchObject({
       total_count: 3,
       filled_count: 2,
       revision: 7,
+    })
+    // The book row sums its chapters: GEN 1 (2 cells) + GEN 2 (1).
+    expect(projected.find((row) => row.scope === 'book')).toMatchObject({
+      section_key: 'GEN',
+      total_count: 3,
+      filled_count: 2,
     })
     expect(projected.find((row) => row.section_key === 'GEN 1')).toMatchObject({
       total_count: 2,
@@ -103,7 +110,7 @@ describe('file_section_progress projection', () => {
   it('full rebuild removes section rows that no longer exist', async () => {
     const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
-    expect(await rows('file_section_progress')).toHaveLength(3)
+    expect(await rows('file_section_progress')).toHaveLength(4)
 
     await pg.query(
       `UPDATE cells SET canonical_ref = NULL
@@ -112,10 +119,12 @@ describe('file_section_progress projection', () => {
     )
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
+    // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
     const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
-    expect(projected).toHaveLength(2)
+    expect(projected).toHaveLength(3)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
+    expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
   })
 })
 
@@ -129,7 +138,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -142,6 +151,33 @@ describe('GET file progress', () => {
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(conditional.status).toBe(304)
+  })
+
+  it('carries per-chapter audio counts, so the inspector need not fetch twice', async () => {
+    // AQU-1098: the projection has written audio_count since 0088, but this
+    // route never selected it, so a chapter list could only ever show text.
+    const { db, pg } = await fixture()
+    await pg.query(
+      `INSERT INTO cell_audio
+         (project_id, file_id, cell_id, audio_id, slot, url, event_id, created_ts,
+          selected, deleted, approved, duration_ms)
+       VALUES ($1,$2,'c1','a1','take','u1','e1',1, 1,0,1,1000),
+              ($1,$2,'c3','a2','take','u2','e2',1, 1,0,0,1000)`,
+      [PROJECT, FILE],
+    )
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    const body = await response.json() as FileProgressResponse
+    expect(body.file).toMatchObject({ audioCount: 2, audioValidatedCount: 1 })
+    const gen1 = body.sections.find((section) => section.key === 'GEN 1')!
+    const gen2 = body.sections.find((section) => section.key === 'GEN 2')!
+    // GEN 1 holds the approved take, GEN 2 the unapproved one.
+    expect(gen1).toMatchObject({ audioCount: 1, audioValidatedCount: 1 })
+    expect(gen2).toMatchObject({ audioCount: 1, audioValidatedCount: 0 })
   })
 
   it('rejects a token scoped to another project', async () => {
@@ -161,18 +197,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s2"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:f"',
+        'If-None-Match': '"progress:file-progress:7:v2:f:s2"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
@@ -294,5 +330,204 @@ describe('file_section_progress time buckets (AQU-805)', () => {
       't:000000600000',
       't:000001200000',
     ])
+  })
+})
+
+// AQU-1083 — the structural subset, recorded alongside every existing number so
+// a reader that excludes headings subtracts rather than reprojects.
+describe('structural aggregates (AQU-1083)', () => {
+  const P = 'proj-struct-prog'
+  const F = 'file-struct-prog'
+
+  const src = (cellId: string, ref: string, type: string | null) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source', type,
+    value: `s ${cellId}`, canonical_ref: ref, event_id: `s-${cellId}`,
+    last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const tgt = (cellId: string, value: string, endorsements: number) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target', type: null,
+    value, canonical_ref: null, event_id: `t-${cellId}`,
+    last_editor: 'alice', last_edit_at: 2, validated: endorsements >= 2 ? 1 : 0,
+    endorsement_count: endorsements, word_count: value ? 1 : 0,
+  })
+
+  /** GEN 1: two verses (one filled at 2 endorsements, one empty) plus a chapter
+   *  heading and a book title — one filled at 3 endorsements, one empty. */
+  async function fixture() {
+    return makeTestDb({
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        src('v1', 'GEN 1:1', 'verse'), tgt('v1', 'uno', 2),
+        src('v2', 'GEN 1:2', 'verse'), tgt('v2', '', 0),
+        src('h1', 'GEN 1:h:1', 'heading'), tgt('h1', 'titulo', 3),
+        src('h2', 'GEN 1:h:2', 'paratext'), tgt('h2', '', 0),
+      ],
+    })
+  }
+
+  const read = async (db: AquillaDb, scope: string) =>
+    db.prepare(
+      `SELECT total_count, filled_count, validator_histogram,
+              structural_count, structural_filled_count, structural_validator_histogram
+         FROM file_section_progress
+        WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
+    ).bind(P, F, scope).first<Record<string, unknown>>()
+
+  it('records the structural subset on the file rollup', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    // The totals still count everything — that is what makes the policy a
+    // read-time subtraction rather than a reprojection.
+    expect(Number(row?.total_count)).toBe(4)
+    expect(Number(row?.filled_count)).toBe(2)
+    expect(Number(row?.structural_count)).toBe(2)
+    expect(Number(row?.structural_filled_count)).toBe(1)
+  })
+
+  it('keeps a structural histogram that subtracts from the real one bucket-wise', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    // Every cell: two empty at 0, one verse at 2, one heading at 3.
+    expect(row?.validator_histogram).toEqual({ '0': 2, '2': 1, '3': 1 })
+    // Structural only: one empty heading at 0, one filled title at 3.
+    expect(row?.structural_validator_histogram).toEqual({ '0': 1, '3': 1 })
+  })
+
+  it('records it per section too', async () => {
+    const { db } = await fixture()
+    await sectionsProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await db.prepare(
+      `SELECT structural_count, structural_filled_count, structural_validator_histogram
+         FROM file_section_progress
+        WHERE project_id = ? AND scope = 'section' AND section_key = 'GEN 1'`,
+    ).bind(P).first<Record<string, unknown>>()
+    // Heading refs split to the same chapter prefix as verses, so they land in
+    // GEN 1's bucket — which is exactly why the chapter never read 100%.
+    expect(Number(row?.structural_count)).toBe(2)
+    expect(Number(row?.structural_filled_count)).toBe(1)
+    expect(row?.structural_validator_histogram).toEqual({ '0': 1, '3': 1 })
+  })
+
+  it('agrees with the full rebuild', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    await sectionsProgressRecomputeStmt(db, P, F, 10).run()
+    const incremental = await read(db, 'file')
+    for (const stmt of fullProgressRecomputeStmts(db, P, F, 11)) await stmt.run()
+    expect(await read(db, 'file')).toEqual({ ...incremental })
+  })
+
+  it('treats an untyped cell as content, not structure', async () => {
+    // Media and cue imports write no type at all. A null-blind predicate would
+    // count them as structural and quietly drop them from the denominator.
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'AUDIO', event_id: 'f-evt' }],
+      cells: [src('m1', 'CUE 1', null), tgt('m1', 'hola', 0)],
+    })
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    expect(Number(row?.total_count)).toBe(1)
+    expect(Number(row?.structural_count)).toBe(0)
+  })
+})
+
+// The projection above records the subset; this is the half that spends it —
+// the same stored rows read once under each policy. Proved against a real
+// imported Genesis (1540 cells, 7 of them USFM front matter) before it was
+// written down here.
+describe('GET file progress under the structural policy (AQU-1083)', () => {
+  const P = 'proj-struct-read'
+  const F = 'file-struct-read'
+
+  const src = (cellId: string, ref: string, type: string | null) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source', type,
+    value: `s ${cellId}`, canonical_ref: ref, event_id: `s-${cellId}`,
+    last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const tgt = (cellId: string, value: string) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target', type: null,
+    value, canonical_ref: null, event_id: `t-${cellId}`,
+    last_editor: 'alice', last_edit_at: 2, validated: 0,
+    endorsement_count: value ? 2 : 0, word_count: value ? 1 : 0,
+  })
+
+  /** A book shaped like the real thing: front matter in its own section, then
+   *  one chapter of verses. The title is translated and no verse is. */
+  async function fixture(countStructural: boolean | undefined) {
+    const db = await makeTestDb({
+      // Seeded in dependency order — org_settings is keyed to organizations.
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [{ id: P, name: 'Genesis', org_id: 1 }],
+      org_settings: [{ org_id: 1, settings: '{}', version: 1 }],
+      project_settings: [{
+        project_id: P,
+        settings: JSON.stringify(
+          countStructural === undefined ? {} : { countStructuralCells: countStructural },
+        ),
+        version: 1,
+      }],
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        src('t1', 'GEN:mt1:1', 'paratext'), tgt('t1', 'Génesis'),
+        src('t2', 'GEN:toc1:1', 'paratext'), tgt('t2', ''),
+        src('v1', 'GEN 1:1', 'verse'), tgt('v1', ''),
+        src('v2', 'GEN 1:2', 'verse'), tgt('v2', ''),
+      ],
+    })
+    await db.db.batch(fullProgressRecomputeStmts(db.db, P, F, 100))
+    return db.db
+  }
+
+  const get = async (db: AquillaDb) => {
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${P}/files/${F}/progress`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    return { response, body: await response.json() as FileProgressResponse }
+  }
+
+  it('counts the front matter when nothing has opted out', async () => {
+    const { body } = await get(await fixture(undefined))
+    expect(body.file).toMatchObject({ totalCount: 4, filledCount: 1 })
+    // Order is compareSections' business, not this test's — a chapterless key
+    // sorts after the numbered ones. What matters is that both are present.
+    expect([...body.sections.map((s) => s.key)].sort()).toEqual(['GEN', 'GEN 1'])
+  })
+
+  it('drops it from both halves of the ratio when the project opts out', async () => {
+    const { body } = await get(await fixture(false))
+    // Not just the denominator: the translated title has to leave the numerator
+    // too, or excluding headings makes the percentage climb.
+    expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
+  })
+
+  it('drops a section the exclusion empties rather than showing it at 0%', async () => {
+    // Front matter is its own section, so excluding it leaves that section with
+    // nothing in it. A tile reading 0% would be a section that no longer exists
+    // reporting that no work has been done on it.
+    const { body } = await get(await fixture(false))
+    expect(body.sections.map((s) => s.key)).toEqual(['GEN 1'])
+  })
+
+  it('gives the two policies different ETags', async () => {
+    // Same file, same revision. Without the policy in the tag, a client that
+    // cached one answer keeps painting it after the switch is flipped.
+    const counting = await get(await fixture(true))
+    const excluding = await get(await fixture(false))
+    expect(counting.response.headers.get('ETag')).not.toBe(
+      excluding.response.headers.get('ETag'),
+    )
+    expect(excluding.response.headers.get('ETag')).toContain(':nostruct')
+  })
+
+  it('falls back to the organization when the project has no answer', async () => {
+    const db = await fixture(undefined)
+    await db.prepare("UPDATE org_settings SET settings = ? WHERE org_id = 1")
+      .bind(JSON.stringify({ countStructuralCells: false })).run()
+    const { body } = await get(db)
+    expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
   })
 })

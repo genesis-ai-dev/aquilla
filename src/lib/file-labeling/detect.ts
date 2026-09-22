@@ -1,5 +1,5 @@
 import type { ProjectRecord, FileReference } from "@/lib/parsers/types"
-import { getBookName, isKnownBookCode } from "./bible-book-names"
+import { getBookName, bookCodeFromFileName } from "./bible-book-names"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 
 export interface RenameSuggestion {
@@ -18,24 +18,17 @@ function stripExt(name: string): string {
 
 function detectBibleBook(file: FileReference): RenameSuggestion | null {
   if (file.type !== "usfm" && file.type !== "ebible") return null
-  const stem = stripExt(file.name)
 
-  // Try to extract a 3-char book code from the stem.
-  // Check end first (handles "40-MAT"), then front (handles "gen", "Genesis").
-  // A candidate is only accepted if it is a known book code.
-  const endCandidate = stem.match(/([A-Za-z0-9]{3})$/)?.[1]
-  const frontCandidate = stem.match(/^([A-Za-z0-9]{3})/)?.[1]
-  const codeMatch =
-    (endCandidate && isKnownBookCode(endCandidate) ? endCandidate : undefined)
-    ?? (frontCandidate && isKnownBookCode(frontCandidate) ? frontCandidate : undefined)
-
+  // The stem-to-code rule lives in bible-book-names so the sidebar grouping
+  // can apply the same rule to migrated files (AQU-1084).
+  const codeMatch = bookCodeFromFileName(file.name)
   if (!codeMatch) return null
 
   const name = getBookName(codeMatch)!
   const corpus = getTestament(codeMatch)!
 
-  // Friendly label already applied. corpusMarker is client-local (not on the
-  // server projection) and is often missing after reload — don't re-prompt.
+  // Friendly label already applied. Don't re-prompt just because a corpus
+  // folder is missing — grouping is persisted separately on the file.
   if (file.name === name) return null
 
   return {

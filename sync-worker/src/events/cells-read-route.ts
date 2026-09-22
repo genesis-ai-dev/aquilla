@@ -211,11 +211,13 @@ function mapRow(row: CellRowRaw): CellRowOut {
  * the wrong default for a read API that should surface everything in the
  * projection.
  */
-function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
+type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "anchor_cell_id" | "event_id">
+
+function walkAnchorChain<T extends OrderRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
 
   // anchor_cell_id (null → "") → ordered children by event_id.
-  const byAnchor = new Map<string, CellRowRaw[]>()
+  const byAnchor = new Map<string, T[]>()
   const cellIds = new Set<string>()
   for (const r of rows) {
     cellIds.add(r.cell_id)
@@ -231,9 +233,9 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
     bucket.sort((a, b) => (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0))
   }
 
-  const ordered: CellRowRaw[] = []
+  const ordered: T[] = []
   const visited = new Set<string>()
-  const byEventId = (a: CellRowRaw, b: CellRowRaw): number =>
+  const byEventId = (a: T, b: T): number =>
     a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0
 
   // Depth-first descent. Each cell's id becomes the anchor key for the next
@@ -273,7 +275,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // event_id order and walk its descendants, so runs that still chain
   // together stay contiguous behind their orphaned head.
   if (visited.size < rows.length) {
-    const roots: CellRowRaw[] = []
+    const roots: T[] = []
     for (const r of rows) {
       if (visited.has(r.cell_id)) continue
       if (r.anchor_cell_id !== null && !cellIds.has(r.anchor_cell_id)) roots.push(r)
@@ -292,7 +294,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // they'd otherwise drop out entirely, which is the wrong default for a
   // read API that should surface everything in the projection.
   if (visited.size < rows.length) {
-    const orphans: CellRowRaw[] = []
+    const orphans: T[] = []
     for (const r of rows) {
       if (!visited.has(r.cell_id)) orphans.push(r)
     }
@@ -306,6 +308,180 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
 interface Cursor {
   /** Index into the ordered chain to resume from. */
   offset: number
+}
+
+// ─── AQU-1160: ordered-id chain cache ───────────────────────────────────────
+//
+// The full-file read + in-memory anchor-chain walk above is O(file size) —
+// correct (it's the tested oracle every fallback below defers to) but a
+// 500-row page on a 30k-cell file paid the cost of materializing and walking
+// every row on EVERY page. This cache breaks that: the FIRST page request for
+// a given (project, file, side, lane, ETag) still pays the full walk (there's
+// no way around computing the order at least once without a persisted
+// position column — a bigger change than this ticket takes on, see the
+// SWARM-TODO in the PR/issue comment), but it remembers the resulting
+// ORDERED LIST OF IDS (not the row data — cheap, ~40 bytes/id) so every
+// subsequent page for the same version is a single bounded
+// side/lane-scoped `cell_id = ANY(...)` point lookup sized to the page,
+// served by idx_cells_file_scan (0083_cells_scan_index.sql).
+//
+// Keyed by the response ETag: that string is already the exact "identity of
+// current full state" value this route computes for conditional reads
+// (fileId + epoch + rebuiltSeq + maxSeq — see makeEtag), so any write that
+// would change ordering, add/remove/change a row, or rebuild/re-incarnate the
+// project changes the key and the cache misses safely. Never used for the
+// `cellIds=` fast path (unpaginated, order is the caller's request order) or
+// the `since=` delta path (unordered by design).
+//
+// Isolate-local only (no DO/KV): correctness never depends on a hit, so a
+// cold isolate or eviction falls back to a narrow ordering read and full walk — see the
+// SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
+// page of a newly-opened file.
+interface ChainCacheItem {
+  cellId: string
+  side: "source" | "target"
+  targetLang: string
+}
+
+async function readPageValues(db: AquillaDb, columns: string, projectId: string, fileId: string, items: ChainCacheItem[]): Promise<CellRowOut[]> {
+  if (items.length === 0) return []
+  // Group by side/lane so each lookup uses the full composite index with
+  // one array parameter, rather than thousands of OR-expanded tuples.
+  const groups = new Map<string, { side: string; lane: string; ids: string[] }>()
+  for (const item of items) {
+    const key = JSON.stringify([item.side, item.targetLang])
+    const group = groups.get(key) ?? { side: item.side, lane: item.targetLang, ids: [] }
+    group.ids.push(item.cellId)
+    groups.set(key, group)
+  }
+  const pageBinds: unknown[] = [projectId, fileId]
+  const predicates = [...groups.values()].map((group) => {
+    // postgres.js unsafe() does not infer array parameter types. Bind an
+    // explicitly escaped array literal; cell IDs remain parameter values.
+    const ids = `{${group.ids.map(id => `"${id.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`
+    pageBinds.push(group.side, group.lane, ids)
+    return "(side = ? AND target_lang = ? AND cell_id = ANY(?::text[]))"
+  })
+  const pageParts = [
+    `SELECT ${columns}`,
+    "FROM cells",
+    "WHERE project_id = ? AND file_id = ?",
+    `AND (${predicates.join(" OR ")})`,
+  ]
+  const pageRes = await db
+    .prepare(pageParts.join(" "))
+    .bind(...pageBinds)
+    .all<CellRowRaw>()
+  const bySlot = new Map<string, CellRowRaw>()
+  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
+  const cells: CellRowOut[] = []
+  for (const item of items) {
+    const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
+    if (row) cells.push(mapRow(row))
+  }
+  return cells
+}
+
+interface ChainCacheEntry {
+  items: ChainCacheItem[]
+  cachedAt: number
+}
+
+const CHAIN_CACHE_MAX_ENTRIES = 32
+const CHAIN_CACHE_TTL_MS = 10 * 60 * 1000
+// Upper bound on the SUM of cached ids across all entries. Each item is a
+// small object (~100 bytes with V8 overhead for a ~30-char cell id + side +
+// lane), so 200K ids is ~20MB worst case — comfortably inside a Worker
+// isolate's 128MB even alongside the request itself. A single file larger
+// than this is simply not cached (falls back to the full walk, which is the
+// pre-cache behavior, never wrong).
+const CHAIN_CACHE_MAX_TOTAL_ITEMS = 200_000
+
+// One module-level (isolate-local) Map, NOT keyed on the AquillaDb instance:
+// index.ts constructs a fresh PostgresDb for EVERY request, so a per-db
+// WeakMap could never hit across the sequential page requests this cache
+// exists for (every page re-ran the full-file SELECT in production).
+//
+// Staleness: the key embeds the response ETag, which is recomputed from the
+// watermark query on every request (fetchWatermarks → makeEtag:
+// fileId + projectEpoch + rebuiltSeq + maxSeq). Any write to the project
+// bumps maxSeq (a rebuild bumps rebuiltSeq, a re-incarnation bumps the
+// epoch), so a post-write request computes a different key and misses. The
+// cache can therefore never serve an ordering older than the watermark the
+// same request just read. `fileId` alone is not a safe cross-project key
+// (nothing enforces global fileId uniqueness at this layer), so the key
+// also carries `projectId`.
+const chainCache = new Map<string, ChainCacheEntry>()
+let chainCacheTotalItems = 0
+
+/** Test-only: isolated test databases in one process all use the same
+ *  project/file ids with identical zero watermarks, so their ETags collide;
+ *  reset between tests to keep them independent. */
+export function resetChainCacheForTests(): void {
+  chainCache.clear()
+  chainCacheTotalItems = 0
+}
+
+function chainCacheKey(
+  projectId: string,
+  etag: string,
+  sideFilter: "source" | "target" | null,
+  laneFilter: string | null,
+  paired: boolean,
+): string {
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""} ${paired}`
+}
+
+/** Keep every side/lane of a cell together, even across a page boundary. */
+function completePageStart<T>(items: T[], offset: number, paired: boolean, id: (item: T) => string): number {
+  // A write can shift an offset into the middle of a group. Re-deliver that
+  // whole group rather than certifying a partial row as safe to edit.
+  while (paired && offset > 0 && offset < items.length && id(items[offset - 1]) === id(items[offset])) offset--
+  return offset
+}
+
+function completePageEnd<T>(items: T[], offset: number, limit: number, paired: boolean, id: (item: T) => string): number {
+  let end = Math.min(offset + limit, items.length)
+  if (paired) {
+    while (end > offset && end < items.length && id(items[end - 1]) === id(items[end])) end++
+  }
+  return end
+}
+
+function chainCacheDelete(key: string): void {
+  const entry = chainCache.get(key)
+  if (!entry) return
+  chainCache.delete(key)
+  chainCacheTotalItems -= entry.items.length
+}
+
+function chainCacheGet(key: string): ChainCacheEntry | null {
+  const entry = chainCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.cachedAt > CHAIN_CACHE_TTL_MS) {
+    chainCacheDelete(key)
+    return null
+  }
+  // Touch for recency: re-insert so Map's insertion-order iteration doubles
+  // as a cheap LRU for the eviction below.
+  chainCache.delete(key)
+  chainCache.set(key, entry)
+  return entry
+}
+
+function chainCacheSet(key: string, entry: ChainCacheEntry): void {
+  chainCacheDelete(key)
+  if (entry.items.length > CHAIN_CACHE_MAX_TOTAL_ITEMS) return
+  chainCache.set(key, entry)
+  chainCacheTotalItems += entry.items.length
+  while (
+    chainCache.size > CHAIN_CACHE_MAX_ENTRIES ||
+    chainCacheTotalItems > CHAIN_CACHE_MAX_TOTAL_ITEMS
+  ) {
+    const oldest = chainCache.keys().next().value
+    if (oldest === undefined) break
+    chainCacheDelete(oldest)
+  }
 }
 
 function encodeCursor(c: Cursor): string {
@@ -473,6 +649,8 @@ export async function handleCellsReadRequest(
   }
 
   const cursor = decodeCursor(url.searchParams.get("cursor"))
+  // Opt-in row paging preserves the legacy side-ordered API for other readers.
+  const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
   // AQU-538: optional lane filter — target rows only; source rows are always
   // included (the shared-source invariant). Absent = all lanes (unchanged).
@@ -653,8 +831,47 @@ export async function handleCellsReadRequest(
     }
   }
 
+  // AQU-1160: cache applies only to the paginated whole-file/whole-side walk
+  // — never to the targeted cellIds fast path (already bounded, order is the
+  // caller's request order) and only when the watermark/ETag was computed
+  // (i.e. cellIdsFilter is empty, same gate as the delta branch above).
+  const useChainCache = etag !== null && (!cellIdsFilter || cellIdsFilter.length === 0)
+  const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired) : null
+  const cached = cacheKey ? chainCacheGet(cacheKey) : null
+
+  if (cached) {
+    const offset = completePageStart(cached.items, cursor?.offset ?? 0, paired, (r) => r.cellId)
+    const pageItems = cached.items.slice(offset, completePageEnd(cached.items, offset, limit, paired, (r) => r.cellId))
+    const nextOffset = offset + pageItems.length
+    const hasMore = nextOffset < cached.items.length
+
+    let cells: CellRowOut[] = []
+    if (pageItems.length > 0) {
+      // Bounded point lookup: exactly the page's rows, served by
+      // idx_cells_file_scan (project_id, file_id, side, target_lang, cell_id)
+      // — independent of file size (AQU-1160 AC1).
+      cells = await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, pageItems)
+      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length}`)
+    }
+
+    return Response.json(
+      {
+        cells,
+        nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
+        total: cached.items.length,
+        maxServerSeq,
+        projectEpoch,
+        ...(paired ? { completeRows: true } : {}),
+      },
+      { headers: cacheHeaders(etag!) },
+    )
+  }
+
+  // Keep the watermark captured before both reads: an edit between ordering
+  // and value hydration must remain eligible for the client's next delta.
+  // Do not refresh that watermark after hydration.
   const parts: string[] = [
-    `SELECT ${columns}`,
+    `SELECT ${useChainCache ? "cell_id, side, target_lang, anchor_cell_id, event_id" : columns}`,
     "FROM cells",
     "WHERE project_id = ? AND file_id = ?",
   ]
@@ -674,14 +891,20 @@ export async function handleCellsReadRequest(
   }
   const sql = parts.join(" ")
 
-  const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<CellRowRaw>()
+  const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<OrderRow | CellRowRaw>()
   const allRows = result.results
+  if (useChainCache) {
+    // Evidence for AQU-1160 AC1's baseline: this is the pre-cache, full-file
+    // cost every page paid before this change. Compare against the
+    // chain-cache hit log above.
+    console.log(`[cells-read] chain-cache miss file=${fileId} rows=${allRows.length}`)
+  }
 
-  let ordered: CellRowRaw[]
+  let ordered: OrderRow[]
   if (cellIdsFilter && cellIdsFilter.length > 0) {
     // Targeted read: skip chain walking; preserve request order so callers
     // patching by index can rely on it. Pagination is moot at this scale.
-    const byId = new Map<string, CellRowRaw[]>()
+    const byId = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       let bucket = byId.get(r.cell_id)
       if (!bucket) {
@@ -703,8 +926,8 @@ export async function handleCellsReadRequest(
     // cell must be walked PER LANE or sibling-lane rows silently drop.
     // Default lane ('') first, then added lanes in name order — for N=1
     // (only '' exists) the output is byte-identical to the pre-lane walk.
-    const sourceRows: CellRowRaw[] = []
-    const targetByLane = new Map<string, CellRowRaw[]>()
+    const sourceRows: OrderRow[] = []
+    const targetByLane = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       if (r.side === "source") sourceRows.push(r)
       else if (r.side === "target") {
@@ -723,7 +946,7 @@ export async function handleCellsReadRequest(
     }
   } else if (sideFilter === "target") {
     // Same per-lane walk for target-only reads.
-    const byLane = new Map<string, CellRowRaw[]>()
+    const byLane = new Map<string, OrderRow[]>()
     for (const r of allRows) {
       const lane = r.target_lang ?? ""
       let bucket = byLane.get(lane)
@@ -741,16 +964,40 @@ export async function handleCellsReadRequest(
     ordered = walkAnchorChain(allRows)
   }
 
-  const offset = cursor?.offset ?? 0
-  const slice = ordered.slice(offset, offset + limit)
+  if (paired) {
+    // First occurrence follows the source chain, then target-only chains.
+    // Group all target lanes with their source before taking a page: absence
+    // of a target now means genuinely untranslated, never "on a later page".
+    const byCell = new Map<string, CellRowRaw[]>()
+    for (const row of ordered) {
+      const group = byCell.get(row.cell_id)
+      if (group) group.push(row)
+      else byCell.set(row.cell_id, [row])
+    }
+    ordered = [...byCell.values()].flat()
+  }
+
+  if (cacheKey) {
+    chainCacheSet(cacheKey, {
+      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
+      cachedAt: Date.now(),
+    })
+  }
+
+  const offset = completePageStart(ordered, cursor?.offset ?? 0, paired, (r) => r.cell_id)
+  const slice = ordered.slice(offset, completePageEnd(ordered, offset, limit, paired, (r) => r.cell_id))
   const nextOffset = offset + slice.length
   const hasMore = nextOffset < ordered.length
 
   return Response.json(
     {
-      cells: slice.map(mapRow),
+      cells: useChainCache
+        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })))
+        // Targeted reads selected all columns above.
+        : (slice as CellRowRaw[]).map(mapRow),
       nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
       total: ordered.length,
+      ...(paired ? { completeRows: true } : {}),
       // Null only on the cellIds fast path, which skips the watermark query.
       maxServerSeq,
       // AQU-943: the incarnation this page's cursor belongs to. The client

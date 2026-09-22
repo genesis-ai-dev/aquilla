@@ -82,6 +82,18 @@ async function seedCast(status = "staged"): Promise<void> {
   await seedChangeset("cs-1", "proj-1", 1, credId, status)
 }
 
+async function configureAssignmentFloor(level: number): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Test Org', 1)",
+  ).run()
+  await env.AQUILLA_PG.prepare("UPDATE projects SET org_id = 1 WHERE id = 'proj-1'").run()
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 0, 1)",
+  )
+    .bind(JSON.stringify({ assignmentMinRole: level }))
+    .run()
+}
+
 async function assign(actor: string, userId: string | null, id = "cs-1"): Promise<Response> {
   return app.request(
     `/api/v2/changesets/${id}/assign`,
@@ -181,6 +193,30 @@ describe("POST /api/v2/changesets/:id/assign", () => {
     expect(body.error.code).toBe("permission_denied")
     expect(body.error.details?.requiredRole).toBe(500)
     expect((await readRow()).assigned_to_user_id).toBeNull()
+  })
+
+  it("lets a contributor route an AI changeset when the org lowers the assignment floor", async () => {
+    await seedCast()
+    await configureAssignmentFloor(400)
+
+    const res = await assign("bob", "3")
+    expect(res.status).toBe(200)
+    expect(await readRow()).toMatchObject({
+      status: "staged",
+      assigned_to_user_id: "3",
+    })
+  })
+
+  it("raises AI-task routing authority when the org raises the assignment floor", async () => {
+    await seedCast()
+    await configureAssignmentFloor(600)
+
+    const res = await assign("dave", "2")
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as {
+      error: { details?: { requiredRole: number } }
+    }
+    expect(body.error.details?.requiredRole).toBe(600)
   })
 
   it("403s a caller with no role on the changeset's project", async () => {

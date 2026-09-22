@@ -71,3 +71,132 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
     expect(result.category).toBe("daily-quota-exceeded")
   })
 })
+
+// AQU-646 stage 4c: the audio failures. Every one of these reached a user as a
+// raw server fragment before this round — not because the branches below were
+// missing, but because `extractStatus` could not read the format this app
+// writes, so all of them fell through to `unknown`.
+describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
+  it("reads a status written in brackets, which is how every audio error writes it", () => {
+    // The literal shape from upload.ts — the one audio error that still rides
+    // the generic status branches. tts.ts and voice-clone.ts strings are
+    // claimed by the engine-named branches (AQU-1001) tested below.
+    expect(categorizeAiError("audio upload failed (500): internal error").category).toBe(
+      "provider-unavailable",
+    )
+    expect(categorizeAiError("audio upload failed (403): insufficient role").category).toBe(
+      "provider-rejected",
+    )
+  })
+
+  // THE ORDERING TEST. OmniVoice is the default engine and answers 503 for
+  // this, so the moment brackets parse, the generic 5xx branch would claim it
+  // and tell the user to try again in a moment — advice that can never come
+  // true, on the most likely voice failure there is. (AQU-1001 renamed the
+  // category from tts-not-configured to omnivoice-not-configured; the
+  // ordering guarantee is the same.)
+  it("calls an unconfigured voice service what it is, not a temporary outage", () => {
+    const result = categorizeAiError("voice/tts failed (503): TTS not configured")
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.category).not.toBe("provider-unavailable")
+    expect(result.body).not.toMatch(/temporary|try again in a moment/i)
+  })
+
+  it("recognizes the TTS daily budget, which arrives as a JSON machine code", () => {
+    const raw = 'voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}'
+    const result = categorizeAiError(raw)
+    expect(result.category).toBe("daily-quota-exceeded")
+    // It used to land in `unknown`, where the braces tripped
+    // `looksLikeMachineDump` and replaced it with "the AI request didn't
+    // finish" — the least useful sentence available for the one failure the
+    // user can actually wait out.
+    expect(result.body).not.toContain("{")
+    expect(result.body).toMatch(/daily/i)
+  })
+
+  // The guard the widened regex must not break: a bracketed number with no
+  // failure lead-in is still not a status.
+  it("still refuses a bare parenthesised number that is not a status", () => {
+    expect(categorizeAiError("The take (500) was the longest one").category).not.toBe(
+      "provider-unavailable",
+    )
+  })
+})
+
+describe("categorizeAiError — names the TTS engine that failed", () => {
+  it("does not treat a local OmniVoice 503 as a missing Gemini key", () => {
+    const result = categorizeAiError("voice/tts failed (503): TTS not configured")
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.title).toBe("OmniVoice isn't configured")
+    expect(result.body).toMatch(/omnivoice/i)
+    expect(result.body).toMatch(/not gemini/i)
+    expect(result.body).toMatch(/will not fix/i)
+  })
+
+  it("recognizes the authored OmniVoice-not-configured body", () => {
+    const raw =
+      "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+    const result = categorizeAiError(raw)
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.title).toBe("OmniVoice isn't configured")
+  })
+
+  it("names OmniVoice on a later Modal failure", () => {
+    const result = categorizeAiError("OmniVoice TTS failed (502): upstream timeout")
+    expect(result.category).toBe("omnivoice-failed")
+    expect(result.title).toBe("OmniVoice TTS failed")
+    expect(result.body).toMatch(/not a gemini key/i)
+  })
+
+  it("names Seed-VC when clone conversion isn't wired", () => {
+    const result = categorizeAiError("voice convert failed (503): voice conversion not configured")
+    expect(result.category).toBe("seed-vc-not-configured")
+    expect(result.title).toBe("Voice cloning isn't configured")
+    expect(result.body).toMatch(/seed-vc/i)
+  })
+
+  it("names Seed-VC on a later conversion failure", () => {
+    const result = categorizeAiError("Voice cloning (Seed-VC) failed (500): gpu OOM")
+    expect(result.category).toBe("seed-vc-failed")
+    expect(result.title).toBe("Voice cloning failed")
+  })
+
+  it("keeps a missing Gemini key as Gemini, and offers OmniVoice as the alternative", () => {
+    const result = categorizeAiError(
+      "Add a Gemini API key in Project Settings before using Gemini voice generation.",
+    )
+    expect(result.category).toBe("missing-gemini-key")
+    expect(result.title).toBe("Gemini API key required")
+    expect(result.body).toMatch(/omnivoice/i)
+  })
+
+  it("names Gemini when TTS ran but returned no audio", () => {
+    const result = categorizeAiError("Gemini TTS response did not include audio data.")
+    expect(result.category).toBe("gemini-failed")
+    expect(result.title).toBe("Gemini TTS failed")
+  })
+})
+
+describe("categorizeAiError — OpenRouter key vs Gemini (AQU-1158)", () => {
+  const OPENROUTER_NOT_CONFIGURED =
+    'Completion failed: 500 {"error":"OPENROUTER_API_KEY is not configured"}'
+
+  it("titles a hosted OpenRouter miss as OpenRouter, never Gemini", () => {
+    const result = categorizeAiError(OPENROUTER_NOT_CONFIGURED)
+    expect(result.category).toBe("missing-openrouter-key")
+    expect(result.title).toBe("OpenRouter API key required")
+    expect(result.body).toMatch(/openrouter/i)
+    expect(result.body).toMatch(/custom/i)
+    expect(result.body).not.toMatch(/gemini/i)
+    expect(result.body).not.toMatch(/voice/i)
+    expect(result.raw).toBe(OPENROUTER_NOT_CONFIGURED)
+  })
+
+  it("does not treat a generic api_key substring in a completion failure as Gemini", () => {
+    const result = categorizeAiError(
+      'Completion failed: 401 {"error":{"message":"invalid api key","code":401}}',
+    )
+    expect(result.category).not.toBe("missing-gemini-key")
+    expect(result.title).not.toMatch(/gemini/i)
+  })
+})

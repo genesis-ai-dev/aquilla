@@ -91,7 +91,7 @@ describe("AppShell main-content error containment", () => {
     const language = screen.getByRole("button", { name: "Quick language switch" })
     expect(language.parentElement).toHaveClass("flex-col")
     expect(language.closest('[data-slot="app-shell-sidebar-footer"]')).toHaveClass("flex-col")
-    expect(screen.getByRole("button", { name: "Copy build info" }).parentElement).toHaveClass("max-w-full")
+    expect(screen.getByRole("button", { name: "Copy build info" }).closest('[data-slot="app-shell-sidebar-build"]')).toHaveClass("max-w-full")
   })
 
   it("renders main content normally when nothing throws", () => {
@@ -153,6 +153,25 @@ describe("AppShell main-content error containment", () => {
     )
 
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "items-center")
+  })
+
+  it("stacks sidebar chrome in a 40px column when the dock rail is collapsed", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          leftDock={<div data-testid="left-dock">dock</div>}
+          logoSlot={<span>logo</span>}
+          railCollapsed
+          main={<div>main</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    const chrome = container.querySelector('[data-slot="app-shell-sidebar-chrome"]')
+    expect(chrome).toHaveClass("flex-col", "w-10")
+    expect(chrome).not.toHaveClass("px-2")
   })
 
   it("sits the floating content card flush under the header (no top margin)", () => {
@@ -236,7 +255,10 @@ describe("AppShell main-content error containment", () => {
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
-    expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
+    const burmese = await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })
+    expect(burmese).toBeInTheDocument()
+    expect(burmese.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(burmese.closest("[data-align]")).toHaveAttribute("data-align", "start")
   })
 
   it("keeps version and language controls on one row in the project workspace", async () => {
@@ -267,12 +289,14 @@ describe("AppShell main-content error containment", () => {
     expect(language).not.toHaveClass("border")
 
     await userEvent.click(help)
-    expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()
+    const homepage = await screen.findByRole("menuitem", { name: /homepage/i })
+    expect(homepage.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(homepage.closest("[data-align]")).toHaveAttribute("data-align", "start")
     expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
   })
 })
 
-describe("AppShell mobile org sidebar sheet", () => {
+describe("AppShell mobile sidebar sheet", () => {
   afterEach(() => {
     window.matchMedia = originalMatchMedia
   })
@@ -305,7 +329,7 @@ describe("AppShell mobile org sidebar sheet", () => {
     expect(sheet.querySelector('[data-testid="sidebar"]')).toHaveTextContent("sidebar")
   })
 
-  it("does not move the editor leftDock into a sheet on small viewports", () => {
+  it("opens the editor leftDock in a left sheet from a PanelLeft control beside the header", async () => {
     stubLgUp(false)
     render(
       <MemoryRouter>
@@ -313,11 +337,25 @@ describe("AppShell mobile org sidebar sheet", () => {
           header={<div data-testid="header">header</div>}
           statusBar={null}
           leftDock={<div data-testid="left-dock">dock</div>}
+          logoSlot={<span>logo</span>}
+          logoAccessory={<button type="button">Collapse sidebar</button>}
+          railCollapsed
           main={<div data-testid="content">content</div>}
         />
       </MemoryRouter>,
     )
-    expect(screen.getByTestId("left-dock")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Open sidebar" })).not.toBeInTheDocument()
+
+    const trigger = screen.getByRole("button", { name: "Open sidebar" })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.queryByTestId("left-dock")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
+
+    await userEvent.click(trigger)
+    const sheet = await screen.findByRole("dialog", { name: "Navigation" })
+    expect(sheet.querySelector('[data-testid="left-dock"]')).toHaveTextContent("dock")
+    const chrome = sheet.querySelector('[data-slot="app-shell-sidebar-chrome"]')
+    expect(chrome).not.toHaveClass("w-10", "flex-col")
+    expect(sheet.querySelector('[data-testid="left-dock"]')).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
   })
 })

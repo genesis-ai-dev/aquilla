@@ -1,4 +1,3 @@
-import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { HealthRing } from "./HealthRing"
@@ -7,24 +6,26 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate, formatNumber, formatPercent } from "@/lib/i18n/format"
 
 interface StatusBarProps {
-  cells: readonly CellSummary[]
+  progress: { total: number; translated: number; validated: number }
+  getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
   projectHealth: number
-  /** Per-cell decay health 0-100, keyed by cell id. Drives the breakdown. */
-  healthMap: Map<string, number>
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
+  /**
+   * AQU-1083: `progress` must already reflect the project's structural-cell
+   * policy — this footer no longer sees cells, so it cannot apply it itself.
+   * ProjectWorkspace resolves it with `applyStructuralPolicy` before passing
+   * the numbers down; see `@/lib/cells/structural`.
+   */
   className?: string
 }
 
 export function StatusBar({
-  cells, projectHealth, healthMap, staleSourceCount, onJumpToCell, className,
+  progress, getHealthByCell, projectHealth, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
   const { locale, t } = useI18n()
-  const total = cells.length
-  const empty = cells.filter((c) => c.status === "empty").length
-  const unvalidated = cells.filter((c) => c.status === "unvalidated").length
-  const validated = cells.filter((c) => c.status === "validated").length
-  const translated = total - empty
+  const { total, translated, validated } = progress
+  const unvalidated = translated - validated
   const fraction = total > 0 ? translated / total : 0
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
@@ -34,12 +35,6 @@ export function StatusBar({
   const translatedDisplay = bidiIsolate(formatNumber(translated, locale))
   const pctDisplay = bidiIsolate(`(${formatPercent(fraction, locale)})`)
 
-  const healthByCell = cells.map((c) => ({
-    cellId: c.id,
-    label: c.cellLabel || c.id,
-    health: healthMap.get(c.id) ?? 0,
-  }))
-
   return (
     <footer className={cn(
       "relative z-10 flex items-center gap-2.5 px-4 py-2 text-sm text-muted-foreground",
@@ -48,7 +43,7 @@ export function StatusBar({
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"
-        healthByCell={healthByCell}
+        getHealthByCell={getHealthByCell}
         staleSourceCount={staleSourceCount}
         onJumpToCell={onJumpToCell}
       >

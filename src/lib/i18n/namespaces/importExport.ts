@@ -151,9 +151,25 @@ export const importExport = defineNamespace({
       "bullet advice — always arrive as one cell per line. Optionally, longer " +
       "paragraphs can also be split into one cell per sentence; export puts each one " +
       "back together as InDesign set it.",
+    "importExport.biblica.descriptionEbl":
+      "Upload the InDesign (.idml) package for an Equipping Biblical Leaders " +
+      "facilitator or participant guide. Every text-bearing paragraph is imported — " +
+      "the guide is written material throughout rather than a Bible with notes around " +
+      "it — and each cell keeps its InDesign formatting locked. The guide's own " +
+      "headings become the file's sections, so the navigator moves a topic or a lesson " +
+      "at a time. Lists that InDesign holds in a single paragraph — objectives, " +
+      "materials, contents entries — always arrive as one cell per line. Optionally, " +
+      "longer paragraphs can also be split into one cell per sentence; export puts " +
+      "each one back together as InDesign set it.",
     "importExport.biblica.chooseFile": "Choose study Bible IDML file",
     "importExport.biblica.chooseFileTreasureHunt": "Choose Treasure Hunt IDML file",
     "importExport.biblica.chooseFileReach4Life": "Choose Reach 4 Life IDML file",
+    "importExport.biblica.chooseFileEbl": "Choose EBL IDML file",
+    "importExport.biblica.editionQuestion": "Which Biblica title is this?",
+    "importExport.biblica.editionQuestionHint":
+      "Each title uses its own InDesign template, and nothing in the package says " +
+      "which one it is. Tick at most one. Leave all three unticked to read the " +
+      "package as Biblica Study Bible notes.",
     "importExport.biblica.treasureHuntLabel": "This is a Treasure Hunt Bible file",
     "importExport.biblica.treasureHuntHint":
       "The Treasure Hunt Bible uses a different InDesign template. Tick this to " +
@@ -164,6 +180,11 @@ export const importExport = defineNamespace({
       "Reach 4 Life uses a third InDesign template. Tick this to import its " +
       "lessons, journeys, hot topics, book introductions and front matter instead " +
       "of looking for study notes.",
+    "importExport.biblica.eblLabel": "This is an EBL file",
+    "importExport.biblica.eblHint":
+      "Equipping Biblical Leaders guides use a fourth InDesign template. Tick this " +
+      "to import the whole guide, split into sections by its own topic and lesson " +
+      "headings, instead of looking for study notes.",
     "importExport.biblica.splitSentencesLabel": "Split long notes into one cell per sentence",
     "importExport.biblica.splitSentencesHint":
       "Leave unchecked to import each note line as one larger cell. Lists still split per line either way.",
@@ -213,8 +234,6 @@ export const importExport = defineNamespace({
       "Original-language OT/NT with per-word lemma, morphology, and Strong's.",
     "importExport.landing.paired.title": "Paired translation",
     "importExport.landing.paired.description": "Source + target pairs from a spreadsheet to fill the target column.",
-    "importExport.landing.labels.title": "Cell labels / cast",
-    "importExport.landing.labels.description": "Re-upload a template to label existing cells with cast names.",
     "importExport.landing.tn.title": "Translation Notes",
     "importExport.landing.tn.hint": "TSV",
     "importExport.landing.tn.description": "unfoldingWord notes, shown beside the matching verse as you translate.",
@@ -400,8 +419,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
-    "importExport.dialog.labelsNeedSourceFile":
-      "Cell labels require an existing source file in this project. Import source files first, then return here.",
     "importExport.dialog.pairedNeedsSourceCells":
       "Paired translation import requires existing source cells in this project. Import source files first.",
 
@@ -509,6 +526,30 @@ export const importExport = defineNamespace({
     "importExport.dialog.downloadFile": "Download {fileName}",
     "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
+    // AQU-1068 (rewritten 2026-09-09): shown beside a native round-trip format
+    // when this file has cells somebody added or removed in the app. These
+    // exports put translations back into the client's OWN file, so what happens
+    // to that content differs per format and is worth saying plainly rather
+    // than warning about.
+    //
+    // Its predecessor said added cells could never be included. That is no
+    // longer true for USFM, Word or PowerPoint, and it was never true for the
+    // rendered formats it also reached (csv, tsv, xliff, tmx, md, txt all carry
+    // added lines fine — see exporters/added-lines.test.ts).
+    "importExport.dialog.structuralNoteUsfm":
+      "Content added here is written into the verse it follows, with no new verse number. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNoteDocx":
+      "Content added here becomes a new paragraph after the one it follows. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNotePptx":
+      "Content added here becomes a new paragraph after the one it follows, and a slide may " +
+      "overflow. Content removed here is left out.",
+    "importExport.dialog.structuralNoteUnplaceable":
+      "Cells can\u2019t be added or removed on this kind of file, so this export matches the original.",
+    "importExport.dialog.structuralNoteLegacy":
+      "This file was imported before we recorded where each paragraph came from, so content " +
+      "added or removed here can\u2019t be placed in it.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -539,6 +580,32 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    // — AQU-1148: what the exported file is allowed to contain. The hints say
+    //   exactly what lands in the file, because "approved text" was being
+    //   claimed for output that mixed validated text, unreviewed drafts and
+    //   untranslated source. —
+    "importExport.dialog.contentLegend": "Content",
+    "importExport.dialog.contentModeAriaLabel": "What the exported file contains",
+    "importExport.dialog.contentModeCurrent": "Current translations",
+    "importExport.dialog.contentModeValidatedOnly": "Validated translations only",
+    "importExport.dialog.contentModeCurrentHint":
+      "Every cell's current text — validated, unvalidated draft and AI draft alike. " +
+      "Untranslated cells are filled with the source text, so the file will not show " +
+      "which parts are approved.",
+    "importExport.dialog.contentModeValidatedOnlyHint":
+      "Only cells that meet this project's validation threshold. Everything else is left " +
+      "out — no unreviewed drafts and no source-language filler.",
+    "importExport.dialog.contentModeValidatedOnlyRoundTripHint":
+      "Only cells that meet this project's validation threshold are written into your " +
+      "original document. Anything else keeps the words already in the file you uploaded.",
+    "importExport.dialog.contentModeValidatedCount":
+      plural({
+        one: "{validated} of {count} cell in this file is validated.",
+        other: "{validated} of {count} cells in this file are validated.",
+      }),
+    "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
+    "importExport.dialog.allChapters": "All chapters",
+    "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
     "importExport.dialog.filenameLegend": "Filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
@@ -572,6 +639,10 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    "importExport.dialog.nothingOnMainTrack": plural({
+      one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
+      other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
+    }),
     "importExport.dialog.unrecordedCharacterCount": plural({
       one: "{count} character with nothing recorded yet",
       other: "{count} characters with nothing recorded yet",
@@ -584,6 +655,8 @@ export const importExport = defineNamespace({
     // — Export dialog: the per-section cards a dubbing file gets —
     "importExport.dialog.audioSectionTitle": "Audio",
     "importExport.dialog.audioShapeGroupAriaLabel": "Audio export shape",
+    "importExport.dialog.audioAddedTracksNote":
+      "Only the main Target audio track is included. Export by line to get the tracks you have added.",
     "importExport.dialog.exportAudio": "Export audio",
     "importExport.dialog.srtExportSectionTitle": "SRT export",
     "importExport.dialog.vttExportSectionTitle": "VTT export",
@@ -654,6 +727,8 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+    "importExport.errors.originalMissing":
+      "Original isn't in storage. Re-import to restore it.",
 
     // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
     // These are messages parser/upload helpers throw that reach the user
@@ -724,6 +799,21 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
+
+    // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
+    "importExport.errors.oversizedCells": plural({
+      one:
+        "Import failed: {count} cell in {fileName} is larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split that section in the source document and import again.",
+      other:
+        "Import failed: {count} cells in {fileName} are larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split those sections in the source document and import again.",
+    }),
+    "importExport.errors.oversizedCellSource": "{label} — source text, {size}",
+    "importExport.errors.oversizedCellTarget": "{label} — translation, {size}",
+    // No inflected noun to agree with the count, so a single form is correct
+    // here rather than a plural() whose English forms would be identical.
+    "importExport.errors.oversizedCellsMore": "and {count} more",
 
     // — Door43 (DCS) sync badge, catalog browser and upstream panel —
     // (importExport.linked.* below is the linked-project upstream-changes
@@ -853,43 +943,17 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
-      "text is never changed. You'll review every match before anything is " +
-      "saved.",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
+      "subtitle file. Source text is never changed. You'll review every match " +
+      "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
+    "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
-      "(.csv/.tsv/.xlsx).",
-    "importExport.labels.choosePlaceholder": "Choose a file…",
-    "importExport.labels.couldNotMintToken": "Could not mint a sync token for this file.",
-    "importExport.labels.csvTooLarge": "The label CSV exceeds the 10 MB safety limit.",
-    "importExport.labels.description": "Download a template with a file's cell references, fill in cast names, " +
-      "then re-upload.",
-    "importExport.labels.downloadTemplate": "Download CSV template",
-    "importExport.labels.emptyCsv": "The label CSV is empty.",
-    "importExport.labels.failedToApply": "Failed to apply labels",
-    "importExport.labels.failedToLoadCells": "Failed to load cells for this file",
-    "importExport.labels.importLabelCount": plural({
-      one: "Import {count} label",
-      other: "Import {count} labels",
-    }),
-    "importExport.labels.loadingCells": "Loading cells…",
-    "importExport.labels.noRowsFound": "No rows found in file.",
-    "importExport.labels.previewCameraHeader": "Camera",
-    "importExport.labels.previewLabelCount": plural({
-      one: "{count} label to import",
-      other: "{count} labels to import",
-    }),
-    "importExport.labels.refCellCount": plural({
-      one: "{count} cell with references in {fileName}.",
-      other: "{count} cells with references in {fileName}.",
-    }),
-    "importExport.labels.step1Heading": "Step 1 — Choose file & download template",
-    "importExport.labels.step2Heading": "Step 2 — Upload filled template",
-    "importExport.labels.thisFileFallback": "this file",
-    "importExport.labels.title": "Cell Labels / Cast Import",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
+      "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -922,8 +986,9 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.matchedCount": "{count} matched",
-    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
-      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
+      "order. Check the source text next to each row to confirm alignment " +
+      "before importing.",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
@@ -1074,6 +1139,18 @@ export const importExport = defineNamespace({
       "importExport.biblica.reach4lifeLabel": {
         description:
           "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Reach 4 Life InDesign template. 'Reach 4 Life' is a product title — keep it recognizable.",
+      },
+      "importExport.biblica.eblLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Equipping Biblical Leaders InDesign template. 'EBL' is the programme's own abbreviation of 'Equipping Biblical Leaders' and is how Biblica names these files — keep the abbreviation rather than expanding or translating it. Note the article agrees with the abbreviation, not the expansion.",
+      },
+      "importExport.biblica.editionQuestion": {
+        description:
+          "Caption above the three mutually exclusive Biblica title checkboxes (Treasure Hunt Bible, Reach 4 Life, EBL). It also names the group for screen readers, so it must read as a question about the file being imported, not as a command.",
+      },
+      "importExport.biblica.editionQuestionHint": {
+        description:
+          "Hint under that caption. Explains why the person importing has to answer — the package does not identify its own title — that at most one box applies, and that leaving all three clear reads the file as a Biblica Study Bible notes package (the importer's default).",
       },
       "importExport.biblica.readingPackageWithProgress": {
         description: "Parse-phase progress line on the Biblica panel while unpacking the IDML package, once a file count is known.",
@@ -1301,6 +1378,37 @@ export const importExport = defineNamespace({
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
       },
+      "importExport.dialog.structuralNoteUsfm": {
+        description:
+          "Appended to the USFM format's hint in the Export dialog, when this file has cells " +
+          "somebody added or removed in the app. Says exactly what the export does with them. " +
+          "'The verse it follows' matters: an added cell gets no verse number of its own, so " +
+          "the client's numbering never changes.",
+      },
+      "importExport.dialog.structuralNoteDocx": {
+        description:
+          "The same note for a Word export: an added cell becomes its own paragraph after the " +
+          "one it follows, and a removed cell's paragraph is dropped from the document.",
+      },
+      "importExport.dialog.structuralNotePptx": {
+        description:
+          "The same note for a PowerPoint export, plus the caveat that a text box has a fixed " +
+          "size and does not reflow, so added content can push past the edge of a slide and " +
+          "need the box resizing by hand.",
+      },
+      "importExport.dialog.structuralNoteUnplaceable": {
+        description:
+          "Shown for a format where cells cannot be added or removed at all — InDesign today, " +
+          "whose layout is addressed by position so new or missing paragraphs cannot be " +
+          "expressed. Reassures the reader that the export matches their original.",
+      },
+      "importExport.dialog.structuralNoteLegacy": {
+        description:
+          "Shown for a Word or PowerPoint file imported before we recorded a locator for each " +
+          "paragraph. Those files are matched to the document by POSITION, where inserting or " +
+          "dropping a paragraph would shift every later one onto the wrong text, so added and " +
+          "removed content cannot be carried at all.",
+      },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",
         placeholders: { label: "The native format's own translated label (e.g. 'USFM')." },
@@ -1335,6 +1443,25 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.contentModeAriaLabel": {
+        description:
+          "Accessible name for the content-mode select on the Export dialog — the control that chooses between every current translation and validated translations only (AQU-1148).",
+      },
+      "importExport.dialog.contentModeValidatedCount": {
+        description:
+          "Count shown under the content-mode select once 'Validated translations only' is chosen, so the user knows how much of the file will actually be written. 'Validated' means a cell that has met this project's validation threshold.",
+        placeholders: {
+          validated: "Number of cells in the current file that are validated.",
+          count: "Total number of cells in the current file — the number the plural form agrees with.",
+        },
+      },
+      "importExport.dialog.chapterFilterAriaLabel": {
+        description: "Accessible name for the chapter-scope select on the Export dialog.",
+      },
+      "importExport.dialog.chapterFilterHint": {
+        description: "Hint below the chapter scope once a single chapter is chosen. {chapter} is bold-styled, rendered by RichMessage.",
+        placeholders: { chapter: "Bold-styled label of the selected chapter, e.g. 'GEN 1'." },
       },
       "importExport.dialog.filenameAriaLabel": {
         description: "Accessible name for the export filename input.",
@@ -1371,6 +1498,25 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, or one file per recorded line.",
+      },
+      "importExport.dialog.nothingOnMainTrack": {
+        description:
+          "Shown in the by-character preview when the default Target audio row " +
+          "holds no recordings but added tracks do. The preview describes the " +
+          "by-character deliverable, which reads the default row only, so the " +
+          "plain 'nothing is recorded yet' was false on exactly these files — " +
+          "and sat beside an Export button that refused for the same reason. " +
+          "Names the count and where to find them.",
+        placeholders: { count: "How many takes are on added tracks. Always 1 or more." },
+      },
+      "importExport.dialog.audioAddedTracksNote": {
+        description:
+          "Shown under the by-character audio export option when the file has " +
+          "audio tracks beyond the four it starts with. That export writes one " +
+          "track per CHARACTER off the main dub row only, so takes recorded " +
+          "onto tracks the user added are not in it — this says so before they " +
+          "export, and points at the by-line shape, which does carry them. A " +
+          "notice, not a restriction: by character remains selectable.",
       },
       "importExport.dialog.subtitleTargetGroupAriaLabel": {
         description:
@@ -1481,6 +1627,10 @@ export const importExport = defineNamespace({
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
       },
+      "importExport.errors.originalMissing": {
+        description:
+          "Toast when Download original fails because the stored blob pointer exists but the bytes are gone from storage. Tells the user to re-import.",
+      },
       "importExport.errors.ebibleEmptyCorpus": {
         description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",
         placeholders: { title: "Title of the eBible translation the user chose — not translated." },
@@ -1537,6 +1687,49 @@ export const importExport = defineNamespace({
       "importExport.errors.sourceUploadTooLarge": {
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.oversizedCells": {
+        description:
+          "Thrown before any upload when one or more parsed cells exceed the server's " +
+          "per-cell text ceiling, so the user learns which sections are too big instead " +
+          "of waiting out a full upload that ends in a raw HTTP 413. The closing " +
+          "sentence is the remedy: break the oversized section up in the original " +
+          "document and re-import.",
+        placeholders: {
+          count: "Number of oversized cells found.",
+          fileName: "Name of the file being imported — not translated.",
+          maxSize: "The per-cell limit, already formatted (e.g. '256 KB') — not translated.",
+          cells:
+            "Pre-joined list of the offending cells, each already rendered by " +
+            "oversizedCellSource / oversizedCellTarget — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellSource": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose SOURCE text is too " +
+          "big. Reads as a label followed by which side is at fault and how large it " +
+          "is; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellTarget": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose pre-filled TRANSLATION " +
+          "is too big (paired imports carry both sides). Same shape as the source " +
+          "variant; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellsMore": {
+        description:
+          "Final entry in the oversized-cell list when more cells are oversized than the " +
+          "message names individually. A fragment appended after the listed ones, so it " +
+          "takes no closing full stop.",
+        placeholders: { count: "How many oversized cells are not listed individually." },
       },
       "importExport.errors.sourceUploadNetworkFailed": {
         description:
@@ -2276,7 +2469,7 @@ export const importExport = defineNamespace({
         description:
           "Caption in small grey text under the drag-and-drop area of the panel " +
           "that fills in the open file's translations, listing the file kinds it " +
-          "accepts. Only the conjunction joining the four format names is " +
+          "accepts. Only the conjunction joining the format names is " +
           "translated; the format names themselves stay as they are.",
       },
       "importExport.fileTarget.description": {
@@ -2293,6 +2486,20 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInSubtitle": {
+        description:
+          "Error shown in red under the drop area when a subtitle file was read " +
+          "successfully but contained no timed caption blocks, so there is nothing " +
+          "to fill in. Single short statement of fact. 'Cues' are the individual " +
+          "timed caption blocks of a subtitle file.",
+      },
+      "importExport.fileTarget.noCuesInVtt": {
+        description:
+          "Error shown in red under the drop area when a WebVTT subtitle file was " +
+          "read successfully but contained no cues, so there is nothing to fill in. " +
+          "Single short statement of fact. 'VTT' is the file extension and stays " +
+          "untranslated.",
       },
       "importExport.fileTarget.noVersesInUsfm": {
         description:
@@ -2317,138 +2524,6 @@ export const importExport = defineNamespace({
           "this panel cannot read. A short statement followed by an imperative " +
           "sentence naming the acceptable alternatives. The bracketed file " +
           "extensions are literal and stay untranslated.",
-      },
-      "importExport.labels.choosePlaceholder": {
-        description:
-          "Placeholder inside the file dropdown on the cast-labelling panel, shown " +
-          "before a file has been picked. Imperative invitation ending in an " +
-          "ellipsis to signal that a choice follows.",
-      },
-      "importExport.labels.couldNotMintToken": {
-        description:
-          "Error shown in red on the cast-labelling panel when the app could not " +
-          "obtain the short-lived permission it needs to read the chosen file's " +
-          "lines, usually because the sign-in has lapsed. Single past-tense " +
-          "statement of failure.",
-      },
-      "importExport.labels.csvTooLarge": {
-        description:
-          "Error shown in red on the cast-labelling panel when the uploaded " +
-          "spreadsheet is bigger than the ceiling the app will read into memory. " +
-          "Single statement naming the limit; the size figure and its unit are " +
-          "literal.",
-      },
-      "importExport.labels.description": {
-        description:
-          "Explanatory sentence under the cast-labelling heading, summarising the " +
-          "three-step round trip: get a prepared spreadsheet listing the references " +
-          "that identify each line, type the character names into it, then upload " +
-          "it again.",
-      },
-      "importExport.labels.downloadTemplate": {
-        description:
-          "Button in the first box of the cast-labelling panel that saves a " +
-          "prepared spreadsheet, pre-filled with one row per line of the chosen " +
-          "file, for the user to type character names into. Imperative verb; the " +
-          "format name stays untranslated.",
-      },
-      "importExport.labels.emptyCsv": {
-        description:
-          "Error shown in red on the cast-labelling panel when the spreadsheet the " +
-          "user uploaded contains no bytes at all, so there is nothing to read. " +
-          "Single short statement of fact.",
-      },
-      "importExport.labels.failedToApply": {
-        description:
-          "Last-resort error shown in red on the cast-labelling panel when writing " +
-          "the character names onto the project's lines failed without a message of " +
-          "its own. Short statement with no closing full stop, since it is rendered " +
-          "as an error line.",
-      },
-      "importExport.labels.failedToLoadCells": {
-        description:
-          "Last-resort error shown in red on the cast-labelling panel when fetching " +
-          "the chosen file's lines failed without any message of its own. Short " +
-          "statement with no closing full stop, since it is rendered as an error " +
-          "line.",
-      },
-      "importExport.labels.importLabelCount": {
-        description:
-          "Primary button in the footer of the cast-labelling panel, which writes " +
-          "the previewed character names onto the project's lines. Imperative verb " +
-          "followed by how many rows will be applied.",
-        placeholders: {
-          count: "Number of character-name rows that will be applied.",
-        },
-      },
-      "importExport.labels.loadingCells": {
-        description:
-          "Temporary grey status line under the file dropdown on the cast-labelling " +
-          "panel while the chosen file's lines are being fetched, before the count " +
-          "of labelable lines can be shown. Present participle ending in an " +
-          "ellipsis.",
-      },
-      "importExport.labels.noRowsFound": {
-        description:
-          "Error shown in red on the cast-labelling panel when the uploaded " +
-          "spreadsheet was readable but held no rows, so there are no character " +
-          "names to apply. Single short statement of fact.",
-      },
-      "importExport.labels.previewCameraHeader": {
-        description:
-          "Third column header of the preview table on the cast-labelling panel. " +
-          "The column shows whether the character is on screen, off screen, or " +
-          "mixed for that line, as read from the uploaded spreadsheet. Single short " +
-          "noun; the column is narrow.",
-      },
-      "importExport.labels.previewLabelCount": {
-        description:
-          "Small heading above the preview table on the cast-labelling panel, " +
-          "counting the character-name rows read out of the uploaded spreadsheet " +
-          "and awaiting confirmation. A count plus noun plus an infinitive phrase " +
-          "meaning 'still to be brought in'.",
-        placeholders: {
-          count: "Number of character-name rows read from the uploaded spreadsheet.",
-        },
-      },
-      "importExport.labels.refCellCount": {
-        description:
-          "Grey status line under the file dropdown on the cast-labelling panel " +
-          "once the chosen file has loaded, saying how many of its lines carry the " +
-          "reference needed to match a template row, and naming the file. A count " +
-          "plus noun phrase, then the file name, as a full sentence.",
-        placeholders: {
-          count: "Number of lines in the chosen file that carry a reference.",
-          fileName: "Display name of the chosen file, or a generic 'this file' fallback when " +
-            "none is selected — do not translate the substituted value when it is a " +
-            "file name.",
-        },
-      },
-      "importExport.labels.step1Heading": {
-        description:
-          "Heading of the first box on the cast-labelling panel, where the user " +
-          "picks which file to label and downloads the prepared spreadsheet for it. " +
-          "Numbered step label; keep the step number first.",
-      },
-      "importExport.labels.step2Heading": {
-        description:
-          "Heading of the second box on the cast-labelling panel, where the user " +
-          "sends back the spreadsheet they have typed character names into. " +
-          "Numbered step label; keep the step number first.",
-      },
-      "importExport.labels.thisFileFallback": {
-        description:
-          "Stand-in for a file name in the cast-labelling panel's status line when " +
-          "no file name is available, giving 'N cells with references in this " +
-          "file.' A short demonstrative noun phrase used mid-sentence, so it must " +
-          "not be capitalised as a title.",
-      },
-      "importExport.labels.title": {
-        description:
-          "Heading of the panel for labelling existing lines with the name of the " +
-          "character who speaks them, by filling in a downloadable template. Noun " +
-          "phrase naming the panel; 'cast' is the set of characters or voices in " +
-          "the project.",
       },
       "importExport.paired.applyingTargets": {
         description:
@@ -2624,11 +2699,12 @@ export const importExport = defineNamespace({
       },
       "importExport.review.orderMatchWarning": {
         description:
-          "Amber warning above the match-review list, shown when the user did not " +
-          "nominate a column holding the reference that identifies each line. It " +
-          "explains that rows were therefore paired top to bottom by position, " +
-          "which is easy to get wrong, and asks the user to eyeball the original " +
-          "text shown beside each row before committing.",
+          "Amber warning above the match-review list, shown when no reference " +
+          "identifying each line was available — either the user did not nominate " +
+          "a spreadsheet column holding one, or the uploaded format (a subtitle " +
+          "file) has none. It explains that rows were therefore paired top to " +
+          "bottom by position, which is easy to get wrong, and asks the user to " +
+          "eyeball the original text shown beside each row before committing.",
       },
       "importExport.review.replacesExisting": {
         description:

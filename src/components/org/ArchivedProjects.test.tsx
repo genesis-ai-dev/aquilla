@@ -2,7 +2,17 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { openRowMenu } from "@/test-utils/row-menu"
 import { ArchivedProjects } from "./ArchivedProjects"
+
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -86,7 +96,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Recently deleted" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
+    await openRowMenu("More actions for Old Project")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
@@ -161,7 +171,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Deleted/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for EXO.usfm" }))
+    await openRowMenu("More actions for EXO.usfm")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() =>
       expect(emitFileRestore).toHaveBeenCalledWith({

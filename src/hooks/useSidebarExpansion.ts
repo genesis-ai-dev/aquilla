@@ -15,9 +15,23 @@ function read(key: string): Set<string> {
   }
 }
 
+function sameMembers(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const id of a) if (!b.has(id)) return false
+  return true
+}
+
 export function usePersistedToggleSet(storageKey: string) {
   const [members, setMembers] = useState<Set<string>>(() => read(storageKey))
-  useEffect(() => { setMembers(read(storageKey)) }, [storageKey])
+  // AQU-350: returning a new Set identity for unchanged contents re-fires every
+  // effect that depends on this set — in the Files sidebar that runs the
+  // per-file progress prefetch sweep a second time on each mount.
+  useEffect(() => {
+    setMembers((prev) => {
+      const next = read(storageKey)
+      return sameMembers(prev, next) ? prev : next
+    })
+  }, [storageKey])
 
   const toggle = useCallback((id: string) => {
     setMembers((prev) => {

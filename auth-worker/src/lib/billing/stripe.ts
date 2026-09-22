@@ -1,9 +1,9 @@
 // Thin Stripe REST client + webhook verify. No SDK — Workers-friendly fetch
 // and @noble/hashes HMAC, same stack as password hashing.
 
-import { hmac } from "@noble/hashes/hmac"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils"
+import { hmac } from "@noble/hashes/hmac.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type { Env } from "../../types"
 import { secureCompare } from "../../utils/secure-compare"
 

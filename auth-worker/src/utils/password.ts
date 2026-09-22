@@ -11,11 +11,11 @@
 
 import bcrypt from "bcryptjs"
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto"
-import { scrypt as nobleScrypt } from "@noble/hashes/scrypt"
+import { scrypt as nobleScrypt } from "@noble/hashes/scrypt.js"
 import {
   bytesToHex as nobleBytesToHex,
   hexToBytes as nobleHexToBytes,
-} from "@noble/hashes/utils"
+} from "@noble/hashes/utils.js"
 
 export type WerkzeugScryptParams = {
   N: number

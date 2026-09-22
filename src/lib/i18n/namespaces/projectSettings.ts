@@ -208,12 +208,28 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
-    "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
-    "projectSettings.timeline.addLinesHint":
-      "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    "projectSettings.cellEditing.sectionTitle": "Content structure",
+    "projectSettings.cellEditing.label": "Who can add and remove cells",
+    "projectSettings.cellEditing.description":
+      "Puts buttons on each row to insert or remove cells. Removing one also removes its " +
+      "translations, recordings and comments; removing an imported cell always needs a " +
+      "maintainer.",
+    // Open-dropdown option text for the cell-editing floor select. FLOOR_LABEL
+    // (src/pages/settings/constants.ts) supplies the shorter closed-trigger
+    // word for each rung; "No one" is not a role, so it has no FLOOR_LABEL
+    // entry and shows this string in both places. AQU-1068 (Matthew's review):
+    // these were bespoke phrases ("Maintainers and project leads", "Anyone who
+    // can edit") and are now the product's standard ladder, so a project admin
+    // reads the same names here as on the Members panel.
+    "projectSettings.cellEditing.optionNone": "No one — default",
+    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
+    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
+    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -667,6 +683,22 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+
+    // ── Terminology source-term matching (AQU-1271) ──
+    "projectSettings.termMatching.title": "Prefixes and suffixes",
+    "projectSettings.termMatching.description":
+      "Letters or syllables that attach to source words. Terminology matching will allow them around a term when the term's \"Allow prefixes and suffixes\" option is on.",
+    "projectSettings.termMatching.prefixes": "Prefixes",
+    "projectSettings.termMatching.suffixes": "Suffixes",
+    "projectSettings.termMatching.maxAffixes": "Max chained per side",
+    "projectSettings.termMatching.foldMarksDefault": "Ignore vowel marks and accents by default",
+    "projectSettings.termMatching.loadPreset": "Load preset",
+    "projectSettings.termMatching.addAffixPlaceholder": "Type and press Enter",
+    "projectSettings.termMatching.remove": "Remove {affix}",
+    "projectSettings.termMatching.preset.hebrew": "Hebrew",
+    "projectSettings.termMatching.preset.arabic": "Arabic",
+    "projectSettings.termMatching.preset.swahili": "Swahili",
+    "projectSettings.termMatching.preset.turkish": "Turkish",
   },
   context: {
     _context: {
@@ -1043,6 +1075,47 @@ export const projectSettings = defineNamespace({
           percent: "The current penalty as a whole-number percentage, e.g. '10'.",
         },
       },
+      "projectSettings.cellEditing.optionNone": {
+        description:
+          "First option in the 'Who can add and remove cells' dropdown, and the " +
+          "value every project starts on. It is not a role — it means nobody at " +
+          "all, including the project's owner. Keep the 'default' note: it is " +
+          "what tells an admin this list has never been touched. Translate the " +
+          "word 'default'; the dash is an em dash separating the two halves.",
+      },
+      "projectSettings.cellEditing.optionCommenter": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, naming the " +
+          "lowest rank that may be granted the affordance. Translate the role " +
+          "name exactly as common.role.commenter is translated — this list must " +
+          "read identically to the Members panel. The number in brackets is the " +
+          "role's level on the permission ladder: data, never translated.",
+      },
+      "projectSettings.cellEditing.optionReviewer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.reviewer is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionContributor": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.contributor is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionProjectLead": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.projectLead is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionMaintainer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, and the " +
+          "strictest rank the setting can name. Translate the role name exactly " +
+          "as common.role.maintainer is translated; the bracketed number is the " +
+          "role's ladder level, data, never translated.",
+      },
       "projectSettings.harmonization.defaultRoleSuffix": {
         description:
           "Marks a role option in the harmonization minimum-role select as the " +
@@ -1201,6 +1274,52 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.termMatching.title": {
+        description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",
+      },
+      "projectSettings.termMatching.description": {
+        description:
+          "Explains what the affix inventory is for — it only takes effect on terms with " +
+          "\"Allow prefixes and suffixes\" enabled.",
+      },
+      "projectSettings.termMatching.prefixes": {
+        description: "Label and accessible name of the prefix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.suffixes": {
+        description: "Label and accessible name of the suffix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.maxAffixes": {
+        description: "Label of the numeric input capping how many chained affixes are allowed per side (1-4).",
+      },
+      "projectSettings.termMatching.foldMarksDefault": {
+        description:
+          "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
+          "when matching terms, absent a per-concept override.",
+      },
+      "projectSettings.termMatching.loadPreset": {
+        description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
+      },
+      "projectSettings.termMatching.addAffixPlaceholder": {
+        description: "Placeholder text in the prefix/suffix tag-input fields.",
+      },
+      "projectSettings.termMatching.remove": {
+        description: "Accessible name of the small remove button on one affix chip.",
+        placeholders: {
+          affix: "The affix text on the chip being removed (data, not translated).",
+        },
+      },
+      "projectSettings.termMatching.preset.hebrew": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.arabic": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.swahili": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.turkish": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
       },
     },
   },

@@ -8,6 +8,7 @@
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
 import { settingsKeyDocLines } from './project-settings-keys'
+import { POLICY_DIRECTION_TABLE } from './policy-direction'
 
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
 
@@ -34,6 +35,13 @@ export interface CommandCatalogEntry {
 const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
   .map((line) => `\`${line}\``)
   .join(', ')
+
+/** AQU-1282: the per-key restrictive direction, rendered from the same table the
+ *  enforcing helper uses (db/shared/policy-direction.ts) so the doc an agent
+ *  reads and the rule it hits cannot drift. */
+const POLICY_DIRECTION_DOC = POLICY_DIRECTION_TABLE.map(
+  (row) => `  - \`${row.key}\`: ${row.restrictiveDirection}`,
+).join('\n')
 
 const COMMENTER = 200
 const CONTRIBUTOR = 400
@@ -172,7 +180,8 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
-Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, agentAuthorship.
+Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
+${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
@@ -197,8 +206,52 @@ Gotchas:
 - An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
 - Section text caps at 4000 chars; \`freeformNotes\` at 8000.
 - \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
-- The L1 summary is carried over, not cleared, so it shows as stale in-app until regenerated — same as an in-app section edit.
+- The copilot reads only the brief's rendered L1 summary (\`translationBrief.l1Summary\`), so on commit the summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed; run \`RegenerateBriefSummary\` to re-render.
 Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
+  },
+  {
+    kind: 'RegenerateBriefSummary',
+    title: 'Regenerate brief summary',
+    oneLiner: 'Re-render the brief’s L1 summary so the copilot sees the current sections.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### RegenerateBriefSummary
+Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
+Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. The L1 is the ONLY part of the brief the copilot's prompt injects (see \`parts.brief\` in the prompt-preview read), so this is how a brief written by SetBrief — or edited in-app without regenerating — reaches the AI.
+Gotchas:
+- Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
+- \`ifMatchVersion\` is the SETTINGS version and must match at prepare AND commit (plan_stale on drift). A successful commit bumps it by one.
+- The render runs BEFORE the approval is consumed: a failed model call answers \`job_failed\` / \`rate_limited\` (credit cap) and leaves the approved changeset committable for a retry.
+- Receipt carries \`briefSummaryChars\` and \`l1ModelId\`.
+Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersion": 8 }\``,
+  },
+  {
+    kind: 'ProjectSetup',
+    title: 'Project setup (composite)',
+    oneLiner: 'Settings, brief, members and imports for one project in ONE approval.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ProjectSetup
+Params: \`{ projectId, settings?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
+1. \`settings\` — non-policy keys, one write.
+2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
+3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
+4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
+5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
+6. The verification receipt (below).
+Gotchas:
+- The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
+- Never guess these four — they come from the partner, not from you: \`settings.sourceLanguage\`, \`settings.targetLanguage\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
+- Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
+- Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
+- Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
+- Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
+- Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
+- Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, policyKeysNotApplied }\`. \`briefReachesCopilot\` is the real prompt-preview run on the first source cell of the first created file — if it is false, the brief is NOT reaching the AI.
+Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "settings": { "sourceLanguage": "ru", "targetLanguage": "sty", "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
   },
   {
     kind: 'UpdateProjectSettings',
@@ -274,25 +327,39 @@ Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audi
   {
     kind: 'EmitEvents',
     title: 'Emit events',
-    oneLiner: 'Stage any allowed project events: comments, waives, validations, files, assignments.',
+    oneLiner: 'Stage any allowed project events: comments, waives, validations, files, assignments, terms.',
     minRoleLevel: COMMENTER,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### EmitEvents
 Params: \`{ events: [{ kind, fileId?, cellId?, laneId?, payload? }] }\` — sole command; max 200 events per changeset.
 The generalized escape hatch: stages role-allowed event kinds through the same precondition doctrine as SetTranslation. The changeset floor is the max floor across events (per-kind floors come from role-policy).
-Allowed kinds v1: comment.create/edit/delete/resolve · cell.waive/unwaive · cell.validate/unvalidate (testimony — reviewed per item, never bulk) · cell.backtranslation.set · target.cell.repin · file.rename/delete/restore · assignment.create/reassign/unassign.
-Not here: target text (use SetTranslation), source edits, audio (use LinkMedia), imports (use PlanImport), reorders/retimes.
+
+**The allowlist IS the permission surface.** A kind not on this list is rejected at prepare with \`validation_failed\` naming the kind — there is no bypass, and adding a kind is a deliberate human change to this file.
+
+Allowed kinds:
+- Comments (200+): \`comment.create\` \`{ body, parentCommentId?, createdForTranslated? }\` (scope from the envelope: cell / file / project) · \`comment.edit\` \`{ commentId, body }\` · \`comment.delete\` \`{ commentId }\` · \`comment.resolve\` \`{ commentId, resolved }\`.
+- Quality waivers (400+): \`cell.waive\` \`{ ruleId, reason? }\` · \`cell.unwaive\` \`{ ruleId }\` — need fileId + cellId.
+- Validation † (400+, testimony — reviewed per item, never bulk): \`cell.validate\` \`{}\` · \`cell.unvalidate\` \`{ targetUsername? }\` — need fileId + cellId; removing someone else's validation needs maintainer (600).
+- Back-translation (400+): \`cell.backtranslation.set\` \`{ btText, btHtml?, polished? }\` — needs fileId + cellId.
+- Staleness (400+): \`target.cell.repin\` \`{}\` — needs fileId + cellId.
+- File lifecycle (500+): \`file.rename\` \`{ name }\` · \`file.delete\` \`{}\` · \`file.restore\` \`{}\` — need fileId.
+- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters', scope: [{ fileId, chapter? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
+- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId.
+
+Not here: target text (use SetTranslation), source edits, cell structure (split/merge/insert/delete), audio (use LinkMedia), imports (use PlanImport), reorders/retimes, membership, and project lifecycle. Rules and Living Memory are not event-sourced at all — rules go through PatchSettings, memory through the agent-memory API — so they cannot be emitted here.
 Gotchas:
 - Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
-- Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
+- Every referenced cell/comment/file/assignment/concept must exist at prepare — one bad reference rejects the whole plan (no silent skips).
+- Terminology: \`status: 'active'\` on create, and every update/delete/approve/reject, are BINDING writes gated by the org's termbase floor; \`status: 'draft'\` is a suggestion any contributor may stage. \`term.create\` naming an existing concept is rejected (use \`term.update\`) — omit \`conceptId\` and the server mints one. Status is not patchable via \`term.update\`; approve/reject are their own kinds so the audit trail keeps them apart.
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.
 
 Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — these are policy, not preferences, and no parameter turns any of them off:
 - **AI-drafted text cannot be validated through this API.** A \`cell.validate\` whose cell is still an unreviewed machine draft (\`ai_drafted\`) is rejected at prepare with \`validation_failed\` naming that cell, and it rejects the WHOLE plan. This mirrors the in-app rule that AI output is reviewed one cell at a time. To validate such a cell, a human edits or validates it in the app first (either clears the marker); an agent cannot clear it on its own behalf.
 - **Explicit cells only.** Every event names one \`(fileId, cellId)\`. There is no wildcard, glob, range, \`"*"\`, or "validate all" form — such a value is simply a cell id that does not exist, and prepare rejects the plan.
 - **Every staged validation is itemized for the approver.** The effect summary lists each cell id with the text as the server reads it, so approval endorses specific sentences, not a count. Validations are testimony tier: review UIs confirm them per item and never bulk-apply them.
-- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.`,
+- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.
+Example: \`{ "kind": "EmitEvents", "events": [{ "kind": "term.create", "payload": { "sourceTerm": "covenant", "renderings": [{ "rendering": "заповіт", "status": "preferred" }], "status": "draft" } }] }\``,
   },
   {
     kind: 'RenameFile',

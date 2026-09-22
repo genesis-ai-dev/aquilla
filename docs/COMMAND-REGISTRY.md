@@ -95,10 +95,24 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
   catalog's static floor advertises each key's *default*, so an org that lowers
   `languageEditMinRole` makes the catalog conservative rather than permissive.
-- **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
-  `agentMemoryAutonomy`, `validationRoleFloor`, `validationNamedUsers`, `validationCount`,
-  `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`,
-  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents).
+- **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
+  `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
+  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
+  are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
+  oversight stages like any other (still ask-mode, still human-approved); one that would
+  LOOSEN it is `permission_denied` with `details.loosening: [{ key, current, proposed,
+  reason }]`. The direction is computed by `policyWriteDirection` / `loosensPolicy`
+  (`db/shared/policy-direction.ts`, which also exports `POLICY_DIRECTION_TABLE` — the
+  per-key table `describe_command PatchSettings` renders) against the LIVE blob at prepare
+  **and again** at commit, so a human loosening a key mid-flight cannot let a stale plan
+  apply as a loosening write. An unset key reads as its documented default, and a no-op
+  write (proposed already equals live) counts as tightening.
+  - Note on `validationNamedUsers`: the list is an ALLOWLIST of who may validate, so
+    *adding* a name admits someone new (loosening) and *dropping* one excludes them
+    (tightening); empty → named is tightening. This inverts the direction stated in
+    AQU-1282's table, which the enforcing code (`sync-worker/src/events/route.ts`)
+    contradicts.
 - `UpdateProjectSettings` (deprecated, kept): now rejects when any POLICY key's value would
   CHANGE vs the live blob (equal pass-through stays valid — existing round-trip callers keep
   working).
@@ -129,12 +143,31 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `comment.create`, `comment.edit`, `comment.delete`, `comment.resolve`,
   `cell.waive`, `cell.unwaive`, `cell.validate`†, `cell.unvalidate`†,
   `cell.backtranslation.set`, `target.cell.repin`, `file.rename`, `file.delete`, `file.restore`,
-  `assignment.create`, `assignment.reassign`, `assignment.unassign`.
+  `assignment.create`, `assignment.reassign`, `assignment.unassign`,
+  `term.create`, `term.update`, `term.delete`, `term.approve`, `term.reject`.
   († testimony: allowed to stage, but the summary marks them `testimony: true` so review UIs
   render per-item confirmation; they are excluded from any future bulk auto-apply.)
-- Explicitly NOT in v1: `target.cell.commit` (use SetTranslation), `source.cell.*`,
-  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
-- Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
+- **Terminology (AQU-1179).** Project-level: no `fileId`/`cellId` on the envelope (rejected if
+  supplied — the engine routes them under the project sentinel), concept id rides the payload.
+  The static floor is CONTRIBUTOR, but prepare mirrors `termbase-authority.ts`'s conditional
+  raise: every BINDING write — `term.create` with `status: 'active'`, and every update / delete /
+  approve / reject — is checked against the org's `termbaseEditMinRole` (default 500), so a plan
+  the caller could never commit is denied rather than staged. `status: 'draft'` on create is a
+  suggestion and stays at CONTRIBUTOR. `term.update` may not carry `status` (approve/reject are
+  their own kinds, so the audit trail keeps "edited" apart from "made binding"); a `term.create`
+  naming a live concept is rejected rather than upserted over it; a `term.approve` of a non-draft
+  is rejected rather than applied as a projection no-op.
+- Explicitly NOT allowlisted: `target.cell.commit` (use SetTranslation), `source.cell.*`,
+  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`,
+  cell structure (split/merge/insert/delete), membership, and project lifecycle. Rules and Living
+  Memory have no event kinds at all — rules live in the settings blob (PatchSettings), memory
+  behind auth-worker's agent-memory API — so they cannot come through this door until they are
+  event-sourced.
+- Summary gains `events: { kind, count, testimony, label }[]` alongside existing fields. `label`
+  is a server-computed plain-language effect line ("Approve a glossary term — enforced for
+  everyone on the project"); the approval page renders it, falling back to `kind × count` for
+  changesets staged before it existed. Adding a kind to the allowlist means adding its phrasing
+  to `emitKindEffectLabel` — a reviewer approves the effect, not the event name.
 
 ### RenameFile — file label management (AQU-1182)
 

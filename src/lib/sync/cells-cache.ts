@@ -20,9 +20,14 @@
 
 import type { CellRow } from "./cells-read-types"
 
-const DB_NAME = "aquilla-cells-cache"
-const DB_VERSION = 2
-const STORE = "cells"
+import {
+  CELLS_CACHE_DB as DB_NAME,
+  CELLS_CACHE_VERSION as DB_VERSION,
+  CELLS_CACHE_STORE as STORE,
+  CELLS_CACHE_BATCH_ROWS,
+  putCellsCacheSnapshot,
+} from "./cells-cache-writer"
+import { putCellsCacheInWorker } from "./cells-cache-worker-client"
 export const CELLS_CACHE_WRITE_DEBOUNCE_MS = 500
 
 // The database is shared by every account on this browser origin. Prefixing
@@ -206,12 +211,17 @@ export async function writeCellsCache(
   // can settle after an account switch; recomputing then would write the old
   // request's rows into the newly-active account's key.
   const entryKey = cacheKey(projectId, fileId)
+  // An immediate snapshot supersedes an older queued tuple. Serialize it
+  // behind any in-flight write so a slower worker cannot restore older rows.
+  const queued = pendingWrites.get(entryKey)
+  if (queued?.timer != null) clearTimeout(queued.timer)
+  pendingWrites.delete(entryKey)
   try {
-    await putCellsCacheEntry({
+    await writePendingSnapshot({
       entryKey,
       projectId,
       fileId,
-      rows,
+      rows: rows.slice(),
       maxServerSeq,
       projectEpoch,
       timer: null,
@@ -241,13 +251,13 @@ async function putCellsCacheEntry(
       ? { projectEpoch: pending.projectEpoch }
       : {}),
   }
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite")
-    tx.objectStore(STORE).put(entry)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error ?? new Error("IDB put failed"))
-    tx.onabort = () => reject(tx.error ?? new Error("IDB put aborted"))
-  })
+  if (entry.rows.length > CELLS_CACHE_BATCH_ROWS && typeof Worker !== "undefined") {
+    // A worker failure leaves the previous honest cache intact. Do not retry
+    // a large clone on the input thread and recreate the typing pause.
+    await putCellsCacheInWorker(entry)
+  } else {
+    await putCellsCacheSnapshot(db, entry)
+  }
 }
 
 /**
@@ -370,7 +380,9 @@ export async function flushCellsCacheWrites(
  * re-walking the merged set here yields the same order a full server read
  * would have returned.
  */
-function walkAnchorChain(rows: CellRow[]): CellRow[] {
+/** Exported for CellStore.resortSourceOrderByChain (AQU-1068), which needs the
+ *  same walk after a collaborator's insert arrives through a targeted read. */
+export function walkAnchorChain(rows: CellRow[]): CellRow[] {
   if (rows.length === 0) return []
 
   const byAnchor = new Map<string, CellRow[]>()

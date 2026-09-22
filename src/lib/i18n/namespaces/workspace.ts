@@ -31,6 +31,21 @@ export const workspace = defineNamespace({
       one: "{count} change was rejected because it conflicted with a newer edit from another session.",
       other: "{count} changes were rejected because they conflicted with newer edits from another session.",
     }),
+    // Tauri offline mode (Phase 3): a locally queued write lost the AD-2 head
+    // CAS on reconnect (someone else committed to the same cell while this
+    // device was offline). See src/lib/offline/conflicts.ts.
+    "workspace.offline.conflictToast": plural({
+      one: "{count} translation couldn't sync — it was changed elsewhere while you were offline.",
+      other: "{count} translations couldn't sync — they were changed elsewhere while you were offline.",
+    }),
+    "workspace.offline.conflictDismiss": "Dismiss",
+    "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
+    // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
+    "workspace.offline.connectivityOnline": "Online",
+    "workspace.offline.connectivityOffline": "Offline",
+    "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
+    "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -445,6 +460,17 @@ export const workspace = defineNamespace({
           "with a period. States the cause, not blame.",
         placeholders: {
           count: "How many queued changes were rejected.",
+        },
+      },
+      "workspace.offline.conflictToast": {
+        description:
+          "Title of the toast shown in the Tauri desktop app when one or more " +
+          "translations queued while offline lost to a newer edit from someone " +
+          "else on reconnect (AD-2 head CAS). Paired with a 'Dismiss' action " +
+          "(workspace.offline.conflictDismiss) that clears the whole batch at " +
+          "once. Full sentence with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many translations couldn't sync.",
         },
       },
       "workspace.projectCard.deletedBy": {

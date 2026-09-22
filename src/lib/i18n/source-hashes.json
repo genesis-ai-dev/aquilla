@@ -2950,7 +2950,19 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "common.dismiss": "48845bff334a50a5",
+    "nav.account.logOutAnyway": "048ac17d958d3bde",
+    "nav.outbox.attempts": "ff856a07b14ef1c3",
+    "nav.outbox.allCaughtUpTitle": "c3a40427d59391a5",
+    "editor.health.needsAttention": "785bc2268090f7e8",
+    "editor.milestone.milestone.empty": "589468e31462fc82",
+    "editor.milestone.vocab.storyPlural": "6d09cf5748829bd2",
+    "editor.milestone.vocab.milestonePlural": "39c33dc2375ffc56",
+    "editor.view.settings": "bea3f3865295923d",
+    "editor.timeline.qualityOriginalTooltip": "345f72f202b2bce8",
+    "comments.stale.badge": "a03f2386ae06b211",
+    "comments.drawer.closeLabel": "3530ee6dc03cdc69"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -5908,7 +5920,7 @@
     "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
     "org.orgSettings.noSessionError": "2e7c28aba070c036"
   },
-  "mfa": {
+  "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
     "knowledgeBase.description": "6f0d192886c1395c",
     "knowledgeBase.useInDraftingLabel": "a4a46276e831497c",
@@ -15275,8 +15287,6 @@
     "projectSettings.shared.nameHint": "9eab90890543742c",
     "projectSettings.timeline.lockLabel": "1341cb82de214c7c",
     "projectSettings.timeline.lockHint": "b2f6d8b55587906b",
-    "projectSettings.timeline.addLinesLabel": "2c1f3fdb8bd223a5",
-    "projectSettings.timeline.addLinesHint": "db0dcf64a28dd7b8",
     "projectSettings.field.temperature": "b314ae60cb741e69",
     "projectSettings.field.healthPenalty": "3b21112da35478d7",
     "projectSettings.field.examplesRetrieved": "8b77ff0a75181df6",
@@ -20096,8 +20106,6 @@
     "projectSettings.shared.nameHint": "9eab90890543742c",
     "projectSettings.timeline.lockLabel": "1341cb82de214c7c",
     "projectSettings.timeline.lockHint": "b2f6d8b55587906b",
-    "projectSettings.timeline.addLinesLabel": "2c1f3fdb8bd223a5",
-    "projectSettings.timeline.addLinesHint": "db0dcf64a28dd7b8",
     "projectSettings.field.temperature": "b314ae60cb741e69",
     "projectSettings.field.healthPenalty": "3b21112da35478d7",
     "projectSettings.field.examplesRetrieved": "8b77ff0a75181df6",

@@ -334,7 +334,11 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
 // ───────────────────────────────────────────────────────────────────────────
 
 function makeRosterResponse(
-  overrides: { rosterViewMinRole?: number; memberProgressViewMinRole?: number } = {},
+  overrides: {
+    rosterViewMinRole?: number
+    memberProgressViewMinRole?: number
+    assignmentMinRole?: number
+  } = {},
 ): OrgSettingsResponse {
   return {
     orgId: 1,
@@ -460,6 +464,29 @@ describe("canEditTermbaseFloor — owner-only write gate (AQU-822)", () => {
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditTermbaseFloor(null)).toBe(false)
     expect(canEditTermbaseFloor(undefined)).toBe(false)
+  })
+})
+
+describe("useOrgSettings — assignmentMinRole (AQU-1037)", () => {
+  it("defaults to project lead when the org has not configured a floor", async () => {
+    mockFetchResponse = makeRosterResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.assignmentMinRole).toBe(500)
+  })
+
+  it("reads a configured assignment floor", async () => {
+    mockFetchResponse = makeRosterResponse({ assignmentMinRole: 300 })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.assignmentMinRole).toBe(300)
+  })
+
+  it("falls back to project lead for an invalid assignment floor", async () => {
+    mockFetchResponse = makeRosterResponse({ assignmentMinRole: 350 })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.assignmentMinRole).toBe(500)
   })
 })
 

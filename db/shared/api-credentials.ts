@@ -14,9 +14,28 @@
 // live, unexpired, unrevoked credential, and whose is it?".
 
 import type { AquillaDb } from "../shim/postgres"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "./rate-limit"
 
 /** Fixed tag prefixing every Aquilla API token. */
 export const API_TOKEN_TAG = "aqk_"
+
+/**
+ * [Pen test] Auth & session mgmt (2026-09-07): every external route
+ * (sync-worker /api/v1/external/*) hashes + looks up whatever Bearer value
+ * it's handed, valid or not, on every call — an unauthenticated caller
+ * flooding any of those routes with garbage tokens costs a DB round-trip
+ * each time, with no limiter in front of it (the existing external rate
+ * limits in db/shared/rate-limit.ts are keyed by credentialId, which only
+ * exists once a token has already validated). Brute-forcing the 256-bit
+ * token itself is infeasible regardless of any throttle here; this exists
+ * to bound DB load from repeated invalid attempts, the same "throttle it
+ * anyway" reasoning already applied to the reset-token and access-link-PIN
+ * flows despite their tokens being equally unguessable. Failures only, per
+ * source IP, 15-minute window — a caller presenting the same valid token
+ * over and over is never counted or throttled.
+ */
+const INVALID_CREDENTIAL_RATE_LIMIT_KIND = "external_credential_invalid"
+const MAX_INVALID_ATTEMPTS_PER_IP = 30
 
 /** Number of chars of the full token kept for display (incl. the tag). */
 export const TOKEN_PREFIX_LEN = 12
@@ -107,8 +126,26 @@ interface CredentialRow {
 export async function validateApiCredential(
   db: AquillaDb,
   token: string,
+  /** Caller's source IP (e.g. the `CF-Connecting-IP` header), for the
+   *  invalid-attempt throttle above. Omit to skip throttling (e.g. tests). */
+  ipIdentifier?: string | null,
 ): Promise<ApiCredentialContext | null> {
   if (!token || !token.startsWith(API_TOKEN_TAG)) return null
+
+  const throttleKey = ipIdentifier ? `ip:${ipIdentifier.trim().toLowerCase()}` : null
+  if (throttleKey) {
+    const recentFailures = await countRecentRateLimitEvents(
+      db,
+      INVALID_CREDENTIAL_RATE_LIMIT_KIND,
+      throttleKey,
+    )
+    if (recentFailures >= MAX_INVALID_ATTEMPTS_PER_IP) return null
+  }
+
+  const fail = async (): Promise<null> => {
+    if (throttleKey) await recordRateLimitEvent(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
+    return null
+  }
 
   const tokenHash = await sha256Hex(token)
   const row = await db
@@ -125,9 +162,9 @@ export async function validateApiCredential(
     .bind(tokenHash)
     .first<CredentialRow>()
 
-  if (!row) return null
-  if (row.revoked_at) return null
-  if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return null
+  if (!row) return fail()
+  if (row.revoked_at) return fail()
+  if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return fail()
 
   // Throttled last-used bump: only when the row hasn't been touched in 5min.
   // Single set-based UPDATE — no read-modify-write. Fire-and-forget: a failed

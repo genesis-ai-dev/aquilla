@@ -158,6 +158,50 @@ Stick with `resetBackend()` + the multi-user fixture for anything checked in.
   keep-list (~25 files, <2 min). Pre-push runs **affected**, not full smoke.
 - `*.spec.ts` — full suite only (expensive format/agent/access journeys).
 - Files under `e2e/tauri/` — manual pre-release only (not implemented in v1).
+- Files under `e2e/specs/production/` — the deployed-environment timing probe
+  (see below). `playwright.config.web.ts` ignores this directory, so no local
+  command can run them.
+
+## Production timing probe (AQU-1024)
+
+Every other command here drives a local `wrangler dev` stack. Load and write
+latency regressions on a deployed environment — cold Worker start, a
+Hyperdrive/Neon hop, a saturated projection write — are invisible to that
+stack, so `e2e/specs/production/timing.prod.spec.ts` signs in to a real
+deployment and measures two numbers:
+
+| Measurement | Default budget | Why that number |
+| --- | --- | --- |
+| Navigation → first rendered cell | 15 000 ms | The SPA aborts an in-flight request at 15s, so a slower workspace has already failed for the user. |
+| Committing blur → `/events` ack | 5 000 ms | Both workers log a request at or beyond 5s as a `[slow-request]` defect (AGENTS.md). |
+
+Both defaults are ceilings, not targets. The probe prints every measurement it
+takes (`[prod-timing] …`, plus a Playwright annotation), so tighten them per
+environment once the team has a recorded baseline.
+
+It is opt-in and refuses to start until you point it somewhere:
+
+```bash
+AQUILLA_PROD_USERNAME=… \
+AQUILLA_PROD_PASSWORD=… \
+AQUILLA_PROD_PROJECT_ID=… \
+  pnpm test:e2e:production:timing
+```
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `AQUILLA_PROD_USERNAME` | — | required |
+| `AQUILLA_PROD_PASSWORD` | — | required; supply as a secret, never in a committed file |
+| `AQUILLA_PROD_PROJECT_ID` | — | required; see the warning below |
+| `AQUILLA_PROD_APP_ORIGIN` | `https://aquilla.app` | point at `https://dev.aquilla.app` to probe dev |
+| `AQUILLA_PROD_AUTH_BASE` | `https://api.aquilla.app/identity` | |
+| `AQUILLA_PROD_LOAD_BUDGET_MS` | `15000` | must be a positive whole number; a malformed value is an error, not a fallback |
+| `AQUILLA_PROD_WRITE_BUDGET_MS` | `5000` | same |
+
+⚠️ **The write measurement commits a real event.** It replaces the first target
+cell of the project's open file with a timestamped marker and does not restore
+it. `AQUILLA_PROD_PROJECT_ID` must name a project reserved for this probe —
+never customer data.
 
 ## Adding a test
 

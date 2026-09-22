@@ -5,6 +5,7 @@ import {
   lineList,
   makeEblIdml,
   styled,
+  tocEntriesWithPageRuns,
   type EblIdmlStories,
 } from "./__fixtures__/ebl-idml"
 import { selectEblNotes } from "./notes"
@@ -267,5 +268,61 @@ describe("selectEblNotes — topics without the template's numbering", () => {
     ])
 
     expect(divisions.map((division) => division.label)).toEqual(["Participant Guide Module 2"])
+  })
+})
+
+describe("selectEblNotes — contents page numbers", () => {
+  it("does not import a page number that is its own character run", async () => {
+    const entries = SAMPLE_EBL.contentsTitles.map((title, index) => ({
+      title,
+      page: SAMPLE_EBL.contentsPages[index]!,
+    }))
+    const { notes } = await selectBody([
+      styled("h", "02_TOC:ms1", SAMPLE_EBL.contentsHead),
+      tocEntriesWithPageRuns("toc", "02_TOC:tc1", entries),
+    ])
+    const texts = notes.map((note) => note.unit.sourceText)
+
+    for (const title of SAMPLE_EBL.contentsTitles) expect(texts).toContain(title)
+    for (const page of SAMPLE_EBL.contentsPages) {
+      expect(texts).not.toContain(page)
+      expect(texts.some((text) => text.endsWith(page) && !text.endsWith(` ${page}`))).toBe(false)
+    }
+    expect(notes.every((note) => note.rejoin === undefined)).toBe(true)
+  })
+
+  it("does not import a page number parked behind tab leaders in the same run", async () => {
+    const { notes } = await selectBody([
+      styled("h", "02_TOC:ms1", SAMPLE_EBL.contentsHead),
+      styled("nested", "02_TOC:tc3", SAMPLE_EBL.contentsNestedEntry),
+    ])
+    const texts = notes.map((note) => note.unit.sourceText)
+
+    expect(texts).toEqual([SAMPLE_EBL.contentsHead, SAMPLE_EBL.contentsNestedTitle])
+    expect(notes.every((note) => note.rejoin === undefined)).toBe(true)
+  })
+
+  it("does not import a page number parked behind spaces in the same run", async () => {
+    const { notes } = await selectBody([
+      styled("h", "02_TOC:ms1", SAMPLE_EBL.contentsHead),
+      styled("spaced", "02_TOC:tc4", `${SAMPLE_EBL.contentsNestedTitle}   ${SAMPLE_EBL.contentsNestedPage}`),
+    ])
+    const texts = notes.map((note) => note.unit.sourceText)
+
+    expect(texts).toContain(SAMPLE_EBL.contentsNestedTitle)
+    expect(texts.some((text) => text.includes(SAMPLE_EBL.contentsNestedPage))).toBe(false)
+    const nested = notes.find((note) => note.unit.sourceText === SAMPLE_EBL.contentsNestedTitle)
+    expect(nested?.rejoin).toEqual({
+      index: 0,
+      count: 1,
+      ranges: [{ slot: 0, start: 0, end: SAMPLE_EBL.contentsNestedTitle.length }],
+    })
+  })
+
+  it("keeps a number that is ordinary copy in the same run", async () => {
+    const { notes } = await selectFrom()
+    for (const entry of SAMPLE_EBL.contentsEntries) {
+      expect(notes.map((note) => note.unit.sourceText)).toContain(entry)
+    }
   })
 })

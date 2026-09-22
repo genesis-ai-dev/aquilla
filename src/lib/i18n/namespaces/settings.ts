@@ -25,6 +25,10 @@ import { defineNamespace } from "./types"
 export const settings = defineNamespace({
   keys: {
     // ── AssignmentAuthoritySection (org settings → security) ──
+    "settings.assignmentAuthority.floorLabel": "Who can assign work",
+    "settings.assignmentAuthority.floorDescription":
+      "Minimum project role required to assign, reassign, or unassign file, " +
+      "chapter, target-lane, and AI review tasks. Defaults to Project lead.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.description":
       "When on, a member (contributor and above) can claim a book/chapter/take " +
@@ -61,6 +65,26 @@ export const settings = defineNamespace({
     // "Endpoint URL" → projectSettings.advancedLlm.endpointLabel (identical text)
     // "Model" → projectSettings.advancedLlm.modelLabel (identical text)
     // "API key" → projectSettings.field.apiKey (identical text)
+
+    // ── LocalLlmSection (Preferences → Offline AI provider, Tauri desktop app only) ──
+    // Deliberately NOT named "Local LLM" in the UI — sits right next to "Local models"
+    // (Whisper/Kokoro/MMS voice models, an unrelated on-device speech feature) in the same
+    // nav group, and the two names read as siblings when they aren't. This is a text-
+    // generation endpoint used only when offline; that's a voice/transcription cache used
+    // always. The description below repeats the distinction since a user landing straight on
+    // this page (deep link, search) won't have seen the nav row's "Offline only" hint.
+    "settings.localLlm.groupLabel": "Offline AI provider",
+    "settings.localLlm.description":
+      "Used for AI translations only when this device has no connection — unrelated to the " +
+      "on-device voice models under \"Local models.\" Requests are proxied through a small " +
+      "local server on this device, never sent over the network. Defaults match Ollama " +
+      "running locally.",
+    "settings.localLlm.testConnection": "Test connection",
+    // "Save" button → common.save (identical text)
+    "settings.localLlm.detectModels": "Detect models",
+    "settings.localLlm.detectedOne": "Detected and filled in: {model}",
+    "settings.localLlm.detectedMany": "Found multiple models — pick one:",
+    "settings.localLlm.detectedNone": "No models found at that endpoint.",
 
     // ── RosterProgressSection (org settings → security) ──
     "settings.rosterProgress.groupLabel": "Visibility",
@@ -269,6 +293,14 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.localLlm.detectedOne": {
+        description:
+          "Confirmation shown under the Model field after \"Detect models\" finds exactly " +
+          "one model at the local endpoint and auto-fills it into the field.",
+        placeholders: {
+          model: "The detected model id, e.g. 'qwen/qwen2.5-coder-14b' or 'llama3'. Not translated.",
+        },
+      },
       "settings.personalProvider.trailingPathHint": {
         description:
           "Hint under the personal AI-provider endpoint field, rendered with " +

@@ -44,7 +44,10 @@ export const SEED_TABLES: SeedTable[] = [
   { name: "cell_waivers", by: { col: "project_id", set: "project" }, pk: ["project_id", "file_id", "cell_id", "rule_id"], authorCols: ["waived_by"] },
   { name: "cell_audio", by: { col: "project_id", set: "project" }, pk: ["project_id", "file_id", "cell_id", "audio_id"] },
   { name: "cell_backtranslations", by: { col: "project_id", set: "project" }, pk: ["project_id", "file_id", "cell_id", "target_event_id"], authorCols: ["author"] },
-  { name: "comments", by: { col: "project_id", set: "project" }, pk: ["comment_id"], authorCols: ["author_id", "author_label"] },
+  // AQU-1296: comments is keyed on (project_id, comment_id) — comment ids are
+  // unique per project only. The keyset pagination above needs the full key or
+  // it skips rows whenever two seeded projects share a comment id.
+  { name: "comments", by: { col: "project_id", set: "project" }, pk: ["project_id", "comment_id"], authorCols: ["author_id", "author_label"] },
   { name: "assignments", by: { col: "project_id", set: "project" }, pk: ["assignment_id"] },
   { name: "assignment_cells", by: { col: "assignment_id", set: "assignment" }, pk: ["assignment_id", "file_id", "cell_id"] },
   { name: "diarization_jobs", by: { col: "project_id", set: "project" }, pk: ["id"] },

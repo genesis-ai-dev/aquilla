@@ -17,6 +17,7 @@ import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembership } from './membership'
 import { counts, readValidationCount, BOOK_INDEX } from './progress-read-route'
+import { readCountStructuralCells } from './structural-cells'
 import {
   readPlanUnitsSql,
   planUnitExistsStmt,
@@ -64,7 +65,7 @@ export interface PlanRouteEnv {
   SYNC_SECRET_KEY?: string
 }
 
-function toUnit(row: PlanUnitRow, validationCount: number): PlanUnit {
+function toUnit(row: PlanUnitRow, validationCount: number, countStructural: boolean): PlanUnit {
   const c = counts(
     {
       scope: row.section_key ? 'book' : 'file',
@@ -72,9 +73,13 @@ function toUnit(row: PlanUnitRow, validationCount: number): PlanUnit {
       total_count: row.total_count,
       filled_count: row.filled_count,
       validator_histogram: row.validator_histogram ?? null,
+      structural_count: row.structural_count,
+      structural_filled_count: row.structural_filled_count,
+      structural_validator_histogram: row.structural_validator_histogram ?? null,
       revision: row.revision,
     },
     validationCount,
+    countStructural,
   )
   return {
     fileId: row.file_id,
@@ -116,8 +121,13 @@ async function readPlan(
   db: AquillaDb,
   projectId: string,
   lane: string,
-): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; planUpdatedAt: number; progressUpdatedAt: number }> {
-  const validationCount = await readValidationCount(db, projectId)
+): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
+  const [validationCount, countStructural] = await Promise.all([
+    readValidationCount(db, projectId),
+    // AQU-1083: the board reads the same policy every other progress surface
+    // does, so a book that opted out of counting headings is Done here too.
+    readCountStructuralCells(db, projectId),
+  ])
   const { results } = await db
     .prepare(readPlanUnitsSql())
     .bind(projectId, lane)
@@ -131,12 +141,12 @@ async function readPlan(
     planUpdatedAt = Math.max(planUpdatedAt, Number(row.plan_updated_at) || 0)
     progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.progress_updated_at) || 0)
     return {
-      unit: toUnit(row, validationCount),
+      unit: toUnit(row, validationCount, countStructural),
       book: row.section_key || row.file_book_code || null,
     }
   })
   withBook.sort((x, y) => compareUnits(x.unit, y.unit, x.book, y.book))
-  return { units: withBook.map((x) => x.unit), revision, validationCount, planUpdatedAt, progressUpdatedAt }
+  return { units: withBook.map((x) => x.unit), revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt }
 }
 
 export async function handlePlanRequest(
@@ -151,7 +161,7 @@ export async function handlePlanRequest(
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
   const db = env.AQUILLA_PG
-  const projectId = decodeURIComponent(match[1]!)
+  const projectId = decodeURIComponent(match[1])
 
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
@@ -162,7 +172,7 @@ export async function handlePlanRequest(
   const lane = (url.searchParams.get('lane') ?? '').trim()
 
   if (request.method === 'GET') {
-    const { units, revision, validationCount, planUpdatedAt, progressUpdatedAt } =
+    const { units, revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt } =
       await readPlan(db, projectId, lane)
     // THREE CLOCKS, because none of them alone moves for every change worth
     // re-reading. `revision` tracks the event sequence; plan writes never
@@ -170,7 +180,9 @@ export async function handlePlanRequest(
     // a progress BACKFILL advances neither, so filling in audio counts and
     // activity needs the newest projection updated_at or a client caches an
     // audio-less board forever.
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}"`
+    // …and a fourth for the structural policy, which moves none of the three.
+    const structuralTag = countStructural ? '' : ':nostruct'
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -250,6 +262,9 @@ export async function handlePlanRequest(
     .all<PlanUnitRow>()
   const row = (results ?? [])[0]
   if (!row) return new Response('unknown plan unit', { status: 404 })
-  const validationCount = await readValidationCount(db, projectId)
-  return Response.json({ unit: toUnit(row, validationCount) })
+  const [validationCount, countStructural] = await Promise.all([
+    readValidationCount(db, projectId),
+    readCountStructuralCells(db, projectId),
+  ])
+  return Response.json({ unit: toUnit(row, validationCount, countStructural) })
 }

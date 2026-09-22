@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /**
  * Preferences, personal/org/team settings surfaces.
@@ -24,7 +24,37 @@ import { defineNamespace } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── StructuralCellsSection (org settings → security) ── AQU-1083
+    "settings.structuralCells.label": "Count headings as translatable content",
+    "settings.structuralCells.description":
+      "When on, chapter headings, section titles and book names count toward " +
+      "translation and validation percentages, the same as any other line. " +
+      "When off, they are left out of both the completed count and the total, " +
+      "so a book reads 100% once every verse is done. Individual projects can " +
+      "override this.",
+    "settings.structuralCells.saveFailed": "Save failed",
+    "settings.structuralCells.blocked":
+      "Only org maintainers and owners can change how progress is counted.",
+    "settings.structuralCells.resetFailed": "Could not update those projects",
+    "settings.structuralCells.resetTitle": plural({
+      one: "{count} project has its own setting",
+      other: "{count} projects have their own setting",
+    }, "count"),
+    "settings.structuralCells.resetDescription": plural({
+      one: "It will keep counting headings its own way and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep counting headings their own way and ignore this default. Reset them to follow the organization instead?",
+    }, "count"),
+    // Number-neutral: the title beside it is singular at a count of one, and
+    // "Leave them as they are" under "1 project has its own setting" reads
+    // like a bug.
+    "settings.structuralCells.resetKeep": "Leave unchanged",
+    "settings.structuralCells.resetConfirm": "Reset to the default",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
+    "settings.assignmentAuthority.floorLabel": "Who can assign work",
+    "settings.assignmentAuthority.floorDescription":
+      "Minimum project role required to assign, reassign, or unassign file, " +
+      "chapter, target-lane, and AI review tasks. Defaults to Project lead.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.description":
       "When on, a member (contributor and above) can claim a book/chapter/take " +
@@ -61,6 +91,26 @@ export const settings = defineNamespace({
     // "Endpoint URL" → projectSettings.advancedLlm.endpointLabel (identical text)
     // "Model" → projectSettings.advancedLlm.modelLabel (identical text)
     // "API key" → projectSettings.field.apiKey (identical text)
+
+    // ── LocalLlmSection (Preferences → Offline AI provider, Tauri desktop app only) ──
+    // Deliberately NOT named "Local LLM" in the UI — sits right next to "Local models"
+    // (Whisper/MMS voice models, an unrelated on-device speech feature) in the same
+    // nav group, and the two names read as siblings when they aren't. This is a text-
+    // generation endpoint used only when offline; that's a voice/transcription cache used
+    // always. The description below repeats the distinction since a user landing straight on
+    // this page (deep link, search) won't have seen the nav row's "Offline only" hint.
+    "settings.localLlm.groupLabel": "Offline AI provider",
+    "settings.localLlm.description":
+      "Used for AI translations only when this device has no connection — unrelated to the " +
+      "on-device voice models under \"Local models.\" Requests are proxied through a small " +
+      "local server on this device, never sent over the network. Defaults match Ollama " +
+      "running locally.",
+    "settings.localLlm.testConnection": "Test connection",
+    // "Save" button → common.save (identical text)
+    "settings.localLlm.detectModels": "Detect models",
+    "settings.localLlm.detectedOne": "Detected and filled in: {model}",
+    "settings.localLlm.detectedMany": "Found multiple models — pick one:",
+    "settings.localLlm.detectedNone": "No models found at that endpoint.",
 
     // ── RosterProgressSection (org settings → security) ──
     "settings.rosterProgress.groupLabel": "Visibility",
@@ -99,6 +149,20 @@ export const settings = defineNamespace({
     "settings.termbase.optionContributor": "Contributor (400) — translators manage terms",
     "settings.termbase.optionProjectLead": "Project lead (500) — default",
     "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
+
+    // ── LanguageEditSection (org settings → security) — AQU-1086 ──
+    "settings.languageEdit.label": "Who can change project languages",
+    "settings.languageEdit.description":
+      "Minimum role required to change a project's source and target language " +
+      "and to add or archive extra target languages. This setting covers " +
+      "languages only — every other project setting still requires Maintainer.",
+    // Open-dropdown option text for the language-edit floor select; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.languageEdit.optionProjectLead":
+      "Project lead (500) — project managers fix their own languages",
+    "settings.languageEdit.optionMaintainer": "Maintainer (600) — default",
+    "settings.languageEdit.ownerOnlyError":
+      "Only org owners can change the language permission policy.",
 
     // ── CommentPermissionsSection (org settings → security) ──
     "settings.commentPermissions.groupLabel": "Comments",
@@ -255,6 +319,30 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.localLlm.detectedOne": {
+        description:
+          "Confirmation shown under the Model field after \"Detect models\" finds exactly " +
+          "one model at the local endpoint and auto-fills it into the field.",
+        placeholders: {
+          model: "The detected model id, e.g. 'qwen/qwen2.5-coder-14b' or 'llama3'. Not translated.",
+        },
+      },
+      "settings.structuralCells.resetTitle": {
+        description:
+          "Title of the dialog shown after an org maintainer changes the " +
+          "heading-counting default, when some projects have set their own " +
+          "value and will therefore ignore it. {count} is how many. Asked " +
+          "only when that number is above zero.",
+        placeholders: { count: "How many projects override the org default." },
+      },
+      "settings.structuralCells.resetDescription": {
+        description:
+          "Body of that same dialog, explaining that those projects keep " +
+          "their own answer unless reset. The confirm button clears their " +
+          "setting so they follow the organization again; the cancel button " +
+          "leaves them alone. Pluralized on the same count as the title, " +
+          "which it does not print — only 'it' versus 'them' changes.",
+      },
       "settings.personalProvider.trailingPathHint": {
         description:
           "Hint under the personal AI-provider endpoint field, rendered with " +

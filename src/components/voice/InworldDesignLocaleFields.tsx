@@ -75,7 +75,6 @@ function DesignLanguageCombobox({
 
   return (
     <ComboboxPrimitive.Root
-      className="w-full"
       items={[...options]}
       value={selected}
       open={open}

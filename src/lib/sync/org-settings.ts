@@ -69,6 +69,19 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-1083: the org-wide default for whether structural cells — chapter
+   * headings, section titles, book names — count toward progress. Unset means
+   * they DO, which is what every project did before this existed. A project
+   * may override it.
+   */
+  countStructuralCells?: boolean
+  /**
+   * AQU-1037: Minimum effective project role allowed to assign, reassign, or
+   * unassign file/chapter/target-lane work and route AI changesets. Default
+   * (when absent) = PROJECT_LEAD (500), preserving prior behavior.
+   */
+  assignmentMinRole?: number
+  /**
    * AQU-822: Minimum role level allowed to manage a project's termbase —
    * add, edit, delete, and archive concepts. Default (when absent) =
    * PROJECT_LEAD (500), the level the terminology UI has always shown the
@@ -83,6 +96,20 @@ export interface OrgWideSettings {
    * Same OWNER-only write gate as exportMinRole / rosterViewMinRole.
    */
   termbaseEditMinRole?: number
+  /**
+   * AQU-1086: minimum org/project role allowed to change a project's source
+   * and target language, and its extra target-lane registry (`targetLanes` /
+   * `archivedLanes`). Unset ⇒ MAINTAINER (600), i.e. the behaviour before
+   * this setting existed; an org opts in to project-lead language editing by
+   * lowering it to 500.
+   *
+   * It does NOT widen any other project setting: the server carve-out applies
+   * only to a write whose changed keys are all language keys (auth-worker
+   * project-settings route).
+   *
+   * Same OWNER-only write gate as termbaseEditMinRole / exportMinRole.
+   */
+  languageEditMinRole?: number
   /**
    * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
    * reply. Default (when absent) = COMMENTER (200), the static
@@ -125,6 +152,14 @@ export interface OrgSettingsResponse {
   version: number
   updatedAt: string | null
   updatedBy: number | null
+  /**
+   * AQU-1083: how many projects in this org carry their own
+   * countStructuralCells and so ignore the org default.
+   *
+   * Absent from an older server, which reads as none — the prompt simply does
+   * not appear, which is the pre-feature behaviour.
+   */
+  countStructuralOverrides?: number
 }
 
 export type OrgPatchResult =
@@ -231,4 +266,32 @@ export async function postPromotionRequest(
   if (res.status === 403) return { kind: "forbidden" }
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: text }
+}
+
+/**
+ * POST .../settings/count-structural/reset-project-overrides — put every
+ * project in the org back on the org's structural-cell default.
+ *
+ * Clears the per-project key rather than stamping the current value into each
+ * one, so those projects follow the NEXT change of the default too.
+ */
+export async function resetCountStructuralOverrides(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/orgs/${orgId}/settings/count-structural/reset-project-overrides`,
+      { method: "POST", headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      return { kind: "error", message: body?.error ?? `HTTP ${res.status}` }
+    }
+    const body = (await res.json()) as { cleared: number }
+    return { kind: "ok", cleared: Number(body.cleared) || 0 }
+  } catch (err) {
+    return { kind: "error", message: String(err) }
+  }
 }

@@ -51,9 +51,11 @@ describe("pluralCategory", () => {
     for (const count of [0, 1, 2, 3, 11, 100]) {
       expect(pluralCategory("th", count), `th ${count}`).toBe("other")
       expect(pluralCategory("my", count), `my ${count}`).toBe("other")
+      expect(pluralCategory("ms", count), `ms ${count}`).toBe("other")
       // `Intl.PluralRules` does not know `mfa` and silently falls back to the
       // runtime default, so the override table is what keeps Patani Malay from
-      // being asked for an unusable `one` form.
+      // being asked for an unusable `one` form. `mfa` is no longer a registered
+      // locale (AQU-1306) but stays reachable as an alias, so it stays covered.
       expect(pluralCategory("mfa", count), `mfa ${count}`).toBe("other")
     }
   })
@@ -77,6 +79,7 @@ describe("pluralCategoriesFor", () => {
     ])
     expect(pluralCategoriesFor("th")).toEqual(["other"])
     expect(pluralCategoriesFor("my")).toEqual(["other"])
+    expect(pluralCategoriesFor("ms")).toEqual(["other"])
     expect(pluralCategoriesFor("mfa")).toEqual(["other"])
   })
 })
@@ -204,7 +207,7 @@ describe("translate over a count-governed key", () => {
   })
 
   it("never renders a raw key for any base key, at any count, in any locale", () => {
-    for (const locale of ["en", "th", "my", "mfa", "ar"]) {
+    for (const locale of ["en", "th", "my", "ms", "ar"]) {
       for (const k of Object.keys(en) as (keyof typeof en)[]) {
         for (const count of [0, 1, 2, 3, 11]) {
           const out = translate({}, k, { count, total: count }, locale)

@@ -79,6 +79,7 @@ import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
 import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
+import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -328,6 +329,9 @@ app.route("/api/v1/ai/agent", agentRoutes)
 // AQU-1186: server-to-server drafting for the external Agent API's DraftCells
 // command. Shared-secret only (sync-worker → here); returns drafts, never writes.
 app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
+// AQU-1282: server-to-server L1 brief-summary render for the external Agent
+// API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
+app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)

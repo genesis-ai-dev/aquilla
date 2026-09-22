@@ -31,6 +31,7 @@ import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
+import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -358,6 +359,8 @@ const worker = {
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
+    const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
+    if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)

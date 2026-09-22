@@ -3,11 +3,16 @@
 // Idempotent: deletes the seeded ids first, then bulk-inserts verbatim.
 //
 //   npx tsx scripts/seed-load.ts --local                 # default local dev PG
-//   npx tsx scripts/seed-load.ts --target "postgresql://…"
+//   npx tsx scripts/seed-load.ts --target "postgresql://…" --confirm-remote-target <host>
 //   LOCAL_PG_URL=… npx tsx scripts/seed-load.ts --local
 //   flags: --ignore-schema-hash  (load despite schema drift — use with care)
 //
-// NEVER point --target at prod. The loader refuses hosts matching the prod host.
+// NEVER point --target at prod. This loader DELETEs every row the bundle
+// carries before re-inserting it, so a run against production replaces live
+// project content with a day-old mirror (AQU-750). Loopback targets load
+// freely; any remote target must be re-typed via --confirm-remote-target, and
+// a host declared production (AQUILLA_PROD_PG_HOST / NEON_PG_HOST) is refused
+// outright — see scripts/lib/seed-target-guard.ts.
 import { Client } from "pg"
 import { createHash } from "node:crypto"
 import { zstdDecompressSync } from "node:zlib"
@@ -15,6 +20,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
+import { assertSeedTargetAllowed } from "./lib/seed-target-guard"
 import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -101,10 +107,9 @@ async function insertRows(c: Client, table: string, rows: Record<string, unknown
 
 async function main() {
   const url = targetUrl()
-  const host = new URL(url).hostname
-  if (process.env.NEON_PG_HOST && host === process.env.NEON_PG_HOST) {
-    throw new Error(`refusing to load into prod host ${host}`)
-  }
+  // Fail-closed: loopback only, unless the operator re-types a non-production
+  // remote host. Runs before anything opens a connection (AQU-750).
+  const host = assertSeedTargetAllowed({ url, env: process.env, argv: process.argv })
   const meta = readMeta()
 
   // schema guard — the repo schema.sql must match what the bundle was built against.

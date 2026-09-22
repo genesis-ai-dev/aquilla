@@ -40,11 +40,11 @@ async function addedCell(cellId: string, anchor: string | null): Promise<void> {
   )
 }
 
-async function translation(cellId: string, value: string, lane = LANE): Promise<void> {
+async function translation(cellId: string, value: string, lane = LANE, validated = false): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'target', $4, $5, $6, 1)`,
-    [PROJECT, FILE, cellId, lane, value, `tgt-${cellId}-${lane}`],
+    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, validated, event_id, last_edit_at)
+     VALUES ($1, $2, $3, 'target', $4, $5, $6, $7, 1)`,
+    [PROJECT, FILE, cellId, lane, value, validated ? 1 : 0, `tgt-${cellId}-${lane}`],
   )
 }
 
@@ -231,5 +231,62 @@ describe("buildUsfmExportPlan — a file nobody restructured", () => {
     const { overrides, edits } = await plan()
     expect(overrides.size).toBe(0)
     expect(edits).toEqual({})
+  })
+})
+
+// AQU-1148: a USFM export is a deliverable — a publisher or typesetter receiving
+// it cannot tell approved translation from unreviewed draft. `?validated=1` on
+// the export route arrives here as `{ validatedOnly: true }`.
+describe("buildUsfmExportPlan — validated-only (AQU-1148)", () => {
+  const validatedPlan = () => buildUsfmExportPlan(t.db, PROJECT, FILE, LANE, { validatedOnly: true })
+
+  it("overlays a validated translation", async () => {
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Approuvée.", LANE, true)
+
+    expect((await validatedPlan()).overrides.get("GEN 1:4")).toBe("Approuvée.")
+  })
+
+  it("leaves an UNVALIDATED translation out, so the verse keeps the client's words", async () => {
+    // Not blanked — absent. The serializer leaves a verse it has no override
+    // for exactly as the client uploaded it, which is the whole point: an
+    // unreviewed draft must not ship inside a file we call approved.
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Brouillon non relu.", LANE, false)
+
+    const { overrides } = await validatedPlan()
+    expect(overrides.size).toBe(0)
+  })
+
+  it("still overlays everything when the flag is off — today's contract", async () => {
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Brouillon non relu.", LANE, false)
+
+    expect((await plan()).overrides.get("GEN 1:4")).toBe("Brouillon non relu.")
+  })
+
+  it("exports a fully-validated file identically in both modes", async () => {
+    await verse("c4", "GEN 1:4")
+    await verse("c5", "GEN 1:5")
+    await translation("c4", "Une.", LANE, true)
+    await translation("c5", "Deux.", LANE, true)
+
+    expect([...(await validatedPlan()).overrides]).toEqual([...(await plan()).overrides])
+  })
+
+  it("drops an UNVALIDATED added cell, and keeps a validated one", async () => {
+    await verse("c4", "GEN 1:4")
+    await addedCell("a1", "c4")
+    await addedCell("a2", "c4")
+    await translation("a1", "Ligne approuvée.", LANE, true)
+    await translation("a2", "Ligne non relue.", LANE, false)
+
+    expect((await validatedPlan()).edits.appendAfter?.get("GEN 1:4")).toEqual(["Ligne approuvée."])
+  })
+
+  it("still removes a deleted verse — a removal is not a translation", async () => {
+    await deleteEvent("c4", { cellId: "c4", value: "x", canonicalRef: "GEN 1:4" })
+
+    expect([...((await validatedPlan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
   })
 })

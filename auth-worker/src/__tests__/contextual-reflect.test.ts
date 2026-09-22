@@ -114,6 +114,9 @@ async function startRun(project = PROJECT, file = FILE) {
     fileId: file,
     initiatedBy: "tester",
     roleSnapshot: { userId: 1, username: "tester", level: 400 },
+    // Unlimited allowance (AQU-1300): these runs must walk BOTH seeded
+    // chapters before parking, or the two-passage reflection gate never opens.
+    spanAllowance: null,
   })
   if (created.status !== "ok") throw new Error("run not created")
   return created.run

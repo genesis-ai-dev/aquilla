@@ -42,6 +42,7 @@ ALTER TABLE contextual_run_events
     'drafts_staged',
     'span_outcome',
     'steering_queued',
+    'run_command',
     'draft_reviewed',
     'memories_proposed'
   ));

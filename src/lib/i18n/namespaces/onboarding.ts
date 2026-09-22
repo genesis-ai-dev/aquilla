@@ -439,6 +439,15 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.section.localModels.title": "Local models",
     "onboarding.preferences.section.localModels.description":
       "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+    // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
+    // there). Named "Offline AI provider" rather than "Local LLM" so it doesn't read as a
+    // sibling of "Local models" right above it — that section is on-device Whisper/Kokoro/MMS
+    // voice models (speech, always active); this one is a text-generation endpoint (chat/
+    // translation, offline-only), the same shape of setting as "AI provider keys" above but
+    // for when there's no connection at all.
+    "onboarding.preferences.section.localLlm.title": "Offline AI provider",
+    "onboarding.preferences.section.localLlm.description":
+      "The endpoint used for AI translations when this device has no connection — separate from the on-device voice models above.",
     "onboarding.preferences.section.usage.title": "Usage",
     "onboarding.preferences.section.usage.description": "Your audio and AI activity. No pricing is shown here.",
     "onboarding.preferences.section.apiTokens.title": "API tokens",
@@ -452,6 +461,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.hint.notSet": "Not set",
     "onboarding.preferences.hint.personal": "Personal",
     "onboarding.preferences.hint.onDevice": "On-device",
+    "onboarding.preferences.hint.offlineOnly": "Offline only",
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":

@@ -56,6 +56,9 @@ function runAt(doneSpans: number, reflectedDoneSpans: number): ContextualRun {
     lastError: null,
     steeringCursor: null,
     blockedOnDecisionId: null,
+    // AQU-1300 trust gate: unlimited allowance, parked because the scope ran out.
+    spanAllowance: null,
+    parkReason: "work_exhausted",
     anchorCellId: null,
     scopeGroup: null,
     reflectedAt: null,

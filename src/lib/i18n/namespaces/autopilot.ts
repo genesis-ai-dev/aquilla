@@ -226,6 +226,27 @@ export const autopilot = defineNamespace({
       other: "Queued · {count} passages remaining",
     }),
     "autopilot.pill.idle": "Idle · no work queued",
+
+    // — Trust gate: parked awaiting input (AQU-1300) ————————————————
+    // The run has budget left over, not work left over. Word these as a
+    // deliberate hand-back ("waiting for you"), never as an error or a stall —
+    // stopping to ask is the feature, and copy that apologises for it teaches
+    // people to switch it off.
+    "autopilot.pill.waitingForYou": "Waiting for you",
+    "autopilot.pill.waitingWithRemaining": plural({
+      one: "Waiting for you · {count} passage left",
+      other: "Waiting for you · {count} passages left",
+    }),
+    "autopilot.pill.announcement.waitingForYou":
+      "Autopilot drafted a passage and is waiting for you. Review it, then continue.",
+    "autopilot.pill.waitingOnDecision":
+      "Waiting on your answer to a question about this passage.",
+    "autopilot.action.continue": "Continue",
+    "autopilot.action.continueHint": "Draft a few more passages, then check back with you",
+    "autopilot.action.translateEverything": "Translate everything",
+    "autopilot.action.translateEverythingHint":
+      "Draft every remaining passage in this file without stopping to ask",
+    "autopilot.error.continueFailed": "Autopilot couldn’t continue. Retry.",
     "autopilot.pill.completeWithAttention":
       "{done}/{total} complete · {failed} need attention",
     "autopilot.pill.announcement.completeWithAttention":
@@ -248,6 +269,12 @@ export const autopilot = defineNamespace({
     "autopilot.steering.sendFailed": "That direction didn't reach the agent. Try again.",
     "autopilot.steering.sending": "Sending direction…",
     "autopilot.steering.send": "Send",
+    "autopilot.steering.commandHint":
+      "Type “stop” or “pause” on its own to control the run instead of directing it.",
+    "autopilot.steering.sendStop": "Stop the run",
+    "autopilot.steering.sendPause": "Pause the run",
+    "autopilot.steering.commandNothingRunning":
+      "Autopilot wasn’t working, so nothing changed.",
     "autopilot.steering.queuedDirections": plural({
       one: "{count} direction queued",
       other: "{count} directions queued",
@@ -363,6 +390,9 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.kind.draftsStaged": "Drafts staged",
     "autopilot.inspector.event.kind.spanOutcome": "Passage outcome",
     "autopilot.inspector.event.kind.steeringQueued": "Steering queued",
+    "autopilot.inspector.event.kind.runCommand": "Asked in chat",
+    "autopilot.inspector.event.runCommandStop": "You asked Autopilot to stop.",
+    "autopilot.inspector.event.runCommandPause": "You asked Autopilot to pause.",
     "autopilot.inspector.event.kind.draftReviewed": "Draft reviewed",
     "autopilot.inspector.event.kind.memoriesProposed": "Notes proposed",
     "autopilot.inspector.event.kind.unknown": "Activity event",
@@ -806,6 +836,10 @@ export const autopilot = defineNamespace({
       "autopilot.pill.queuedRemaining": withPlaceholders(
         "Compact visible editor-pill label for queued passages remaining.",
         { count: "Number of queued passages remaining." },
+      ),
+      "autopilot.pill.waitingWithRemaining": withPlaceholders(
+        "Editor-pill label for a run that paused itself to ask the person whether to keep drafting. It is waiting by design, not stuck.",
+        { count: "Number of passages in this file Autopilot has not drafted yet." },
       ),
       "autopilot.pill.completeWithAttention": withPlaceholders(
         "Editor-pill summary when a run finished some passages and left others needing a person.",

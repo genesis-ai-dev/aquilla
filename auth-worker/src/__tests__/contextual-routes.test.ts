@@ -24,6 +24,7 @@ import {
   listDrafts,
   requestPause,
   confirmPause,
+  readUnconsumedSteering,
   resumeRun,
   terminateRun,
 } from "../../../db/shared/contextual-runs"
@@ -973,6 +974,93 @@ describe("POST /contextual/steering", () => {
   })
 })
 
+// AQU-1299: the steering route is the conversational path to the run's own
+// controls. A stop-shaped message must terminate rather than steer, and — the
+// original bug — must never be the thing that wakes a parked run back up.
+describe("POST /contextual/steering — run commands", () => {
+  it("terminates a running run, records the command, and appends no steering", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    // The seeded run parks immediately; put it back to work so a stop has
+    // something to stop (direct transition — no tick loop kicked).
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "@Coordinator stop",
+      runId,
+    })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "stop", applied: true })
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("terminated")
+
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId })
+    expect(unconsumed.map((entry) => entry.body)).not.toContain("@Coordinator stop")
+
+    const activity = await req("GET", `/runs/${runId}/activity`, contrib)
+    const { events } = (await activity.json()) as {
+      events: { kind: string; details: { command?: string } }[]
+    }
+    expect(events.find((event) => event.kind === "run_command")?.details.command).toBe("stop")
+  })
+
+  it("pauses a running run at the next passage edge", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "hold on",
+      runId,
+    })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "pause", applied: true })
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("pausing")
+  })
+
+  it("never wakes a parked run — the run stays parked and no loop is kicked", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("parked")
+
+    for (const body of ["stop", "pause"]) {
+      const r = await req("POST", "/steering", contrib, { kind: "direction", body, runId })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toMatchObject({ applied: false })
+      expect(_test.lastLoop).toBeNull()
+      expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("parked")
+    }
+  })
+
+  it("keeps a genuine instruction containing “stop” as steering", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const direction = "stop using contractions in narration"
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: direction,
+      runId,
+    })
+    expect(r.status).toBe(201)
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("running")
+
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId })
+    expect(unconsumed.map((entry) => entry.body)).toContain(direction)
+  })
+
+  it("refuses to record a command as a direction when there is no run to command", async () => {
+    const { contrib } = await seedWorld()
+    const r = await req("POST", "/steering", contrib, { kind: "direction", body: "stop", fileId: FILE })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "stop", applied: false })
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId: "" })
+    expect(unconsumed.map((entry) => entry.body)).not.toContain("stop")
+  })
+})
+
 describe("draft listing + review handshake", () => {
   it("viewer lists but cannot review; applied waits for projection; decisions are terminal", async () => {
     const { contrib, viewer } = await seedWorld()
@@ -1257,7 +1345,16 @@ describe("POST /contextual/runs {scope:'project'}", () => {
     await seedFairnessFiles()
     testEnv.CONTEXTUAL_MAX_CONCURRENCY = "1"
 
-    const response = await req("POST", "/runs", contrib, { scope: "project" })
+    // `translateEverything` (AQU-1300) lifts the per-run span budget. Fairness
+    // is a property of the SECOND wave — whether an early file can reacquire
+    // the project slot before a later one has had its first — so this needs
+    // each run to get past span 1. Under the trust-gated default of one span
+    // both runs park after their first wave and there is no fairness left to
+    // test. Two runs × two waves = the four span starts asserted below.
+    const response = await req("POST", "/runs", contrib, {
+      scope: "project",
+      translateEverything: true,
+    })
     expect(response.status).toBe(201)
     const body = await response.json() as {
       started: { runId: string; fileId: string }[]
@@ -1506,3 +1603,145 @@ describe("sweepStrandedContextualRuns", () => {
     expect(sweep.adopted).toBe(0)
   })
 })
+
+// ── Trust gate wake paths (AQU-1300) ───────────────────────────────────────
+//
+// WHY at the route level: the budget lives on the run row, but the four things
+// that BUY budget are spread across three files — the action route, the review
+// route, the steering route, and the decision lifecycle. Each one has to grant
+// before it resumes, or the run wakes with nothing to spend and parks again on
+// its very next span edge. That failure is invisible in any single unit: the
+// call succeeds, the status flips to running, and the user simply watches
+// nothing happen. It is only observable end to end, which is here.
+
+describe("trust gate — continuing a parked run", () => {
+  /** Two more chapters, so a default-allowance run parks with work left over
+   *  instead of finishing the seeded file outright. */
+  async function seedMoreChapters(): Promise<void> {
+    for (const [cellId, ref, text] of [
+      ["c3", "MRK 2:1", "And again he entered"],
+      ["c4", "MRK 3:1", "He went into the synagogue"],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`)
+        .run()
+    }
+  }
+
+  async function settle(): Promise<void> {
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+  }
+
+  it("a plain start drafts one passage and parks awaiting input", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const run = await getRun(env.AQUILLA_PG, runId)
+    expect(run?.status).toBe("parked")
+    expect(run?.parkReason).toBe("awaiting_input")
+    expect(run?.doneSpans).toBe(1)
+    expect(run?.totalSpans).toBeGreaterThan(1)
+  })
+
+  it("start with translateEverything runs the file out", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const res = await req("POST", "/runs", contrib, { fileId: FILE, translateEverything: true })
+    expect(res.status).toBe(201)
+    const { runId } = (await res.json()) as { runId: string }
+    await settle()
+
+    const run = await getRun(env.AQUILLA_PG, runId)
+    expect(run?.spanAllowance).toBeNull()
+    expect(run?.doneSpans).toBe(run?.totalSpans)
+    expect(run?.parkReason).toBe("work_exhausted")
+  })
+
+  it("continue grants a batch and drafts again", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+    const parked = await getRun(env.AQUILLA_PG, runId)
+    expect(parked?.doneSpans).toBe(1)
+
+    const res = await req("POST", `/runs/${runId}/continue`, contrib)
+    expect(res.status).toBe(200)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    // The batch is what makes Continue feel like progress: more than the one
+    // passage an incidental grant buys.
+    expect(after?.doneSpans).toBeGreaterThan(1)
+  })
+
+  it("continue-all lifts the budget for the rest of the scope", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", `/runs/${runId}/continue-all`, contrib)
+    expect(res.status).toBe(200)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    expect(after?.spanAllowance).toBeNull()
+    expect(after?.doneSpans).toBe(after?.totalSpans)
+    expect(after?.parkReason).toBe("work_exhausted")
+  })
+
+  it("refuses continue to a viewer — it spends the project's model budget", async () => {
+    const { contrib, viewer } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", `/runs/${runId}/continue`, viewer)
+    expect(res.status).toBe(403)
+    expect((await getRun(env.AQUILLA_PG, runId))?.doneSpans).toBe(1)
+  })
+
+  it("reviewing a staged draft buys one more passage and wakes the run", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+    expect((await getRun(env.AQUILLA_PG, runId))?.doneSpans).toBe(1)
+
+    const drafts = await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")
+    expect(drafts.length).toBeGreaterThan(0)
+    const res = await req("POST", `/drafts/${drafts[0].id}/review`, contrib, { action: "rejected" })
+    expect(res.status).toBe(200)
+    await settle()
+
+    // This is the criterion the whole feature turns on: the run earns its next
+    // passage by the user engaging with the last one.
+    const after = await getRun(env.AQUILLA_PG, runId)
+    expect(after?.doneSpans).toBe(2)
+    expect(after?.status).toBe("parked")
+  })
+
+  it("steering a parked run wakes it for ONE passage, not the whole book", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "Keep the narrator's register plain.",
+      runId,
+    })
+    expect(res.status).toBe(201)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    // One span, then park again. A steering wake that bypassed the budget
+    // would be the hole that makes the whole gate decorative.
+    expect(after?.doneSpans).toBe(2)
+    expect(after?.status).toBe("parked")
+    expect(after?.parkReason).toBe("awaiting_input")
+  })
+})
+

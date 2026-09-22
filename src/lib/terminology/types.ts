@@ -46,6 +46,36 @@ export interface TermRendering {
   status: RenderingStatus
 }
 
+/**
+ * Per-concept matching options. Every field is optional; absent fields resolve
+ * to script- and project-derived defaults in `resolveMatchOptions`
+ * (match-options.ts). Stored verbatim in `concepts.match_options`.
+ */
+export interface TermMatchOptions {
+  /** Ignore combining marks (vowel points, accents) on both sides. */
+  foldMarks?: boolean
+  /** Allow the project's configured prefixes/suffixes around the term. */
+  affixes?: boolean
+  /** Extra literal source forms treated as alternates of sourceTerm. */
+  forms?: string[]
+  /** Matched surface forms the user rejected; compared after folding. */
+  excludedForms?: string[]
+}
+
+/**
+ * Project-level affix inventory for source-term matching. Plain data: the
+ * matcher knows "prefix strings" and "suffix strings", nothing about any
+ * language. Presets (affix-presets.ts) only pre-fill these lists.
+ */
+export interface TermMatchingSettings {
+  prefixes: string[]
+  suffixes: string[]
+  /** Chained affixes allowed per side. Default 2. */
+  maxAffixes?: number
+  /** Overrides the script-derived foldMarks default for every concept. */
+  foldMarksDefault?: boolean
+}
+
 export interface Concept {
   id: string
   /** Headword / lemma. Normalized exact match is case-insensitive. */
@@ -61,6 +91,8 @@ export interface Concept {
    * default case-insensitive match used everywhere else in the term pipeline.
    */
   caseSensitive?: boolean
+  /** Matching options; see TermMatchOptions. Absent = all defaults. */
+  match?: TermMatchOptions
 }
 
 /** Payload from the editor "Add to terminology" popover. */
@@ -80,4 +112,5 @@ export interface ConceptDraft {
    * what the client ASKS for.
    */
   approve?: boolean
+  match?: TermMatchOptions
 }

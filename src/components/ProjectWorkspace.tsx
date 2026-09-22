@@ -1,3 +1,6 @@
+import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
+import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -14,8 +17,9 @@ import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
-import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
-import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
+import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
+import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -24,6 +28,7 @@ import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/fr
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
+import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -106,7 +111,10 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  buildGlosserSeeds,
+  nextPaintGate,
 } from "./project-workspace-helpers"
+import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -325,6 +333,7 @@ import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/syn
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -338,7 +347,7 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import {
   detectStrongTextDirection,
   resolveTextDirection,
-  summarizeDetectedDirections,
+  summarizePairedDirections,
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
@@ -373,7 +382,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useConcepts } from "@/hooks/useConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
-import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
+import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
@@ -438,6 +447,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // between React re-renders.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
+const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
@@ -571,6 +581,18 @@ export function ProjectWorkspace() {
     roleLevel: serverRoleLevel,
     settingsFetched,
   } = useProject(projectId!)
+  // AQU-1083: the effective policy for this project — its own answer, else its
+  // org's, else count them. Both legs come from the settings hook, which is
+  // the one thing here that re-reads on a remote change frame and on window
+  // focus; an org-level flip therefore reaches this workspace without a
+  // reload. The footer below is the only progress surface that counts cells
+  // itself, and the sidebar's chapter tiles need the value to know when their
+  // cached snapshot is stale — every other surface reads a number the server
+  // already resolved this against.
+  const countStructuralCells =
+    projectSettings?.settings?.countStructuralCells
+    ?? projectSettings?.orgCountStructuralCells
+    ?? true
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -1328,10 +1350,20 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
   }, [projectId])
+  // AQU-1326: opening a file used to fan out every workspace data hook at
+  // mount — audit stats, comments, per-file audio attachments, the project-wide
+  // progress rollup — all racing the cell stream for the same connection pool.
+  // On a high-latency link that pushed the first painted row several
+  // round-trips out. These hooks are gated on `editorFirstPaint` so the
+  // editor-critical requests (sync token → cells page) go out alone, and the
+  // rest start once the first cell page is on screen. Flipped by the effect
+  // just below the cell store, which owns the definition of "painted".
+  const [paintGate, setPaintGate] = useState<PaintGate>(() => ({ file: null, sawLoad: false, open: false }))
+  const editorFirstPaint = paintGate.open
   // Server-backed (Postgres) audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
-  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt) && editorFirstPaint
   const {
     byCellId: auditStatsByCellId,
     revalidate: revalidateAuditStats,
@@ -1357,6 +1389,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
     applyOptimisticCellTiming,
+    loadProgress: cellLoadProgress,
     isLoading: cellsLoading,
     isError: cellsError,
   } = useActiveCellStore({
@@ -1368,9 +1401,32 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
+    countStructural: countStructuralCells,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
+  // cell page reaching the store — but a file that legitimately has no cells,
+  // a load that failed, and the no-file-open case must all release the gate
+  // too, or those hooks would never run.
+  //
+  // The reducer is pure and lives in `project-workspace-helpers` so the rule
+  // (in particular why "not loading" is not "settled") is tested directly —
+  // same extract-the-guard pattern as `shouldApplyCheckResult`.
+  useEffect(() => {
+    setPaintGate((prev) =>
+      nextPaintGate(prev, {
+        fileId: activeFileId ?? null,
+        cellCount: cellSummaries.length,
+        cellsError,
+        cellsLoading,
+      }),
+    )
+    // `cellStoreVersion` is a dep so any store change re-evaluates the gate —
+    // a repaint that happens to leave the cell COUNT unchanged would otherwise
+    // not re-run this. The reducer returns its previous object when nothing
+    // changed, so the extra runs cost a comparison and no render.
+  }, [activeFileId, cellStoreVersion, cellSummaries.length, cellsError, cellsLoading])
   const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
@@ -1488,6 +1544,10 @@ export function ProjectWorkspace() {
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, BacktranslationRecord>
     terminology: ProjectRecord["terminology"] | undefined
+    // AQU-207: confirmed/invalidated interlinear alignments seed the glosser
+    // too, so they belong in the cache key — otherwise a confirmation hands
+    // back the stale pre-confirmation glosser.
+    alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     glosser: Glosser
   } | null>(null)
   const alignmentModelCacheRef = useRef<{
@@ -1593,24 +1653,24 @@ export function ProjectWorkspace() {
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
     // confirmed/cleared here; another lane's entries stay dormant until that
     // lane is active again.
-    for (const summary of cellSummaries) {
-      const key = laneCellKey(summary.id)
-      const pending = pendingTargetCommitHeadsRef.current.get(key)
-      if (!pending) continue
-      const projectedHead = summary.targetEventId ?? null
-      if (projectedHead === pending.eventId) {
-        pendingTargetCommitHeadsRef.current.delete(key)
-        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(key)
-        }
-      } else if (projectedHead && projectedHead !== pending.parentId) {
-        pendingTargetCommitHeadsRef.current.delete(key)
-        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(key)
-        }
+    // AQU-1309: only confirmation of THIS pending head retires it. With
+    // H → A → B queued locally, the projection can still report H. H differs
+    // from B's immediate parent A, but that is lag, not evidence of a competing
+    // edit. Forgetting B here makes the next edit branch off H and go stale.
+    // Actual conflicts are resolved by subscribeStaleSiblings above.
+    const confirmed = readAtVersion(cellStoreVersion, () => confirmedTargetHeadKeys(
+      pendingTargetCommitHeadsRef.current,
+      activeLane,
+      cellId => cellStore.getCellSummary(cellId)?.targetEventId,
+    ))
+    for (const key of confirmed) {
+      const pending = pendingTargetCommitHeadsRef.current.get(key)!
+      pendingTargetCommitHeadsRef.current.delete(key)
+      if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
+        pendingCompletionEventIdRef.current.delete(key)
       }
     }
-  }, [cellSummaries, laneCellKey])
+  }, [activeLane, cellStore, cellStoreVersion])
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
@@ -1894,18 +1954,10 @@ export function ProjectWorkspace() {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
-  const activeFileDirectionSummary = useMemo(() => {
-    function* sourceDirections() {
-      for (const summary of cellSummaries) yield summaryDirections(summary).source
-    }
-    function* targetDirections() {
-      for (const summary of cellSummaries) yield summaryDirections(summary).target
-    }
-    return {
-      source: summarizeDetectedDirections(sourceDirections()),
-      target: summarizeDetectedDirections(targetDirections()),
-    }
-  }, [cellSummaries])
+  const activeFileDirectionSummary = useMemo(
+    () => summarizePairedDirections(cellSummaries, summaryDirections),
+    [cellSummaries],
+  )
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
   const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
@@ -2678,7 +2730,9 @@ export function ProjectWorkspace() {
 
   const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
     projectId: project?.id ?? null,
-    siblingFileId: audioCueSibling?.id ?? null,
+    // AQU-1326: the cue sibling is a second whole-file read. Deferred behind
+    // the first cell page so it doesn't race the editor's own stream.
+    siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
@@ -2751,7 +2805,8 @@ export function ProjectWorkspace() {
   // this second per-file read gives us.
   const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    audioCueSibling?.id ?? null,
+    // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
+    editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
   )
   // Dragging a take on a cue: the anchor the drag writes lands in the CUE
   // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
@@ -2893,16 +2948,12 @@ export function ProjectWorkspace() {
    * import dialog say "Replace" rather than "Import") and the recorder's
    * lookup for the line being performed.
    */
-  // AQU-1068 perf: ONE materialisation pass per store version for the
-  // render-time whole-file readers below (cast map, clearable count, the
-  // character-agreement compare). Each used to call getAllCellViews() itself,
-  // which builds a fresh view for every cell — three 31k-cell builds per
-  // store bump on a Bible, several bumps per insert. Click-time readers keep
-  // their own calls; they run once per gesture, not once per version.
-  const allCellViews = useMemo(
-    () => readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
-    [cellStore, cellStoreVersion],
-  )
+  const allCellViews = useCharacterSheetCells(cellStore, cellStoreVersion, {
+    timeline: timelineStacked,
+    importDialog: importCharactersOpen,
+    review: characterCheckOpen,
+    linkedAudio: audioCueSibling !== null,
+  })
   const castByCellId = useMemo(
     () =>
       new Map(
@@ -4194,6 +4245,11 @@ export function ProjectWorkspace() {
     // The open file's threads load first; the rest of the project pages in
     // behind them, so the editor's per-cell markers never wait on history.
     priorityFileId: activeFileId,
+    // AQU-1326: comments are a per-cell marker, not the cell itself — hold the
+    // project-wide load until the first cell page has painted so it doesn't
+    // compete with the cell stream on open. The hook re-fires the load when
+    // this flips true.
+    tokenReady: editorFirstPaint,
   })
 
   // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
@@ -4289,36 +4345,9 @@ export function ProjectWorkspace() {
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
 
-  // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
-  // column" import mode. CellData.group carries the canonical ref.
-  const importSourceCells = useMemo(() => cellSummaries.map((c) => ({
-    cellId: c.id,
-    fileId: c.fileId,
-    targetEventId: c.targetEventId,
-    sourceEventId: c.sourceEventId,
-    translated: c.translated ?? "",
-    canonicalRef: c.group,
-  })), [cellSummaries])
-
-  // File-scoped target import: the open file's cells in display order, with
-  // source text so the review screen can show alignment.
-  //
-  // AQU-1143: cue cells carry their timings through as well, so an incoming
-  // subtitle file is aligned by timecode overlap rather than raw row order —
-  // one inserted or deleted cue then can't cascade every later translation
-  // onto the wrong cell. Cells without timings simply keep order matching.
-  const fileTargetCells = useMemo(() => cellSummaries.map((c) => ({
-    cellId: c.id,
-    fileId: c.fileId,
-    targetEventId: c.targetEventId,
-    sourceEventId: c.sourceEventId,
-    translated: c.translated ?? "",
-    canonicalRef: c.group,
-    original: c.original,
-    ...(c.startTime !== undefined && c.endTime !== undefined
-      ? { startMs: c.startTime, endMs: c.endTime }
-      : {}),
-  })), [cellSummaries])
+  const { importSourceCells, fileTargetCells } = useImportCellRefs(
+    cellSummaries, importOpen, fileImportOpen,
+  )
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
@@ -5097,12 +5126,14 @@ export function ProjectWorkspace() {
     // AQU-1006 follow-up: from the concepts projection, not the retired
     // `project.terminology` settings key.
     const terminology = localConcepts
+    const alignmentSeeds = project?.alignmentSeeds
     const cached = glosserCacheRef.current
     if (
       cached &&
       cached.corpusCells === corpusCells &&
       cached.backtranslationCache === backtranslationCache &&
-      cached.terminology === terminology
+      cached.terminology === terminology &&
+      cached.alignmentSeeds === alignmentSeeds
     ) {
       return cached.glosser
     }
@@ -5110,45 +5141,23 @@ export function ProjectWorkspace() {
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    // High-weight seeds from previous user-corrected BTs stored in the cache.
-    // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
-    // future glosses reflect the reviewer's intent.
-    const seeds: BtSeed[] = []
-    const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
-    for (const record of backtranslationCache.values()) {
-      const cell = corpusByCellId.get(record.cellId)
-      if (!cell?.translated) continue
-      if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
-        continue
-      }
-      seeds.push({
-        source: record.btText,
-        target: record.forText || cell.translated,
-        weight: record.polished === false ? 5 : 2,
-      })
-    }
-    // Seed from project termbase: active concepts feed preferred/admitted/forbidden
-    // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of localConcepts) {
-      if (concept.status !== "active") continue
-      for (const rendering of concept.renderings) {
-        const weight =
-          rendering.status === "preferred" ? 3 :
-          rendering.status === "admitted" ? 1 :
-          -3 // forbidden
-        seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
-      }
-    }
+    const seeds = buildGlosserSeeds({
+      corpusCells,
+      backtranslationCache,
+      terminology,
+      alignmentSeeds,
+    })
     const g = buildGlosser(pairs, seeds)
     memMark(`glosser.build(${pairs.length}p)`)
     glosserCacheRef.current = {
       corpusCells,
       backtranslationCache,
       terminology,
+      alignmentSeeds,
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, localConcepts])
+  }, [corpusCells, backtranslationCache, localConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -5363,6 +5372,10 @@ export function ProjectWorkspace() {
         // that silence was the demo's other complaint.
         status: draft.approve ? "active" : "draft",
         ...(draft.caseSensitive ? { caseSensitive: true } : {}),
+        // AQU-1271: the popover's matching options (excluded forms, fold/affix
+        // overrides) are part of the term, not popover-local UI state — drop
+        // them here and the chips the user just clicked would do nothing.
+        ...(draft.match ? { match: draft.match } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -5542,6 +5555,15 @@ export function ProjectWorkspace() {
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
   // 2a). openCommentCount (file-level) is still health-derived.
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount } = health
+  // AQU-1083: useHealth counts every cell of the open file; the footer must
+  // show the policy-resolved number or it contradicts the sidebar bar for the
+  // same file. Subtracted here, not inside useHealth, so the health hook stays
+  // ignorant of cell types.
+  const statusBarProgress = useMemo(() => {
+    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
+    if (!live) return EMPTY_STATUS_PROGRESS
+    return applyStructuralPolicy(live, cellSummaries, countStructuralCells)
+  }, [activeFileId, cellSummaries, countStructuralCells, liveFileProgress])
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -5565,6 +5587,10 @@ export function ProjectWorkspace() {
     setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
   }, [getTokenForFile, progressSnapshotTokenFileId, project?.id])
   useEffect(() => {
+    // AQU-1326: the rollup paints the SIDEBAR's per-file progress bars, not the
+    // open file — hold it until the first cell page has painted so it doesn't
+    // take a slot from the cell stream on open.
+    if (!editorFirstPaint) return
     void refreshAllFilesProgress()
       .catch(() => {
         // Non-fatal — sidebar rows simply fall back to no progress bar
@@ -5572,7 +5598,7 @@ export function ProjectWorkspace() {
       })
     // Re-fetch whenever the file count changes (import/delete) so newly
     // added files pick up a snapshot without a full reload.
-  }, [project?.files.length, refreshAllFilesProgress])
+  }, [editorFirstPaint, project?.files.length, refreshAllFilesProgress])
   const fileProgress = useMemo(
     () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
     [allFilesProgressSnapshot, liveFileProgress],
@@ -5628,7 +5654,10 @@ export function ProjectWorkspace() {
   // lag on a 31k-cell file. The builder keeps identities for unchanged cells
   // and chapters, so the sidebar's chapter grid also skips re-rendering.
   const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
-  const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
+  const hasActiveChapters = activeFileId != null && readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex().length > 0)
+  // Only the expanded sidebar consumes this projection. Keep health live, but
+  // defer its whole-file display walk until that surface actually renders.
+  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
     if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
       // Summaries sit in store order, so the store's index is a direct lookup;
@@ -5646,9 +5675,14 @@ export function ProjectWorkspace() {
         getSummary,
         health: (cellId) => effectiveHealthMap.get(cellId),
         hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083: draw a heading as "not counted" rather than as work left
+        // to do. The chapter's fraction already excludes it — the store does
+        // that — so this only chooses the colour and what it announces.
+        isExcluded: (cellId) =>
+          !countStructuralCells && isStructuralCell(getSummary(cellId)?.type),
       })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -5838,6 +5872,7 @@ export function ProjectWorkspace() {
         cells: getActiveCells(),
         rules,
         concepts: localConcepts,
+        termMatching: project?.termMatching,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -5846,7 +5881,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7155,6 +7190,7 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
+    cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
     // AQU-1068 item 5: the source cell's menu. Its REASONS are per-row and
     // travel as strings; these are the same functions for every row, so they
     // ride the context and stay out of React.memo's compare surface.
@@ -7165,7 +7201,7 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -7197,6 +7233,15 @@ export function ProjectWorkspace() {
     }),
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError]
   )
+
+  const showFileStats = centerSurface === "editor"
+    && (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty")
+  const getCharacterImportCells = useCallback(() => cellSummaries, [cellSummaries])
+  const getStatusBarHealth = useCallback(() => cellSummaries.map(cell => ({
+    cellId: cell.id,
+    label: cell.cellLabel || cell.id,
+    health: healthMap.get(cell.id) ?? 0,
+  })), [cellSummaries, healthMap])
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
@@ -7326,12 +7371,13 @@ export function ProjectWorkspace() {
     confirmCommitted,
   ])
 
-  const validatedEvidenceVersion = useMemo(() => (
-    readAtVersion(cellStoreVersion, getActiveCells)
-      .filter((cell) => cell.status === "validated" && cell.translated.trim())
-      .map((cell) => `${cell.id}:${cell.targetEventId ?? cell.lastEditAt ?? ""}`)
-      .join("|")
-  ), [cellStoreVersion, getActiveCells])
+  const translateAsReadAvailable = translateAsReadEnabled
+    && lens === "text"
+    && !isReadOnly
+    && isConfigured
+    && isCompletionAvailable
+    && Boolean(activeFileId)
+  const validatedEvidenceVersion = useValidatedEvidenceVersion(translateAsReadAvailable, cellSummaries)
 
   // Completion and store callbacks can legitimately receive new identities as
   // their hooks update UI state. Translate-as-read must not treat those normal
@@ -7372,13 +7418,7 @@ export function ProjectWorkspace() {
     // both feed this same viewport queue.
     const runId = ++translateAsReadRunRef.current
     const viewportCellIds = translateAsReadViewportCellIds
-    const available = translateAsReadEnabled
-      && lens === "text"
-      && !isReadOnly
-      && isConfigured
-      && isCompletionAvailable
-      && Boolean(activeFileId)
-    if (!available || viewportCellIds.length === 0) {
+    if (!translateAsReadAvailable || viewportCellIds.length === 0) {
       setTranslateAsReadActiveCellId(null)
       return
     }
@@ -7479,6 +7519,7 @@ export function ProjectWorkspace() {
     lens,
     project?.id,
     translateAsReadEnabled,
+    translateAsReadAvailable,
     translateAsReadViewportCellIds,
     translateAsReadViewportStateKey,
     validatedEvidenceVersion,
@@ -8186,7 +8227,9 @@ export function ProjectWorkspace() {
     (project?.syncRole?.level ?? 0) >= (resolveCellEditingFloor(project) ?? Infinity)
   const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    lens === "audio" || mayRestructureCells ? activeFileId : null,
+    // AQU-1326: deferred behind the first cell page — the attachment map only
+    // decorates rows that have to exist first.
+    editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
@@ -8233,11 +8276,16 @@ export function ProjectWorkspace() {
    * racing. Both are gone: the cue block moved up (see its note), and the rule
    * itself is a pure, tested function that iterates DESTINATIONS.
    */
-  const synthTargets = useMemo(() => {
-    if (!activeFileId) return []
-    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
-    return resolveSynthTargets(cells, cueLinkArgs)
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, cueLinkArgs])
+  // Both audio actions need the same current attachment-merged cells. Share
+  // the snapshot so a text edit does not read/copy the whole file twice.
+  const batchAudioCells = useMemo(() => activeFileId
+    ? mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    : EMPTY_CELL_DATA,
+  [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+  const synthTargets = useMemo(() => activeFileId
+    ? resolveSynthTargets(batchAudioCells, cueLinkArgs)
+    : [],
+  [activeFileId, batchAudioCells, cueLinkArgs])
   synthTargetsRef.current = synthTargets
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
@@ -8255,13 +8303,11 @@ export function ProjectWorkspace() {
     // The cue list is already merged with its own file's attachments, and it
     // includes the ~10 heard lines an episode that no subtitle is linked to —
     // a take on one of those needs transcribing like any other.
-    const holders =
-      audioCueCells ??
-      mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    const holders = audioCueCells ?? batchAudioCells
     let untranscribed = 0
     for (const c of holders) if (needsTranscription(c)) untranscribed++
     return { untranscribed, unsynthesized: synthTargets.length }
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets])
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -8568,9 +8614,13 @@ export function ProjectWorkspace() {
     })
   }, [cueLinkDrawerOpen, audioCues, cueLinkRows, cueLinkRejections, cellStore, cellStoreVersion])
 
-  /** Lookups the drawer needs to show a row's two lines. */
+  /** Resolve only the drawer rows being rendered, using the store's ID index.
+   * Recreate the reader on edits so visible review rows stay current; a closed
+   * drawer does no work and never allocates a whole-file lookup map. */
   const cueLinkTextById = useMemo(
-    () => new Map(readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()).map((c) => [c.id, c])),
+    () => readAtVersion(cellStoreVersion, () => ({
+      get: (id: string) => cellStore.getCellSummary(id) ?? undefined,
+    })),
     [cellStore, cellStoreVersion],
   )
   const cueLinkCueById = useMemo(() => new Map((audioCues ?? []).map((c) => [c.id, c])), [audioCues])
@@ -10692,7 +10742,36 @@ export function ProjectWorkspace() {
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
 
-  if (status === "loading") return <WorkspaceSkeleton />
+  // AQU-1325: while the project record loads, paint the real chrome (rail,
+  // account switcher, breadcrumb) around a main-area skeleton. None of the
+  // chrome depends on the record, so blanking it behind a whole-page template
+  // only made a slow round-trip look like a page load.
+  if (status === "loading") {
+    return (
+      <AppShell
+        railCollapsed={dockTab === null}
+        dockStorageKey={projectId}
+        leftDock={
+          <LeftDock
+            activeTab={dockTab}
+            onActiveTabChange={setDockTab}
+            filesPanel={
+              <div className="flex flex-col gap-2 p-3" aria-hidden="true">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton key={index} className="h-8" style={{ width: `${72 + (index % 3) * 8}%` }} />
+                ))}
+              </div>
+            }
+            agentPanel={null}
+            searchPanel={null}
+          />
+        }
+        header={<OrgBreadcrumb section={t("common.project")} />}
+        statusBar={null}
+        main={<WorkspaceMainSkeleton />}
+      />
+    )
+  }
   if (status === "no-session") {
     return (
       <SignedOutWorkspace
@@ -11118,9 +11197,15 @@ export function ProjectWorkspace() {
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
-                  activeChapterHealth={activeChapterHealth}
+                  hasActiveChapters={hasActiveChapters}
+                  getActiveChapterHealth={getActiveChapterHealth}
+                  // AQU-1326: the sidebar's per-file /progress reads wait for
+                  // the editor's first cell page, same gate as the other
+                  // secondary reads above.
+                  deferSectionProgress={!editorFirstPaint}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
+                  countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
                   targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
@@ -12025,6 +12110,13 @@ export function ProjectWorkspace() {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }
+            // AQU-1271: the add-to-terminology popover offers this when the
+            // project has no prefix/suffix inventory for its matcher yet.
+            onSetUpAffixes={() =>
+              navigate(`/project/${projectId}/settings?q=terminology`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
+            }
             isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onClearCellErrors={clearCellErrors}
@@ -12095,6 +12187,7 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
               </div>
+              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>
               {mediaSections.showsRail("text") && (
                 <MediaSectionRail
@@ -12125,6 +12218,7 @@ export function ProjectWorkspace() {
         ) : (
           <CellAreaPlaceholder
             state={cellAreaState}
+            progress={cellLoadProgress}
             fileName={activeFile?.name}
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
@@ -12391,14 +12485,12 @@ export function ProjectWorkspace() {
                 }
               />
             )
-            const fileStats =
-              centerSurface === "editor" &&
-              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
+            const fileStats = showFileStats ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                cells={cellSummaries}
+                progress={statusBarProgress}
+                getHealthByCell={getStatusBarHealth}
                 projectHealth={projectHealth}
-                healthMap={healthMap}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
               />
@@ -12887,7 +12979,7 @@ export function ProjectWorkspace() {
         <ImportCharactersDialog
           open={importCharactersOpen}
           textFileName={activeFile.name}
-          cells={cellSummaries}
+          getCells={getCharacterImportCells}
           audioCues={audioCues ?? undefined}
           existingCount={characterCount}
           existingAudioCount={audioCharacterCount}

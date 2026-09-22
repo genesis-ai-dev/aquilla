@@ -61,7 +61,7 @@ describe("parseArgs", () => {
 const PROJECT: ProjectRow = {
   gitlab_id: 7, aquilla_id: "proj-7", name: "Seven", namespace: "ns/seven",
   org_id: 3, team_id: 4, owner_user_id: 5, last_activity_at: "2026-01-01T00:00:00Z",
-  head_sha: "abc", applied_sha: null, content_logic: 0, cast_hash: null,
+  head_sha: "abc", applied_sha: null, audio_applied_sha: null, content_logic: 0, cast_hash: null,
   status: "ok", last_error: null, project_upserted: 1, updated_at: 0,
 }
 const GL_PROJECT: GitLabProjectLite = {
@@ -95,7 +95,7 @@ function planFor(jobId: number, sha = "abc"): MaterializeResult {
   }
 }
 
-interface Calls { checkouts: number; materializes: { force: boolean }[]; pushes: number }
+interface Calls { checkouts: number; materializes: { force: boolean }[]; pushes: number; audio: number }
 
 function makeScheduler(over: {
   config?: Partial<DaemonConfig>
@@ -103,12 +103,14 @@ function makeScheduler(over: {
   materializeThrows?: boolean
   push?: PushResult
 }) {
-  const calls: Calls = { checkouts: 0, materializes: [], pushes: 0 }
+  const calls: Calls = { checkouts: 0, materializes: [], pushes: 0, audio: 0 }
   const config = loadConfig(ENV, { home: root, ...over.config })
   const stages: StageFns = {
     ensureCheckout: async (_deps, p) => {
       calls.checkouts++
-      return { dir: path.join(root, "clones", String(p.gitlabId)), sha: over.checkoutSha ?? p.wantSha, recloned: false }
+      const dir = path.join(root, "clones", String(p.gitlabId))
+      fs.mkdirSync(path.join(dir, ".git"), { recursive: true })
+      return { dir, sha: over.checkoutSha ?? p.wantSha, recloned: false }
     },
     materialize: async (_deps, input) => {
       calls.materializes.push({ force: input.force === true })
@@ -121,6 +123,10 @@ function makeScheduler(over: {
       if (!deps.dryRun && res.verified) deps.db.advance(input.job.id, "done")
       return res
     },
+    migrateAudio: async () => {
+      calls.audio++
+      return { total: 0, copied: 0, missingOid: 0, lfsMiss: 0, failed: 0, events: 0 }
+    },
   }
   const ctx: SchedulerCtx = {
     config,
@@ -131,12 +137,36 @@ function makeScheduler(over: {
     pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),
     log: () => {},
     digest: new Digest(),
+    r2: {} as SchedulerCtx["r2"],
     stages,
   }
   return { scheduler: new Scheduler(ctx), calls, ctx }
 }
 
 describe("Scheduler.runOnce", () => {
+  it("reuses an existing checkout for audio, then removes it", async () => {
+    const checkout = path.join(root, "clones", String(PROJECT.gitlab_id))
+    db.setProjectFields(PROJECT.gitlab_id, { applied_sha: "abc" })
+    fs.mkdirSync(path.join(checkout, ".git"), { recursive: true })
+    const audio = db.enqueue(PROJECT.gitlab_id, "audio", "abc")
+    const { scheduler, calls } = makeScheduler({ config: { home: root } })
+    await scheduler.runOnce()
+    expect(db.getJob(audio.id)?.stage).toBe("done")
+    expect(calls.checkouts).toBe(0)
+    expect(calls.audio).toBe(1)
+    expect(fs.existsSync(checkout)).toBe(false)
+  })
+
+  it("dry-run plans audio without waiting for the content write", async () => {
+    const content = db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    const audio = db.enqueue(PROJECT.gitlab_id, "audio", "abc")
+    const { scheduler, calls } = makeScheduler({ config: { home: root, dryRun: true } })
+    await scheduler.runOnce()
+    expect(db.getJob(content.id)?.stage).toBe("planned")
+    expect(db.getJob(audio.id)?.stage).toBe("fetched")
+    expect(calls.audio).toBe(1)
+  })
+
   it("walks a job detected → fetched → planned → done", async () => {
     const job = db.enqueue(PROJECT.gitlab_id, "content", "abc")
     const { scheduler, calls } = makeScheduler({})
@@ -337,6 +367,57 @@ describe("Scheduler.weeklyReseed", () => {
 })
 
 describe("Scheduler.runForever", () => {
+  it("keeps polling the webhook inbox while a migration stage is running", async () => {
+    db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    let releaseFetch: () => void = () => {}
+    const fetchGate = new Promise<void>((resolve) => { releaseFetch = resolve })
+    let fetchStarted: () => void = () => {}
+    const fetchStartedGate = new Promise<void>((resolve) => { fetchStarted = resolve })
+    let polls = 0
+    const config = loadConfig(ENV, { home: root, inboxPollMs: 1 })
+    const stages: StageFns = {
+      ensureCheckout: async (_deps, p) => {
+        fetchStarted()
+        await fetchGate
+        return { dir: path.join(root, "clones", String(p.gitlabId)), sha: p.wantSha, recloned: false }
+      },
+      materialize: async (_deps, input) => planFor(input.job.id, input.job.sha),
+      pushJob: async (deps, input) => {
+        deps.db.advance(input.job.id, "done")
+        return { pushed: 0, finalized: true, settingsUpdated: false, verified: true, reseeded: false }
+      },
+      migrateAudio: async () => ({ total: 0, copied: 0, missingOid: 0, lfsMiss: 0, failed: 0, events: 0 }),
+    }
+    const ctx: SchedulerCtx = {
+      config,
+      db,
+      sync: {
+        inbox: async () => { polls++; return { items: [], last: undefined } },
+        orgTeamMaps: async () => ({ orgMap: new Map(), teamMap: new Map() }),
+      } as unknown as SyncClient,
+      gitlab: { project: async () => GL_PROJECT } as unknown as GitLabClient,
+      creds: { gitlabUrl: "https://git", gitlabToken: "t", accessToken: "", source: "direct-token" } as GitLabCredentials,
+      pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),
+      log: () => {},
+      digest: new Digest(),
+      stages,
+    }
+    const scheduler = new Scheduler(ctx)
+    const ac = new AbortController()
+    const done = scheduler.runForever(ac.signal)
+
+    await fetchStartedGate
+    const before = polls
+    for (let attempt = 0; attempt < 20 && polls === before; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+    const polledWhileBusy = polls > before
+    releaseFetch()
+    ac.abort()
+    await done
+    expect(polledWhileBusy).toBe(true)
+  })
+
   // Regression for the SIGINT/SIGTERM graceful-stop bug: abort must not tear
   // down a stage that is mid-flight. `runForever` should only resolve once
   // the in-flight `pushJob` call has actually finished.
@@ -358,6 +439,7 @@ describe("Scheduler.runForever", () => {
         deps.db.advance(input.job.id, "done")
         return { pushed: 1, finalized: true, settingsUpdated: false, verified: true, reseeded: false }
       },
+      migrateAudio: async () => ({ total: 0, copied: 0, missingOid: 0, lfsMiss: 0, failed: 0, events: 0 }),
     }
     const ctx: SchedulerCtx = {
       config,

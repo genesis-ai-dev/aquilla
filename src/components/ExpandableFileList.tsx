@@ -64,7 +64,8 @@ interface Props {
    * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
-  activeChapterHealth?: BookHealthChapter[]
+  hasActiveChapters?: boolean
+  getActiveChapterHealth?: () => BookHealthChapter[]
 }
 
 export function ExpandableFileList({
@@ -72,7 +73,7 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  activeChapterHealth,
+  hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
 }: Props) {
   const t = useT()
@@ -264,7 +265,7 @@ export function ExpandableFileList({
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
                       const canExpand = fileHasSections(file)
-                        || (file.id === activeFileId && Boolean(activeChapterHealth?.length))
+                        || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -319,7 +320,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
-                              chapters={file.id === activeFileId ? activeChapterHealth : undefined}
+                              getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {

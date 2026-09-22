@@ -91,10 +91,10 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     phonemizerBrowserUnpackPlugin(),
     react(),
-    // React Compiler is RC and expensive at compile time. Skip it for the
-    // test build — the compiler isn't what we're testing, and including it
-    // turned the E2E orchestrator into a memory hog on dev machines.
-    ...(mode === "test" ? [] : [babel({ presets: [reactCompilerPreset()] })]),
+    // Keep routine tests cheap, but let typing diagnostics exercise the same
+    // compiler as the normal local/release app: E2E_REACT_COMPILER=1.
+    ...(mode === "test" && process.env.E2E_REACT_COMPILER !== "1"
+      ? [] : [babel({ presets: [reactCompilerPreset()] })]),
     tailwindcss(),
     // isomorphic-git pulls in node:crypto, node:buffer, etc.
     nodePolyfills({

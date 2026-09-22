@@ -1,3 +1,6 @@
+import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
+import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -25,6 +28,7 @@ import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/fr
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
+import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -103,7 +107,6 @@ import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import type { TimebaseCorrection } from "@/lib/import/timebase"
-import { toFileTargetCells } from "@/lib/import-file-target"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
   shouldPatchSystemPrompt,
@@ -347,7 +350,7 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import {
   detectStrongTextDirection,
   resolveTextDirection,
-  summarizeDetectedDirections,
+  summarizePairedDirections,
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
@@ -447,6 +450,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // between React re-renders.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
+const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
@@ -1376,6 +1380,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
     applyOptimisticCellTiming,
+    loadProgress: cellLoadProgress,
     isLoading: cellsLoading,
     isError: cellsError,
   } = useActiveCellStore({
@@ -1639,19 +1644,19 @@ export function ProjectWorkspace() {
     // from B's immediate parent A, but that is lag, not evidence of a competing
     // edit. Forgetting B here makes the next edit branch off H and go stale.
     // Actual conflicts are resolved by subscribeStaleSiblings above.
-    for (const summary of cellSummaries) {
-      const key = laneCellKey(summary.id)
-      const pending = pendingTargetCommitHeadsRef.current.get(key)
-      if (!pending) continue
-      const projectedHead = summary.targetEventId ?? null
-      if (projectedHead === pending.eventId) {
-        pendingTargetCommitHeadsRef.current.delete(key)
-        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(key)
-        }
+    const confirmed = readAtVersion(cellStoreVersion, () => confirmedTargetHeadKeys(
+      pendingTargetCommitHeadsRef.current,
+      activeLane,
+      cellId => cellStore.getCellSummary(cellId)?.targetEventId,
+    ))
+    for (const key of confirmed) {
+      const pending = pendingTargetCommitHeadsRef.current.get(key)!
+      pendingTargetCommitHeadsRef.current.delete(key)
+      if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
+        pendingCompletionEventIdRef.current.delete(key)
       }
     }
-  }, [cellSummaries, laneCellKey])
+  }, [activeLane, cellStore, cellStoreVersion])
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
@@ -1935,18 +1940,10 @@ export function ProjectWorkspace() {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
-  const activeFileDirectionSummary = useMemo(() => {
-    function* sourceDirections() {
-      for (const summary of cellSummaries) yield summaryDirections(summary).source
-    }
-    function* targetDirections() {
-      for (const summary of cellSummaries) yield summaryDirections(summary).target
-    }
-    return {
-      source: summarizeDetectedDirections(sourceDirections()),
-      target: summarizeDetectedDirections(targetDirections()),
-    }
-  }, [cellSummaries])
+  const activeFileDirectionSummary = useMemo(
+    () => summarizePairedDirections(cellSummaries, summaryDirections),
+    [cellSummaries],
+  )
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
   const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
@@ -2937,16 +2934,12 @@ export function ProjectWorkspace() {
    * import dialog say "Replace" rather than "Import") and the recorder's
    * lookup for the line being performed.
    */
-  // AQU-1068 perf: ONE materialisation pass per store version for the
-  // render-time whole-file readers below (cast map, clearable count, the
-  // character-agreement compare). Each used to call getAllCellViews() itself,
-  // which builds a fresh view for every cell — three 31k-cell builds per
-  // store bump on a Bible, several bumps per insert. Click-time readers keep
-  // their own calls; they run once per gesture, not once per version.
-  const allCellViews = useMemo(
-    () => readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
-    [cellStore, cellStoreVersion],
-  )
+  const allCellViews = useCharacterSheetCells(cellStore, cellStoreVersion, {
+    timeline: timelineStacked,
+    importDialog: importCharactersOpen,
+    review: characterCheckOpen,
+    linkedAudio: audioCueSibling !== null,
+  })
   const castByCellId = useMemo(
     () =>
       new Map(
@@ -4395,26 +4388,9 @@ export function ProjectWorkspace() {
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
 
-  // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
-  // column" import mode. CellData.group carries the canonical ref.
-  const importSourceCells = useMemo(() => cellSummaries.map((c) => ({
-    cellId: c.id,
-    fileId: c.fileId,
-    targetEventId: c.targetEventId,
-    sourceEventId: c.sourceEventId,
-    translated: c.translated ?? "",
-    canonicalRef: c.group,
-  })), [cellSummaries])
-
-  // File-scoped target import: the open file's cells in display order, with
-  // source text so the review screen can show alignment.
-  //
-  // AQU-1143: cue cells carry their timings through as well, so an incoming
-  // subtitle file is aligned by timecode overlap rather than raw row order —
-  // one inserted or deleted cue then can't cascade every later translation
-  // onto the wrong cell. Cells without timings simply keep order matching.
-  // toFileTargetCells owns the seconds → ms conversion.
-  const fileTargetCells = useMemo(() => toFileTargetCells(cellSummaries), [cellSummaries])
+  const { importSourceCells, fileTargetCells } = useImportCellRefs(
+    cellSummaries, importOpen, fileImportOpen,
+  )
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
@@ -5739,7 +5715,10 @@ export function ProjectWorkspace() {
   // lag on a 31k-cell file. The builder keeps identities for unchanged cells
   // and chapters, so the sidebar's chapter grid also skips re-rendering.
   const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
-  const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
+  const hasActiveChapters = activeFileId != null && readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex().length > 0)
+  // Only the expanded sidebar consumes this projection. Keep health live, but
+  // defer its whole-file display walk until that surface actually renders.
+  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
     if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
       // Summaries sit in store order, so the store's index is a direct lookup;
@@ -7311,6 +7290,15 @@ export function ProjectWorkspace() {
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError]
   )
 
+  const showFileStats = centerSurface === "editor"
+    && (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty")
+  const getCharacterImportCells = useCallback(() => cellSummaries, [cellSummaries])
+  const getStatusBarHealth = useCallback(() => cellSummaries.map(cell => ({
+    cellId: cell.id,
+    label: cell.cellLabel || cell.id,
+    health: healthMap.get(cell.id) ?? 0,
+  })), [cellSummaries, healthMap])
+
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
       editorRef.current?.scrollToCellId(result.cellId, { flash: true })
@@ -7439,12 +7427,13 @@ export function ProjectWorkspace() {
     confirmCommitted,
   ])
 
-  const validatedEvidenceVersion = useMemo(() => (
-    readAtVersion(cellStoreVersion, getActiveCells)
-      .filter((cell) => cell.status === "validated" && cell.translated.trim())
-      .map((cell) => `${cell.id}:${cell.targetEventId ?? cell.lastEditAt ?? ""}`)
-      .join("|")
-  ), [cellStoreVersion, getActiveCells])
+  const translateAsReadAvailable = translateAsReadEnabled
+    && lens === "text"
+    && !isReadOnly
+    && isConfigured
+    && isCompletionAvailable
+    && Boolean(activeFileId)
+  const validatedEvidenceVersion = useValidatedEvidenceVersion(translateAsReadAvailable, cellSummaries)
 
   // Completion and store callbacks can legitimately receive new identities as
   // their hooks update UI state. Translate-as-read must not treat those normal
@@ -7485,13 +7474,7 @@ export function ProjectWorkspace() {
     // both feed this same viewport queue.
     const runId = ++translateAsReadRunRef.current
     const viewportCellIds = translateAsReadViewportCellIds
-    const available = translateAsReadEnabled
-      && lens === "text"
-      && !isReadOnly
-      && isConfigured
-      && isCompletionAvailable
-      && Boolean(activeFileId)
-    if (!available || viewportCellIds.length === 0) {
+    if (!translateAsReadAvailable || viewportCellIds.length === 0) {
       setTranslateAsReadActiveCellId(null)
       return
     }
@@ -7592,6 +7575,7 @@ export function ProjectWorkspace() {
     lens,
     project?.id,
     translateAsReadEnabled,
+    translateAsReadAvailable,
     translateAsReadViewportCellIds,
     translateAsReadViewportStateKey,
     validatedEvidenceVersion,
@@ -8348,11 +8332,16 @@ export function ProjectWorkspace() {
    * racing. Both are gone: the cue block moved up (see its note), and the rule
    * itself is a pure, tested function that iterates DESTINATIONS.
    */
-  const synthTargets = useMemo(() => {
-    if (!activeFileId) return []
-    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
-    return resolveSynthTargets(cells, cueLinkArgs)
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, cueLinkArgs])
+  // Both audio actions need the same current attachment-merged cells. Share
+  // the snapshot so a text edit does not read/copy the whole file twice.
+  const batchAudioCells = useMemo(() => activeFileId
+    ? mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    : EMPTY_CELL_DATA,
+  [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+  const synthTargets = useMemo(() => activeFileId
+    ? resolveSynthTargets(batchAudioCells, cueLinkArgs)
+    : [],
+  [activeFileId, batchAudioCells, cueLinkArgs])
   synthTargetsRef.current = synthTargets
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
@@ -8370,13 +8359,11 @@ export function ProjectWorkspace() {
     // The cue list is already merged with its own file's attachments, and it
     // includes the ~10 heard lines an episode that no subtitle is linked to —
     // a take on one of those needs transcribing like any other.
-    const holders =
-      audioCueCells ??
-      mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    const holders = audioCueCells ?? batchAudioCells
     let untranscribed = 0
     for (const c of holders) if (needsTranscription(c)) untranscribed++
     return { untranscribed, unsynthesized: synthTargets.length }
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets])
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -8683,9 +8670,13 @@ export function ProjectWorkspace() {
     })
   }, [cueLinkDrawerOpen, audioCues, cueLinkRows, cueLinkRejections, cellStore, cellStoreVersion])
 
-  /** Lookups the drawer needs to show a row's two lines. */
+  /** Resolve only the drawer rows being rendered, using the store's ID index.
+   * Recreate the reader on edits so visible review rows stay current; a closed
+   * drawer does no work and never allocates a whole-file lookup map. */
   const cueLinkTextById = useMemo(
-    () => new Map(readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()).map((c) => [c.id, c])),
+    () => readAtVersion(cellStoreVersion, () => ({
+      get: (id: string) => cellStore.getCellSummary(id) ?? undefined,
+    })),
     [cellStore, cellStoreVersion],
   )
   const cueLinkCueById = useMemo(() => new Map((audioCues ?? []).map((c) => [c.id, c])), [audioCues])
@@ -11262,7 +11253,8 @@ export function ProjectWorkspace() {
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
-                  activeChapterHealth={activeChapterHealth}
+                  hasActiveChapters={hasActiveChapters}
+                  getActiveChapterHealth={getActiveChapterHealth}
                   // AQU-1326: the sidebar's per-file /progress reads wait for
                   // the editor's first cell page, same gate as the other
                   // secondary reads above.
@@ -12250,7 +12242,7 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
               </div>
-              <CellRowsLoadStatus loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
+              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>
               {mediaSections.showsRail("text") && (
                 <MediaSectionRail
@@ -12281,6 +12273,7 @@ export function ProjectWorkspace() {
         ) : (
           <CellAreaPlaceholder
             state={cellAreaState}
+            progress={cellLoadProgress}
             fileName={activeFile?.name}
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
@@ -12547,14 +12540,12 @@ export function ProjectWorkspace() {
                 }
               />
             )
-            const fileStats =
-              centerSurface === "editor" &&
-              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
+            const fileStats = showFileStats ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                cells={cellSummaries}
+                progress={activeFileId ? liveFileProgress.get(activeFileId) ?? EMPTY_STATUS_PROGRESS : EMPTY_STATUS_PROGRESS}
+                getHealthByCell={getStatusBarHealth}
                 projectHealth={projectHealth}
-                healthMap={healthMap}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
               />
@@ -13043,7 +13034,7 @@ export function ProjectWorkspace() {
         <ImportCharactersDialog
           open={importCharactersOpen}
           textFileName={activeFile.name}
-          cells={cellSummaries}
+          getCells={getCharacterImportCells}
           audioCues={audioCues ?? undefined}
           existingCount={characterCount}
           existingAudioCount={audioCharacterCount}

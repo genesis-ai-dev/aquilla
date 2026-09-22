@@ -484,34 +484,28 @@ export function fullProgressRecomputeStmts(
       // recompute, gone after a full one. Since a file with book rows has no
       // file-grain unit, those cells then belonged to no planning unit at all
       // and any date or Done mark stored against the book became unreachable.
-      `DELETE FROM file_section_progress progress
+      // Compute the surviving keys once. The previous correlated CASE made
+      // Postgres scan source cells again for every chapter/book/lane row.
+      `WITH source_keys AS MATERIALIZED (
+         SELECT DISTINCT ${sectionKeyExpr('source')} AS section_key,
+                ${bookKeyExpr('source')} AS book_key,
+                COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+' AS is_scripture
+           FROM cells source
+          WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
+       ), surviving_keys AS (
+         SELECT 'section'::text AS scope, section_key FROM source_keys
+         UNION
+         SELECT 'book'::text, book_key FROM source_keys
+          WHERE EXISTS (SELECT 1 FROM source_keys WHERE is_scripture)
+       )
+       DELETE FROM file_section_progress progress
         WHERE progress.project_id = ?
           AND progress.file_id = ?
           AND progress.scope IN ('section', 'book')
-          AND (
-            NOT EXISTS (
-              SELECT 1
-                FROM cells source
-               WHERE source.project_id = progress.project_id
-                 AND source.file_id = progress.file_id
-                 AND source.side = 'source'
-                 AND CASE progress.scope
-                       WHEN 'section' THEN ${sectionKeyExpr('source')}
-                       ELSE ${bookKeyExpr('source')}
-                     END = progress.section_key
-            )
-            OR (
-              progress.scope = 'book'
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM cells scripture
-                 WHERE scripture.project_id = progress.project_id
-                   AND scripture.file_id = progress.file_id
-                   AND scripture.side = 'source'
-                   AND COALESCE(scripture.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
-              )
-            )
+          AND NOT EXISTS (
+            SELECT 1 FROM surviving_keys alive
+             WHERE alive.scope = progress.scope AND alive.section_key = progress.section_key
           )`,
-    ).bind(projectId, fileId),
+    ).bind(projectId, fileId, projectId, fileId),
   ]
 }

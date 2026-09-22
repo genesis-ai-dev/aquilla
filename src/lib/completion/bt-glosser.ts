@@ -313,7 +313,8 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
   // Length cap: 2× input tokens + small absolute buffer
   const maxOutputTokens = tokens.length * OUTPUT_LENGTH_FACTOR + OUTPUT_LENGTH_ABS_CAP
 
-  // Repetition tracking: last emitted phrase and its consecutive run count
+  // Repetition tracking: last emitted (or currently-suppressed) phrase and its
+  // consecutive run count.
   let lastEmittedPhrase = ""
   let consecutiveCount = 0
 
@@ -324,6 +325,10 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
     if (output.length >= maxOutputTokens) break
 
     let matched = false
+    // Set when this token's n-gram match hit the repetition guard, so the
+    // literal-fallback branch below leaves the cooldown counters alone instead
+    // of resetting them against the literal it's about to emit.
+    let suppressed = false
 
     // Try longest n-gram down to unigram
     for (let n = Math.min(maxN, tokens.length - i); n >= 1; n--) {
@@ -352,7 +357,13 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
         }
 
         if (consecutiveCount > MAX_CONSECUTIVE_REPEATS) {
-          // Phrase is cycling — fall through to literal fallback below
+          // Phrase is cycling. Fall through to the literal fallback below, but
+          // keep lastEmittedPhrase/consecutiveCount pinned on this phrase (not
+          // reset to the literal) — otherwise the single interrupting literal
+          // reset the count and let "phrase, phrase, [literal], phrase,
+          // phrase, [literal], ..." stutter forever instead of actually
+          // breaking (AQU-203 follow-up).
+          suppressed = true
           break
         }
 
@@ -366,12 +377,14 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
     if (!matched) {
       // Literal fallback — keep the target token as-is
       const literal = tokens[i]
-      // Reset repetition counter since we're emitting a literal
-      if (literal === lastEmittedPhrase) {
-        consecutiveCount++
-      } else {
-        consecutiveCount = 1
-        lastEmittedPhrase = literal
+      if (!suppressed) {
+        // Genuine no-match (not a cooldown): reset the counter against the literal.
+        if (literal === lastEmittedPhrase) {
+          consecutiveCount++
+        } else {
+          consecutiveCount = 1
+          lastEmittedPhrase = literal
+        }
       }
       output.push(literal)
       i++

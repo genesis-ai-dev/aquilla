@@ -1751,17 +1751,20 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
 
--- AQU-1240 slice 8 (part 1): composite FK from every lane_id-bearing table to
+-- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
--- schema.sql apply must create the referenced table first. Mirrors migration
--- 0098 — NOT VALID (instant, still enforced on new writes). The post-backfill
--- cutover VALIDATEs these and adds SET NOT NULL.
-ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+-- schema.sql apply must create the referenced table first. On live these were
+-- added NOT VALID in migration 0098 (instant, still enforced on new writes) and
+-- flipped to VALIDATED in the cutover migration 0099 — the state declared here.
+-- A fresh apply validates trivially (empty tables). lane_id itself stays
+-- nullable during the dual-read window; the SET NOT NULL cutover is staged in
+-- db/postgres/deferred-notnull-cutover/ (see that folder's README).
+ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);

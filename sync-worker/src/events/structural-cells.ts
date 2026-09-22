@@ -10,15 +10,30 @@
 // no answer to "is this cell structural". The client's copy of this lives in
 // src/lib/cells/structural.ts and must agree with it.
 //
-// NOT null-safe by accident: `type` is null for every media and cue import, and
-// null must read as CONTENT. `type IN (...)` yields NULL for a null type, which
-// FILTER and WHERE both treat as false — the behaviour we want, but only
-// because the test says so rather than because SQL is obvious here.
+// Null-safe ON PURPOSE, and it took a bug to earn the COALESCE. `type` is null
+// for every media and cue import, and for any spreadsheet row the importer
+// could not classify; null must read as CONTENT.
+//
+// A bare `type IN (...)` is NULL for a null type. Under FILTER that reads as
+// false, which is the answer we want — so the positive form looked correct and
+// was. But the same expression NEGATED is `NOT NULL`, which is NULL, and WHERE
+// drops a NULL row exactly as it drops a false one. So
+// `WHERE NOT (type IN (...))` — the form a read uses to EXCLUDE structural
+// cells — silently discarded every untyped cell in the file the moment a team
+// turned headings off, and the surface went blank rather than wrong. Blank is
+// the harder of the two to diagnose, because it looks like no data rather than
+// like bad data.
+//
+// COALESCE makes both readings agree: an untyped cell is content under FILTER
+// and survives under NOT. Found while building AQU-1278 on top of this.
 
 export const STRUCTURAL_CELL_TYPES = ['heading', 'paratext'] as const
 
 /**
- * `<alias>.type IN ('heading', 'paratext')` — the SOURCE row's type.
+ * `COALESCE(<alias>.type, '') IN ('heading', 'paratext')` — the SOURCE row's
+ * type, with a null reading as content. See the header for why the COALESCE is
+ * load-bearing rather than decorative: this expression is used both plain and
+ * negated, and only one of those two survives a null without it.
  *
  * Always give it the source alias. Target rows carry no type of their own, so a
  * predicate pointed at a target finds nothing and every structural count comes
@@ -26,7 +41,7 @@ export const STRUCTURAL_CELL_TYPES = ['heading', 'paratext'] as const
  */
 export function structuralPredicateSql(alias: string): string {
   const list = STRUCTURAL_CELL_TYPES.map((t) => `'${t}'`).join(', ')
-  return `${alias}.type IN (${list})`
+  return `COALESCE(${alias}.type, '') IN (${list})`
 }
 
 /**

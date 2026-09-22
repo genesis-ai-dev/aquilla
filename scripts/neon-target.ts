@@ -4,6 +4,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
+import { childArgs } from "./neon-target-args"
 
 type Target = "production" | "dev"
 type Command = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity" | "backfill-lanes" | "verify-lanes"
@@ -223,23 +224,12 @@ async function main() {
   const command = parseCommand(process.argv[3])
   const env = await resolvePgEnv(target)
 
-  console.log(`neon-target ${target} ${command} -> ${env.NEON_PG_HOST}`)
-  const script = command === "backfill-progress"
-    ? "scripts/neon-backfill-progress.ts"
-    : command === "backfill-activity"
-      ? "scripts/neon-backfill-activity.ts"
-      : command === "backfill-lanes"
-        ? "scripts/neon-backfill-lanes.ts"
-        : command === "verify-lanes"
-          ? "scripts/neon-verify-lanes.ts"
-          : "scripts/neon-migrate.ts"
-  // Forward any extra flags (e.g. --apply, --project, --limit, --require-complete)
-  // to the backfill/verify scripts.
+  // Everything after the command reaches a backfill or verify script as its
+  // own flags (`--missing-books`, `--apply`, `--require-complete`). See
+  // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
   const passthrough = process.argv.slice(4)
-  const args =
-    command.startsWith("backfill-") || command === "verify-lanes"
-      ? [script, ...passthrough]
-      : [script, command]
+  const args = childArgs(command, passthrough)
+  console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))
 }
 

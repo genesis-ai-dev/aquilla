@@ -1,57 +1,20 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
+// AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
+// when auth-worker's per-unit assignment read started needing them. They are
+// re-exported here so every existing importer of this module keeps working and
+// so the file still reads as the one place the projection's grouping is
+// defined — the definition simply now lives where both workers can reach it.
+import {
+  bookKeyExpr,
+  sectionKeyExpr,
+  TIMELINE_SECTION_MS,
+} from '../../../db/shared/plan-keys'
+
+export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS }
 
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
-
-/**
- * AQU-805: bucket size for time-based (media/timeline) sections — 5 minutes,
- * mirroring the in-app jump navigation's TIMELINE_MILESTONE_MS so the
- * project-overview file breakdown groups media progress the same way.
- */
-export const TIMELINE_SECTION_MS = 5 * 60 * 1000
-
-/**
- * AQU-805: the section grouping key for a source cell, as a SQL expression.
- *
- * Canonical (Scripture) files key by "<BOOK> <CHAPTER>" — the canonical_ref
- * before the verse colon — exactly as before. Media / timeline files carry no
- * canonical_ref but do carry start_ms; they key into ~5-minute time buckets
- * ("t:<zero-padded bucket-start ms>") so a single-episode media file shows a
- * per-section breakdown instead of only a flat cell count. The bucket-start ms
- * is zero-padded to a fixed width so the key sorts lexically in time order and
- * the read route's string sort needs no time-awareness. Cells with neither a
- * canonical ref nor a start_ms produce '' and are filtered out (untimed).
- */
-export function sectionKeyExpr(alias: string): string {
-  const canonical = `TRIM(SPLIT_PART(COALESCE(${alias}.canonical_ref, ''), ':', 1))`
-  return `CASE
-    WHEN ${canonical} <> '' THEN ${canonical}
-    WHEN ${alias}.start_ms IS NOT NULL
-      THEN 't:' || LPAD(((${alias}.start_ms / ${TIMELINE_SECTION_MS}) * ${TIMELINE_SECTION_MS})::text, 12, '0')
-    ELSE ''
-  END`
-}
-
-/**
- * AQU-1093: the BOOK grouping key for a source cell, as a SQL expression.
- *
- * A section key is "<BOOK> <CHAPTER>"; the book is its first token. Media
- * files key by time bucket ("t:<ms>") and have no book, and a cell with
- * neither yields '' — both are excluded from book rows.
- *
- * A book-only canonical_ref (a one-chapter book referenced as "TIT") produces
- * section_key 'TIT' AND book_key 'TIT'. Those are different rows with the same
- * key, which is why every grouping below carries `scope` alongside the key.
- */
-export function bookKeyExpr(alias: string): string {
-  const section = sectionKeyExpr(alias)
-  return `CASE
-    WHEN ${section} <> '' AND ${section} NOT LIKE 't:%'
-      THEN SPLIT_PART(${section}, ' ', 1)
-    ELSE ''
-  END`
-}
 
 /**
  * Whether the file is Scripture at all: does any source cell carry a
@@ -96,6 +59,20 @@ export const AUDIO_CTE_SQL = `SELECT ca.cell_id,
 const STRUCTURAL_SUMMARY_SQL = `COALESCE(SUM(structural), 0)::integer AS structural_count,
               COALESCE(SUM(filled) FILTER (WHERE structural = 1), 0)::integer AS structural_filled_count`
 
+/**
+ * AQU-1278: the structural share of the AUDIO pair, so a reader that excludes
+ * headings subtracts them from the recordings as well as from the cells.
+ *
+ * Without it the policy shrinks the denominator and leaves the numerator alone,
+ * and a book whose chapter headings were voiced reports more audio than it has
+ * cells. Sam: recorded headings "don't count towards or against anything".
+ *
+ * Reads the same per-cell `structural` / `audio` / `audio_validated` columns
+ * the `paired` CTE already computes, so no statement grows a join for this.
+ */
+const STRUCTURAL_AUDIO_SUMMARY_SQL = `COALESCE(SUM(audio) FILTER (WHERE structural = 1), 0)::integer AS structural_audio_count,
+              COALESCE(SUM(audio_validated) FILTER (WHERE structural = 1), 0)::integer AS structural_audio_validated_count`
+
 /** The structural share of one validator bucket. */
 const STRUCTURAL_BUCKET_SQL = `COUNT(*) FILTER (WHERE structural = 1)::integer AS structural_bucket_count`
 
@@ -119,12 +96,21 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
        last_edit_at = excluded.last_edit_at,
-       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id),
+       structural_audio_count = excluded.structural_audio_count,
+       structural_audio_validated_count = excluded.structural_audio_validated_count`
 
+// AQU-1278 appended the structural audio pair at the TAIL rather than beside
+// the audio columns it belongs with, and that is load-bearing: three of the six
+// summary branches below are POSITIONAL `UNION ALL` arms with no aliases, so a
+// column inserted anywhere but the end shifts every later value one slot to the
+// left in half of them — silently, with no SQL error, because the types line up.
+// lane_id sits beside target_lang (both named in every arm), not in that tail.
 const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
-       audio_count, audio_validated_count, last_edit_at`
+       audio_count, audio_validated_count, last_edit_at,
+       structural_audio_count, structural_audio_validated_count`
 
 /**
  * Recompute the file-level progress row from authoritative source/target
@@ -182,7 +168,8 @@ export function fileProgressRecomputeStmt(
               ${STRUCTURAL_SUMMARY_SQL},
               COALESCE(SUM(audio), 0)::integer AS audio_count,
               COALESCE(SUM(audio_validated), 0)::integer AS audio_validated_count,
-              NULLIF(MAX(last_edit_at), 0) AS last_edit_at
+              NULLIF(MAX(last_edit_at), 0) AS last_edit_at,
+              ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
         GROUP BY lane
      ), watermark AS (
@@ -210,7 +197,8 @@ export function fileProgressRecomputeStmt(
               '{}'::jsonb
             ),
             watermark.revision, ?,
-            summary.audio_count, summary.audio_validated_count, summary.last_edit_at
+            summary.audio_count, summary.audio_validated_count, summary.last_edit_at,
+            summary.structural_audio_count, summary.structural_audio_validated_count
        FROM summary CROSS JOIN watermark
      ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
@@ -315,7 +303,8 @@ export function sectionsProgressRecomputeStmt(
               ${STRUCTURAL_SUMMARY_SQL},
               COALESCE(SUM(audio), 0)::integer AS audio_count,
               COALESCE(SUM(audio_validated), 0)::integer AS audio_validated_count,
-              NULLIF(MAX(last_edit_at), 0) AS last_edit_at
+              NULLIF(MAX(last_edit_at), 0) AS last_edit_at,
+              ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
         WHERE section_key <> '' ${sectionFilter}
         GROUP BY lane, section_key
@@ -326,7 +315,8 @@ export function sectionsProgressRecomputeStmt(
               ${STRUCTURAL_SUMMARY_SQL},
               COALESCE(SUM(audio), 0)::integer,
               COALESCE(SUM(audio_validated), 0)::integer,
-              NULLIF(MAX(last_edit_at), 0)
+              NULLIF(MAX(last_edit_at), 0),
+              ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
         WHERE book_key <> '' AND (SELECT v FROM has_books) ${bookFilter}
         GROUP BY lane, book_key
@@ -365,7 +355,8 @@ export function sectionsProgressRecomputeStmt(
             summaries.structural_count, summaries.structural_filled_count,
             COALESCE(histograms.structural_validator_histogram, '{}'::jsonb),
             watermark.revision, ?,
-            summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at
+            summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at,
+            summaries.structural_audio_count, summaries.structural_audio_validated_count
        FROM summaries
        LEFT JOIN histograms
          ON histograms.lane = summaries.lane
@@ -433,7 +424,8 @@ export function fullProgressRecomputeStmts(
                 ${STRUCTURAL_SUMMARY_SQL},
                 COALESCE(SUM(audio), 0)::integer AS audio_count,
                 COALESCE(SUM(audio_validated), 0)::integer AS audio_validated_count,
-                NULLIF(MAX(last_edit_at), 0) AS last_edit_at
+                NULLIF(MAX(last_edit_at), 0) AS last_edit_at,
+                ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
           GROUP BY lane
          UNION ALL
@@ -445,7 +437,8 @@ export function fullProgressRecomputeStmts(
                 ${STRUCTURAL_SUMMARY_SQL},
                 COALESCE(SUM(audio), 0)::integer,
                 COALESCE(SUM(audio_validated), 0)::integer,
-                NULLIF(MAX(last_edit_at), 0)
+                NULLIF(MAX(last_edit_at), 0),
+                ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
           WHERE section_key <> ''
           GROUP BY lane, section_key
@@ -458,7 +451,8 @@ export function fullProgressRecomputeStmts(
                 ${STRUCTURAL_SUMMARY_SQL},
                 COALESCE(SUM(audio), 0)::integer,
                 COALESCE(SUM(audio_validated), 0)::integer,
-                NULLIF(MAX(last_edit_at), 0)
+                NULLIF(MAX(last_edit_at), 0),
+                ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
           WHERE book_key <> '' AND (SELECT v FROM has_books)
           GROUP BY lane, book_key
@@ -504,7 +498,8 @@ export function fullProgressRecomputeStmts(
               summaries.structural_count, summaries.structural_filled_count,
               COALESCE(histograms.structural_validator_histogram, '{}'::jsonb),
               watermark.revision, ?,
-              summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at
+              summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at,
+              summaries.structural_audio_count, summaries.structural_audio_validated_count
          FROM summaries
          LEFT JOIN histograms
            ON histograms.lane = summaries.lane

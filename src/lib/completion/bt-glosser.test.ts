@@ -212,6 +212,33 @@ describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
 
     expect(outputTokens.length).toBeLessThanOrEqual(inputTokenCount * 2 + 10)
   })
+
+  it("keeps a dominant phrase suppressed instead of letting an interrupting literal reset the cooldown", () => {
+    // Regression (AQU-203 follow-up): the repetition guard reset its cooldown
+    // counter against whatever literal token it fell back to. A single
+    // interrupting literal then let the SAME dominant phrase win again on the
+    // very next token, producing "the the X the the X the the X..." — a
+    // stutter broken only by isolated single-word interruptions, still live
+    // on dev after PR #538.
+    //
+    // Every distinct target word below aligns strongly to the same one-word
+    // source "the", so each target token individually re-triggers the
+    // dominant alignment — exactly the shape that exposed the reset bug.
+    const targetWords = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa"]
+    const pairs = targetWords.flatMap((word) =>
+      Array.from({ length: 5 }, () => ({ source: "the", target: word })),
+    )
+
+    const glosser = buildGlosser(pairs)
+    const result = glosser.gloss(targetWords.join(" "))
+    const outputTokens = result.split(/\s+/).filter(Boolean)
+
+    const theCount = outputTokens.filter((t) => t === "the").length
+    // Once the cooldown breaks the run, "the" must not keep winning again on
+    // later tokens — it should appear only for the initial run before the
+    // guard first fires, not resurface after every interrupting literal.
+    expect(theCount).toBeLessThanOrEqual(2)
+  })
 })
 
 // ── AQU-203: function words must not win the argmax ──────────────────────────

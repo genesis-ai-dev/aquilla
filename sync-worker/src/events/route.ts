@@ -1503,38 +1503,48 @@ export async function handleEventsWriteRequest(
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
-      /** QW-10 recompute statements — run in a SECOND batch after `stmts` commit. */
-      recompute: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
-    let currentChunk: PendingChunk = { entries: [], stmts: [], recompute: [] }
+    let currentChunk: PendingChunk = { entries: [], stmts: [] }
 
-    // QW-10: the deferred file-counter recompute runs once per (file, chunk),
-    // built when the chunk is sealed — 1/N the aggregate scans of the old
-    // per-event recompute.
+    // QW-10 / AQU-1261: the deferred file-counter recompute runs once per FILE
+    // per request — built from the entries that actually committed, after the
+    // last chunk commits — rather than once per (file, chunk).
+    //
+    // The recompute is a full-file aggregate scan, so its cost is a function of
+    // the file, not of how many events touched it. Rebuilding it per chunk made
+    // a 400-event bulk write over a 10k-cell file scan that file four times for
+    // one identical answer; only the last pass survived. Coalescing to one pass
+    // keeps the same end state and drops the redundant scans — which is what
+    // concurrent writers on the same file were queueing behind.
     //
     // perf/events-write-path: it runs in its OWN transaction, immediately
-    // after the chunk's write transaction commits (same request, awaited
-    // before the broadcast — never waitUntil), rather than inside it. The
-    // recompute is a full-file aggregate scan over `cells`; carrying it inside
-    // the write transaction meant the events/cells row locks stayed held for
-    // the whole scan, which on prod showed up as 200ms+ lock waits and
-    // deadlocks on single-row commits. The contract is therefore: counters
-    // are consistent by the time this request RESPONDS (and broadcasts), not
-    // by the time the events commit. The window between the two is only
-    // observable to a concurrent reader, who would see counters at most one
-    // chunk behind — and that reader's own next commit recomputes them again.
+    // after the write transactions commit (same request, awaited before the
+    // broadcast — never waitUntil), rather than inside them. The recompute is a
+    // full-file aggregate scan over `cells`; carrying it inside the write
+    // transaction meant the events/cells row locks stayed held for the whole
+    // scan, which on prod showed up as 200ms+ lock waits and deadlocks on
+    // single-row commits. The contract is therefore: counters are consistent by
+    // the time this request RESPONDS (and broadcasts), not by the time the
+    // events commit. The window between the two is only observable to a
+    // concurrent reader, who would see counters behind by at most this
+    // request — and that reader's own next commit recomputes them again.
     // A recompute failure is logged loudly and does not un-accept the events
     // (they are durably committed); the next commit on the file self-heals.
-    const sealChunk = (chunk: PendingChunk): void => {
+    //
+    // AQU-1261: this is built from COMMITTED entries only, so a request whose
+    // later chunk fails still recomputes over its durable prefix — the totals
+    // match the events that actually landed rather than the ones we hoped to
+    // write.
+    const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
       const counterFiles = new Map<string, {
         projectId: string
         fileId: string
         fullSections: boolean
         cellIds: Set<string>
       }>()
-      for (const entry of chunk.entries) {
+      for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
           let impact = counterFiles.get(key)
@@ -1550,20 +1560,23 @@ export async function handleEventsWriteRequest(
         }
       }
       const recomputeTs = Date.now()
+      const stmts: AquillaStatement[] = []
       for (const f of counterFiles.values()) {
-        chunk.recompute.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
-          chunk.recompute.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+          // A full rebuild supersedes any per-cell section recompute for the
+          // same file, so the touched cell ids are deliberately dropped here.
+          stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
         } else {
-          chunk.recompute.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
           if (f.cellIds.size > 0) {
-            chunk.recompute.push(
+            stmts.push(
               sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
             )
           }
         }
       }
-      chunks.push(chunk)
+      return stmts
     }
 
     for (const entry of pendingEntries) {
@@ -1585,8 +1598,8 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length > 0 &&
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
-        sealChunk(currentChunk)
-        currentChunk = { entries: [], stmts: [], recompute: [] }
+        chunks.push(currentChunk)
+        currentChunk = { entries: [], stmts: [] }
       }
 
       currentChunk.entries.push(entry)
@@ -1594,7 +1607,7 @@ export async function handleEventsWriteRequest(
     }
 
     if (currentChunk.stmts.length > 0) {
-      sealChunk(currentChunk)
+      chunks.push(currentChunk)
     }
 
     const committedEntries: PendingEntry[] = []
@@ -1607,8 +1620,9 @@ export async function handleEventsWriteRequest(
     // client would treat "accepted" as "saved" (the old silent-loss bug).
     // Reading the row count back from the same transaction is race-free:
     // no later request can change what THIS write did. (The recompute
-    // statements are NOT in this batch — see sealChunk — so `results` indexes
-    // line up with `chunk.stmts` exactly as the per-entry offsets assume.)
+    // statements are NOT in this batch — see buildRecomputeStmts — so
+    // `results` indexes line up with `chunk.stmts` exactly as the per-entry
+    // offsets assume.)
     const flagChainLosers = (
       chunk: PendingChunk,
       results: ReadonlyArray<{ meta: { changes: number } }>,
@@ -1646,27 +1660,39 @@ export async function handleEventsWriteRequest(
     const runBatch = (stmts: AquillaStatement[]) =>
       db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
 
+    /**
+     * One recompute pass over everything that committed, in its own
+     * transaction. Called exactly once per request — on the success path after
+     * the last chunk, and on the failure path over the durable prefix.
+     */
+    const recomputeCommitted = async (): Promise<void> => {
+      try {
+        const stmts = buildRecomputeStmts(committedEntries)
+        if (stmts.length === 0) return
+        await runBatch(stmts)
+      } catch (recomputeErr) {
+        // The events are committed; only the derived counters are behind.
+        // Loud, because a silent miss here is a counter drift nobody can
+        // trace back — but not fatal, and NOT reported as a rejection.
+        console.error(
+          `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
+          recomputeErr,
+        )
+      }
+    }
+
     try {
       for (const chunk of chunks) {
         const results = await runBatch(chunk.stmts)
         flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
-        if (chunk.recompute.length > 0) {
-          try {
-            await runBatch(chunk.recompute)
-          } catch (recomputeErr) {
-            // The events are committed; only the derived counters are behind.
-            // Loud, because a silent miss here is a counter drift nobody can
-            // trace back — but not fatal, and NOT reported as a rejection.
-            console.error(
-              `[events] file counter recompute failed after commit (${chunk.entries.length} events accepted; counters self-heal on the next commit):`,
-              recomputeErr,
-            )
-          }
-        }
       }
+      await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      // The chunks that did commit are durable, so their counters must still
+      // be brought up to date (AQU-1261) before we report the partial result.
+      await recomputeCommitted()
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {

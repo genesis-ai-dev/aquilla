@@ -315,3 +315,33 @@ describe("InterlinearAlignmentPanel — a decision stays visible (AQU-207)", () 
     expect(screen.queryByText("✓ confirmed")).toBeNull()
   })
 })
+
+// ── Row keys are unique per position ─────────────────────────────────────────
+
+describe("InterlinearAlignmentPanel — repeated tokens get distinct row keys", () => {
+  it("renders a verse that repeats a word without a duplicate-key error", () => {
+    const n = MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 5
+    const pairs = Array.from({ length: n }, () => ({
+      source: "you love you",
+      target: "du liebst du",
+    }))
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      render(
+        <InterlinearAlignmentPanel
+          sourceText="you love you"
+          targetText="du liebst du"
+          alignmentModel={buildAlignmentModel(pairs, [])}
+          confirmedSeeds={noSeeds}
+          onSeedChange={noop}
+        />,
+      )
+      // Both "you" positions must be on screen: the panel is per position.
+      expect(screen.getAllByRole("button", { name: /confirm alignment: you translates as du/i }).length).toBe(2)
+      const dupKey = errors.mock.calls.find((call) => String(call[0]).includes("same key"))
+      expect(dupKey).toBeUndefined()
+    } finally {
+      errors.mockRestore()
+    }
+  })
+})

@@ -59,6 +59,16 @@ export interface InterlinearAlignmentPanelProps {
   onSeedChange: (seed: AlignmentSeed) => void
 }
 
+/**
+ * React key for a row. A decision is about the token PAIR (so the decided
+ * sets key on `src|tgt`), but a sentence that repeats a word yields one link
+ * per position with the same pair — keyed on the pair alone React logged
+ * "two children with the same key" for every "you → you" in a verse.
+ */
+function rowKey(link: AlignmentLink): string {
+  return `${link.srcIndex}:${link.srcToken}|${link.tgtIndex}:${link.tgtToken}`
+}
+
 function confidenceLabel(confidence: number): string {
   if (confidence >= CONFIDENCE_HIGH) return "high"
   // CONFIDENCE_AMBER = 0.3 — amber band used for styling only (alignCell already
@@ -354,7 +364,7 @@ export function InterlinearAlignmentPanel({
             const key = `${link.srcToken}|${link.tgtToken}`
             return (
               <AlignmentRow
-                key={key}
+                key={rowKey(link)}
                 link={link}
                 modelled={modelled}
                 confirmed={confirmedSet.has(key)}
@@ -385,7 +395,7 @@ export function InterlinearAlignmentPanel({
               const key = `${link.srcToken}|${link.tgtToken}`
               return (
                 <AlignmentRow
-                  key={key}
+                  key={rowKey(link)}
                   link={link}
                   confirmed={confirmedSet.has(key)}
                   invalidated={invalidatedSet.has(key)}

@@ -21,6 +21,7 @@
 // not invent its own.
 
 import { memo } from "react"
+import { TRACK_DASH_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import {
@@ -112,20 +113,31 @@ function SourceRegionLaneImpl({
     return isVisible(s.start, s.end, viewStartSec, viewEndSec)
   })
   // Neighbour walls + snap targets, from the FULL cue list — a cue's
-  // neighbour may be scrolled out of view. Cues are a transcript: they may
-  // touch but never overlap or leapfrog, so a drag stops at the neighbouring
-  // cue's edge — the same rule the subtitle row enforces on its own cells.
-  const cueWalls = new Map<string, { minStartSec: number; maxEndSec: number; candidates: number[] }>()
+  // neighbour may be scrolled out of view.
+  //
+  // AQU-1068 item 5 (Sam, 2026-09-09): the walls are the neighbours' STARTS.
+  // This used to read "cues are a transcript: they may touch but never overlap
+  // or leapfrog", and stopped a drag at the neighbouring cue's near edge. A
+  // transcript does say two things at once — two speakers talking over each
+  // other — and the timed exporters already sort by start time, so overlap is
+  // free now. What a cue may still not do is BEGIN outside its neighbours'
+  // starts: that is what would part the clock order from the anchor chain the
+  // text table reads. Same rule on the subtitle row, which builds its own.
+  //
+  // The snap CANDIDATES keep both edges: snapping a cue's end to the next
+  // cue's start is still the common tidy-up, and it is no longer a wall.
+  const cueWalls = new Map<string, { minStartSec: number; maxEndSec: number; maxStartSec?: number; candidates: number[] }>()
   if (retimable && onRetime) {
     for (let i = 0; i < cells.length; i += 1) {
-      const prevEnd = i > 0 ? cells[i - 1].endTime : undefined
-      const nextStart = i < cells.length - 1 ? cells[i + 1].startTime : undefined
+      const prev = i > 0 ? cells[i - 1] : undefined
+      const next = i < cells.length - 1 ? cells[i + 1] : undefined
       cueWalls.set(cells[i].id, {
-        minStartSec: prevEnd ?? 0,
-        maxEndSec: nextStart ?? Number.POSITIVE_INFINITY,
+        minStartSec: prev?.startTime ?? 0,
+        maxStartSec: next?.startTime ?? Number.POSITIVE_INFINITY,
+        maxEndSec: Number.POSITIVE_INFINITY,
         candidates: [
-          ...(prevEnd != null ? [prevEnd] : []),
-          ...(nextStart != null ? [nextStart] : []),
+          ...(prev?.endTime != null ? [prev.endTime] : []),
+          ...(next?.startTime != null ? [next.startTime] : []),
         ],
       })
     }
@@ -139,7 +151,13 @@ function SourceRegionLaneImpl({
   )
 
   return (
-    <div data-testid="tl-source-regions" data-variant="source-audio-cues" className={`relative ${TL_ROW_H_CLASS} border-b border-border`}>
+    <div
+      data-testid="tl-source-regions"
+      data-variant="source-audio-cues"
+      // The source-audio row's other tenant, so it wears that row's hue.
+      style={trackHueVarsFor("source-audio", null)}
+      className={`relative ${TL_ROW_H_CLASS} border-b border-border`}
+    >
       {visibleGaps.map((g) => {
         const widthPx = secToPx(g.endSec - g.startSec, pxPerSec)
         return (
@@ -156,7 +174,13 @@ function SourceRegionLaneImpl({
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
           // strip's chips are the precedent), kept in the lane's sky family.
-          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40`}
+          // Stage 7: the shared dotted-chip treatment — lower rung, no fill,
+          // filling to 33% under the pointer. This region marks source audio
+          // with no cell behind it, so a block of colour at rest would overstate
+          // it (the old `bg-sky-50/30` was nearly nothing for the same reason).
+          // No `dark:` pair anywhere: an alpha over the page is already right
+          // in both themes.
+          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border ${TRACK_DASH_CLASS} transition-colors`}
           // The radius shrinks with the chip. A narrow silence flush against a
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.

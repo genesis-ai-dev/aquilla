@@ -20,6 +20,10 @@ describe("AppTooltip", () => {
     await waitFor(() => {
       expect(screen.getByRole("tooltip")).toHaveTextContent("Deadline details")
     }, { timeout: 250 })
+    expect(screen.getByRole("tooltip").closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "bottom",
+    )
   })
 
   it("right-aligns the popup when align is end", async () => {

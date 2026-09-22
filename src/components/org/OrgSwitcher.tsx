@@ -1,8 +1,12 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { AlertTriangle, Building2, Check, Plus, SearchIcon } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
+import { useOrgSwitcherCatalog } from "@/hooks/useOrgSwitcherCatalog"
+import { Spinner } from "@/components/ui/spinner"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
@@ -142,6 +146,9 @@ function OrgSwitcherList({
   selectedGuestOrgId,
   directoryError,
   onRetryDirectory,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: {
   guestSelected: boolean
   isAllOrgs: boolean
@@ -149,6 +156,9 @@ function OrgSwitcherList({
   selectedGuestOrgId: number | null
   directoryError: string | null
   onRetryDirectory: () => void
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
 }) {
   const { t } = useI18n()
   const filtered = ComboboxPrimitive.useFilteredItems<OrgSwitcherItem>()
@@ -228,7 +238,55 @@ function OrgSwitcherList({
           </ComboboxGroup>
         </>
       )}
+      {(hasMore || loadingMore) && (
+        <LoadMoreSentinel
+          disabled={!hasMore || loadingMore}
+          loading={loadingMore}
+          onVisible={onLoadMore}
+        />
+      )}
     </>
+  )
+}
+
+function LoadMoreSentinel({
+  disabled,
+  loading,
+  onVisible,
+}: {
+  disabled: boolean
+  loading: boolean
+  onVisible: () => void
+}) {
+  const { t } = useI18n()
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (disabled) return
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onVisible()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [disabled, onVisible])
+
+  return (
+    <div
+      ref={ref}
+      role="status"
+      data-testid="org-switcher-load-more"
+      className="flex items-center justify-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+    >
+      {loading ? (
+        <>
+          <Spinner />
+          {t("common.loading")}
+        </>
+      ) : (
+        <span className="sr-only">{t("common.loading")}</span>
+      )}
+    </div>
   )
 }
 
@@ -261,7 +319,7 @@ function OrgSwitcherOption({
         ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
           <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
-          <RoleLabel name={item.roleName} />
+          <RoleLabel name={item.roleName} plain className={ORG_META_CLASS} />
         ) : (
           <span className={ORG_META_CLASS}>{t("org.switcher.guestRole")}</span>
         )}
@@ -290,16 +348,29 @@ export function OrgSwitcher() {
     accessibleProjectsError,
     refreshAccessibleProjects,
   } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
+  const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
   const location = useLocation()
   const navigate = useNavigate()
 
   const [open, setOpen] = useState(false)
   const [inputValue, setInputValue] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const catalogEnabled = open && isPlatformAdmin && !platformAdminLoading
+  const catalog = useOrgSwitcherCatalog({
+    jwt,
+    open,
+    enabled: catalogEnabled,
+    query: inputValue,
+  })
 
   // AQU-759: keep both member and guest lists alphabetical regardless of the
   // order the backend returned them in (Joel: "Keep it alphabetical").
-  const sortedOrgs = useMemo(() => [...orgs].sort(byName), [orgs])
+  const sortedOrgs = useMemo(() => {
+    const source = catalogEnabled ? catalog.orgs : orgs
+    return [...source].sort(byName)
+  }, [catalogEnabled, catalog.orgs, orgs])
   const sortedGuestOrgs = useMemo(() => [...guestOrgs].sort(byName), [guestOrgs])
 
   // AQU-790: a guest org now uses the same path convention as an owned org
@@ -326,10 +397,31 @@ export function OrgSwitcher() {
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
     if (showAllOrgs) next.push({ kind: "all", key: "all", label: t("org.breadcrumb.allOrganizations") })
-    for (const org of sortedOrgs) next.push(memberItem(org))
+    const seen = new Set<number>()
+    const guestIds = new Set(sortedGuestOrgs.map((org) => org.id))
+    for (const org of sortedOrgs) {
+      if (guestIds.has(org.id)) continue
+      seen.add(org.id)
+      next.push(memberItem(org))
+    }
+    // Keep the selected catalog org in `items` while a search page omits it
+    // (Base UI needs the value in the known set to keep the trigger label).
+    if (activeOrg && !seen.has(activeOrg.id) && !guestSelected) {
+      next.push(memberItem(activeOrg))
+    }
     for (const org of sortedGuestOrgs) next.push(guestItem(org))
     return next
-  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t])
+  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected])
+
+  const visibleItems = useMemo<OrgSwitcherItem[]>(() => {
+    if (!catalogEnabled) return items
+    const query = inputValue.trim()
+    return items.filter((item) => {
+      if (item.kind === "all") return query === ""
+      if (query !== "") return orgMatchesSearch(item.label, query)
+      return true
+    })
+  }, [catalogEnabled, items, inputValue])
 
   const selectedItem = useMemo((): OrgSwitcherItem | null => {
     if (guestSelected && selectedGuestOrgId != null) {
@@ -453,6 +545,15 @@ export function OrgSwitcher() {
     <>
       <Combobox
         items={items}
+        {...(catalogEnabled
+          ? { filteredItems: visibleItems, filter: null as null }
+          : {
+              filter: (item: OrgSwitcherItem, query: string) => {
+                // All-orgs is a navigation shortcut, not a searchable org — hide while typing.
+                if (item.kind === "all") return query.trim() === ""
+                return orgMatchesSearch(item.label, query)
+              },
+            })}
         value={selectedItem}
         onValueChange={(item) => handleSelect(item)}
         open={open}
@@ -463,11 +564,6 @@ export function OrgSwitcher() {
         itemToStringValue={(item: OrgSwitcherItem) => item.key}
         itemToStringLabel={(item: OrgSwitcherItem) => item.label}
         isItemEqualToValue={(a: OrgSwitcherItem, b: OrgSwitcherItem) => a.key === b.key}
-        filter={(item: OrgSwitcherItem, query: string) => {
-          // All-orgs is a navigation shortcut, not a searchable org — hide while typing.
-          if (item.kind === "all") return query.trim() === ""
-          return orgMatchesSearch(item.label, query)
-        }}
       >
         <ComboboxTrigger
           render={
@@ -490,6 +586,7 @@ export function OrgSwitcher() {
           <ComboboxInput
             showTrigger={false}
             showSearchIcon
+            loading={catalogEnabled && catalog.searching}
             // Gate on query text — Base UI Clear stays visible for any selection.
             showClear={inputValue !== ""}
             placeholder={t("org.switcher.searchPlaceholder")}
@@ -507,12 +604,16 @@ export function OrgSwitcher() {
                   <SearchIcon />
                 </EmptyMedia>
                 <EmptyTitle className="text-muted-foreground font-normal">
-                  {t("org.switcher.noOrganizationsFound")}
+                  {catalogEnabled && catalog.searching
+                    ? t("common.searching")
+                    : catalog.error
+                      ? t("org.switcher.searchFailed")
+                      : t("org.switcher.noOrganizationsFound")}
                 </EmptyTitle>
               </EmptyHeader>
             </Empty>
           </ComboboxEmpty>
-          <ComboboxList className="max-h-80 flex-1">
+          <ComboboxList className="max-h-80 flex-1" aria-busy={catalog.searching || catalog.loadingMore || undefined}>
             <OrgSwitcherList
               guestSelected={guestSelected}
               isAllOrgs={viewingAllOrgs}
@@ -520,6 +621,9 @@ export function OrgSwitcher() {
               selectedGuestOrgId={selectedGuestOrgId}
               directoryError={accessibleProjectsError}
               onRetryDirectory={retryProjectDirectory}
+              hasMore={catalogEnabled && catalog.hasMore}
+              loadingMore={catalog.loadingMore}
+              onLoadMore={catalog.loadMore}
             />
           </ComboboxList>
           <ComboboxSeparator className="mx-0 my-0" />

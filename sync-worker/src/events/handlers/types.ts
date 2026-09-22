@@ -38,6 +38,9 @@ export interface DispatchResult {
    * BATCH_LIMIT-sized chunks via db.batch().
    */
   stmts: AquillaStatement[]
+  /** Index of the idempotent events INSERT. A zero row count identifies
+   * a concurrent replay that the route's earlier ID prefetch missed. */
+  eventInsertStmtIndex?: number
   /**
    * Per-event Realtime frame. Caller may coalesce many of these for
    * broadcast.
@@ -55,6 +58,13 @@ export interface DispatchResult {
    * and is reported stale (RACE-2 / M1-2).
    */
   chainSlot?: ChainSlot
+  /**
+   * AQU-1154: index into `stmts` of the claim + head-CAS gated cells write
+   * (set together with chainSlot). After commit the route checks that
+   * statement's row count: 0 rows means the event lost the in-flight race
+   * (claim or head compare-and-swap) and is reported stale.
+   */
+  headStmtIndex?: number
   /**
    * Set when the per-event file-counter recompute was deferred
    * (opts.deferFileCounters) — the route appends one recompute per

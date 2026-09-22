@@ -91,6 +91,40 @@ describe("file.video.set projection", () => {
   })
 })
 
+describe("file.corpus.set projection (sidebar folder)", () => {
+  it("is contributor-gated and non-chain-mutating", async () => {
+    const { REQUIRED_ROLE } = await import("../events/role-policy")
+    const { isChainMutatingKind } = await import("../events/event-projection")
+    expect(REQUIRED_ROLE["file.corpus.set"]).toBe(400)
+    expect(isChainMutatingKind("file.corpus.set")).toBe(false)
+  })
+
+  it("merges corpusMarker into files.meta and advances event_id", () => {
+    const { db, recorded } = makeRecordingDb()
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("file.corpus.set", { corpusMarker: "Treasure Hunt Bible" }, { cellId: null }),
+      [],
+    )
+    expect(touches).toEqual(["files"])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("UPDATE files")
+    expect(recorded[0].sql).toContain("jsonb_build_object('corpusMarker'")
+    expect(recorded[0].args).toEqual(["Treasure Hunt Bible", "evt-1", "f1", "p1"])
+  })
+
+  it("removes the corpusMarker key when null — the file lands in Ungrouped", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.corpus.set", { corpusMarker: null }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("- 'corpusMarker'")
+    expect(recorded[0].args).toEqual(["evt-1", "f1", "p1"])
+  })
+})
+
 describe("file.timing.set projection (pre-merge round: file-level timing mode)", () => {
   it("is maintainer-gated and non-chain-mutating", async () => {
     const { REQUIRED_ROLE } = await import("../events/role-policy")
@@ -165,6 +199,73 @@ describe("file.track.set projection (stage 1: per-track overrides)", () => {
       "f1",
       "p1",
     ])
+  })
+
+  // ── The junk-entry hole (2026-08-27) ───────────────────────────────────
+  //
+  // A kind-less patch for an id that does not exist used to merge an entry
+  // that nothing renders and only the GATED delete could remove. The guard is
+  // in SQL because the handler is synchronous and never loads the file's meta;
+  // a failing condition is a no-op, which is also the right answer for the
+  // race it incidentally fixes — a reorder arriving after someone else's
+  // delete no longer resurrects the track as junk.
+  it("requires the track to exist for a patch that cannot create one", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "trk-es", patch: { order: 2 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).toContain("jsonb_exists")
+    // `jsonb_exists(...)` and NOT the `?` key-exists operator, which would
+    // collide with this driver's bind placeholder.
+    expect(recorded[0].sql).not.toContain("-> 'trackOverrides' ?")
+    // The id binds a third time, for the existence term.
+    expect(recorded[0].args).toEqual([
+      "trk-es",
+      "trk-es",
+      '{"order":2}',
+      "evt-1",
+      "f1",
+      "p1",
+      "trk-es",
+    ])
+  })
+
+  it("does NOT require it when the patch carries a kind, which is what creates one", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "trk-es", patch: { kind: "audio", name: "Spanish", order: 1 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).not.toContain("jsonb_exists")
+    expect(recorded[0].args).toHaveLength(6)
+  })
+
+  // A derived row's first reorder legitimately has no entry yet, and
+  // drag-to-reorder ships working with the setting off.
+  it("does NOT require it for a derived row", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "target-audio", patch: { order: 3 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).not.toContain("jsonb_exists")
+    expect(recorded[0].args).toHaveLength(6)
   })
 
   it("rides the same upsert when a single field is cleared with null", () => {

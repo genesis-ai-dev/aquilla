@@ -32,6 +32,7 @@ import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
+import { learnFromTranscriptCorrection } from "@/lib/store/transcript-corrections-store"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
@@ -134,13 +135,27 @@ export function CellTakeBlock({
       const nextTimings = remapTranscriptTimings(timings as never, corrected)
       if (nextTimings.length === 0) return
       if (!attachment?.url) return
+
+      // AQU-463: the same edit that fixes THIS transcript teaches the project
+      // how ASR gets that word wrong, so the next transcription arrives already
+      // fixed. Learning is best-effort and deliberately non-blocking — the
+      // user's correction is committed below whatever happens here.
+      try {
+        const before = (timings as ReadonlyArray<{ word: string }>).map((t) => t.word).join(" ")
+        learnFromTranscriptCorrection(project.id, before, corrected)
+      } catch (err) {
+        console.warn("[transcript] learning from correction failed:", err)
+      }
       void emitCellAudioAttach({
         projectId: project.id,
         fileId: owner.fileId,
         cellId: owner.id,
         audioId: selectedAudioId,
         url: attachment.url,
-        slot: selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
+        // AQU-646: the clip's own slot, inferred only when it is absent (a
+        // hand-built stub). This attach assigns `slot` outright and deselects
+        // the clip's siblings in that slot, so guessing it moves the take.
+        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings: nextTimings,
         ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),

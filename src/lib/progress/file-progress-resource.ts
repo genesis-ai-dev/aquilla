@@ -9,6 +9,16 @@ export interface ProgressCounts {
   validatedCount: number
   /** Counts (not percentages) meeting >=1, >=2, ... validator levels. */
   validationLevels: number[]
+  /**
+   * AQU-1098: source cells with a live take, and with a selected+approved one.
+   * OPTIONAL on purpose. The server always sends both, but the editor builds a
+   * local optimistic snapshot of this same shape from cells it holds in
+   * memory, and that snapshot has no knowledge of audio. Undefined says "not
+   * known here"; a fabricated 0 would say "none", which is a different and
+   * wrong claim.
+   */
+  audioCount?: number
+  audioValidatedCount?: number
 }
 
 export interface FileProgressResponse {
@@ -399,9 +409,16 @@ export function setLocalFileProgress(
   lane = '',
 ): void {
   const record = resourceFor(projectId, fileId, lane)
+  const uniquePendingIds = [...new Set(pendingEventIds)]
+  // CellStore reuses immutable snapshots for progress-neutral edits. Repeating
+  // the same input must neither notify every subscriber nor rewrite IndexedDB.
+  // It must also leave a just-cleared optimistic overlay in place until the
+  // confirmation request resolves, instead of reverting to the old server data.
+  if (record.local === progress && uniquePendingIds.length === record.pendingEventIds.length
+    && uniquePendingIds.every((id, index) => id === record.pendingEventIds[index])) return
   const hadPendingEvents = record.pendingEventIds.length > 0
   record.local = progress
-  record.pendingEventIds = [...new Set(pendingEventIds)]
+  record.pendingEventIds = uniquePendingIds
   record.progress = record.pendingEventIds.length > 0
     || hadPendingEvents
     || record.server?.source === 'file-counter-fallback'

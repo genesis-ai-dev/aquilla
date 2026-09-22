@@ -1,22 +1,20 @@
 /**
- * Terminology chip decoration plugin.
+ * Terminology highlight decoration plugin.
  *
  * Scans the editor doc for active Concept sourceTerm matches (case-insensitive,
- * word-boundary aware) and renders a small status-tinted chip absolutely
- * positioned at the top-right of each matched word span. The host span is
- * `position:relative`; the chip is `position:absolute` so line height is
- * NOT affected.
+ * word-boundary aware) and wraps each match in the shared, subtle terminology
+ * highlight. The matched term itself is the lookup target.
  *
  * Usage: wire into TranslatedEditor via the optional `terminologyConcepts` prop.
- * Chip click is annotated with `data-source-term` for AQU-204 (TermLookupPopover).
+ * Clicks are annotated with `data-source-term` for AQU-204 (TermLookupPopover).
  */
 
 import { Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
-import type { Concept } from "@/lib/terminology/types"
-import { buildTermRegex } from "@/lib/terminology/match"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
+import { buildTermRegex, findConceptMatches } from "@/lib/terminology/match"
 import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
 export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminologyChipDecorations")
@@ -47,13 +45,26 @@ export function findTermMatches(text: string, term: string): Array<{ start: numb
 }
 
 /**
- * Build a DecorationSet with:
- *  - an inline decoration wrapping each match (adds `position:relative` host span)
- *  - a widget decoration at the match start rendering the chip
+ * Find every plain-text [start, end) range a CONCEPT matches: its sourceTerm
+ * plus any extra `match.forms`, with mark-folding, project affixes and
+ * excluded forms applied (AQU-1271). Chips therefore highlight exactly the
+ * surface forms the rule engine enforces.
+ */
+export function findConceptMatchRanges(
+  text: string,
+  concept: Concept,
+  termMatching?: TermMatchingSettings,
+): Array<{ start: number; end: number }> {
+  return findConceptMatches(text, concept, termMatching).map(({ start, end }) => ({ start, end }))
+}
+
+/**
+ * Build a DecorationSet with one inline decoration wrapping each match.
  */
 export function buildTerminologyChipDecorationSet(
   doc: PMNode,
   concepts: Concept[],
+  termMatching?: TermMatchingSettings,
 ): DecorationSet {
   // Only active concepts participate
   const activeConcepts = concepts.filter(c => c.status === "active")
@@ -66,7 +77,7 @@ export function buildTerminologyChipDecorationSet(
   const decorations: Decoration[] = []
 
   for (const concept of activeConcepts) {
-    const matches = findTermMatches(plainText, concept.sourceTerm)
+    const matches = findConceptMatchRanges(plainText, concept, termMatching)
     for (const match of matches) {
       const from = plainToPm[match.start]
       const to = plainToPm[match.end]
@@ -77,29 +88,9 @@ export function buildTerminologyChipDecorationSet(
         Decoration.inline(from, to, {
           class: "term-chip-host",
           "data-source-term": concept.sourceTerm,
+          "aria-label": `Managed term: ${concept.sourceTerm}`,
+          title: `Managed term: ${concept.sourceTerm}`,
         })
-      )
-
-      // Widget chip rendered at the END of the matched span. The chip is
-      // wrapped in its own `position:relative` host so the absolutely-positioned
-      // dot anchors to the term's trailing edge. Without this wrapper a widget
-      // is a *sibling* of the term span (ProseMirror inserts it between inline
-      // nodes, not inside `term-chip-host`), so `.term-chip`'s absolute offset
-      // would escape to the nearest positioned ancestor — the `position:relative`
-      // cell wrapper — and paint in the cell's top-right corner (AQU-664).
-      decorations.push(
-        Decoration.widget(to, () => {
-          const host = document.createElement("span")
-          host.className = "term-chip-host"
-          const chip = document.createElement("span")
-          chip.className = `term-chip term-chip-preferred`
-          chip.setAttribute("data-source-term", concept.sourceTerm)
-          chip.setAttribute("aria-label", `Managed term: ${concept.sourceTerm}`)
-          chip.setAttribute("title", `Managed term: ${concept.sourceTerm}`)
-          // Dot rendered via CSS content/background, text is empty
-          host.appendChild(chip)
-          return host
-        }, { side: 1 }) // side:1 → placed after the character, before any following content
       )
     }
   }
@@ -107,7 +98,10 @@ export function buildTerminologyChipDecorationSet(
   return DecorationSet.create(doc, decorations)
 }
 
-export function createTerminologyChipExtension(getConcepts: () => Concept[]) {
+export function createTerminologyChipExtension(
+  getConcepts: () => Concept[],
+  getTermMatching?: () => TermMatchingSettings | undefined,
+) {
   return Extension.create({
     name: "terminologyChipDecorations",
     addProseMirrorPlugins() {
@@ -116,16 +110,16 @@ export function createTerminologyChipExtension(getConcepts: () => Concept[]) {
           key: terminologyChipPluginKey,
           state: {
             init: (_, state) =>
-              buildTerminologyChipDecorationSet(state.doc, getConcepts()),
+              buildTerminologyChipDecorationSet(state.doc, getConcepts(), getTermMatching?.()),
             apply: (tr, old, _oldState, newState) => {
               if (tr.getMeta(terminologyChipPluginKey) === "rebuild") {
-                return buildTerminologyChipDecorationSet(newState.doc, getConcepts())
+                return buildTerminologyChipDecorationSet(newState.doc, getConcepts(), getTermMatching?.())
               }
               // Chip matches are derived from the doc text itself (unlike the
               // violation/karaoke decorations, whose inputs are external props
               // rebuilt via meta). Mapping the old set through a doc change can
               // never ADD a chip for newly typed term matches, so rebuild.
-              if (tr.docChanged) return buildTerminologyChipDecorationSet(tr.doc, getConcepts())
+              if (tr.docChanged) return buildTerminologyChipDecorationSet(tr.doc, getConcepts(), getTermMatching?.())
               return old
             },
           },

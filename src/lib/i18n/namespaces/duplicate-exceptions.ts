@@ -43,6 +43,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "and a command are different parts of speech and most target languages " +
     "write them differently; folding them together would make one of the two " +
     "wrong wherever they diverge.",
+  "editor.timeline.textPaneTitle":
+    "Heading of the media lens's TEXT SECTION — the panel of cells beside the " +
+    "video, which a reader can collapse to a rail and bring back. editor.lens.text " +
+    "names the editor's Text LENS, a mode you switch into, and the two are on " +
+    "screen at the same time: the lens tab sits in the toolbar above a section " +
+    "heading that would read identically. A language that distinguishes a named " +
+    "region of a screen from a mode you enter needs both words, and tying the " +
+    "section heading to the mode's key would mean a later edit for one silently " +
+    "renamed the other.",
   "importExport.dialog.audioSectionTitle":
     "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
     "user is about to download. nav.lens.audio names the editor's Audio lens — " +
@@ -72,6 +81,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
+  "audio.newVoice.kokoroLabel":
+    "Field label for the Kokoro speaker dropdown in the New voice modal — which " +
+    "built-in voice this engine should speak with. editor.navTitle.voice is the " +
+    "editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "label and a navigation tab are different UI roles that happen to share the " +
+    "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +
@@ -819,6 +834,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
     "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
     "process-step label, not the document, and free to translate as 'summary'.",
+  "org.projectOverview.plan.statusNotStarted":
+    "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
+    "book, episode or document nobody has put any content into yet. " +
+    "autopilot.status.notStarted is a value of the run-status enum for a " +
+    "background PROCESS that has not run; terminology.livingMemory.section." +
+    "brief.statusNone is the authoring state of one document. All three are " +
+    "'not started' in English and routinely take different verbs, participles " +
+    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
+    "fired, and an unwritten document are three different subjects.",
   "terminology.livingMemory.section.brief.statusNone":
     "Hint on the Living Memory index saying the brief document has not been " +
     "begun — an authoring state of a document. autopilot.status.notStarted is a " +
@@ -843,6 +867,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
     "target LANE shown when a project has no named lanes — a placeholder noun " +
     "('the default one'), a different grammatical role.",
+  "onboarding.preferences.fontSize.default":
+    "Option in the app-wide font-size select for the baseline UI scale (root " +
+    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
+    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
+    "lane noun take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

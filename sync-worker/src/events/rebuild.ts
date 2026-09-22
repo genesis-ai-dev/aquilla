@@ -3,21 +3,13 @@
 // POST /admin/projects/:projectId/rebuild-projection
 //
 // Drops every cell row + cell_validators row for this project, then replays
-// every event in `server_seq` order, applying the AD-2 first-child-of-
-// parent rule. The naive linear replay is enough here: each event has at
-// most one preceding sibling at its `(project_id, file_id, cell_id,
-// parent_id)` slot, and we visit in seq order, so a sibling that arrived
-// LATER (higher seq) and lost the race never gets to update the projection.
-//
-// Replay == live (RACE-2 / M1-2): the live path's chain_claims arbitration
-// always awards a contested slot to the LOWEST-server_seq sibling (the
-// per-project seq counter's row lock makes commit order == seq order, and
-// the claim is taken inside that critical section — see chain-claims.ts).
-// That is exactly the first-in-seq-order rule applied here, so a rebuild
-// reproduces the live projection byte-for-byte. chain_claims itself is NOT
-// rewritten by rebuild: it was populated under the same rule, and historical
-// slots without claim rows are still guarded by the isWinningChild pre-check
-// against `events`.
+// every event in `server_seq` order, applying the head compare-and-swap rule
+// (AQU-1154, invariant I1): walking the log in seq order, a chain-arbitrated
+// event applies iff its parent_id IS the cell's head (per side/lane) at that
+// point, or the row does not exist yet. That is exactly what the live path's
+// gated cells write enforces inside its transaction (commit order == seq
+// order under the per-project seq lock), so a rebuild reproduces the live
+// projection. chain_claims itself is NOT rewritten by rebuild.
 //
 // ── Non-atomic failure mode ────────────────────────────────────────────
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
@@ -26,10 +18,12 @@
 import {
   buildEventProjectionStmts,
   isChainArbitrated,
+  isChainMutatingKind,
+  laneOfEvent,
+  projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
-import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
@@ -109,23 +103,27 @@ export async function handleRebuildProjectionRequest(
     return new Response('failed to read events from DB', { status: 500 })
   }
 
-  // 3. AD-2 first-child-of-parent in-memory tracking.
-  //    For each `(project_id, file_id, cell_id, parent_id)` we record the
-  //    id of the first event we saw at that slot — that one wins. Subsequent
-  //    siblings stay in `events` (which we're not rewriting) but don't
-  //    contribute to the projection.
-  const winningChildAt = new Map<string, string>()
-  // Source and target sides, plus named target lanes, arbitrate independently.
-  // Compute the exact same qualified parent key as the live claim path.
-  const qualifiedParentKeyOf = (row: EventRow): string => {
+  // 3. Head compare-and-swap in-memory tracking: the current chain head per
+  //    (project, file, cell, side, lane) — the same row key `cells` uses.
+  //    Source and target sides, plus named target lanes, each have their own
+  //    head. A delete clears the head (the row is gone; the next event on
+  //    that key applies regardless of parent, exactly as the live INSERT
+  //    path does). `source.cell.mirror` is not chain-arbitrated but DOES
+  //    move the source head (under its monotonic upstream_seq guard), so a
+  //    later source event chained on a mirror id must see it as the head.
+  const headAt = new Map<string, string>()
+  const mirrorSeqAt = new Map<string, number>()
+  const parsedPayload = (row: EventRow): unknown => {
     try {
-      return eventQualifiedParentKey(row.parent_id, row.kind, JSON.parse(row.payload))
+      return JSON.parse(row.payload)
     } catch {
-      return eventQualifiedParentKey(row.parent_id, row.kind, null)
+      return null
     }
   }
-  const childKey = (row: EventRow): string =>
-    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${qualifiedParentKeyOf(row)}`
+  const headKey = (row: EventRow, payload: unknown): string => {
+    const side = row.kind.startsWith('source.') ? 'source' : 'target'
+    return `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${side}\0${laneOfEvent(row.kind, payload)}`
+  }
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0
@@ -150,24 +148,33 @@ export async function handleRebuildProjectionRequest(
     eventsRead += 1
     if (DELEGATED_PROJECTION_KINDS.has(row.kind)) continue
 
-    // Strict AD-2 first-child-of-parent for every chain-mutating event,
-    // commits included (must match route.ts). We replay in server_seq ASC,
-    // so the first event at a given (project, file, cell, parent_id) slot
-    // is the winner; siblings stay in `events` (we're not rewriting the log)
-    // but do not contribute to the projection. The guard applies ONLY to
-    // chain-arbitrated kinds — cell.validate (parent_id NULL) would otherwise
-    // collide with source.cell.create at the same slot and be dropped, and a
-    // parent-null cell DELETE (a migration retraction, AQU-747/910) would
-    // lose to the cell's own create and resurrect the cell on every rebuild
-    // (AQU-931).
+    // Head compare-and-swap for every chain-arbitrated event (must match the
+    // live gate in event-projection.ts): it applies iff its parent_id is the
+    // current head for its side/lane, or there is no row yet. Stale branches
+    // stay in `events` (we're not rewriting the log) but do not contribute to
+    // the projection. The guard applies ONLY to chain-arbitrated kinds —
+    // cell.validate (parent_id NULL) is not a chain step, and a parent-null
+    // cell DELETE (a migration retraction, AQU-747/910) is a tombstone that
+    // applies unconditionally (AQU-931).
     let isWinner = true
-    if (row.cell_id && isChainArbitrated(row.kind, row.parent_id)) {
-      const key = childKey(row)
-      const winner = winningChildAt.get(key)
-      if (!winner) {
-        winningChildAt.set(key, row.id)
-      } else if (winner !== row.id) {
-        isWinner = false
+    if (row.cell_id && isChainMutatingKind(row.kind)) {
+      const key = headKey(row, parsedPayload(row))
+      if (isChainArbitrated(row.kind, row.parent_id)) {
+        const head = headAt.get(key)
+        isWinner = head === undefined || head === row.parent_id
+      }
+      if (isWinner) {
+        if (row.kind.endsWith('.delete')) headAt.delete(key)
+        else headAt.set(key, row.id)
+      }
+    } else if (row.kind === 'source.cell.mirror' && row.cell_id) {
+      const payload = parsedPayload(row) as { upstream?: { seq?: number } } | null
+      const seq = payload?.upstream?.seq
+      const key = headKey(row, payload)
+      const last = mirrorSeqAt.get(key)
+      if (typeof seq === 'number' && (last === undefined || seq > last)) {
+        mirrorSeqAt.set(key, seq)
+        headAt.set(key, row.id)
       }
     }
 
@@ -218,20 +225,13 @@ export async function handleRebuildProjectionRequest(
     await db.batch(stmts.slice(i, i + BATCH_LIMIT))
   }
 
-  // 4b. Recompute file counters once, set-based (deferred above). Mirrors
-  //     POST /migrate/finalize — O(total cells), not O(N²) per cell.
-  await db
-    .prepare(
-      `UPDATE files SET
-         cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
-         approved_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND validated=1),
-         filled_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target' AND TRIM(value)!=''),
-         word_count = (SELECT COALESCE(SUM(word_count),0) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target'),
-         last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
-         updated_at = ?
-       WHERE project_id = ?`,
-    )
-    .bind(Date.now(), projectId)
+  // 4b. Recompute file counters once, set-based (deferred above). Shares one
+  //     builder with the live projection and POST /migrate/finalize — this used
+  //     to be a third hand-written copy, and it had already drifted, dropping
+  //     ai_drafted_count. AQU-1083 made the divergence dangerous rather than
+  //     merely untidy: a rebuild running its own SQL would silently put
+  //     headings back into a project that had excluded them.
+  await projectFileCountersRecomputeStmt(db, projectId, Date.now())
     .run()
 
   // 5. Mark the rebuild for warm delta clients (audit B5). A rebuild changes

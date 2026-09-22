@@ -13,6 +13,7 @@
 import { useRef, useState } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { TRACK_HOVER_FILL_CLASS } from "@/lib/timeline/track-colors"
 import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
@@ -108,11 +109,21 @@ export interface TimelineCardProps {
   /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
    *  back to the pre-SUB-53 computation (the dubbing answer). */
   span?: { start: number; end: number }
-  /** AQU-646 round 8: hard walls this card may not cross — the neighbouring
-   *  cues' edges. Absent = unbounded, which is every lane but the VTT-plus-
-   *  footage Subtitles track. Subtitle timing IS the cell's timing, so unlike a
-   *  dub take it does not get to be approximate: no crossing, no overlapping. */
-  bounds?: { minStartSec: number; maxEndSec: number }
+  /**
+   * AQU-646 round 8: hard walls this card may not cross. Absent = unbounded,
+   * which is every lane but the VTT-plus-footage Subtitles track.
+   *
+   * AQU-1068 item 5 (Sam, 2026-09-09) narrowed what these mean. They used to be
+   * the neighbouring cues' near EDGES — no crossing and no overlapping, on the
+   * reasoning that cues are a transcript. Overlap is now allowed in full: two
+   * speakers talking over each other is a real thing a subtitle says, and the
+   * timed exporters already sort by start time. What is left is the one limit
+   * that keeps the clock order and the anchor chain agreeing — a card's START
+   * stays between its neighbours' STARTS. Hence `maxStartSec`, which bounds
+   * where a card may BEGIN; `maxEndSec` bounds where it may END and the
+   * subtitle lanes now pass Infinity for it.
+   */
+  bounds?: { minStartSec: number; maxEndSec: number; maxStartSec?: number }
   /** AQU-928: `mods` is undefined for a plain click (which also seeks) and set
    *  when a modifier made this a selection-building gesture. */
   onSelect(cellId: string, mods?: SelectMods): void
@@ -180,14 +191,23 @@ export function TimelineCard({
     // AND a wall, so a candidate that would land the card past a wall has to
     // lose to the wall. Clamping first would let the snap step step back over it.
     if (bounds) {
-      const { minStartSec: lo, maxEndSec: hi } = bounds
+      const { minStartSec: lo, maxEndSec: hi, maxStartSec } = bounds
+      // The furthest this card may BEGIN. Two sources: an explicit
+      // `maxStartSec` (the next cue's start — AQU-1068's order rule), and the
+      // end wall minus the card's own length, which is what an end-bounded
+      // lane implies. The tighter wins, so a lane passing only one is
+      // unaffected by the other.
+      const startCeiling = (len: number) =>
+        Math.max(lo, Math.min(maxStartSec ?? Number.POSITIVE_INFINITY, hi - len))
       if (mode === "move") {
         // Slide, never squeeze: a move keeps its length and stops at the wall.
         const len = ne - ns
-        ns = Math.min(Math.max(ns, lo), Math.max(lo, hi - len))
+        ns = Math.min(Math.max(ns, lo), startCeiling(len))
         ne = ns + len
       } else if (mode === "resize-l") {
-        ns = Math.min(Math.max(ns, lo), ne - MIN_DUR_SEC)
+        // The left edge cannot pass the start wall, and cannot swallow the
+        // card either.
+        ns = Math.min(Math.max(ns, lo), Math.min(maxStartSec ?? Number.POSITIVE_INFINITY, ne - MIN_DUR_SEC))
       } else {
         ne = Math.max(Math.min(ne, hi), ns + MIN_DUR_SEC)
       }
@@ -246,6 +266,16 @@ export function TimelineCard({
 
   function beginDrag(mode: DragMode, e: React.PointerEvent) {
     if (!canRetime) return
+    // PRIMARY BUTTON ONLY, AND NOT A MACOS CONTEXT-CLICK. Without this a
+    // right-press begins a real retime: `pointerup` calls proposeSpan and
+    // EMITS if the pointer moved at all, so a right-drag across a card silently
+    // rewrites its timing. `beginTrackDrag` in the gutter has had this guard
+    // since it shipped; the two chip drags never got it.
+    //
+    // BEFORE the stopPropagation, deliberately: bailing first lets the
+    // pointerdown bubble, which is harmless (no lane root carries a pointer
+    // handler) and leaves the event free to reach a context-menu trigger above.
+    if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
     try {
@@ -325,6 +355,22 @@ export function TimelineCard({
         if (!movedRef.current && !mods) onSeek?.(cell.id)
         movedRef.current = false
       }}
+      // AQU-646 stage 2: A RIGHT-CLICK ON A CHIP OPENS NOTHING, DELIBERATELY.
+      // `contextmenu` bubbles, and the lane behind this chip is now a
+      // context-menu trigger for its TRACK — so without this, right-clicking a
+      // take would offer to rename or delete the track it sits on, which is
+      // not what the pointer is over. The track menu is for the track; the chip
+      // has its own affordances on it already.
+      //
+      // The result really is nothing at all: the trigger's own document-level
+      // listener suppresses the browser's native menu anywhere inside it, and
+      // this stops the custom one. That is the intended outcome, not an
+      // oversight — noted here because "nothing happened" is otherwise a
+      // reasonable thing to file a bug about.
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
       onPointerDown={(e) => {
         // …and must not start a retime drag either, or ⌘-clicking a subtitle
         // card would nudge its span.
@@ -347,8 +393,18 @@ export function TimelineCard({
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
         // be hidden mid-drag; inner text stays contained by its own `truncate`s.
         drag ? "z-20 overflow-visible" : "overflow-hidden",
+        // AQU-646 stage 7: the row's own hue, at the same wash every other
+        // clip in the timeline uses, read from the variable the lane
+        // publishes. It replaces a hand-written sky pair with its own `dark:`
+        // variants — an alpha over the page is already right in both themes.
+        //
+        // ONLY THE DIALOGUE CARD IS TINTED. A subtitle card is dense text and
+        // there are hundreds of them; a wash behind every one would fight the
+        // words rather than identify the row, which the gutter's accent bar
+        // already does. That asymmetry is the same one the row colours have
+        // always had, now said in the shared vocabulary.
         isDialogue
-          ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
+          ? "border-[color:var(--tl-track-hue)] bg-[color:var(--tl-track-gen)] text-foreground"
           : "border-border bg-card text-foreground",
         // Dotted means a different thing in each track (Sam, 2026-08-11). In
         // SUBTITLES it is this: the cell is real, the words are not here yet.
@@ -359,7 +415,20 @@ export function TimelineCard({
         // AQU-928: no ring-offset — the lighter, flush ring reads as "also in
         // the selection" next to the primary's offset one.
         !selected && multiSelected && "z-10 ring-2 ring-sky-400/80",
-        !selected && !multiSelected && !drag && "hover:z-10 hover:bg-muted/30",
+        // AQU-646 stage 7: a source-audio chip answers the pointer in its OWN
+        // hue at the hover wash, matching the dotted placeholder between two of
+        // them (Sam, 2026-08-27: "hovering any source audio chip region, real
+        // or dotted"). It used to go to a neutral grey, which threw the row's
+        // colour away at exactly the moment you were pointing at it. Every
+        // other card keeps the grey: those rows are dense text, not clips.
+        !selected && !multiSelected && !drag && "hover:z-10",
+        // …and the FILLED rung, not the lightest one: a dialogue chip already
+        // wears `--tl-track-gen`, and both are `background-color`, so the hover
+        // replaces the fill instead of layering over it. With the plain hover
+        // rung (.18, below the .33 fill) pointing at a chip made it FAINTER —
+        // .24 → .12 on source audio, which is where it was obvious enough to
+        // report (2026-08-27).
+        !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_FILL_CLASS : "hover:bg-muted/30"),
       )}
       style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >
@@ -369,10 +438,9 @@ export function TimelineCard({
         <DragTimeChip mode={drag.mode} startSec={previewStart} endSec={previewEnd} deltaSec={dragDeltaSec} />
       )}
       <span
-        className={cn(
-          "absolute inset-y-0 left-0",
-          isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
-        )}
+        // The card's own identity bar, in the row's hue at full strength —
+        // the same solid the gutter's accent and colour dot use.
+        className="absolute inset-y-0 left-0 bg-[color:var(--tl-track-hue)]"
         // Follows the card's own corner or it pokes out of a sharpened one.
         style={{
           width: `${ACCENT_BAR_PX}px`,

@@ -239,6 +239,9 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
     const sheet = document.querySelector('[data-slot="sheet-content"]')
     expect(sheet).toHaveAttribute("data-nested-dialog-open")
     expect(onOpenChange).not.toHaveBeenCalled()
+    const nestedOverlay = document.querySelector('[data-slot="dialog-overlay"]')
+    expect(nestedOverlay).toBeTruthy()
+    expect(nestedOverlay).not.toHaveAttribute("hidden")
   })
 
   it("Coming Soon rows remain inactive teasers regardless of role (unaffected by this change)", () => {

@@ -387,7 +387,17 @@ function fromPostgresJs(sql: postgres.Sql): PgExecutor {
 }
 
 /** Build an Aquilla database handle from a Postgres connection string (prod). */
-export function makePostgres(connectionString: string, max = 5): PostgresDb {
+/** Per-request pool size. The events route fans out SIX prefetch SELECTs in
+ *  one Promise.all (route.ts PERF-2) — at max=5 the sixth always queued behind
+ *  a full pool, i.e. one guaranteed extra round-trip on every flush. 8 covers
+ *  that fan-out with headroom for the concurrent membership/settings reads
+ *  that follow, and connections are opened lazily (postgres.js dials only when
+ *  a query has to wait), so a simple request still uses one or two. Hyperdrive
+ *  pools the origin side, so the cost of the extra client connections is
+ *  local to the Worker isolate and bounded by the request's lifetime. */
+export const DEFAULT_POOL_MAX = 8
+
+export function makePostgres(connectionString: string, max = DEFAULT_POOL_MAX): PostgresDb {
   const sql = postgres(connectionString, {
     max,
     fetch_types: false, // recommended through Hyperdrive's pooling

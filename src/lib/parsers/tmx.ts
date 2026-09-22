@@ -21,6 +21,7 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
 import { serializeInner, codeAwareTextContent } from "./xliff"
+import { sanitizeParseDetail } from "./parse-error-detail"
 
 /** Round-trip metadata captured per <tu> on TMX import. */
 export interface TmxSegmentMeta {
@@ -86,7 +87,11 @@ export function parseTmx(xmlText: string): TranslatableString[] {
 
   const parseError = doc.querySelector("parsererror")
   if (parseError) {
-    throw new Error(`TMX parse error: ${parseError.textContent?.slice(0, 200)}`)
+    // OPS-30: the <parsererror> body can quote the document; strip quoted spans
+    // before this message rides into IMPORT_FAILED telemetry.
+    throw new Error(
+      `TMX parse error: ${sanitizeParseDetail(parseError.textContent ?? "malformed XML").slice(0, 200)}`,
+    )
   }
 
   const root = doc.documentElement

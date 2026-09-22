@@ -31,6 +31,21 @@ export const workspace = defineNamespace({
       one: "{count} change was rejected because it conflicted with a newer edit from another session.",
       other: "{count} changes were rejected because they conflicted with newer edits from another session.",
     }),
+    // Tauri offline mode (Phase 3): a locally queued write lost the AD-2 head
+    // CAS on reconnect (someone else committed to the same cell while this
+    // device was offline). See src/lib/offline/conflicts.ts.
+    "workspace.offline.conflictToast": plural({
+      one: "{count} translation couldn't sync — it was changed elsewhere while you were offline.",
+      other: "{count} translations couldn't sync — they were changed elsewhere while you were offline.",
+    }),
+    "workspace.offline.conflictDismiss": "Dismiss",
+    "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
+    // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
+    "workspace.offline.connectivityOnline": "Online",
+    "workspace.offline.connectivityOffline": "Offline",
+    "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
+    "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -51,8 +66,6 @@ export const workspace = defineNamespace({
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
-    "workspace.videoUnavailable":
-      "Video file not available on this device. Attach it locally or paste a URL via the Film icon.",
     "workspace.staleSibling.viewInHistory": "View in history",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
@@ -173,8 +186,19 @@ export const workspace = defineNamespace({
 
     // -- AiSetupDialog --
     "workspace.aiSetup.title": "Set up AI",
-    "workspace.aiSetup.description": "Choose a provider to enable translation suggestions.",
+    "workspace.aiSetup.description":
+      "Choose once how this project drafts. You can change it later in settings.",
     "workspace.aiSetup.fullSettingsLink": "Full settings →",
+    "workspace.aiSetup.frontierDescriptionSignedIn":
+      "Aquilla's hosted model with your {username} login. Billed as Aquilla usage.",
+    "workspace.aiSetup.projectKeyLabel": "This project's API key",
+    "workspace.aiSetup.projectKeyDescription":
+      "Your OpenRouter or compatible key for this project on this device. Not shared with teammates, and not used on other projects.",
+    "workspace.aiSetup.overrideDescription":
+      "Use the endpoint already saved in Preferences ({endpoint}). Default for this browser; this project's API key beats it.",
+    "workspace.aiSetup.overrideMissingError": "No personal override is saved in Preferences.",
+    "workspace.aiSetup.overrideNeedsKey":
+      "That override still needs an API key. Add it in Preferences, or choose this project's API key.",
 
     // -- ApiKeyField --
     "workspace.apiKeyField.saveAcrossProjects": "Save across my projects (this browser)",
@@ -186,6 +210,8 @@ export const workspace = defineNamespace({
 
     // -- AudioRecorder/DurationBar --
     "workspace.durationBar.targetLabel": "target {time}",
+    // AQU-646: how far past the window a take has run.
+    "workspace.durationBar.overBy": "+{seconds}s",
 
     // -- CellAiStatusPopover --
     "workspace.aiStatusPopover.technicalDetail": "Technical detail",
@@ -252,6 +278,19 @@ export const workspace = defineNamespace({
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
 
+    // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
+    "workspace.alignment.originalHeading": "Original language",
+    "workspace.alignment.originalSub": "— the Greek/Hebrew words behind this verse",
+    "workspace.alignment.originalHelpTooltip":
+      "Every word of the original-language source, with its dictionary form, Strong's number and " +
+      "morphology. Where the model can place a word, its rendering in your translation is shown " +
+      "beside it. Words matched through the dictionary form are marked — treat those as a hint.",
+    "workspace.alignment.originalNoMatch": "no confident match",
+    "workspace.alignment.originalViaLemma": "via lemma",
+    "workspace.alignment.originalViaLemmaTooltip":
+      "Matched through the dictionary form {lemma} rather than the form used in this verse, so it " +
+      "is a weaker guess than a direct match.",
+
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
 
@@ -284,7 +323,7 @@ export const workspace = defineNamespace({
     // -- SourceSelectionToolbar --
     "workspace.sourceSelection.viewTerm": "View term",
     "workspace.sourceSelection.askAi": "Ask AI",
-    "workspace.sourceSelection.addToTermbase": "Add to termbase",
+    "workspace.sourceSelection.addToTermbase": "Add to terminology",
 
     // -- StatusBar --
     "workspace.statusBar.summary": "{total} cells · {translated} translated {pct}",
@@ -307,15 +346,6 @@ export const workspace = defineNamespace({
       "measured",
     ),
 
-    // -- ProjectWorkspace: CSV cast/character label-picker import toasts --
-    "workspace.labelPicker.noLabelsAppliedToast":
-      "No labels applied — the CSV doesn't match {fileName}. Re-download the template and try again.",
-    "workspace.labelPicker.partiallyAppliedToast": "Applied {applied} of {total} labels to {fileName}.",
-    "workspace.labelPicker.appliedToast": plural(
-      { one: "Applied {applied} label to {fileName}.", other: "Applied {applied} labels to {fileName}." },
-      "applied",
-    ),
-
     // -- WorkspaceSkeleton --
     "workspace.skeleton.loadingProject": "Loading project",
 
@@ -326,7 +356,6 @@ export const workspace = defineNamespace({
     "workspace.denoise.revertButton": "Revert",
 
     // -- chat/ChatComposer (Send reuses autopilot.steering.send, Stop reuses common.stop) --
-    "workspace.chatComposer.keyboardHint": "Enter to send · Shift+Enter for newline",
     "workspace.chatComposer.queueTooltip": "Queue — sends when the current run finishes",
     "workspace.chatComposer.queueMessage": "Queue message",
 
@@ -381,9 +410,17 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.diffEndDetail": "End: {value}",
 
     // -- timeline/TargetAudioLane --
+    "workspace.targetAudioLane.previewTooLong":
+      "This take is too long to preview here — play the timeline instead.",
+    "workspace.targetAudioLane.previewTooLarge": "This take is too big to preview yet.",
+    "workspace.targetAudioLane.previewTooLargeDetail":
+      "Its length has never been measured, so it cannot be prepared for preview. Run Measure all from the file menu and try again.",
+    "workspace.targetAudioLane.previewUnavailable": "This take cannot be previewed.",
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    // AQU-646 stage 5: the other corner of the same chip.
+    "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -436,6 +473,17 @@ export const workspace = defineNamespace({
           "with a period. States the cause, not blame.",
         placeholders: {
           count: "How many queued changes were rejected.",
+        },
+      },
+      "workspace.offline.conflictToast": {
+        description:
+          "Title of the toast shown in the Tauri desktop app when one or more " +
+          "translations queued while offline lost to a newer edit from someone " +
+          "else on reconnect (AD-2 head CAS). Paired with a 'Dismiss' action " +
+          "(workspace.offline.conflictDismiss) that clears the whole batch at " +
+          "once. Full sentence with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many translations couldn't sync.",
         },
       },
       "workspace.projectCard.deletedBy": {
@@ -523,12 +571,6 @@ export const workspace = defineNamespace({
           "'git' and 'Phase 2' are technical/roadmap terms — keep 'git' " +
           "untranslated as the tool's name.",
         maxLength: 90,
-      },
-      "workspace.videoUnavailable": {
-        description:
-          "Banner shown over a subtitle file's timeline when its linked video " +
-          "blob isn't present on this device and no video URL is attached yet. " +
-          "'Film icon' refers to the toolbar icon that opens the attach-video flow.",
       },
       "workspace.staleSibling.viewInHistory": {
         description:
@@ -961,7 +1003,10 @@ export const workspace = defineNamespace({
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.description": {
-        description: "Subtitle under workspace.aiSetup.title, explaining what setting up a provider enables.",
+        description:
+          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "project API key, or a personal override; the dialog does not return " +
+          "after that choice.",
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.fullSettingsLink": {
@@ -971,6 +1016,45 @@ export const workspace = defineNamespace({
           "Keep the trailing arrow glyph (→) or your language's equivalent " +
           "'go to' convention.",
         screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.frontierDescriptionSignedIn": {
+        description:
+          "Body of the Frontier option when the user is signed in. Names the " +
+          "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
+        placeholders: {
+          username: "Signed-in account username.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyLabel": {
+        description:
+          "Title of the per-project bring-your-own-key option. Contrast with " +
+          "the personal override (Preferences, all projects) and Frontier " +
+          "(hosted). Short, no period.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyDescription": {
+        description:
+          "Body of the project API-key option. The key is the user's, but it " +
+          "is stored on this project on this device — not a teammate-synced " +
+          "setting and not the device-wide personal override.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideDescription": {
+        description:
+          "Body of the personal-override option, naming the saved endpoint " +
+          "and that it is the browser default until this project has its own key.",
+        placeholders: {
+          endpoint: "The OpenAI-compatible base URL already saved in Preferences.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideMissingError": {
+        description: "Error if Continue is pressed on override but none is stored.",
+      },
+      "workspace.aiSetup.overrideNeedsKey": {
+        description:
+          "Error when the saved personal override is a hosted endpoint with no key.",
       },
 
       "workspace.apiKeyField.saveAcrossProjects": {
@@ -1000,6 +1084,18 @@ export const workspace = defineNamespace({
           "translatable and not hardcoded.",
       },
 
+      "workspace.durationBar.overBy": {
+        description:
+          "Shown beside the running time in the recorder when a take has passed " +
+          "the length of the line it is for, so the performer does not have to " +
+          "subtract two timecodes while recording. The plus sign is meaningful " +
+          "— it always reads as an overrun and never as a countdown — and the " +
+          "unit is seconds to one decimal place. Keep it very short; it sits " +
+          "between two other numbers on one narrow row.",
+        placeholders: {
+          seconds: "How far past the target the take has run, in seconds to one decimal place, without a sign.",
+        },
+      },
       "workspace.durationBar.targetLabel": {
         description:
           "Small caption beside the elapsed-time readout on a recording's " +
@@ -1209,6 +1305,47 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.originalHeading": {
+        description:
+          "Heading of the section listing the original-language (biblical Hebrew or " +
+          "Greek) words of the verse being translated, above the statistical " +
+          "alignment links. 'Original language' means the language the scripture " +
+          "was written in, not the project's source text.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalSub": {
+        description:
+          "Muted continuation of workspace.alignment.originalHeading, on the same " +
+          "line. The leading dash joins it to the heading; do not start with a " +
+          "capital. 'Greek/Hebrew' names the two biblical languages.",
+      },
+      "workspace.alignment.originalHelpTooltip": {
+        description:
+          "Tooltip on the help icon beside that heading. 'Dictionary form' is the " +
+          "lemma — the headword an inflected form is listed under; \"Strong's " +
+          "number\" is a standard scripture-word index and stays as-is.",
+      },
+      "workspace.alignment.originalNoMatch": {
+        description:
+          "Shown in place of a target word when the model cannot say which part of " +
+          "the translation renders this original-language word. Lowercase, muted; " +
+          "it is a status, not a heading.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalViaLemma": {
+        description:
+          "Small badge on a row whose target word was found through the word's " +
+          "dictionary form (lemma) rather than the exact form in this verse — a " +
+          "weaker match. Lowercase, very short.",
+        maxLength: 14,
+      },
+      "workspace.alignment.originalViaLemmaTooltip": {
+        description:
+          "Tooltip on that badge, explaining why the match is weaker.",
+        placeholders: {
+          lemma: "The dictionary form of the original-language word — not translated.",
+        },
+      },
 
       "workspace.offlineBanner.message": {
         description:
@@ -1316,8 +1453,8 @@ export const workspace = defineNamespace({
       "workspace.sourceSelection.addToTermbase": {
         description:
           "Button in the same floating source-selection toolbar that starts " +
-          "adding the selected text as a new termbase/glossary entry.",
-        maxLength: 20,
+          "adding the selected text as a new terminology entry.",
+        maxLength: 24,
       },
 
       "workspace.statusBar.summary": {
@@ -1365,32 +1502,6 @@ export const workspace = defineNamespace({
           "zero failures.",
         placeholders: { measured: "How many recordings were successfully measured; also selects the plural form." },
       },
-      "workspace.labelPicker.noLabelsAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV whose rows matched none of " +
-          "the file's speaker labels at all.",
-        placeholders: { fileName: "Name of the file the CSV was checked against — not translated." },
-      },
-      "workspace.labelPicker.partiallyAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV that matched some but not " +
-          "all rows against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were successfully applied.",
-          total: "Total labels attempted (applied + unmatched).",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-      "workspace.labelPicker.appliedToast": {
-        description:
-          "Success toast after importing a cast/character CSV that matched every row " +
-          "against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were applied; also selects the plural form.",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-
       "workspace.skeleton.loadingProject": {
         description:
           "Accessible label for the full-page loading skeleton shown while a " +
@@ -1416,12 +1527,6 @@ export const workspace = defineNamespace({
         description: "Button that re-selects the original recording take instead of the denoised one.",
       },
 
-      "workspace.chatComposer.keyboardHint": {
-        description:
-          "Small footer hint inside the AI chat composer explaining the " +
-          "keyboard shortcuts for sending vs inserting a newline.",
-        maxLength: 48,
-      },
       "workspace.chatComposer.queueTooltip": {
         description:
           "Tooltip on the queue button shown while a run is streaming (only " +
@@ -1602,6 +1707,29 @@ export const workspace = defineNamespace({
         placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
       },
 
+      "workspace.targetAudioLane.previewTooLong": {
+        description:
+          "Toast when the chip's play button is pressed on a take too long to " +
+          "decode for preview. It points at the timeline, which streams and can " +
+          "play it.",
+      },
+      "workspace.targetAudioLane.previewTooLarge": {
+        description:
+          "Toast when the play button is pressed on a take whose LENGTH was " +
+          "never recorded and whose file is over the preview size ceiling. " +
+          "Distinct from 'too long' because it has a cure: measuring the take. " +
+          "Before this the button simply made no sound and said nothing.",
+      },
+      "workspace.targetAudioLane.previewTooLargeDetail": {
+        description:
+          "Body for the above, naming the fix. 'Measure all' is the file-menu " +
+          "action that backfills missing durations.",
+      },
+      "workspace.targetAudioLane.previewUnavailable": {
+        description:
+          "Toast when the play button cannot reach a take's audio at all — a " +
+          "legacy attachment whose bytes are gone, or no audio device.",
+      },
       "workspace.targetAudioLane.overlapsNext": {
         description:
           "Tooltip line on a target-audio (dub) chip whose tail overlaps the " +
@@ -1612,6 +1740,14 @@ export const workspace = defineNamespace({
         description:
           "Tooltip line on a target-audio (dub) chip whose head overlaps the " +
           "PREVIOUS verse's dub, mirroring workspace.targetAudioLane.overlapsNext.",
+      },
+      "workspace.targetAudioLane.playClip": {
+        description:
+          "Hover and screen-reader name of the small play button in the top-" +
+          "left corner of an audio clip in the timeline, opposite the record " +
+          "button. It plays only that one clip, trimmed exactly as the " +
+          "timeline draws it, without moving the playhead or starting the " +
+          "rest of the timeline.",
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

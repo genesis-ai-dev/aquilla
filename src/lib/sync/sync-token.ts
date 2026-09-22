@@ -38,8 +38,12 @@ export class SyncTokenError extends Error {
   }
 }
 
-/** Optional bootstrap payload so the server can auto-register an unknown
- *  projectId on the caller's first /sync-token request. */
+/** Legacy bootstrap payload. AQU-299 / SEC-9: the server no longer
+ *  auto-registers an unknown projectId from it — POST /api/v2/projects
+ *  (createCloudProject, called on create and throwing on failure) is the only
+ *  project-creation path, and /sync-token 403s anything unregistered. Still
+ *  sent by the workspace and accepted-but-ignored server-side; remove once no
+ *  deployed client sends it. */
 export interface ProjectBootstrap {
   projectName?: string
   gitlabProjectId?: number
@@ -148,6 +152,7 @@ export function makeSyncTokenMinter(
   callbacks: SyncTokenCallbacks = {}
 ): () => Promise<SyncTokenMintResult> {
   let cached: CachedToken | null = null
+  const pending = new Map<string, Promise<SyncTokenMintResult>>()
   return async () => {
     const now = Date.now()
     // Resolve the active JWT BEFORE the cache check: the cached token is only
@@ -163,34 +168,44 @@ export function makeSyncTokenMinter(
     if (cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200 }
     }
-    try {
-      const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
-      cached = {
-        value: resp.token,
-        expiresAtMs: now + resp.expiresIn * 1000,
-        jwt,
-      }
-      callbacks.onRole?.(resp.role)
-      return { token: resp.token, status: 200 }
-    } catch (err) {
-      let status: number | null = null
-      if (err instanceof SyncTokenError) {
-        status = err.status
-        if (err.status === 403) {
-          callbacks.onForbidden?.()
-        } else if (err.status === 401) {
-          // Session JWT was rejected. Evict the in-memory sync token cache so
-          // the next call re-fetches, and notify the caller with the JWT that
-          // failed so it can raise the session-expired signal (AQU-159) —
-          // without destroying the session on what may be a transient
-          // misreported 401 (AQU-994) or clearing unrelated accounts.
-          cached = null
-          callbacks.onUnauthorized?.(jwt)
+    const existing = pending.get(jwt)
+    if (existing) return existing
+    const request = (async (): Promise<SyncTokenMintResult> => {
+      try {
+        const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
+        if (getJwt() === jwt) cached = {
+          value: resp.token,
+          expiresAtMs: now + resp.expiresIn * 1000,
+          jwt,
         }
+        callbacks.onRole?.(resp.role)
+        return { token: resp.token, status: 200 }
+      } catch (err) {
+        let status: number | null = null
+        if (err instanceof SyncTokenError) {
+          status = err.status
+          if (err.status === 403) {
+            callbacks.onForbidden?.()
+          } else if (err.status === 401) {
+            // Session JWT was rejected. Evict the in-memory sync token cache so
+            // the next call re-fetches, and notify the caller with the JWT that
+            // failed so it can raise the session-expired signal (AQU-159) —
+            // without destroying the session on what may be a transient
+            // misreported 401 (AQU-994) or clearing unrelated accounts.
+            if (cached?.jwt === jwt) cached = null
+            callbacks.onUnauthorized?.(jwt)
+          }
+        }
+        // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
+        console.warn("[sync-token] fetch failed:", err)
+        return { token: null, status }
       }
-      // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
-      console.warn("[sync-token] fetch failed:", err)
-      return { token: null, status }
+    })()
+    pending.set(jwt, request)
+    try {
+      return await request
+    } finally {
+      if (pending.get(jwt) === request) pending.delete(jwt)
     }
   }
 }

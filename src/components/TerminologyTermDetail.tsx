@@ -10,25 +10,53 @@
  */
 
 import { useMemo, useCallback, useState } from "react"
-import { X, CheckCircle2, AlertCircle, Minus } from "lucide-react"
+import { X, CheckCircle2, AlertCircle, Minus, SquareArrowOutUpRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
+import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
+import { TermFormsSection } from "@/components/terminology/TermFormsSection"
 import { predictEquivalents } from "@/lib/terminology/equivalents"
-import { matchesTerm } from "@/lib/terminology/match"
+import { matchesConcept, matchesTerm } from "@/lib/terminology/match"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 // ─── Status label helper ──────────────────────────────────────────────────────
 
-function RenderingChip({ rendering }: { rendering: TermRendering }) {
+/**
+ * AQU-1006 follow-up: the status order a click cycles through.
+ *
+ * preferred → admitted → forbidden → preferred. Deliberately a cycle rather
+ * than a dropdown: there are exactly three values, they are mutually
+ * exclusive, and the chip is already the thing you want to point at. The
+ * label always states the CURRENT status, so nothing depends on the user
+ * knowing the order.
+ */
+const RENDERING_STATUS_CYCLE: Record<TermRendering["status"], TermRendering["status"]> = {
+  preferred: "admitted",
+  admitted: "forbidden",
+  forbidden: "preferred",
+}
+
+function RenderingChip({
+  rendering,
+  onCycleStatus,
+  onRemove,
+}: {
+  rendering: TermRendering
+  /** Present only when the user may edit this concept's renderings. */
+  onCycleStatus?: () => void
+  onRemove?: () => void
+}) {
   const t = useT()
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
@@ -38,10 +66,39 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
     rendering.status === "forbidden" &&
       "bg-red-100 text-red-700 line-through dark:bg-red-950 dark:text-red-400",
   )
+  const editable = Boolean(onCycleStatus || onRemove)
   return (
-    <span className={chipClass}>
-      {rendering.rendering}
-      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+    <span className={cn(chipClass, editable && "pr-0.5")}>
+      {onCycleStatus ? (
+        <button
+          type="button"
+          onClick={onCycleStatus}
+          className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={t("terminology.termDetail.cycleStatusTitle")}
+          aria-label={t("terminology.termDetail.cycleStatusAria", {
+            rendering: rendering.rendering,
+            status: t(renderingStatusLabelKey(rendering.status)),
+          })}
+        >
+          {rendering.rendering}
+          <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+        </button>
+      ) : (
+        <>
+          {rendering.rendering}
+          <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+        </>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-0.5 rounded-sm p-0.5 opacity-60 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring outline-none"
+          aria-label={t("terminology.termDetail.removeRenderingAria", { rendering: rendering.rendering })}
+        >
+          <X className="size-2.5" aria-hidden />
+        </button>
+      )}
     </span>
   )
 }
@@ -50,9 +107,16 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
 
 type Verdict = "enforced" | "infringed" | "na"
 
-function deriveVerdict(concept: Concept, original: string, translated: string): Verdict {
-  // Wildcard-aware match (grac* matches grace/graced/gracia) via shared matcher.
-  if (!matchesTerm(original, concept.sourceTerm)) return "na"
+function deriveVerdict(
+  concept: Concept,
+  original: string,
+  translated: string,
+  termMatching?: TermMatchingSettings,
+): Verdict {
+  // AQU-1271: source side via the shared CONCEPT matcher (wildcards, extra
+  // forms, mark folding, project affixes, exclusions) so this page's verdicts
+  // agree with the rule engine and the editor chips.
+  if (!matchesConcept(original, concept, termMatching)) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",
@@ -106,8 +170,13 @@ interface OccurrenceRowProps {
   canEdit: boolean
   projectId: string
   username: string
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   onCellCommitted: () => void
+  onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  termMatching?: TermMatchingSettings
 }
 
 function OccurrenceRow({
@@ -119,14 +188,16 @@ function OccurrenceRow({
   username,
   onOptimisticEdit,
   onCellCommitted,
+  onJumpToCell,
+  termMatching,
 }: OccurrenceRowProps) {
   const t = useT()
-  const verdict = deriveVerdict(concept, cell.original, translated)
+  const verdict = deriveVerdict(concept, cell.original, translated, termMatching)
   const [editing, setEditing] = useState(false)
 
   const handleCommit = useCallback(
     ({ value, valueHtml }: TranslatedEditorCommit) => {
-      onOptimisticEdit(cell.id, { value, valueHtml })
+      onOptimisticEdit({ cellId: cell.id, fileId: cell.fileId }, { value, valueHtml })
       void emitTargetCellCommit({
         projectId,
         fileId: cell.fileId,
@@ -163,7 +234,7 @@ function OccurrenceRow({
     >
       {/* Cell ref */}
       <span className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground pt-0.5">
-        {cell.group || cell.id.slice(0, 8)}
+        {cell.context || cell.group || cell.id.slice(0, 8)}
       </span>
 
       {/* Source snippet */}
@@ -204,6 +275,21 @@ function OccurrenceRow({
           </button>
         )}
       </div>
+
+      {onJumpToCell && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t("terminology.termDetail.goToCellAria", {
+            ref: cell.context || cell.group || cell.id.slice(0, 8),
+          })}
+          onClick={() => onJumpToCell({ cellId: cell.id, fileId: cell.fileId })}
+        >
+          <SquareArrowOutUpRight />
+        </Button>
+      )}
     </li>
   )
 }
@@ -221,7 +307,10 @@ export interface TerminologyTermDetailProps {
   /** Called after any commit so the parent can trigger a revalidate. */
   onCellCommitted: () => void
   /** Optimistic patch forwarded from the parent's useCells instance. */
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   /** Whether the user may promote a predicted equivalent to a managed rendering. */
   canManageTermbase?: boolean
   /**
@@ -229,6 +318,36 @@ export interface TerminologyTermDetailProps {
    * concept. Persistence is owned by the parent (patchSettings).
    */
   onPromoteRendering?: (conceptId: string, target: string) => void | Promise<void>
+  /** True while the parent is still fetching cells for the examples list. */
+  examplesLoading?: boolean
+  /** Jump to this occurrence in the editor. */
+  onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  /**
+   * AQU-1006 follow-up: replace this concept's rendering list.
+   *
+   * The detail page could previously only ADD a rendering, by promoting a
+   * predicted equivalent — there was no way to remove one or to change a
+   * rendering from required to forbidden without leaving for the edit dialog.
+   *
+   * Takes the WHOLE list rather than a per-item delta because that is what a
+   * `term.update` carries: renderings have no stable per-item id to merge on,
+   * so the projection replaces them wholesale. Callers emit one event.
+   */
+  onRenderingsChange?: (conceptId: string, renderings: TermRendering[]) => void | Promise<void>
+  /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
+  termMatching?: TermMatchingSettings
+  /**
+   * AQU-1271: replace this concept's source-matching options.
+   *
+   * Like renderings, this is a WHOLE-object write: `term.update` replaces
+   * `match_options` wholesale, so the callback receives the full pruned
+   * `TermMatchOptions` (or `undefined` when the user has cleared everything).
+   */
+  onMatchChange?: (conceptId: string, match: TermMatchOptions | undefined) => void | Promise<void>
+  /** AQU-1271: case sensitivity lives on the concept, not inside `match`. */
+  onCaseSensitiveChange?: (conceptId: string, caseSensitive: boolean) => void | Promise<void>
+  /** Offered when the project has no prefix/suffix inventory yet. */
+  onSetUpAffixes?: () => void
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -244,25 +363,32 @@ export function TerminologyTermDetail({
   onOptimisticEdit,
   canManageTermbase = false,
   onPromoteRendering,
+  examplesLoading = false,
+  onJumpToCell,
+  onRenderingsChange,
+  termMatching,
+  onMatchChange,
+  onCaseSensitiveChange,
+  onSetUpAffixes,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
-    () => cells.filter((c) => matchesTerm(c.original, concept.sourceTerm)),
-    [cells, concept.sourceTerm],
+    () => cells.filter((c) => matchesConcept(c.original, concept, termMatching)),
+    [cells, concept, termMatching],
   )
 
   const { enforced, infringed } = useMemo(() => {
     let enforced = 0
     let infringed = 0
     for (const c of occurrences) {
-      const v = deriveVerdict(concept, c.original, c.translated)
+      const v = deriveVerdict(concept, c.original, c.translated, termMatching)
       if (v === "enforced") enforced++
       else if (v === "infringed") infringed++
     }
     return { enforced, infringed }
-  }, [occurrences, concept])
+  }, [occurrences, concept, termMatching])
 
   // Predicted target equivalents over the loaded bilingual cell pairs. χ² + EM
   // cross-check; results stay "AI-assumed" until explicitly promoted.
@@ -281,6 +407,47 @@ export function TerminologyTermDetail({
     },
     [onPromoteRendering, concept.id],
   )
+
+  // AQU-1006 follow-up: rendering edits. Each helper builds the FULL next list
+  // and hands it to the parent, which emits one `term.update` — renderings
+  // have no per-item identity to merge on, so they replace wholesale.
+  const canEditRenderings = canManageTermbase && Boolean(onRenderingsChange)
+
+  const handleCycleStatus = useCallback(
+    (index: number) => {
+      const next = concept.renderings.map((r, i) =>
+        i === index ? { ...r, status: RENDERING_STATUS_CYCLE[r.status] } : r,
+      )
+      void onRenderingsChange?.(concept.id, next)
+    },
+    [concept.renderings, concept.id, onRenderingsChange],
+  )
+
+  const handleRemoveRendering = useCallback(
+    (index: number) => {
+      void onRenderingsChange?.(concept.id, concept.renderings.filter((_, i) => i !== index))
+    },
+    [concept.renderings, concept.id, onRenderingsChange],
+  )
+
+  const [newRendering, setNewRendering] = useState("")
+  const handleAddRendering = useCallback(() => {
+    const trimmed = newRendering.trim()
+    if (!trimmed) return
+    // Don't duplicate an existing rendering (case-insensitive), matching the
+    // guard the promote path already applies.
+    if (concept.renderings.some((r) => r.rendering.trim().toLowerCase() === trimmed.toLowerCase())) {
+      setNewRendering("")
+      return
+    }
+    // New renderings land as "admitted", not "preferred": adding one should
+    // never silently demote whichever rendering the team already agreed on.
+    void onRenderingsChange?.(concept.id, [
+      ...concept.renderings,
+      { rendering: trimmed, status: "admitted" as const },
+    ])
+    setNewRendering("")
+  }, [newRendering, concept.renderings, concept.id, onRenderingsChange])
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -318,18 +485,59 @@ export function TerminologyTermDetail({
       {/* Concept metadata */}
       <div className="border-b px-4 py-3 space-y-2">
         {/* Renderings */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {concept.renderings.map((r, i) => (
-            <RenderingChip key={i} rendering={r} />
+            <RenderingChip
+              key={`${r.rendering}:${i}`}
+              rendering={r}
+              {...(canEditRenderings
+                ? {
+                    onCycleStatus: () => handleCycleStatus(i),
+                    onRemove: () => handleRemoveRendering(i),
+                  }
+                : {})}
+            />
           ))}
+          {canEditRenderings && (
+            <span className="inline-flex items-center gap-1">
+              <Input
+                value={newRendering}
+                onChange={(e) => setNewRendering(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    handleAddRendering()
+                  }
+                }}
+                placeholder={t("terminology.termDetail.addRenderingPlaceholder")}
+                aria-label={t("terminology.termDetail.addRenderingAria")}
+                className="h-6 w-36 text-[11px]"
+              />
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={handleAddRendering}
+                disabled={!newRendering.trim()}
+              >
+                {t("terminology.termDetail.addRenderingButton")}
+              </Button>
+            </span>
+          )}
         </div>
+        {canEditRenderings && concept.renderings.length > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            {t("terminology.termDetail.renderingEditHint")}
+          </p>
+        )}
 
         {/* Notes */}
         {concept.notes && (
           <p className="text-xs text-muted-foreground">{concept.notes}</p>
         )}
 
-        {/* Stats summary */}
+        {/* Stats summary — hidden while examples load so we don't flash "0 occurrences". */}
+        {!examplesLoading && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>
             <RichMessage
@@ -353,21 +561,39 @@ export function TerminologyTermDetail({
             </>
           )}
         </div>
+        )}
+
+        {/* AQU-1271: which source forms this term actually hits, and why. */}
+        <TermFormsSection
+          concept={concept}
+          cells={cells}
+          termMatching={termMatching}
+          canEdit={canManageTermbase && Boolean(onMatchChange)}
+          onMatchChange={onMatchChange}
+          onCaseSensitiveChange={onCaseSensitiveChange}
+          onSetUpAffixes={onSetUpAffixes}
+        />
       </div>
 
-      {/* Target equivalents — managed (deterministic) vs AI-assumed (predicted) */}
+      {/* Managed renderings / predicted equivalents don't need the cell query. */}
       <div className="border-b px-4 py-3">
         <EquivalentsPanel
           sourceTerm={concept.sourceTerm}
           managed={concept.renderings}
-          predicted={predicted}
+          predicted={examplesLoading ? [] : predicted}
           canPromote={canManageTermbase && Boolean(onPromoteRendering)}
           onPromote={handlePromoteEquivalent}
         />
       </div>
 
-      {/* Occurrence list */}
-      <main className="flex-1 overflow-y-auto px-4 py-2">
+      {/* Occurrence list — the cells query lives here, not on the whole entry. */}
+      {examplesLoading ? (
+        <div role="status" className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          {t("terminology.termDetail.loadingExamples")}
+        </div>
+      ) : (
+        <main className="flex-1 overflow-y-auto px-4 py-2">
         {occurrences.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
             <Minus className="h-8 w-8 opacity-30" />
@@ -381,6 +607,7 @@ export function TerminologyTermDetail({
               <span className="flex-1">{t("editor.column.source")}</span>
               <span className="w-20 shrink-0">{t("terminology.common.columnVerdict")}</span>
               <span className="flex-1">{t("editor.column.target")}</span>
+              {onJumpToCell && <span className="w-8 shrink-0" />}
             </div>
             <ul>
               {occurrences.map((cell) => (
@@ -394,12 +621,15 @@ export function TerminologyTermDetail({
                   username={username}
                   onOptimisticEdit={onOptimisticEdit}
                   onCellCommitted={onCellCommitted}
+                  onJumpToCell={onJumpToCell}
+                  termMatching={termMatching}
                 />
               ))}
             </ul>
           </>
         )}
       </main>
+      )}
     </div>
   )
 }

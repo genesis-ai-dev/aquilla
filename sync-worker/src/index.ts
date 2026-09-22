@@ -24,12 +24,14 @@ import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleRemovedCellsReadRequest } from "./events/removed-cells-read-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
+import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -37,6 +39,7 @@ import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
+import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleImportReconcileRequest } from "./events/import-reconcile-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
@@ -52,9 +55,12 @@ import { handleMigrateSourceArtifactCopyRequest } from "./events/migrate-source-
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
+import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
+import { handleOriginalDownloadRequest } from "./events/original-download-route"
+import { handleOriginalsBundleRequest } from "./events/originals-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
@@ -66,10 +72,18 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalCommentsRequest } from "./external/comments-route"
+import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
+import { handleExternalExportRequest } from "./external/export-route"
+import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
+import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
+import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
+import { handleExternalSkillsRequest } from "./external/skills-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -78,6 +92,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
+import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -91,10 +106,14 @@ declare global {
       /** R2 media/original-import blob bucket. Not used for Y.Doc state. */
       SNAPSHOTS: R2Bucket
       /** Read-only binding to GitLab's LFS object-storage bucket
-       *  (codex-attachments-v1-1), used only by /migrate/audio-copy to copy
-       *  legacy audio bytes bucket→bucket without leaving Cloudflare. Absent in
-       *  envs that don't run the audio import. */
-      LFS_SRC?: R2Bucket
+       *  (codex-attachments-v1-1), used only by /migrate/audio-copy and
+       *  /migrate/source-artifact-copy to copy legacy bytes bucket→bucket
+       *  without leaving Cloudflare. Absent in envs that don't run the audio
+       *  import. Typed as ReadonlyR2Bucket (not R2Bucket) because the R2
+       *  binding itself has no read-only mode — `fetch` below wraps the raw
+       *  binding with `asReadonlyR2` so put/delete are enforced, not just
+       *  documented, against someone else's bucket. */
+      LFS_SRC?: ReadonlyR2Bucket
       /** The events + projections store. NOT a D1 binding — it is the
        *  D1-compatible Postgres (Neon) shim, injected per-request at the top of
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
@@ -106,6 +125,9 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /** Shared secret GitLab sends as `X-Gitlab-Token` on webhook deliveries
+       *  to `/migrate/webhook/gitlab`. See events/migrate-webhook-route.ts. */
+      GITLAB_WEBHOOK_SECRET?: string
       /**
        * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
        * `DELETE /audio/*`), so ops calls never carry the token-signing key.
@@ -265,7 +287,15 @@ const worker = {
       )
     }
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
-    env = { ...env, AQUILLA_PG: pgShim as unknown as AquillaDb }
+    // The runtime injects a full R2Bucket regardless of our narrower
+    // LFS_SRC type above — wrap it once here so every downstream route only
+    // ever holds a get/head/list handle, never put/delete.
+    const rawLfsSrc = env.LFS_SRC as unknown as R2Bucket | undefined
+    env = {
+      ...env,
+      AQUILLA_PG: pgShim as unknown as AquillaDb,
+      LFS_SRC: rawLfsSrc ? asReadonlyR2(rawLfsSrc) : undefined,
+    }
     try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
@@ -315,6 +345,10 @@ const worker = {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
+
+    // AQU-1092…1098: the project's plan board (units + target dates + Done).
+    const planResponse = await handlePlanRequest(request, env)
+    if (planResponse) return withCors(planResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
@@ -325,8 +359,12 @@ const worker = {
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
+    const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
+    if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
+    if (removedCellsResponse) return withCors(removedCellsResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
     if (memberActivityResponse) return withCors(memberActivityResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
@@ -339,10 +377,32 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const conceptsReadResponse = await handleConceptsReadRequest(request, env)
+    if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1233: agent-facing comment reads. Its own module (rather than another
+    // arm of read-routes) because it re-uses that file's auth/scope gate —
+    // registering it here keeps the dependency one-directional.
+    const externalCommentsResponse = await handleExternalCommentsRequest(request, env)
+    if (externalCommentsResponse) return withCors(externalCommentsResponse, request)
+    // AQU-1229: Living Memory reads. Mounted after the general external reads —
+    // both regexes are $-anchored so neither can shadow the other, but the
+    // memory paths extend .../files/:fileId/cells, so keeping the narrower
+    // suffix routes second matches the ordering convention above.
+    const externalMemoryReadResponse = await handleExternalMemoryReadRequest(request, env)
+    if (externalMemoryReadResponse) return withCors(externalMemoryReadResponse, request)
+    // AQU-858: agent-callable round-trip export (the mirror of the artifact
+    // import tools). Its path (.../files/:fileId/export) is disjoint from the
+    // external read routes above, so ordering is for readability only.
+    const externalExportResponse = await handleExternalExportRequest(request, env)
+    if (externalExportResponse) return withCors(externalExportResponse, request)
+    // AQU-1231: quality signals (health / coverage / term consistency). Its own
+    // handler because read-routes.ts is already at the file-size ceiling.
+    const externalQualityResponse = await handleExternalQualityRequest(request, env)
+    if (externalQualityResponse) return withCors(externalQualityResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.
@@ -360,6 +420,12 @@ const worker = {
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
+    // GitLab webhook receiver + daemon inbox (AQU-XXXX). The receiver is called by
+    // GitLab itself, which cannot send x-migrate-runner, so it sits before the fence.
+    if (new URL(request.url).pathname === "/migrate/webhook/gitlab") {
+      const r = await handleMigrateWebhookRequest(request, env)
+      if (r) return r
+    }
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
@@ -389,12 +455,18 @@ const worker = {
     if (migrateGroupsResponse) return migrateGroupsResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
+    const migrateWebhookInbox = await handleMigrateWebhookRequest(request, env)
+    if (migrateWebhookInbox) return migrateWebhookInbox
     const sourceUploadResponse = await handleSourceUploadRequest(request, env)
     if (sourceUploadResponse) return sourceUploadResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)
     if (exportBundleResponse) return exportBundleResponse
+    const originalDownloadResponse = await handleOriginalDownloadRequest(request, env)
+    if (originalDownloadResponse) return originalDownloadResponse
+    const originalsBundleResponse = await handleOriginalsBundleRequest(request, env)
+    if (originalsBundleResponse) return originalsBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
@@ -416,6 +488,19 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1294: partner intake template + agent skills. Static text / pure
+    // transforms, unauthenticated like the command docs below.
+    const externalSetupTemplateResponse = await handleExternalSetupTemplateRequest(request)
+    if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
+    const externalSkillsResponse = handleExternalSkillsRequest(request)
+    if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
+
+    // Static command documentation (the REST half of describe_command).
+    // Unauthenticated like the discovery root, and mounted with it so both sit
+    // just ahead of the 404 fallback.
+    const externalCommandsDocResponse = handleExternalCommandsDocRequest(request)
+    if (externalCommandsDocResponse) return withCors(externalCommandsDocResponse, request)
 
     // Agent API discovery root + JSON 404 fallback. MUST stay after every
     // other /api/v1/external/* handler — it claims the root and anything the

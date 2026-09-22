@@ -100,6 +100,46 @@ describe("HighlightedText zero-width and clamped ranges", () => {
     expect(range).not.toBeNull()
     expect(range?.textContent).toBe(".")
   })
+
+  it("combines the blue term highlight with the severity blot", () => {
+    const { container } = render(
+      <HighlightedText
+        text="managed term"
+        ranges={[{
+          start: 0,
+          end: 7,
+          kind: "violation-major",
+          ruleId: "term:concept-1:approved",
+        }]}
+      />,
+    )
+
+    const range = container.querySelector('[data-rule-id="term:concept-1:approved"]')
+    expect(range).toHaveClass("terminology-highlight")
+    expect(range).toHaveClass(
+      "underline",
+      "decoration-wavy",
+      "decoration-red-500",
+    )
+  })
+
+  it("keeps severity underlines for non-terminology ranges", () => {
+    const { container } = render(
+      <HighlightedText
+        text="generic rule"
+        ranges={[{
+          start: 0,
+          end: 7,
+          kind: "violation-major",
+          ruleId: "rule-1",
+        }]}
+      />,
+    )
+
+    const range = container.querySelector('[data-rule-id="rule-1"]')
+    expect(range).toHaveClass("underline", "decoration-wavy")
+    expect(range).not.toHaveClass("terminology-highlight")
+  })
 })
 
 describe("HighlightedText evidence tokens (Unicode)", () => {

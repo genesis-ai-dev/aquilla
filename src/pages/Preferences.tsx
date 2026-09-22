@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Cpu, Gauge, KeyRound, PanelLeft, UserRound } from "lucide-react"
+import { Cpu, Gauge, KeyRound, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -21,12 +21,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
+import {
+  FONT_SIZE_SCALES,
+  isFontSizeScale,
+  useFontSizeScale,
+  type FontSizeScale,
+} from "@/branding/FontSize"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
+import { LocalLlmSection } from "@/components/settings/LocalLlmSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
@@ -40,8 +48,8 @@ import {
  * these are reachable by EVERY signed-in user (via the AccountSwitcher), not
  * just org admins — /settings is now an org-level surface gated to managers.
  *
- * `/preferences` shows a General card inline (theme, UI language, analytics,
- * and a Workspace nav row in the same group); heavier sections stay as
+ * `/preferences` shows a General card inline (theme, app font size, UI language,
+ * analytics, and a Workspace nav row in the same group); heavier sections stay as
  * navigation rows into `/preferences/:section`. Both routes render this
  * same component — it branches on the `section` param.
  *
@@ -62,6 +70,13 @@ const THEME_OPTIONS: { id: ThemeMode; labelKey: MessageKey }[] = [
   { id: "light", labelKey: "onboarding.preferences.theme.light" },
   { id: "dark", labelKey: "onboarding.preferences.theme.dark" },
 ]
+
+const FONT_SIZE_LABEL_KEYS: Record<FontSizeScale, MessageKey> = {
+  small: "onboarding.preferences.fontSize.small",
+  default: "onboarding.preferences.fontSize.default",
+  large: "onboarding.preferences.fontSize.large",
+  "extra-large": "onboarding.preferences.fontSize.extraLarge",
+}
 
 /** Single-line fields rendered as text inputs, in render order. */
 const PROFILE_TEXT_FIELDS: {
@@ -145,8 +160,9 @@ function WorkspaceSection() {
 }
 
 /**
- * Device-scoped General card on the Preferences index — theme, UI language,
- * analytics consent, plus Workspace as a connected nav row into its detail page.
+ * Device-scoped General card on the Preferences index — theme, app font size,
+ * UI language, analytics consent, plus Workspace as a connected nav row into
+ * its detail page.
  */
 function GeneralSection({
   workspaceHint,
@@ -156,9 +172,11 @@ function GeneralSection({
   backgroundLocation?: Location
 }) {
   const { mode, setMode } = useThemeMode()
+  const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
   const { enabled, setEnabled } = useAnalyticsConsent()
   const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
+  const fontSizeItems = FONT_SIZE_SCALES.map((id) => ({ value: id, label: t(FONT_SIZE_LABEL_KEYS[id]) }))
 
   return (
     <SettingsGroup label={t("common.general")}>
@@ -187,6 +205,36 @@ function GeneralSection({
                 {THEME_OPTIONS.map(({ id, labelKey }) => (
                   <SelectItem key={id} value={id}>
                     {t(labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label={t("onboarding.preferences.fontSize.groupLabel")}
+        description={t("onboarding.preferences.fontSize.rowDescription")}
+        control={
+          <Select
+            items={fontSizeItems}
+            value={fontSizeScale}
+            onValueChange={(value) => {
+              if (isFontSizeScale(value)) setFontSizeScale(value)
+            }}
+          >
+            <SelectTrigger
+              id="app-font-size"
+              aria-label={t("onboarding.preferences.fontSize.groupLabel")}
+              className="w-44 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {FONT_SIZE_SCALES.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {t(FONT_SIZE_LABEL_KEYS[id])}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -326,6 +374,8 @@ interface PreferenceSection {
   group: string
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
+  /** Only shown in the Tauri desktop shell (checked at render time). */
+  tauriOnly?: boolean
 }
 
 /** Former nested slugs now inlined on the index — keep redirecting for bookmarks. */
@@ -367,6 +417,15 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     render: () => <LocalModelsSection />,
   },
   {
+    slug: "local-llm",
+    titleKey: "onboarding.preferences.section.localLlm.title",
+    descriptionKey: "onboarding.preferences.section.localLlm.description",
+    group: "AI & personalization",
+    icon: ServerCog,
+    tauriOnly: true,
+    render: () => <LocalLlmSection />,
+  },
+  {
     slug: "usage",
     titleKey: "onboarding.preferences.section.usage.title",
     descriptionKey: "onboarding.preferences.section.usage.description",
@@ -404,6 +463,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
         : t("onboarding.preferences.hint.notSet"),
     "provider-keys": t("onboarding.preferences.hint.personal"),
     "local-models": t("onboarding.preferences.hint.onDevice"),
+    "local-llm": t("onboarding.preferences.hint.offlineOnly"),
     usage: t("onboarding.timeWindow.thisWeek"),
   }
 
@@ -417,7 +477,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
         <GeneralSection workspaceHint={hints.workspace} backgroundLocation={backgroundLocation} />
         {PREFERENCE_GROUPS.map((group) => (
           <NavList key={group} label={group}>
-            {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
+            {PREFERENCE_SECTIONS.filter((s) => s.group === group && (!s.tauriOnly || isTauriRuntime())).map((s) => (
               <NavRow
                 key={s.slug}
                 to={`/preferences/${s.slug}`}
@@ -450,7 +510,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   const navigate = useNavigate()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
-  if (!section) return <Navigate to="/preferences" replace />
+  if (!section || (section.tauriOnly && !isTauriRuntime())) return <Navigate to="/preferences" replace />
   if (modal) {
     // In the route-modal there is no breadcrumb, so the BackLink is the way
     // back to the index; it pops history to keep the dialog's depth intact.

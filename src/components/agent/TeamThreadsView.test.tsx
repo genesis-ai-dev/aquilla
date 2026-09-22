@@ -211,7 +211,8 @@ beforeEach(() => {
   agentSessionState.runs = []
   agentSessionState.isStreaming = false
   fetchContextualRunActivity.mockResolvedValue(activity([]))
-  sendContextualSteering.mockResolvedValue(undefined)
+  // AQU-1299: steering resolves to the server's routed result, not void.
+  sendContextualSteering.mockResolvedValue({ intent: "direction", applied: true, run: null })
 })
 
 describe("TeamThreadsView — the active conversation surface", () => {

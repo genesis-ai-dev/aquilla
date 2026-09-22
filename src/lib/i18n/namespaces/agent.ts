@@ -266,7 +266,10 @@ export const agent = defineNamespace({
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",
+    "agent.changeset.membershipChanges": "Membership changes",
+    "agent.changeset.memoryWrites": "Living Memory changes",
     "agent.changeset.changesHeading": "Changes ({count})",
+    "agent.changeset.testimonyHeading": "Validations to endorse ({count})",
     "agent.changeset.warnings": "Warnings",
     "agent.changeset.digestLabel": "Digest:",
     // ── AQU-926 live review card (LiveChangesetCard): the card itself
@@ -302,6 +305,29 @@ export const agent = defineNamespace({
     }),
     "agent.changeset.heldNotice":
       "Held changesets are still staged — they surface here once the ones above are dealt with.",
+
+    // ── AQU-841 in-app approvals queue (ProjectApprovals). The point of the
+    //    surface is that an external agent no longer has to hand back one
+    //    approval URL per changeset: every plan it staged for this project is
+    //    reviewable from one page. Wording keeps the approval gate visible —
+    //    "pending"/"waiting" for the staged state, never "applied". ────────
+    "agent.approvals.title": "Pending agent approvals",
+    "agent.approvals.subtitle":
+      "Plans agents staged in this project. Review them here instead of opening one approval link at a time.",
+    "agent.approvals.signInNotice": "Sign in to review this project's pending approvals.",
+    "agent.approvals.loading": "Loading pending approvals…",
+    "agent.approvals.empty": "Nothing is waiting for approval.",
+    "agent.approvals.refresh": "Refresh",
+    "agent.approvals.approveAll": plural({
+      one: "Approve {count} plan",
+      other: "Approve {count} plans",
+    }),
+    "agent.approvals.approveAllResult": "Approved {approved} of {total}.",
+    "agent.approvals.perItemBadge": "Needs per-item review",
+    "agent.approvals.perItemNotice":
+      "Plans that assert quality — validation and endorsement — are never approved in bulk. Open one to confirm it line by line.",
+    "agent.approvals.openFullReview": "Open full review",
+    "agent.approvals.queueLink": "Review all pending approvals",
 
     // ── Staged proposal rows (ProposalCard's KIND_META + destination badge) ──
     "agent.proposal.kind.edit": "Edit",
@@ -416,6 +442,7 @@ export const agent = defineNamespace({
     "agent.validation.testimonyNotice":
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
+    "agent.validation.roleCannotValidate": "Your role can't validate in this project",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -661,6 +688,13 @@ export const agent = defineNamespace({
           "the total change count in parentheses.",
         placeholders: { count: "Total number of changes in the changeset (may exceed how many are listed below it)." },
       },
+      "agent.changeset.testimonyHeading": {
+        description:
+          "Heading over the itemized list of staged cell validations on the approval " +
+          "page (AQU-1184). Each row names the cell and shows its current text, so the " +
+          "approver endorses specific translations rather than a bare count.",
+        placeholders: { count: "Number of validation/unvalidation entries listed below it." },
+      },
       "agent.changeset.receiptApplied": {
         description:
           "Execution receipt shown in the changeset review card after Approve & " +
@@ -698,6 +732,26 @@ export const agent = defineNamespace({
           "the same wording for both plural forms; translate for whatever forms the " +
           "target language needs.",
         placeholders: { count: "How many additional staged changesets are held; also selects the plural form." },
+      },
+      "agent.approvals.approveAll": {
+        description:
+          "Primary button on the in-app approvals queue (AQU-841) that approves " +
+          "every listed plan that may be bulk-approved, with how many that is. The " +
+          "count excludes plans needing per-item review, so it can be smaller than " +
+          "the number of rows on screen — never word it as 'all'.",
+        placeholders: {
+          count: "How many staged plans the button will approve; also selects the plural form.",
+        },
+      },
+      "agent.approvals.approveAllResult": {
+        description:
+          "Result line after the approvals queue's bulk approve finishes, stating how " +
+          "many of the attempted plans were approved. A shortfall means some failed — " +
+          "the failing rows carry their own error, so keep this a plain tally.",
+        placeholders: {
+          approved: "How many plans the server accepted.",
+          total: "How many plans were attempted.",
+        },
       },
       "agent.proposal.landsInFile": {
         description:
@@ -1019,6 +1073,11 @@ export const agent = defineNamespace({
           persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
           scope: "The passage label or file name the run is working — not translated.",
         },
+      },
+      "agent.validation.roleCannotValidate": {
+        description:
+          "Tooltip on a disabled per-row Validate button in the validation queue " +
+          "when the signed-in user's project role is below the validation floor.",
       },
     },
   },

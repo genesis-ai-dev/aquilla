@@ -12,6 +12,8 @@ import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { applyCorrections } from "./transcript-corrections"
+import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -257,6 +259,24 @@ export interface TranscribeCellArgs {
   session: FrontierSession | null
   projectId: string
   language?: string
+  /**
+   * The slot the clip actually lives in, from a caller that knows it.
+   *
+   * AQU-646: the re-attach below assigns `slot` OUTRIGHT and its sibling-
+   * deselect is scoped to that slot, so naming the wrong one moves the clip and
+   * drops whatever was selected where it lands. The fallback under this is an
+   * INFERENCE, and an inference can only ever distinguish the two slots that
+   * existed when it was written — a clip in any third slot reads as
+   * "recording". Callers that know the slot must say so; the two that don't
+   * (the Recording tab's button, the batch runner) are both working on a cell's
+   * own selected clip, where the inference is still right.
+   *
+   * NOT read off the attachment: the recording modal hands transcription a
+   * hand-built cell stub, and adding one more field to that stub is how this
+   * class of bug has arrived three times already (SUB-49's durationMs, then the
+   * trim wipe). An explicit argument cannot be silently omitted by a stub.
+   */
+  slot?: string
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -279,7 +299,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language } = args
+  const { cell, session, projectId, language, slot: slotArg } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -346,7 +366,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
       : undefined
 
-    const result = await transcribeAudioImpl(bytes, {
+    const raw = await transcribeAudioImpl(bytes, {
       language: whisperLanguageFromTag(language) ?? undefined,
       trim,
       onProgress: (p) => {
@@ -361,6 +381,20 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         }
       },
     })
+
+    // AQU-463: replay the corrections a human has already made in this project
+    // over the raw ASR output. Whisper is wrong the same way every time in a
+    // low-resource language, and the translator has fixed that word before —
+    // they should not have to fix it again. Substitutions are token-for-token
+    // (see transcript-corrections.ts), so the chunk list keeps its length and
+    // the timings below are the ones ASR produced.
+    const learned = loadTranscriptCorrections(projectId)
+    const result = learned.length > 0
+      ? {
+          text: applyCorrections(raw.text, learned),
+          chunks: raw.chunks.map((c) => ({ ...c, text: applyCorrections(c.text, learned) })),
+        }
+      : raw
 
     const wordCount = result.chunks.length
 
@@ -394,8 +428,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // SUB-49: a generated-voice clip must not be relocated into the
         // recording slot by transcribing it (the upsert assigns `slot`
         // outright, and the sibling-deselect above it would drop the real
-        // take). Follow the clip's own slot.
-        slot: audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
+        // take). Follow the clip's own slot — stated by the caller when it
+        // knows, inferred only as a fallback. See TranscribeCellArgs.slot for
+        // why the inference cannot be trusted once a third slot exists.
+        slot: slotArg ?? (audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them

@@ -33,11 +33,40 @@ function jsonResponse(body: FileProgressResponse, etag: string): Response {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   await resetFileProgressResourceForTests()
 })
 
 describe("file progress resource", () => {
+  it("skips duplicate local snapshots without subscriber renders or IndexedDB writes", async () => {
+    const put = vi.spyOn(IDBObjectStore.prototype, "put")
+    const getToken = async () => "token"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(progress("dedupe", 0), '"initial"')))
+    let renders = 0
+    const hook = renderHook(() => {
+      renders++
+      return useFileProgressResource("project", "dedupe", getToken)
+    })
+    await waitFor(() => expect(hook.result.current.progress?.file.filledCount).toBe(0))
+    const local = progress("dedupe", 1)
+    await act(async () => { setLocalFileProgress("project", "dedupe", local, ["edit"]) })
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    put.mockClear()
+    const before = renders
+    await act(async () => {
+      for (let i = 0; i < 10; i++) setLocalFileProgress("project", "dedupe", local, ["edit", "edit"])
+    })
+    expect(renders).toBe(before)
+    expect(put).not.toHaveBeenCalled()
+    expect(hook.result.current.progress).toBe(local)
+    // New pending IDs still matter even with exactly the same progress values.
+    await act(async () => { setLocalFileProgress("project", "dedupe", local, ["edit", "second"]) })
+    expect(put).toHaveBeenCalled()
+    expect(renders).toBeGreaterThan(before)
+    hook.unmount()
+  })
+
   it("moves a pre-account snapshot into the first resolved owner scope", async () => {
     const server = progress("legacy-progress-file", 1)
     const getToken = async () => "token"
@@ -126,6 +155,12 @@ describe("file progress resource", () => {
     expect(hook.result.current.progress?.file.filledCount).toBe(1)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(hook.result.current.progress?.file.filledCount).toBe(1)
+
+    // A progress-neutral render while confirmation is in flight must not
+    // revert to the older server counts or request another confirmation.
+    act(() => setLocalFileProgress("project", "optimistic-file", local, []))
+    expect(hook.result.current.progress?.file.filledCount).toBe(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     resolveConfirmation(jsonResponse(confirmed, '"progress:optimistic-file:2:v1"'))
     await waitFor(() => expect(hook.result.current.progress?.revision).toBe(2))

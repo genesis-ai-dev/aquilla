@@ -235,3 +235,236 @@ describe("exportPptx — translation injection (AQU-152a)", () => {
     await expect(exportPptx(notPptx, fixtureCells())).rejects.toThrow(/no ppt\/slides/)
   })
 })
+
+// ── AQU-1068: content added and removed in the app ───────────────────────────
+//
+// Same two rules as the Word exporter, with one hazard of its own: this one
+// mutates a LIVE DOM collection, so inserting or removing a paragraph shifts
+// the very indices the locator path is built on.
+
+/** A cell somebody added in the app: the origin marker, and no locator. */
+function addedPptxCell(id: string, translated: string): CellData {
+  return {
+    ...makeCell(id, "", translated, id),
+    metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
+  }
+}
+
+async function slideXmlOf(blob: Blob, slide: number): Promise<string> {
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+  return zip.file(`ppt/slides/slide${slide}.xml`)!.async("string")
+}
+
+const removedPptxAt = (memberPath: string, blockPath: string) => ({
+  metadata: {
+    aquillaImport: {
+      sourceLocator: { kind: "package-block", memberPath, blockPath, segment: 0 },
+    },
+  },
+})
+
+const S1_SHAPE1 = "p:sp[1]/p:txBody/a:p[1]"
+const S1_SHAPE2 = "p:sp[2]/p:txBody/a:p[1]"
+
+describe("exportPptx — content added in the app", () => {
+  it("writes an added cell as a new paragraph after the one it follows", async () => {
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c1", "Hello world", "Bonjour", "g1"), "ppt/slides/slide1.xml", S1_SHAPE1),
+      addedPptxCell("added", "Ajouté."),
+      withLocator(makeCell("c2", "Second shape text", "Deuxième", "g2"), "ppt/slides/slide1.xml", S1_SHAPE2),
+    ]
+    const result = await exportPptx(bytes, cells)
+    const xml = await slideXmlOf(result.blob, 1)
+
+    expect(result.inserted).toBe(1)
+    expect(xml.indexOf("Bonjour")).toBeLessThan(xml.indexOf("Ajouté."))
+    expect(xml.indexOf("Ajouté.")).toBeLessThan(xml.indexOf("Deuxième"))
+  })
+
+  it("does not disturb the paragraphs AFTER it — the live-collection hazard", async () => {
+    // `getElementsByTagName` returns a live list. Inserting into it while the
+    // walk is running shifts pIdx and length underneath, so a later paragraph
+    // gets skipped or matched against the wrong locator. The exporter snapshots
+    // with Array.from for exactly this. Without that, "Deuxième" lands wrong.
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c1", "Hello world", "Bonjour", "g1"), "ppt/slides/slide1.xml", S1_SHAPE1),
+      addedPptxCell("a1", "Un."),
+      addedPptxCell("a2", "Deux."),
+      withLocator(makeCell("c2", "Second shape text", "Deuxième", "g2"), "ppt/slides/slide1.xml", S1_SHAPE2),
+    ]
+    const result = await exportPptx(bytes, cells)
+    const xml = await slideXmlOf(result.blob, 1)
+
+    expect(result.inserted).toBe(2)
+    expect(result.injected).toBe(2)
+    expect(xml).toContain("Deuxième")
+    expect(xml.indexOf("Un.")).toBeLessThan(xml.indexOf("Deux."))
+    // THE ASSERTION THAT ACTUALLY CATCHES IT. Without the snapshot the two
+    // inserted clones grow the live list mid-walk and are then WALKED AS IF
+    // THEY WERE SOURCE PARAGRAPHS — they have no locator, so each is counted
+    // untouched and this rises from 2 (slide two's pair) to 4. Every other
+    // observable stays identical, which is why the bug would otherwise ship.
+    expect(result.untouched).toBe(2)
+  })
+
+  it("leaves an UNTRANSLATED added cell out", async () => {
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c1", "Hello world", "Bonjour", "g1"), "ppt/slides/slide1.xml", S1_SHAPE1),
+      addedPptxCell("added", ""),
+    ]
+    expect((await exportPptx(bytes, cells)).inserted).toBe(0)
+  })
+
+  it("adds nothing on a LEGACY deck with no locators", async () => {
+    const bytes = await makePptx()
+    const cells = [
+      makeCell("c1", "Hello world", "Bonjour", "g1"),
+      addedPptxCell("added", "Ajouté."),
+      makeCell("c2", "Second shape text", "Deuxième", "g2"),
+    ]
+    const result = await exportPptx(bytes, cells)
+    expect(result.inserted).toBe(0)
+    expect(await slideXmlOf(result.blob, 1)).not.toContain("Ajouté.")
+  })
+})
+
+describe("exportPptx — content removed in the app", () => {
+  it("drops the paragraph whose cell was removed", async () => {
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c2", "Second shape text", "Deuxième", "g2"), "ppt/slides/slide1.xml", S1_SHAPE2),
+    ]
+    const result = await exportPptx(bytes, cells, {
+      removedCells: [removedPptxAt("ppt/slides/slide1.xml", S1_SHAPE1)],
+    })
+    const xml = await slideXmlOf(result.blob, 1)
+
+    expect(result.removed).toBe(1)
+    expect(xml).not.toContain("Hello ")
+    expect(xml).toContain("Deuxième")
+  })
+
+  it("KEEPS the client's paragraph when the cell is merely untranslated", async () => {
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c1", "Hello world", "", "g1"), "ppt/slides/slide1.xml", S1_SHAPE1),
+      withLocator(makeCell("c2", "Second shape text", "Deuxième", "g2"), "ppt/slides/slide1.xml", S1_SHAPE2),
+    ]
+    const result = await exportPptx(bytes, cells)
+    const xml = await slideXmlOf(result.blob, 1)
+
+    expect(result.removed).toBe(0)
+    expect(xml).toContain("Hello ")
+  })
+
+  it("removing one paragraph does not shift the next one's locator", async () => {
+    // The same live-collection hazard from the other direction.
+    const bytes = await makePptx()
+    const cells = [
+      withLocator(makeCell("c3", "Slide two title", "Titre deux", "g3"), "ppt/slides/slide2.xml", S1_SHAPE1),
+      withLocator(makeCell("c4", "Slide two body", "Corps deux", "g4"), "ppt/slides/slide2.xml", S1_SHAPE2),
+    ]
+    const result = await exportPptx(bytes, cells, {
+      removedCells: [removedPptxAt("ppt/slides/slide1.xml", S1_SHAPE1)],
+    })
+
+    expect(result.removed).toBe(1)
+    const slide2 = await slideXmlOf(result.blob, 2)
+    expect(slide2).toContain("Titre deux")
+    expect(slide2).toContain("Corps deux")
+  })
+
+  it("changes nothing when the removed list is empty", async () => {
+    const bytes = await makePptx()
+    const cells = fixtureCells()
+    const withEmpty = await slideXmlOf((await exportPptx(bytes, cells, { removedCells: [] })).blob, 1)
+    const without = await slideXmlOf((await exportPptx(bytes, cells)).blob, 1)
+    expect(withEmpty).toBe(without)
+  })
+})
+
+// AQU-1124: text inside a PowerPoint table (a p:graphicFrame holding a:tbl)
+// is now imported, so the exporter has to put translations back into it.
+describe("exportPptx — table cells (AQU-1124)", () => {
+  const TABLE_CELL_1 = "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[1]/a:txBody/a:p[1]"
+  const TABLE_CELL_2 = "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[2]/a:txBody/a:p[1]"
+
+  /** One slide: a text box, then a one-row two-column table, then a text box. */
+  async function makeTableDeck(): Promise<ArrayBuffer> {
+    const zip = new JSZip()
+    zip.file(
+      "ppt/slides/slide1.xml",
+      slideXml(
+        shape(`<a:p><a:r><a:t>Before table</a:t></a:r></a:p>`) +
+        `<p:graphicFrame><a:graphic><a:graphicData><a:tbl>` +
+        `<a:tr>` +
+        `<a:tc><a:txBody><a:p><a:r><a:t>Book</a:t></a:r></a:p></a:txBody></a:tc>` +
+        `<a:tc><a:txBody><a:p><a:r><a:t>Chapters</a:t></a:r></a:p></a:txBody></a:tc>` +
+        `</a:tr>` +
+        `</a:tbl></a:graphicData></a:graphic></p:graphicFrame>` +
+        shape(`<a:p><a:r><a:t>After table</a:t></a:r></a:p>`),
+      ),
+    )
+    return zip.generateAsync({ type: "arraybuffer" })
+  }
+
+  it("injects translations into table-cell paragraphs", async () => {
+    const bytes = await makeTableDeck()
+    const cells = [
+      withLocator(makeCell("t1", "Book", "Libro", "g1"), "ppt/slides/slide1.xml", TABLE_CELL_1),
+      withLocator(makeCell("t2", "Chapters", "Capítulos", "g2"), "ppt/slides/slide1.xml", TABLE_CELL_2),
+    ]
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(2)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual([
+      "Before table",
+      "Libro",
+      "Capítulos",
+      "After table",
+    ])
+  })
+
+  it("round-trips the whole slide: import, translate, export, re-import", async () => {
+    const bytes = await makeTableDeck()
+    const imported = await extractPptxStrings(bytes)
+    const cells = imported.map((s, i) =>
+      withLocator(
+        makeCell(`c${i}`, s.original, `${s.original} (es)`, `g${i}`),
+        s.sourceLocation!.file,
+        s.sourceLocation!.blockPath,
+      ),
+    )
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(4)
+    expect(result.untouched).toBe(0)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual([
+      "Before table (es)",
+      "Book (es)",
+      "Chapters (es)",
+      "After table (es)",
+    ])
+  })
+
+  it("legacy positional files (no locators) still map cells to shapes only", async () => {
+    // A deck imported before table support has no cells for the table
+    // paragraphs. Counting them in the positional walk would slide every
+    // mapping after the table onto the wrong paragraph.
+    const bytes = await makeTableDeck()
+    const cells = [
+      makeCell("c1", "Before table", "Antes", "g1"),
+      makeCell("c2", "After table", "Después", "g2"),
+    ]
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(2)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual(["Antes", "Book", "Chapters", "Después"])
+  })
+})

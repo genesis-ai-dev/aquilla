@@ -35,6 +35,8 @@ import {
   type AlignmentLink,
   type AlignmentSeed,
 } from "@/lib/completion/interlinear"
+import { alignOriginalWords, type OriginalWordAlignment } from "@/lib/completion/macula-align"
+import type { MorphWord } from "@/lib/sync/morph-read"
 import { cn } from "@/lib/utils"
 
 export interface InterlinearAlignmentPanelProps {
@@ -46,6 +48,10 @@ export interface InterlinearAlignmentPanelProps {
   alignmentModel: AlignmentModel | null
   /** Already-persisted seeds so the panel can reflect prior confirmed/invalidated state. */
   confirmedSeeds: AlignmentSeed[]
+  /** AQU-462: original-language morphology for this cell (Macula Hebrew/Greek
+   *  source files). Absent for every other kind of source — the panel then
+   *  renders exactly as it did before. */
+  originalWords?: readonly MorphWord[]
   /** Called when the user confirms or invalidates an alignment.
    *  Parent is responsible for persisting and passing a refreshed model. */
   onSeedChange: (seed: AlignmentSeed) => void
@@ -182,12 +188,104 @@ function AlignmentRow({
   )
 }
 
+/**
+ * AQU-462: one original-language word — its surface form, the morphology the
+ * Macula import stored for it, and the target word it maps to.
+ *
+ * Every word of the verse gets a row, including the ones the model cannot
+ * place: an interlinear that silently omits words misrepresents the verse, and
+ * the lemma/Strong's/morphology is useful on its own.
+ */
+function OriginalWordRow({ word }: { word: OriginalWordAlignment }) {
+  const t = useT()
+  const details = [word.lemma, word.strongs, word.morphCode].filter(Boolean).join(" · ")
+  const pct = Math.round(word.confidence * 100)
+
+  return (
+    <div className="flex items-baseline gap-2 rounded-md bg-muted/40 px-2 py-1 text-xs">
+      <span className="min-w-0 flex-1 truncate">
+        <span className="text-sm font-semibold" dir="auto">{word.surface}</span>
+        {details && (
+          <span className="ml-1.5 text-[10px] text-muted-foreground" dir="auto">{details}</span>
+        )}
+      </span>
+
+      <span className="shrink-0 text-muted-foreground">→</span>
+
+      <span className="min-w-0 flex-1 truncate">
+        {word.tgtToken ? (
+          <>
+            <span
+              className={cn(
+                "font-mono",
+                word.basis === "surface" ? "font-semibold" : "italic",
+              )}
+            >
+              {word.tgtToken}
+            </span>
+            {/* i18n-exempt "lemma" is an AlignmentBasis tag, not copy */}
+            {word.basis === "lemma" && (
+              <AppTooltip
+                content={t("workspace.alignment.originalViaLemmaTooltip", {
+                  lemma: word.lemma ?? word.surface,
+                })}
+                className="max-w-xs"
+              >
+                <span className="ml-1.5 rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                  {t("workspace.alignment.originalViaLemma")}
+                </span>
+              </AppTooltip>
+            )}
+          </>
+        ) : (
+          <span className="text-[10px] italic text-muted-foreground/70">
+            {t("workspace.alignment.originalNoMatch")}
+          </span>
+        )}
+      </span>
+
+      {word.tgtToken && (
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+          {pct}%
+        </span>
+      )}
+    </div>
+  )
+}
+
+function OriginalLanguageSection({ words }: { words: OriginalWordAlignment[] }) {
+  const t = useT()
+  return (
+    <div className="flex flex-col gap-1.5" data-aquilla-original-alignment>
+      <div className="flex items-center gap-1">
+        <span className="text-xs font-medium text-muted-foreground">
+          {t("workspace.alignment.originalHeading")}
+        </span>
+        <span className="text-[11px] text-muted-foreground/60">
+          {t("workspace.alignment.originalSub")}
+        </span>
+        <AppTooltip content={t("workspace.alignment.originalHelpTooltip")} className="max-w-xs">
+          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+            <HelpCircle className="h-3 w-3" />
+          </span>
+        </AppTooltip>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {words.map((word) => (
+          <OriginalWordRow key={word.wordSeq} word={word} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function InterlinearAlignmentPanel({
   sourceText,
   targetText,
   alignmentModel,
   confirmedSeeds,
   onSeedChange,
+  originalWords,
 }: InterlinearAlignmentPanelProps) {
   const t = useT()
   // AQU-241: derive whether the model has enough pairs for non-random results.
@@ -222,6 +320,20 @@ export function InterlinearAlignmentPanel({
     const highKeys = new Set(links.map((l) => `${l.srcToken}|${l.tgtToken}`))
     return allAmber.filter((l) => !highKeys.has(`${l.srcToken}|${l.tgtToken}`))
   }, [hasSufficientData, alignmentModel, sourceText, targetText, links])
+
+  // AQU-462: the original-language strip. It does NOT depend on the corpus —
+  // lemma, Strong's and morphology come from the import — so it renders even in
+  // the insufficient-data state. The target links do depend on it, so below the
+  // meaningful-alignment floor the words are shown without them rather than
+  // with guesses the rest of this panel would refuse to make.
+  const originalAlignments: OriginalWordAlignment[] = useMemo(() => {
+    if (!originalWords || originalWords.length === 0) return []
+    return alignOriginalWords(
+      originalWords,
+      targetText,
+      hasSufficientData ? alignmentModel : null,
+    )
+  }, [originalWords, targetText, hasSufficientData, alignmentModel])
 
   const confirmedSet = useMemo(() => {
     const s = new Set<string>()
@@ -273,29 +385,41 @@ export function InterlinearAlignmentPanel({
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
           {t("workspace.alignment.insufficientData")}
         </p>
+        {originalAlignments.length > 0 && (
+          <OriginalLanguageSection words={originalAlignments} />
+        )}
       </div>
     )
   }
 
-  // With sufficient data but no links in either band: hide the section entirely.
-  if (links.length === 0 && amberLinks.length === 0) return null
+  // With sufficient data but no links in either band: hide the section entirely
+  // — unless there is an original-language strip, which stands on its own.
+  if (links.length === 0 && amberLinks.length === 0 && originalAlignments.length === 0) return null
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1">
-        {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("editor.bt.alignment")}
-        </span>
-        <AppTooltip
-          content={t("workspace.alignment.helpTooltipFull")}
-          className="max-w-xs"
-        >
-          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-            <HelpCircle className="h-3 w-3" />
+      {/* AQU-462: the original-language words lead, because they are the verse
+          itself; the statistical link list below is a view over them. */}
+      {originalAlignments.length > 0 && (
+        <OriginalLanguageSection words={originalAlignments} />
+      )}
+
+      {(links.length > 0 || amberLinks.length > 0) && (
+        <div className="flex items-center gap-1">
+          {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("editor.bt.alignment")}
           </span>
-        </AppTooltip>
-      </div>
+          <AppTooltip
+            content={t("workspace.alignment.helpTooltipFull")}
+            className="max-w-xs"
+          >
+            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+              <HelpCircle className="h-3 w-3" />
+            </span>
+          </AppTooltip>
+        </div>
+      )}
 
       {links.length > 0 && (
         <div className="flex flex-col gap-0.5">

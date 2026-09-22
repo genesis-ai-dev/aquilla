@@ -247,7 +247,7 @@ export function isSettledLanguage(
   matches: readonly LanguageEntry[],
 ): boolean {
   if (matches.length !== 1) return false
-  return fold(matches[0]!.name) === fold(query.trim())
+  return fold(matches[0].name) === fold(query.trim())
 }
 
 /**

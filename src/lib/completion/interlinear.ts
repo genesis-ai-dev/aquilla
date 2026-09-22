@@ -140,7 +140,17 @@ export interface AlignmentModel {
 
 // ── Tokenization ──────────────────────────────────────────────────────────────
 
-const TOKEN_RE = /[\p{L}\p{N}]+/gu
+/**
+ * AQU-462: combining marks (`\p{M}`) are part of a word, not separators.
+ *
+ * Pointed Hebrew carries its vowels as combining marks, so a letters-and-digits
+ * class shredded בְּרֵאשִׁית into eleven single-consonant "tokens" — every
+ * Hebrew alignment was really a per-consonant alignment, which is noise no
+ * matter how good the model is. Greek was unaffected only because its accents
+ * arrive precomposed. The same shredding hits any script that points its
+ * vowels (Arabic, Devanagari, Thai), so this is a fix for them too.
+ */
+const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
 
 /** Split a string into lowercase Unicode tokens. */
 function tokenize(s: string): string[] {

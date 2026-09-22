@@ -31,11 +31,56 @@ const useProject = vi.fn()
 const refresh = vi.fn()
 vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
 
+// AQU-1277: the PM picker calls useProjectMembers, which fetches
+// /api/v2/projects/:id/members. Unmocked that reached production identity for
+// real. None of these tests assert on the roster, so an empty one is enough.
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: vi.fn(async () => {}),
+    add: vi.fn(async () => null),
+    addMany: vi.fn(async () => []),
+    remove: vi.fn(async () => {}),
+    changeRole: vi.fn(async () => null),
+  }),
+}))
+
 const archiveProjectRemote = vi.fn()
 const unarchiveProjectRemote = vi.fn()
 vi.mock("@/lib/sync/archive", () => ({
   archiveProjectRemote: (...a: unknown[]) => archiveProjectRemote(...a),
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
+}))
+
+// Project Download UI (Phase 5) — off (browser SPA behavior) by default;
+// the "ProjectOverview offline" describe block below flips these on.
+let tauriRuntime = false
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => tauriRuntime,
+}))
+const fakeOfflineStore = { id: "fake-offline-store" }
+let offlineStoreValue: { store: unknown; loading: boolean; error: Error | null } = {
+  store: null,
+  loading: false,
+  error: null,
+}
+vi.mock("@/context/OfflineStoreContext", () => ({
+  useOfflineStore: () => offlineStoreValue,
+}))
+const downloadProjectOffline = vi.fn()
+const removeOfflineProject = vi.fn((..._a: unknown[]) => ({ ok: true }))
+const getOfflineQueueDepth = vi.fn((..._a: unknown[]) => 0)
+let offlineProjectStatus: { projectId: string; status: string } | null = null
+let downloadProgressValue: { filesDone: number; filesTotal: number } | null = null
+vi.mock("@/lib/offline/download", () => ({
+  downloadProjectOffline: (...a: unknown[]) => downloadProjectOffline(...a),
+  removeOfflineProject: (...a: unknown[]) => removeOfflineProject(...a),
+  getOfflineQueueDepth: (...a: unknown[]) => getOfflineQueueDepth(...a),
+  useOfflineProjectStatus: () => offlineProjectStatus,
+  useDownloadProgress: () => downloadProgressValue,
 }))
 
 type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
@@ -129,6 +174,10 @@ vi.mock("@/lib/sync/sync-token", () => ({
 const fetchProjectFiles = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+  // download.ts (Phase 5, imported transitively by ProjectOverview.tsx) reads
+  // this export at module scope for its default deps — never actually
+  // invoked by these tests, which don't exercise the offline download flow.
+  streamFileCells: vi.fn(),
 }))
 const fetchProjectPlan = vi.fn()
 const setPlanUnit = vi.fn()
@@ -175,14 +224,24 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  countStructuralCells: true,
+  countStructuralOverrides: 0,
+  resetCountStructuralOverrides: vi.fn(),
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -257,6 +316,12 @@ beforeEach(async () => {
   // whether a test sees units depends on which test ran before it.
   fetchSyncToken.mockResolvedValue({ token: "tok" })
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
+  tauriRuntime = false
+  offlineStoreValue = { store: null, loading: false, error: null }
+  offlineProjectStatus = null
+  downloadProgressValue = null
+  removeOfflineProject.mockReturnValue({ ok: true })
+  getOfflineQueueDepth.mockReturnValue(0)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -754,6 +819,68 @@ describe("ProjectOverview archive/restore", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+describe("ProjectOverview offline (Tauri desktop, Phase 5)", () => {
+  beforeEach(() => {
+    tauriRuntime = true
+    offlineStoreValue = { store: fakeOfflineStore, loading: false, error: null }
+  })
+
+  it("shows Make available offline even for a viewer with no other overflow permissions", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Make available offline" })
+    fireEvent.click(item)
+
+    await waitFor(() => expect(downloadProjectOffline).toHaveBeenCalledWith(fakeOfflineStore, "p1", "jwt"))
+  })
+
+  it("shows the offline badge and Remove offline copy once ready", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Available offline")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Remove offline copy" })
+    fireEvent.click(item)
+
+    expect(removeOfflineProject).toHaveBeenCalledWith(fakeOfflineStore, "p1")
+  })
+
+  it("shows a downloading badge with file progress while a download is in flight", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "downloading" }
+    downloadProgressValue = { filesDone: 1, filesTotal: 4 }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Downloading… (1/4 files)")).toBeInTheDocument()
+  })
+
+  it("blocks Remove offline copy and surfaces an error when writes are still queued", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    getOfflineQueueDepth.mockReturnValue(2)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove offline copy" }))
+
+    expect(removeOfflineProject).not.toHaveBeenCalled()
+    expect(await screen.findByText(/haven't synced to the server/)).toBeInTheDocument()
+  })
+
+  it("does not show offline actions outside Tauri", async () => {
+    tauriRuntime = false
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
   })
 })
 
@@ -1426,6 +1553,8 @@ describe("plan board on the overview", () => {
     expect(inspector).toBeInTheDocument()
     // Not inside a dialog: the page stays interactive behind it.
     expect(inspector.closest('[role="dialog"]')).toBeNull()
+    expect(within(inspector).getByRole("link", { name: /in editor$/ }))
+      .toHaveAttribute("href", "/project/p1/editor/file/f1")
   })
 
   it("withholds the planning controls from someone below maintainer", async () => {
@@ -1459,5 +1588,151 @@ describe("plan board on the overview", () => {
     }])
     renderOverview()
     expect(await screen.findByTestId("plan-empty")).toBeInTheDocument()
+  })
+})
+
+// AQU-656: original-blob downloads. The files card they used to hang off was
+// replaced by the plan (AQU-1092); the gallery is now a compact assets card
+// that lists only files with a stored original.
+describe("imported originals on the overview (AQU-656)", () => {
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [],
+    })
+  })
+
+  function fileWith(
+    fileId: string,
+    name: string,
+    hasOriginalSource = false,
+  ): import("@/lib/sync/cells-read").FileSummary {
+    return {
+      fileId, projectId: "p1", name, fileType: "usfm",
+      sourceLanguage: null, targetLanguage: null,
+      cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100,
+      lastEditAt: null, hasOriginalSource,
+    }
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        name: "My Project",
+        files: files.map((f) => ({
+          id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount,
+        })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("shows Download all originals and per-file download when a blob exists", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([
+      fileWith("f1", "Genesis.usfm", true),
+      fileWith("f2", "Notes.md"),
+    ])
+
+    renderOverview()
+
+    expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
+    expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    const original = screen.getByTestId("download-original-file")
+    expect(original.tagName).toBe("BUTTON")
+    expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")
+    expect(screen.queryByRole("button", { name: "Download original Notes.md" })).not.toBeInTheDocument()
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.queryByText("Notes.md")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when no file has a stored original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when the caller is below the org's export floor", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
+    useFiles([fileWith("f1", "Genesis.usfm", true)])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  const manyOriginals = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      fileWith(`f${i + 1}`, `Book${String(i + 1).padStart(2, "0")}.usfm`, true),
+    )
+
+  it("caps the list at five rows and reveals the rest a batch at a time or all at once", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(12))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).getByText("Book05.usfm")).toBeInTheDocument()
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show 5 more" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show all (12)" })).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show 5 more" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(10)
+    expect(within(card).getByText("Book10.usfm")).toBeInTheDocument()
+    // Only two rows are left hidden, so another batch would equal "Show all".
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (12)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(12)
+    expect(within(card).getByText("Book12.usfm")).toBeInTheDocument()
+    expect(within(card).queryByRole("button", { name: "Show all (12)" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show fewer" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+  })
+
+  it("expands everything at once from the first page", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(23))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (23)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(23)
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show fewer" })).toBeInTheDocument()
+  })
+
+  it("shows no paging controls when five or fewer files have an original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(5))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
   })
 })

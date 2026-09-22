@@ -20,6 +20,7 @@ import {
   type AlignmentModel,
   type AlignmentSeed,
 } from "@/lib/completion/interlinear"
+import type { MorphWord } from "@/lib/sync/morph-read"
 
 // AppTooltip mounts the real Base UI tooltip on hover/focus, which isn't
 // reliably driveable in happy-dom. Render its content unconditionally so this
@@ -220,5 +221,107 @@ describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () =>
       /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),
     )
     expect(helpTooltip).toBeTruthy()
+  })
+})
+
+// ── AQU-462: original-language (Macula Greek/Hebrew) strip ───────────────────
+
+describe("InterlinearAlignmentPanel — original-language words (AQU-462)", () => {
+  const warmGreekModel = () =>
+    buildAlignmentModel(
+      Array.from({ length: MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 5 }, () => ({
+        source: "λογος",
+        target: "word",
+      })),
+      [],
+    )
+
+  const morph = (
+    wordSeq: number,
+    surface: string,
+    extra: Partial<MorphWord> = {},
+  ): MorphWord => ({ cellId: "c1", wordSeq, surface, ...extra })
+
+  it("lists every original-language word with its lemma, Strong's number and morphology", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="λογος"
+        targetText="word"
+        alignmentModel={warmGreekModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        originalWords={[morph(1, "λογος", { lemma: "λογος", strongsG: "G3056", morphCode: "N-NSM" })]}
+      />,
+    )
+
+    expect(screen.getByText("Original language")).toBeInTheDocument()
+    // Surface form and lemma coincide for the nominative, so both cells match.
+    expect(screen.getAllByText("λογος").length).toBeGreaterThan(0)
+    expect(screen.getByText(/G3056/)).toBeInTheDocument()
+    expect(screen.getByText(/N-NSM/)).toBeInTheDocument()
+  })
+
+  it("marks a word matched through its lemma rather than the form in the verse", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="λογον"
+        targetText="word"
+        alignmentModel={warmGreekModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        originalWords={[morph(1, "λογον", { lemma: "λογος" })]}
+      />,
+    )
+
+    expect(screen.getByText("via lemma")).toBeInTheDocument()
+    expect(screen.getByText("word")).toBeInTheDocument()
+  })
+
+  it("still shows a word the model cannot place, marked as unmatched", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="αβρααμ"
+        targetText="word"
+        alignmentModel={warmGreekModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        originalWords={[morph(1, "αβρααμ", { lemma: "αβρααμ" })]}
+      />,
+    )
+
+    expect(screen.getAllByText("αβρααμ").length).toBeGreaterThan(0)
+    expect(screen.getByText("no confident match")).toBeInTheDocument()
+  })
+
+  it("shows the words without target links while the corpus is too small to align", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="λογος"
+        targetText="word"
+        alignmentModel={stubModelWithPairCount(MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT - 1)}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        originalWords={[morph(1, "λογος", { lemma: "λογος" })]}
+      />,
+    )
+
+    // The morphology does not depend on the corpus, so it is still shown …
+    expect(screen.getAllByText("λογος").length).toBeGreaterThan(0)
+    // … alongside the same "keep translating" nudge, and with no guessed link.
+    expect(screen.getByText(/keep translating/i)).toBeInTheDocument()
+    expect(screen.getByText("no confident match")).toBeInTheDocument()
+  })
+
+  it("renders exactly as before for a source with no morphology", () => {
+    const { container } = render(
+      <InterlinearAlignmentPanel
+        sourceText="in the beginning"
+        targetText="am anfang"
+        alignmentModel={stubModelWithPairCount(MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT)}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+      />,
+    )
+    expect(container.querySelector("[data-aquilla-original-alignment]")).toBeNull()
   })
 })

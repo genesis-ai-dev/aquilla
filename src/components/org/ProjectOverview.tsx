@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -26,10 +26,20 @@ import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
+import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import {
+  downloadProjectOffline,
+  removeOfflineProject,
+  getOfflineQueueDepth,
+  useDownloadProgress,
+  useOfflineProjectStatus,
+} from "@/lib/offline/download"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -47,6 +57,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -240,6 +251,11 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 
 const LANE_TAB_ALL = "__all__"
 const LANE_TAB_DEFAULT = "__default__"
+/**
+ * AQU-656: rows the imported-originals card shows before "Show more" /
+ * "Show all" kick in. Also the batch size each "Show more" reveals.
+ */
+const ORIGINALS_PAGE_SIZE = 5
 
 function laneTagToTab(tag: string | null): string {
   if (tag === null) return LANE_TAB_ALL
@@ -336,6 +352,19 @@ export function ProjectOverview() {
     () => new Map(files.map((f) => [f.fileId, f.name])),
     [files],
   )
+  // AQU-656: originals live on `file_source_blobs`, not the plan. The files
+  // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
+  // PM download gallery is this compact list — only files that have a blob.
+  const originalFiles = useMemo(
+    () => files.filter((f) => f.hasOriginalSource),
+    [files],
+  )
+  // The originals list starts capped at ORIGINALS_PAGE_SIZE rows; "Show more"
+  // grows it one page at a time, "Show all" expands it outright, and "Show
+  // fewer" collapses it back to the first page.
+  const [originalsShown, setOriginalsShown] = useState(ORIGINALS_PAGE_SIZE)
+  const visibleOriginals = originalFiles.slice(0, originalsShown)
+  const hiddenOriginalsCount = originalFiles.length - visibleOriginals.length
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
@@ -583,7 +612,11 @@ export function ProjectOverview() {
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
-  const canAssign = (project?.syncRole?.level ?? 0) >= 500
+  const canAssign = canOpenAssignUi(
+    project?.syncRole?.level ?? null,
+    orgSettings.allowSelfAssignment,
+    orgSettings.assignmentMinRole,
+  )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
 
@@ -726,6 +759,39 @@ export function ProjectOverview() {
     }
   }
 
+  // Project Download UI (Phase 5) — Tauri desktop only. `offlineStore` is
+  // null outside Tauri (see OfflineStoreContext.tsx), so every handler below
+  // is a no-op in the plain browser SPA.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStatus = useOfflineProjectStatus(offlineStore, id || null)
+  const downloadProgress = useDownloadProgress(id)
+
+  async function handleMakeAvailableOffline() {
+    if (!offlineStore || !jwt || !id) return
+    setError(null)
+    try {
+      await downloadProjectOffline(offlineStore, id, jwt)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  function handleRemoveOfflineCopy() {
+    if (!offlineStore || !id) return
+    setError(null)
+    const queueDepth = getOfflineQueueDepth(offlineStore, id)
+    if (queueDepth > 0) {
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: queueDepth }))
+      return
+    }
+    const result = removeOfflineProject(offlineStore, id)
+    if (!result.ok && result.reason === "queue-not-empty") {
+      // Lost a race with a write that queued between the check above and the
+      // removal itself — same message, fresh count.
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: result.queueDepth }))
+    }
+  }
+
   // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
   // visually mirrors under RTL instead of pointing away from the target.
   const languagePair =
@@ -816,6 +882,23 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
+                      {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                        <Badge variant="secondary" className="shrink-0" data-testid="offline-ready-badge">
+                          <HardDriveDownload className="size-3" aria-hidden />
+                          {t("org.projectOverview.offlineReadyBadge")}
+                        </Badge>
+                      )}
+                      {isTauriRuntime() && offlineStatus?.status === "downloading" && (
+                        <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
+                          <Spinner className="size-3" />
+                          {downloadProgress
+                            ? t("org.projectOverview.offlineDownloadingProgress", {
+                                done: downloadProgress.filesDone,
+                                total: downloadProgress.filesTotal,
+                              })
+                            : t("org.projectOverview.offlineDownloading")}
+                        </Badge>
+                      )}
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
@@ -865,8 +948,8 @@ export function ProjectOverview() {
                         {t("common.restore")}
                       </Button>
                     )}
-                    {/* Archive + Download + Lifecycle moved into overflow menu */}
-                    {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
+                    {/* Archive + Download + Lifecycle + Offline moved into overflow menu */}
+                    {(canManage || isOwner || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -901,6 +984,25 @@ export function ProjectOverview() {
                                 <PauseCircle className="size-4" />
                               )}
                               {isFrozen ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status !== "ready" && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                void handleMakeAvailableOffline()
+                              }}
+                              disabled={!jwt || offlineStatus?.status === "downloading"}
+                            >
+                              <CloudDownload className="size-4" />
+                              {offlineStatus?.status === "downloading"
+                                ? t("org.projectOverview.offlineDownloading")
+                                : t("org.projectOverview.makeAvailableOffline")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                            <DropdownMenuItem onClick={handleRemoveOfflineCopy}>
+                              <CloudOff className="size-4" />
+                              {t("org.projectOverview.removeOfflineCopy")}
                             </DropdownMenuItem>
                           )}
                           {isOwner && (
@@ -1345,7 +1447,7 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              {project && isFlagEnabled(project, "contextualTranslation") && (
+              {project && isAutopilotVisible(project) && (
                 <ProjectAutopilotPanel
                   key={id}
                   projectId={id}
@@ -1419,6 +1521,121 @@ export function ProjectOverview() {
                   ) : null
                 }
               />
+
+              {/* AQU-656: original imported blobs. Hidden when the org export
+                  floor forbids it, and when no file has a stored original —
+                  Codex-migrated / pre-sidecar files are AQU-991, not a
+                  storage-audit empty state here. */}
+              {orgSettings.canExport && originalFiles.length > 0 && jwt && (
+                <div className="rounded-lg border bg-card p-5" data-testid="imported-originals">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold text-muted-foreground">
+                      {t("org.projectOverview.importedOriginalsHeading")}
+                    </h2>
+                    <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="download-originals-zip"
+                        onClick={() => {
+                          const fileId = project?.files[0]?.id ?? originalFiles[0]?.fileId
+                          if (!fileId) return
+                          void downloadImportedOriginalsZip({
+                            projectId: id,
+                            projectName: project?.name ?? "project",
+                            jwt,
+                            fileId,
+                          })
+                        }}
+                      >
+                        {t("org.projectOverview.downloadOriginals")}
+                      </Button>
+                    </AppTooltip>
+                  </div>
+                  <ul
+                    id="imported-originals-list"
+                    className="space-y-1"
+                    aria-label={t("org.projectOverview.importedOriginalsListAria")}
+                  >
+                    {visibleOriginals.map((f) => (
+                      <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                        <span className="min-w-0 flex-1 font-medium">
+                          <ExpandableName name={f.name} />
+                        </span>
+                        <AppTooltip content={t("fileDetails.downloadOriginal")}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0"
+                            aria-label={t("org.projectOverview.downloadOriginalAria", { fileName: f.name })}
+                            data-testid="download-original-file"
+                            onClick={() => {
+                              void downloadImportedOriginal({
+                                projectId: id,
+                                file: { id: f.fileId, name: f.name, type: f.fileType },
+                                getToken: async (fileId) => {
+                                  const tok = await fetchSyncToken(jwt, id, fileId, {
+                                    projectName: project?.name,
+                                  })
+                                  return tok.token
+                                },
+                              })
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </AppTooltip>
+                      </li>
+                    ))}
+                  </ul>
+                  {originalFiles.length > ORIGINALS_PAGE_SIZE && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                      {/* "Show more" only earns its place while a full batch is
+                          still hidden — once fewer than a page remains it would
+                          do exactly what "Show all" does. */}
+                      {hiddenOriginalsCount > ORIGINALS_PAGE_SIZE && (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          data-testid="imported-originals-show-more"
+                          onClick={() => setOriginalsShown((n) => n + ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowMore", {
+                            count: ORIGINALS_PAGE_SIZE,
+                          })}
+                        </button>
+                      )}
+                      {hiddenOriginalsCount > 0 ? (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={false}
+                          data-testid="imported-originals-show-all"
+                          onClick={() => setOriginalsShown(originalFiles.length)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowAll", {
+                            count: originalFiles.length,
+                          })}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={true}
+                          data-testid="imported-originals-show-fewer"
+                          onClick={() => setOriginalsShown(ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.showFewer")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485
@@ -1508,6 +1725,9 @@ export function ProjectOverview() {
                         files={project?.files ?? []}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
+                        roleLevel={project?.syncRole?.level ?? 0}
+                        allowSelfAssignment={orgSettings.allowSelfAssignment}
+                        assignmentMinRole={orgSettings.assignmentMinRole}
                         onAssigned={handleAssigned}
                       />
                     </div>

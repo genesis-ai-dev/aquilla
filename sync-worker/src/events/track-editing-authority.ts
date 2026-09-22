@@ -3,20 +3,21 @@
 // `allowTrackEditing` (project settings; the write route is maintainer-gated)
 // decides whether a project's timelines may be restructured at all — tracks
 // added and deleted, grouped into folders, recoloured. It is the sibling of
-// line-creation-authority.ts and timing-authority.ts, and it fails safe to OFF
-// for the same reason the first one does: the affordance is the liability the
-// setting exists to contain.
+// timing-authority.ts, and it fails safe to OFF because the affordance is the
+// liability the setting exists to contain.
 //
-// BUT IT IS A DIFFERENT SHAPE FROM BOTH, AND THE DIFFERENCE IS THE POINT.
-// `allowLineCreation` is a conditional floor RAISE: `source.cell.create` was
-// lowered to CONTRIBUTOR in the static table, and authorize puts PROJECT_LEAD
-// back when the setting is off. There is no such move available here.
-// `file.track.set` is ALREADY floored at MAINTAINER (role-policy.ts), so there
-// is no lower floor to raise from — this setting answers *whether*, not *who*.
+// IT IS NOW THE ONLY PROJECT SETTING OF ITS KIND STILL ENFORCED HERE, and the
+// contrast worth knowing is with the cell-editing tier. That one was checked
+// at this perimeter too until 2026-09-09, when it became a product rule
+// enforced at the button instead — enforcing it server-side silently refused
+// three re-import-class flows that emit cell events through the user's own
+// outbox (see authorize.ts). Nothing analogous applies here: `file.track.set`
+// has no import path, no re-import flow emits it, and it is ALREADY floored at
+// MAINTAINER in role-policy.ts, so this setting answers *whether*, not *who*.
 // The consequence, stated plainly because it looks like a bug otherwise: with
 // the setting off, a gated write is refused to an OWNER. Two gates means two
 // gates. Do not add a `role < X` term to the check in authorize.ts to make it
-// resemble its neighbours; both of them carry one and neither reason applies.
+// resemble the timing carve-out; that one raises a floor, and this does not.
 //
 // AND THE GATING IS PER FIELD, BECAUSE ONE EVENT KIND CARRIES EVERY OPERATION.
 // `file.track.set` is how a reorder, a rename, a creation, a deletion, a folder
@@ -29,8 +30,8 @@
  * Does this patch REQUIRE the setting, or is it ordinary maintainer work?
  *
  * Exported and pure so the rule can be tested without minting a JWT or faking
- * a database — the seam line-creation-authority.ts never got, and the reason
- * its own test has to stand up a whole fake DB to assert a policy decision.
+ * a database — a seam worth copying whenever a policy decision is worth
+ * asserting on its own.
  *
  * Three clauses, and the first is NOT a special case of the second:
  *

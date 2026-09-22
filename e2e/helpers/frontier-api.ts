@@ -110,6 +110,52 @@ export async function createProjectServerSide(
   return (await r.json()) as CreatedProject
 }
 
+/** GET /api/v2/projects/:projectId/settings — the stored shared-settings blob,
+ * for specs asserting that a UI save actually reached auth-worker. */
+export async function readProjectSettings(
+  jwt: string,
+  projectId: string,
+): Promise<Record<string, unknown>> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!r.ok) throw new Error(`read settings failed: HTTP ${r.status} — ${await r.text()}`)
+  const stored = (await r.json()) as { settings?: Record<string, unknown> }
+  return stored.settings ?? {}
+}
+
+/** PUT /api/v2/projects/:projectId/settings — merge keys into a project's
+ * settings. Caller needs maintainer+ (the route's own floor). */
+export async function updateProjectSettings(
+  jwt: string,
+  projectId: string,
+  settings: Record<string, unknown>,
+): Promise<void> {
+  const current = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!current.ok) {
+    throw new Error(`read settings failed: HTTP ${current.status} — ${await current.text()}`)
+  }
+  const stored = (await current.json()) as { settings?: Record<string, unknown>; version?: number }
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    {
+      method: "PUT",
+      headers: authHeaders(jwt),
+      body: JSON.stringify({
+        settings: { ...(stored.settings ?? {}), ...settings },
+        ifMatchVersion: stored.version ?? 0,
+      }),
+    },
+  )
+  if (!r.ok) {
+    throw new Error(`update settings failed: HTTP ${r.status} — ${await r.text()}`)
+  }
+}
+
 /** POST /api/v2/projects/:projectId/invites — mint a share-link invite
  * (caller needs project_lead+). Pass an email to email-bind it. */
 export async function createProjectInvite(

@@ -13,7 +13,7 @@ import {
   applyAddonPurchase,
   applySubscriptionSnapshot,
   orgIdFromMetadata,
-  rememberBillingEvent,
+  applyBillingEvent,
   subscriptionFromStripeObject,
 } from "../lib/billing/apply"
 import { FIELD_PLAN, resolveFieldPlan } from "../lib/billing/plans"
@@ -206,44 +206,51 @@ billing.post("/billing/webhook", async (c) => {
   const type = event.type ?? ""
   const eventId = typeof event.id === "string" ? event.id : null
 
+  const handled = ["checkout.session.completed", "customer.subscription.updated",
+    "customer.subscription.deleted", "invoice.paid"].includes(type)
+  if (handled && !eventId?.trim()) {
+    return c.json({ error: "missing_event_id" }, 400)
+  }
+  const applyEvent = async (orgId: number, apply: (tx: AquillaDb) => Promise<void>) => {
+    const applied = await applyBillingEvent(
+      c.env.AQUILLA_PG, orgId, eventId!, type, obj, apply,
+    )
+    return c.json(applied ? { ok: true } : { ok: true, duplicate: true })
+  }
+
   try {
     if (type === "checkout.session.completed") {
       const orgId = orgIdFromMetadata(obj.metadata)
       if (orgId == null) return c.json({ ok: true, ignored: "no_org" })
-      if (!(await rememberBillingEvent(c.env.AQUILLA_PG, orgId, eventId, type, obj))) {
-        return c.json({ ok: true, duplicate: true })
-      }
       const kind = String((obj.metadata as Record<string, string> | undefined)?.kind ?? "")
       const customer = typeof obj.customer === "string" ? obj.customer : null
       const subscriptionId = typeof obj.subscription === "string" ? obj.subscription : null
       if (kind === "addon") {
         const packs = Number((obj.metadata as Record<string, string> | undefined)?.packs ?? 1)
-        await applyAddonPurchase(c.env.AQUILLA_PG, orgId, packs)
+        return await applyEvent(orgId, (tx) => applyAddonPurchase(tx, orgId, packs))
       } else if (subscriptionId && stripeConfigured(c.env)) {
         const sub = await retrieveSubscription(c.env, subscriptionId)
-        await applySubscriptionSnapshot(c.env.AQUILLA_PG, orgId, sub)
+        return await applyEvent(orgId, (tx) => applySubscriptionSnapshot(tx, orgId, sub))
       } else if (subscriptionId) {
-        await applySubscriptionSnapshot(c.env.AQUILLA_PG, orgId, {
+        return await applyEvent(orgId, (tx) => applySubscriptionSnapshot(tx, orgId, {
           id: subscriptionId,
           customer: customer ?? "",
           status: "active",
           currentPeriodStart: new Date().toISOString(),
           currentPeriodEnd: new Date(Date.now() + FIELD_PLAN.intervalDays * 86_400_000).toISOString(),
-        })
+        }))
       }
+      return await applyEvent(orgId, async () => {})
     } else if (type === "customer.subscription.updated" || type === "customer.subscription.deleted") {
       const sub = subscriptionFromStripeObject(obj)
       const orgId =
         orgIdFromMetadata(obj.metadata) ??
         (await lookupOrgIdBySubscription(c.env.AQUILLA_PG, sub.id))
       if (orgId == null) return c.json({ ok: true, ignored: "no_org" })
-      if (!(await rememberBillingEvent(c.env.AQUILLA_PG, orgId, eventId, type, obj))) {
-        return c.json({ ok: true, duplicate: true })
-      }
       if (type === "customer.subscription.deleted") {
-        await applySubscriptionSnapshot(c.env.AQUILLA_PG, orgId, { ...sub, status: "canceled" })
+        return await applyEvent(orgId, (tx) => applySubscriptionSnapshot(tx, orgId, { ...sub, status: "canceled" }))
       } else {
-        await applySubscriptionSnapshot(c.env.AQUILLA_PG, orgId, sub)
+        return await applyEvent(orgId, (tx) => applySubscriptionSnapshot(tx, orgId, sub))
       }
     } else if (type === "invoice.paid") {
       const subscriptionId =
@@ -256,13 +263,11 @@ billing.post("/billing/webhook", async (c) => {
       if (!subscriptionId) return c.json({ ok: true, ignored: "no_subscription" })
       const orgId = await lookupOrgIdBySubscription(c.env.AQUILLA_PG, subscriptionId)
       if (orgId == null) return c.json({ ok: true, ignored: "no_org" })
-      if (!(await rememberBillingEvent(c.env.AQUILLA_PG, orgId, eventId, type, obj))) {
-        return c.json({ ok: true, duplicate: true })
-      }
       if (stripeConfigured(c.env)) {
         const sub = await retrieveSubscription(c.env, subscriptionId)
-        await applySubscriptionSnapshot(c.env.AQUILLA_PG, orgId, sub)
+        return await applyEvent(orgId, (tx) => applySubscriptionSnapshot(tx, orgId, sub))
       }
+      return await applyEvent(orgId, async () => {})
     }
   } catch (err) {
     console.error("[billing] webhook handler error:", err)
@@ -273,15 +278,11 @@ billing.post("/billing/webhook", async (c) => {
 })
 
 async function lookupOrgIdBySubscription(db: AquillaDb, subscriptionId: string): Promise<number | null> {
-  try {
-    const row = await db
-      .prepare(`SELECT org_id FROM org_billing WHERE stripe_subscription_id = ?`)
-      .bind(subscriptionId)
-      .first<{ org_id: number }>()
-    return row?.org_id ?? null
-  } catch {
-    return null
-  }
+  const row = await db
+    .prepare(`SELECT org_id FROM org_billing WHERE stripe_subscription_id = ?`)
+    .bind(subscriptionId)
+    .first<{ org_id: number }>()
+  return row?.org_id ?? null
 }
 
 export default billing

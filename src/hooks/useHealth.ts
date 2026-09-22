@@ -10,8 +10,22 @@ export interface HealthCell {
   status: CellData["status"]
   original: string
   translated: string
+  medium?: CellData["medium"]
+  transcription?: string
+  hasOwnTake?: boolean
   endorsementCount?: number
   threads?: CellData["threads"]
+}
+
+interface RuleCacheEntry {
+  fileId: string
+  status: HealthCell["status"]
+  original: string
+  translated: string
+  medium: HealthCell["medium"]
+  transcription: string | undefined
+  hasOwnTake: boolean | undefined
+  infractions: RuleInfraction[]
 }
 
 interface HealthDispatchOptions {
@@ -83,11 +97,20 @@ function infractionMapsEqual(
     if (!bv) return false
     if (av.length !== bv.length) return false
     for (let i = 0; i < av.length; i++) {
-      // Compare by ruleId + reason(+params) — enough to detect rule-trigger
-      // changes without a full deep equality over the object.
-      if (av[i].ruleId !== bv[i].ruleId) return false
-      if (av[i].reason !== bv[i].reason) return false
-      if (av[i].reasonParams?.tokens !== bv[i].reasonParams?.tokens) return false
+      const left = av[i]
+      const right = bv[i]
+      if (left === right) continue
+      if (left.ruleId !== right.ruleId || left.reason !== right.reason
+        || left.cellId !== right.cellId || left.fileId !== right.fileId) return false
+      const keys = Object.keys(left.reasonParams ?? {})
+      if (keys.length !== Object.keys(right.reasonParams ?? {}).length
+        || keys.some(key => left.reasonParams?.[key] !== right.reasonParams?.[key])) return false
+      if (left.spans.length !== right.spans.length) return false
+      for (let index = 0; index < left.spans.length; index++) {
+        const a = left.spans[index]
+        const b = right.spans[index]
+        if (a.side !== b.side || a.start !== b.start || a.end !== b.end || a.matchedText !== b.matchedText) return false
+      }
     }
   }
   return true
@@ -160,11 +183,50 @@ function deriveAuxStats(fileCells: Map<string, readonly HealthCell[]>): {
   return { fileProgress, openCommentCount, projectOpenCommentCount, cellOpenCommentCount }
 }
 
+/** Save acknowledgements change event IDs and timestamps without changing
+ * health. Preserve the input reference in that case so all three derivations
+ * (decay, rules, progress/comments) can keep their existing results.
+ * Compare values, not summary identity: store summaries include non-health
+ * fields and may be reconstructed after a server acknowledgement.
+ */
+function sameHealthInputs(
+  previous: Map<string, readonly HealthCell[]>,
+  current: Map<string, readonly HealthCell[]>,
+): boolean {
+  if (previous === current) return true
+  if (previous.size !== current.size) return false
+  const oldFiles = previous.entries()
+  for (const [fileId, cells] of current) {
+    const old = oldFiles.next().value
+    if (!old || old[0] !== fileId) return false
+    const before = old[1]
+    if (before === cells) continue
+    if (before.length !== cells.length) return false
+    for (let i = 0; i < cells.length; i++) {
+      const a = before[i]
+      const b = cells[i]
+      if (a === b) continue
+      if (a.id !== b.id || a.status !== b.status
+        || a.original !== b.original || a.translated !== b.translated
+        || a.endorsementCount !== b.endorsementCount
+        || a.medium !== b.medium || a.transcription !== b.transcription
+        || a.hasOwnTake !== b.hasOwnTake || a.threads !== b.threads) return false
+    }
+  }
+  return true
+}
+
 export function useHealth(
-  fileCells: Map<string, readonly HealthCell[]>,
+  inputFileCells: Map<string, readonly HealthCell[]>,
   rules: TranslationRule[] = [],
   options: HealthDispatchOptions = {},
 ): HealthStats {
+  const previousInputs = useRef(inputFileCells)
+  const fileCells = useMemo(() => {
+    if (sameHealthInputs(previousInputs.current, inputFileCells)) return previousInputs.current
+    previousInputs.current = inputFileCells
+    return inputFileCells
+  }, [inputFileCells])
   const requiredValidations = options.requiredValidations ?? 1
   const enabled = options.enabled ?? true
   const decaySettingsKey = JSON.stringify(options.decaySettings ?? null) + `|${requiredValidations}`
@@ -189,11 +251,11 @@ export function useHealth(
   // and rebuilds `fileCells` to a new Map ref, so a naive full pass re-evaluates
   // every cell for every keystroke-blur (8+s on a Bible book). Rules are pure
   // per-cell (see rule-engine.ts), so we cache infractions keyed on each cell's
-  // content signature and only re-run `checkRulesForCell` for cells whose
-  // (status, original, translated) actually changed.
+  // individual input fields and only re-run `checkRulesForCell` for cells whose
+  // text, status, media transcript, recording presence, or file actually changed.
   const infractionsCacheRef = useRef<{
     rulesSig: string
-    byCell: Map<string, { sig: string; infractions: RuleInfraction[] }>
+    byCell: Map<string, RuleCacheEntry>
   }>({ rulesSig: "", byCell: new Map() })
 
   // `enabledRules` + `rulesSig` depend only on `rules`, which changes far less
@@ -218,28 +280,44 @@ export function useHealth(
     const cache = infractionsCacheRef.current
     const rulesChanged = cache.rulesSig !== rulesSig
 
-    const nextByCell = new Map<string, { sig: string; infractions: RuleInfraction[] }>()
+    const byCell = cache.byCell
+    let visited = 0
     const result = new Map<string, RuleInfraction[]>()
 
     if (enabledRules.length === 0) {
-      infractionsCacheRef.current = { rulesSig, byCell: nextByCell }
+      infractionsCacheRef.current = { rulesSig, byCell: new Map() }
       end()
       return result
     }
 
     for (const [fileId, cells] of fileCells) {
       for (const cell of cells) {
-        const sig = `${cell.status} ${cell.original} ${cell.translated}`
-        const prev = rulesChanged ? undefined : cache.byCell.get(cell.id)
-        const entry = prev && prev.sig === sig
+        visited++
+        const prev = rulesChanged ? undefined : byCell.get(cell.id)
+        const entry = prev && prev.fileId === fileId
+          && prev.status === cell.status && prev.original === cell.original
+          && prev.translated === cell.translated && prev.medium === cell.medium
+          && prev.transcription === cell.transcription && prev.hasOwnTake === cell.hasOwnTake
           ? prev
-          : { sig, infractions: checkRulesForCell(cell as CellData, fileId, enabledRules) }
-        nextByCell.set(cell.id, entry)
+          : {
+              fileId, status: cell.status, original: cell.original, translated: cell.translated,
+              medium: cell.medium, transcription: cell.transcription, hasOwnTake: cell.hasOwnTake,
+              infractions: checkRulesForCell(cell as CellData, fileId, enabledRules),
+            }
+        if (entry !== prev) byCell.set(cell.id, entry)
         if (entry.infractions.length > 0) result.set(cell.id, entry.infractions)
       }
     }
 
-    infractionsCacheRef.current = { rulesSig, byCell: nextByCell }
+    // Insertions/updates are already reflected in byCell. A size mismatch
+    // means entries may have left the loaded files; prune only then rather
+    // than copying tens of thousands of unchanged entries on every save.
+    if (byCell.size !== visited) {
+      const retained = new Set<string>()
+      for (const cells of fileCells.values()) for (const cell of cells) retained.add(cell.id)
+      for (const id of byCell.keys()) if (!retained.has(id)) byCell.delete(id)
+    }
+    infractionsCacheRef.current = { rulesSig, byCell }
     end()
     memMark("useHealth.checkRules")
     return result
@@ -280,9 +358,14 @@ export function useHealth(
   // finishes the equality walk in a few ms and saves a full re-render of
   // every visible row.
   const prevRef = useRef<HealthStats | null>(null)
-  if (prevRef.current && healthStatsEqual(prevRef.current, raw)) {
-    return prevRef.current
-  }
-  prevRef.current = raw
-  return raw
+  // An equivalent new result may reuse an older reference. Remember that
+  // comparison for this raw result so unrelated renders do not walk every
+  // cell again. All health/rule/comment inputs still invalidate `raw` above.
+  return useMemo(() => {
+    if (prevRef.current && healthStatsEqual(prevRef.current, raw)) {
+      return prevRef.current
+    }
+    prevRef.current = raw
+    return raw
+  }, [raw])
 }

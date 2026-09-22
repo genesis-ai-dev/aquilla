@@ -33,11 +33,13 @@ import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { loadSession } from "@/lib/frontier/session-store"
 import {
   setContextualTransport,
+  type ContextualParkReason,
   type ContextualRunSnapshot,
   type ContextualTransport,
   type ContextualTransportSnapshot,
 } from "./run-store"
 import { isOpaqueId } from "../../../shared/span-label"
+import type { RunCommandIntent } from "../../../shared/run-command-intent"
 
 // ── Typed errors ────────────────────────────────────────────────────────────
 
@@ -146,7 +148,7 @@ function projectForRun(runId: string): string {
   return projectId
 }
 
-async function postRunCommand(runId: string, command: "pause" | "resume" | "terminate"): Promise<void> {
+async function postRunCommand(runId: string, command: ContextualRunCommand): Promise<void> {
   const projectId = projectForRun(runId)
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(
@@ -182,6 +184,7 @@ export const realContextualTransport: ContextualTransport = {
     fileId: string,
     anchorCellId?: string,
     targetLang = "",
+    translateEverything = false,
   ): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
@@ -192,6 +195,10 @@ export const realContextualTransport: ContextualTransport = {
         fileId,
         ...(anchorCellId ? { anchorCellId } : {}),
         ...(targetLang ? { targetLang } : {}),
+        // Omitted unless chosen, so the server's trust-gated default applies
+        // (AQU-1300) — sending `false` explicitly would mean the same thing,
+        // but a start that says nothing about budget is the honest default.
+        ...(translateEverything ? { translateEverything: true } : {}),
       }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")
@@ -203,6 +210,8 @@ export const realContextualTransport: ContextualTransport = {
   pause: (runId) => postRunCommand(runId, "pause"),
   resume: (runId) => postRunCommand(runId, "resume"),
   terminate: (runId) => postRunCommand(runId, "terminate"),
+  continueRun: (runId, scope) =>
+    postRunCommand(runId, scope === "all" ? "continue-all" : "continue"),
 }
 
 // ── Drafts: the run's actual output ─────────────────────────────────────────
@@ -295,6 +304,9 @@ export interface ContextualOverviewFile {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** Why this file's newest run parked (AQU-1300). A project-wide start is one
+   *  run per file, so this is where the per-file "waiting for you" is read. */
+  parkReason?: ContextualParkReason | null
 }
 
 export type ReadinessLevel = "ready" | "partial" | "missing"
@@ -310,10 +322,16 @@ export interface ReadinessItem {
 
 /** What autopilot knows about this project — the context an expert translator
  *  would have on the desk before drafting a line. */
+/** Prerequisites the server actually enforces before a run may start. */
+export type StartBlockerId = "languages" | "brief"
+
 export interface ContextReadiness {
   items: ReadinessItem[]
   blockingGaps: number
   ready: boolean
+  /** Empty on a project autopilot may start on. Absent from older servers,
+   *  which is read as "nothing blocked" — the server is still authoritative. */
+  startBlockers?: StartBlockerId[]
 }
 
 export interface ContextualOverview {
@@ -351,6 +369,12 @@ export interface ContextualRunRecord {
   scopeGroup?: string | null
   anchorCellId?: string | null
   proposedDrafts?: number
+  /** AQU-1300. Spans the run may still process before it parks; `null` is
+   *  unlimited ("translate everything"). Absent from a pre-AQU-1300 backend. */
+  spanAllowance?: number | null
+  /** Why a `parked` run stopped. Only `awaiting_input` offers Continue /
+   *  Translate everything — `work_exhausted` is genuinely finished. */
+  parkReason?: ContextualParkReason | null
   activeDirections: string[]
 }
 
@@ -525,6 +549,18 @@ function normalizeRun(value: unknown): ContextualRunRecord | null {
     ...(row.proposedDrafts !== undefined
       ? { proposedDrafts: numberValue(row.proposedDrafts) }
       : {}),
+    // Both stay ABSENT rather than defaulting when the backend does not send
+    // them (AQU-1300). A missing allowance is "this server has no trust gate",
+    // which is not the same as a spent budget, and defaulting it to 0 would
+    // paint every run on an older backend as waiting for input.
+    ...(row.spanAllowance === null || typeof row.spanAllowance === "number"
+      ? { spanAllowance: row.spanAllowance }
+      : {}),
+    ...(row.parkReason === "awaiting_input" || row.parkReason === "work_exhausted"
+      ? { parkReason: row.parkReason }
+      : row.parkReason === null
+        ? { parkReason: null }
+        : {}),
     activeDirections: directions,
   }
 }
@@ -759,7 +795,15 @@ export async function startFileContextualRun(
   return realContextualTransport.start(projectId, fileId, undefined, targetLang)
 }
 
-export type ContextualRunCommand = "pause" | "resume" | "terminate"
+/** `continue` grants the run a batch of spans and resumes it; `continue-all`
+ *  lifts its budget entirely (AQU-1300). Both are only meaningful on a run
+ *  parked with `parkReason: "awaiting_input"`. */
+export type ContextualRunCommand =
+  | "pause"
+  | "resume"
+  | "terminate"
+  | "continue"
+  | "continue-all"
 
 /** Project-scoped controls for the inspector. Commands still pass through the
  * same role/state guards as the editor pill; the response is the authoritative
@@ -781,14 +825,30 @@ export async function commandContextualRun(
   return run
 }
 
+/** What the server did with a composer message (AQU-1299). `direction` is the
+ *  ordinary case: the message was queued as steering. `pause`/`stop` mean the
+ *  message was read as a run command and routed to that control instead —
+ *  `applied` says whether the run actually changed state (a stop typed at an
+ *  already-stopped run is honoured as a no-op, not an error). */
+export interface ContextualSteeringResult {
+  intent: RunCommandIntent
+  applied: boolean
+  run: ContextualRunRecord | null
+}
+
 /**
  * Free-text steering direction for a live run ("keep the tone formal").
  * Not part of ContextualTransport (the store doesn't sequence steering); the
  * steering UI calls this directly. The server route is project-scoped —
- * POST …/contextual/steering { kind, body, runId } — and waking a parked run
- * is its job, not the client's.
+ * POST …/contextual/steering { kind, body, runId } — and both waking a parked
+ * run and recognising a run command are its job, not the client's. The
+ * composer runs the same classifier only to choose its own optimistic
+ * feedback; the response here is authoritative.
  */
-export async function sendContextualSteering(runId: string, text: string): Promise<void> {
+export async function sendContextualSteering(
+  runId: string,
+  text: string,
+): Promise<ContextualSteeringResult> {
   const projectId = projectForRun(runId)
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(
@@ -800,6 +860,12 @@ export async function sendContextualSteering(runId: string, text: string): Promi
     },
   )
   if (!res.ok) return throwFromResponse(res, "send steering failed")
+  const body = objectValue(await res.json())
+  const command = body?.command
+  const intent: RunCommandIntent = command === "pause" || command === "stop" ? command : "direction"
+  const run = normalizeRun(body?.run)
+  if (run) runProjects.set(run.runId, projectId)
+  return { intent, applied: body?.applied === true, run }
 }
 
 // ── Contextual decisions (human-in-the-loop question channel) ──────────────

@@ -13,6 +13,8 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 const me = (jwt: string) => app.request("/api/v2/admin/me", { headers: authHeader(jwt) }, env)
 const overview = (jwt: string) =>
   app.request("/api/v2/admin/overview", { headers: authHeader(jwt) }, env)
+const migrationStatus = (jwt: string) =>
+  app.request("/api/v2/admin/migration-status", { headers: authHeader(jwt) }, env)
 const requestCode = (jwt: string) =>
   app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
 const verifyCode = (jwt: string, code: string) =>
@@ -39,6 +41,26 @@ describe("admin identity is by email", () => {
 })
 
 describe("step-up elevation flow", () => {
+  it("requires elevation and reads the daemon snapshot from R2", async () => {
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+    expect((await migrationStatus(jwt)).status).toBe(403)
+
+    const { devCode } = (await (await requestCode(jwt)).json()) as { devCode?: string }
+    expect((await verifyCode(jwt, devCode as string)).status).toBe(200)
+
+    const key = "_migrate/daemon-status.json"
+    const snapshot = { runner: "daemon@test", heartbeatAt: "2026-09-21T00:00:00.000Z" }
+    await env.SNAPSHOTS.put(key, JSON.stringify(snapshot))
+    try {
+      const response = await migrationStatus(jwt)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: snapshot })
+    } finally {
+      await env.SNAPSHOTS.delete(key)
+    }
+  })
+
   it("an admin reaches /me but not the console before elevation", async () => {
     await seedUser(7, "root") // root@example.com — the admin email
     const jwt = await jwtFor("root")

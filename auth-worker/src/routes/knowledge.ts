@@ -199,7 +199,13 @@ async function handleUpload(
   } catch (err) {
     // Roll back the orphaned R2 object so a failed insert leaves no dangling blob.
     await bucket.delete(r2Key).catch(() => {})
-    const { body, status } = errorJson("job_failed", `knowledge doc insert failed: ${String(err)}`, 500)
+    // [Pen test] API security & data exposure (2026-09-03): this used to echo
+    // `String(err)` — a raw Postgres driver error, which can name
+    // tables/columns/constraints — straight back to the caller. Log it
+    // server-side, return a generic message (mirrors
+    // sync-worker/src/external/errors.ts's toErrorResponse).
+    console.error("[knowledge] doc insert failed:", err)
+    const { body, status } = errorJson("job_failed", "knowledge doc insert failed", 500)
     return c.json(body, status)
   }
 

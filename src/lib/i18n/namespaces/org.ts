@@ -13,6 +13,67 @@ export const org = defineNamespace({
     "org.breadcrumb.allOrganizations": "All organizations",
     "org.breadcrumb.organizationFallback": "Organization",
 
+    // -- OrgDataEgress: maintainer/owner multi-project archive --
+    "org.egress.title": "Data egress",
+    "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
+    "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
+    "org.egress.roleRequired":
+      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+    "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
+    "org.egress.loading": "Loading organization files",
+    "org.egress.loadFailed": "Couldn’t load files",
+    "org.egress.portfolioUnavailable": "Portfolio stats are unavailable — lane, audio, and last-edit columns may be incomplete.",
+    "org.egress.policyRestricted": "Export restricted by org policy",
+    "org.egress.selectAll": "Select all files",
+    "org.egress.selectFile": "Select {file}",
+    "org.egress.column.lanes": "Lanes",
+    "org.egress.column.lastEdit": "Last edit",
+    "org.egress.filterPlaceholder": "Filter files…",
+    "org.egress.selectedCount": "{selected} of {total} selected",
+    "org.egress.options.title": "Export options",
+    "org.egress.options.textMode": "Text export mode",
+    "org.egress.options.text.original.label": "Original format (round-trip)",
+    "org.egress.options.text.original.description": "Each file in the format it was imported as; formats without a round-trip exporter use the conversion format below.",
+    "org.egress.options.text.convert.label": "Convert to…",
+    "org.egress.options.text.convert.description": "Every file re-serialized to one uniform format.",
+    "org.egress.options.text.none.label": "Text off",
+    "org.egress.options.text.none.description": "No text entries in the export.",
+    "org.egress.options.conversionFormat": "Conversion format",
+    "org.egress.options.targetLanes": "Target lanes",
+    "org.egress.options.lane": "Lane {lane}",
+    "org.egress.options.includeSources": "Include original source documents",
+    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, exactly as stored.",
+    "org.egress.options.audioMode": "Audio export mode",
+    "org.egress.options.audio.none.description": "No audio in the export.",
+    "org.egress.options.audio.separate.label": "Every clip separately",
+    "org.egress.options.audio.separate.description": "One audio file per cell recording.",
+    "org.egress.options.audio.file.label": "One clip per file",
+    "org.egress.options.audio.file.description": "All of a file’s recordings joined in document order.",
+    "org.egress.options.audio.voice.label": "One clip per voice",
+    "org.egress.options.audio.voice.description": "Each voice’s recordings joined together, no gaps.",
+    "org.egress.options.audio.timeline.label": "Voice timeline stems (silence while others speak)",
+    "org.egress.options.audio.timeline.description": "One aligned track per voice; all tracks share the file’s timeline.",
+    "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
+    "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
+    "org.egress.options.estimate": "{fileCount} · {cellCount}",
+    "org.egress.options.estimateAudio": " · ~{minutes} min recorded audio",
+    "org.egress.results.preparing": "Preparing",
+    "org.egress.results.preparingExport": "Preparing export…",
+    "org.egress.results.exportingText": "Exporting text",
+    "org.egress.results.exportingAudio": "Exporting audio",
+    "org.egress.results.packaging": "Packaging",
+    "org.egress.results.finishing": "Finishing",
+    "org.egress.results.projectStatus": "{phase} — {project} ({current} of {total}){cached}",
+    "org.egress.results.phaseStatus": "{phase}…",
+    "org.egress.results.cachedSuffix": " (cached)",
+    "org.egress.results.progress": "Export progress",
+    "org.egress.results.failed": "Export failed: {message}",
+    "org.egress.results.complete": "Export complete — your download has started.",
+    "org.egress.results.cached": "cached",
+    "org.egress.results.entryCount": plural({ one: "{count} entry", other: "{count} entries" }),
+    "org.egress.results.skipped": "Skipped {scope}: {reason}",
+    "org.egress.results.noteLine": "Note: {file}: {note}",
+
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
     "org.switcher.workspaceFallback": "Workspace",
     "org.switcher.triggerAriaLabel": "Organization switcher: {org}",
@@ -28,6 +89,7 @@ export const org = defineNamespace({
     "org.switcher.retryOrganizationsAriaLabel": "Retry loading organizations",
     "org.switcher.retrySharedOrganizationsAriaLabel": "Retry loading shared organizations",
     "org.switcher.couldNotLoadSharedOrganizations": "Couldn’t load shared organizations",
+    "org.switcher.searchFailed": "Couldn’t search organizations",
 
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
@@ -274,7 +336,7 @@ export const org = defineNamespace({
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
     "org.teamDetail.roleDescriptionViewer":
-      "Viewer (100) — can read all org projects. No edit or management actions.",
+      "Viewer (100) — read-only access. No edit or management actions. Org membership at this level does not open projects until the person is added to a project or team.",
     "org.teamDetail.roleDescriptionCommenter":
       "Commenter (200) — can read and leave comments. Cannot edit content.",
     "org.teamDetail.roleDescriptionReviewer":
@@ -315,7 +377,9 @@ export const org = defineNamespace({
     }),
     "org.memberAccessPanel.orgRoleOnlyNote": "org-role only; no project overrides",
     "org.memberAccessPanel.orgRoleLabel": "Org role:",
-    "org.memberAccessPanel.orgRoleAppliesNote": "— applies to every project in this org.",
+    "org.memberAccessPanel.orgRoleAppliesNote": "— can see every project in this org.",
+    "org.memberAccessPanel.orgRoleNoProjectAccessNote":
+      "— does not grant project access. Add them to a project or team.",
     "org.memberAccessPanel.noOrgRole": "No org-wide role.",
     "org.memberAccessPanel.noGrantsNote": "No direct, team, or creator grants on any project.",
     "org.memberAccessPanel.resolvedLabel": "resolved:",
@@ -368,6 +432,16 @@ export const org = defineNamespace({
     "org.projectOverview.markAsActive": "Mark as Active",
     "org.projectOverview.markAsInactive": "Mark as Inactive",
     "org.projectOverview.archive": "Archive",
+    // Project Download UI (Phase 5) — Tauri desktop only.
+    "org.projectOverview.makeAvailableOffline": "Make available offline",
+    "org.projectOverview.offlineDownloading": "Downloading…",
+    "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
+    "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.removeOfflineCopy": "Remove offline copy",
+    "org.projectOverview.offlineRemoveBlocked": plural({
+      one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
+      other: "Can't remove yet — {count} changes haven't synced to the server. Reconnect and wait for them to sync first.",
+    }),
     "org.projectOverview.customizeStatsAria": "Customize stats",
     // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
@@ -388,10 +462,23 @@ export const org = defineNamespace({
     "org.projectOverview.filesHeadingTruncated": "Files (top {cap} of {total})",
     "org.projectOverview.filesHeadingCount": "Files ({count})",
     "org.projectOverview.filesListAria": "File list",
+    "org.projectOverview.fileListActionsAria": "File list actions",
     "org.projectOverview.copyCsvTooltip": "Copy the file list below as CSV",
     "org.projectOverview.copyCsv": "Copy CSV",
+    "org.projectOverview.copyCsvCopied": "CSV copied to clipboard",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
+    "org.projectOverview.downloadOriginals": "Download all originals",
+    "org.projectOverview.downloadOriginalsTooltip":
+      "Download every original imported source file as a zip",
+    "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
+    "org.projectOverview.importedOriginalsHeading": "Imported originals",
+    "org.projectOverview.importedOriginalsListAria": "Imported original files",
+    "org.projectOverview.importedOriginalsShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -469,7 +556,7 @@ export const org = defineNamespace({
     // tooltip. Distinct from the shorter common.role.*Description blurbs used
     // by MembersMatrixCellEditor/ProjectMembersPage/SharePanel — both are
     // real, separately-live UI copy; see the ROLE_INFO doc comment. --
-    "org.role.descriptionViewer": "Can read all org projects. No edit or management actions.",
+    "org.role.descriptionViewer": "Read-only access. No edit or management actions.",
     "org.role.descriptionCommenter": "Can read and leave comments. Cannot edit content.",
     "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
     "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
@@ -502,6 +589,17 @@ export const org = defineNamespace({
     "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
     "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
+
+    // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
+    "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
+    "org.egressSettings.whoCanEgressDescription":
+      "Minimum role that can open the organization-wide Data egress page and " +
+      "download everything as one archive. Owners always can; each project's " +
+      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
+    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
@@ -650,10 +748,12 @@ export const org = defineNamespace({
 
     // -- OrgMembersTable: org roster table and member-management dialogs --
     "org.membersPage.orgTable.changeRoleDescription":
-      "This updates their organization-level role across every project.",
+      "Maintainer and Owner can see every project in the organization. Contributor and below cannot see projects until added to a project or team.",
     "org.membersPage.orgTable.addMemberTitle": "Add a member",
     "org.membersPage.orgTable.addMemberDescription":
-      "Grant an org-wide role, or invite someone by email who doesn't have an account yet.",
+      "Add someone to this organization, or invite them by email if they don't have an account yet.",
+    "org.membersPage.orgTable.projectAccessNote":
+      "Contributor, Project lead, and Viewer join the organization but cannot see or open projects until they are added to a specific project or team. Only Maintainer and Owner can see every project.",
     "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
     "org.membersPage.orgTable.addMembersTab": "Add members",
     "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
@@ -786,7 +886,7 @@ export const org = defineNamespace({
       "A role inherited because a group this person belongs to has access to this project. Edit the group's membership to change or remove this grant.",
     "org.accessModelLegend.orgWide.label": "Org-wide",
     "org.accessModelLegend.orgWide.description":
-      "A role that applies to every project in this org because of the person's org-level role. Change the org membership to affect all projects at once.",
+      "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
     "org.accessModelLegend.creator.label": "Creator",
     "org.accessModelLegend.creator.description":
       "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
@@ -855,7 +955,7 @@ export const org = defineNamespace({
       "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
     "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
-      "This role is granted org-wide and applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
+      "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
     "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
@@ -867,10 +967,10 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, their org-wide role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
-      "Access on every project comes from org-wide role; no per-project overrides.",
+      "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",
 
     // -- MembersPanel: shared roster list (per-project and org membership) --
     // "via org" badge → org.membersPage.sourceViaOrg (identical text)
@@ -890,6 +990,10 @@ export const org = defineNamespace({
     "org.multiProjectInviteDialog.emailModeHint":
       "They'll receive one email per selected project with a single-use invite link.",
     "org.multiProjectInviteDialog.projectsFieldLabel": "Projects",
+    // AQU-1150: filter box above the project checklist.
+    "org.multiProjectInviteDialog.searchPlaceholder": "Search projects…",
+    "org.multiProjectInviteDialog.searchProjectsAriaLabel": "Search projects",
+    // "No projects match your search." → org.orgProjectsDataTable.noSearchMatch (identical text)
     "org.multiProjectInviteDialog.selectProjectAriaLabel": "Select {name}",
     "org.multiProjectInviteDialog.noProjectsAvailable":
       "No projects available — create one first or check back when sync completes.",
@@ -899,6 +1003,16 @@ export const org = defineNamespace({
     }),
     "org.multiProjectInviteDialog.rolesSuffix": " — roles: {roles}",
     "org.multiProjectInviteDialog.sendInvitesButton": "Send invites",
+    // AQU-1149: page-level confirmation. The in-dialog "added"/"invited" row
+    // badges stay; these outlive the dialog so the outcome survives closing it.
+    "org.multiProjectInviteDialog.addedToast": plural({
+      one: "Added {username} to {count} project",
+      other: "Added {username} to {count} projects",
+    }),
+    "org.multiProjectInviteDialog.invitedToast": plural({
+      one: "Invite sent to {email} for {count} project",
+      other: "Invites sent to {email} for {count} projects",
+    }),
 
     // -- RemoveOrgMemberDialog: confirm-and-optionally-cascade org removal --
     "org.removeOrgMemberDialog.title": "Remove {username} from {orgName}?",
@@ -1082,6 +1196,7 @@ export const org = defineNamespace({
     // "Find an organization…" placeholder → org.switcher.searchPlaceholder (identical text)
     // "Find an organization" aria-label → org.switcher.searchAriaLabel (identical text)
     // "No organizations found." → org.switcher.noOrganizationsFound (identical text)
+    // "Couldn't search organizations" → org.switcher.searchFailed (identical text)
     // "Create" → org.switcher.create (identical text)
 
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
@@ -1129,6 +1244,7 @@ export const org = defineNamespace({
     // The inspector docked beside the board.
     "org.projectOverview.plan.inspectorAria": "Details for {unit}",
     "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
@@ -1164,6 +1280,11 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    // AQU-1255: the card draws the first few rows and stops. The count lives
+    // in the label so the button says what it opens, to a reader and a screen
+    // reader alike.
+    "org.projectOverview.plan.showAll": "Show all {count}",
+    "org.projectOverview.plan.showFewer": "Show fewer",
     "org.projectOverview.plan.viewStatus": "By status",
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
@@ -1214,6 +1335,73 @@ export const org = defineNamespace({
           "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
         placeholders: { count: "Number of projects not currently shown." },
       },
+      "org.egress.exportCount": {
+        description: "Primary action on Data egress, showing how many selected files will be exported.",
+        placeholders: { count: "Number of selected files; also selects the plural form." },
+      },
+      "org.egress.selectFile": {
+        description: "Accessible name for one file-row selection checkbox.",
+        placeholders: { file: "File name — not translated." },
+      },
+      "org.egress.selectedCount": {
+        description: "Selection summary above the organization file inventory.",
+        placeholders: {
+          selected: "Number of selected files.",
+          total: "Total number of files in the organization inventory.",
+        },
+      },
+      "org.egress.options.lane": {
+        description: "Accessible name for one target-lane checkbox in export options.",
+        placeholders: { lane: "Target lane display label — not translated." },
+      },
+      "org.egress.options.estimate": {
+        description: "Compact file-and-cell estimate at the bottom of Data egress options.",
+        placeholders: {
+          fileCount: "Already-localized file count, such as '2 files'.",
+          cellCount: "Already-localized cell count, such as '40 cells'.",
+        },
+      },
+      "org.egress.options.estimateAudio": {
+        description: "Optional audio-duration suffix appended to the Data egress estimate.",
+        placeholders: { minutes: "Rounded number of recorded-audio minutes." },
+      },
+      "org.egress.results.projectStatus": {
+        description: "Live export progress line for one project in a multi-project organization export.",
+        placeholders: {
+          phase: "Localized current export phase.",
+          project: "Project name — not translated.",
+          current: "One-based current project number.",
+          total: "Total number of projects being exported.",
+          cached: "Localized cached suffix, or an empty string.",
+        },
+      },
+      "org.egress.results.phaseStatus": {
+        description: "Live organization-level packaging status after all individual projects finish.",
+        placeholders: { phase: "Localized current export phase." },
+      },
+      "org.egress.results.failed": {
+        description: "Terminal Data egress error message.",
+        placeholders: { message: "Verbatim technical failure reason." },
+      },
+      "org.egress.results.entryCount": {
+        description: "Number of archive entries produced for one project.",
+        placeholders: { count: "Number of produced archive entries; also selects the plural form." },
+      },
+      "org.egress.results.skipped": {
+        description: "Transparency line naming one skipped export scope and its reason.",
+        placeholders: {
+          scope: "File, lane, source, or audio scope identifier — not translated.",
+          reason: "Verbatim skip reason from the export engine or server.",
+        },
+      },
+      "org.egress.results.noteLine": {
+        description:
+          "Transparency line under a project's export results carrying one file's caveat — e.g. that a source document is not the byte-exact original upload. Only the leading word is translatable copy.",
+        placeholders: {
+          file: "File name — not translated.",
+          note: "Verbatim caveat from the export engine.",
+        },
+      },
       "org.switcher.triggerAriaLabel": {
         description:
           "Accessible name for the sidebar button that opens the org switcher dropdown. {org} is the currently selected organization's name (or 'All organizations'/'Workspace').",
@@ -1233,6 +1421,10 @@ export const org = defineNamespace({
       "org.switcher.retrySharedOrganizationsAriaLabel": {
         description:
           "Accessible name for the retry control shown when loading the project directory that backs shared/guest organizations failed. Used both when it replaces the whole switcher (no member orgs) and on the inline retry row inside the open dropdown (member orgs still shown).",
+      },
+      "org.switcher.searchFailed": {
+        description:
+          "Empty-state copy in the org switcher when a server-side organization search failed. Distinct from the member-list load failure, which replaces the whole switcher with a retry affordance.",
       },
       "org.laneChips.tooltip": {
         description:
@@ -1483,6 +1675,10 @@ export const org = defineNamespace({
           "Summary shown next to a member's name in the effective-access panel, counting projects with an explicit (direct/team/creator) grant beyond their org role.",
         placeholders: { count: "How many projects the member has explicit access to; also selects the plural form." },
       },
+      "org.memberAccessPanel.orgRoleNoProjectAccessNote": {
+        description:
+          "Trailing clause after 'Org role: Contributor' (or Viewer / Project lead) on the member access panel (AQU-1107). Explains that this org membership does not open projects; the next sentence tells the owner to add the person to a project or team.",
+      },
       "org.memberAccessPanel.teamGrantLabel": {
         description:
           "Label prefix on a per-project access badge, naming the team whose grant contributes to the resolved role. Followed by the role name (e.g. 'team Translators: Contributor').",
@@ -1523,6 +1719,14 @@ export const org = defineNamespace({
       },
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
+      },
+      "org.projectOverview.fileListActionsAria": {
+        description:
+          "Accessible name for the icon-only overflow (⋯) button beside the file-list filter/sort controls. Distinct from org.projectOverview.moreActionsAria, which names the project-header overflow.",
+      },
+      "org.projectOverview.copyCsvCopied": {
+        description:
+          "Success toast shown after Copy CSV writes the filtered file list to the clipboard. The menu item itself stays labeled Copy CSV.",
       },
       "org.projectOverview.filesListAria": {
         description:
@@ -1573,6 +1777,37 @@ export const org = defineNamespace({
           total: "Total number of cells in this file.",
           words: "Total word count in this file.",
         },
+      },
+      "org.projectOverview.downloadOriginalAria": {
+        description:
+          "Accessible name for the icon-only button on a project-overview imported-originals row that downloads the exact original imported file.",
+        placeholders: { fileName: "The file's display name — not translated." },
+      },
+      "org.projectOverview.downloadOriginals": {
+        description:
+          "Button on the project-overview imported-originals card that downloads every stored original as a zip. Distinct from Download CSV, which is the plan progress table.",
+      },
+      "org.projectOverview.downloadOriginalsTooltip": {
+        description:
+          "Tooltip on Download all originals explaining that the zip contains the raw imported source files, not a translation-injected export.",
+      },
+      "org.projectOverview.importedOriginalsHeading": {
+        description:
+          "Heading of the project-overview card that lists imported source files a PM can download as originals. Distinct from the Plan board, which is progress, not assets.",
+      },
+      "org.projectOverview.importedOriginalsListAria": {
+        description:
+          "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
+      },
+      "org.projectOverview.importedOriginalsShowMore": {
+        description:
+          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "org.projectOverview.importedOriginalsShowAll": {
+        description:
+          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
+        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",
@@ -1725,6 +1960,40 @@ export const org = defineNamespace({
         description:
           "Error shown under the export-permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
+      "org.egressSettings.whoCanEgressLabel": {
+        description:
+          "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
+      },
+      "org.egressSettings.whoCanEgressDescription": {
+        description:
+          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+      },
+      "org.egressSettings.ownersOnlyPolicyNote": {
+        description:
+          "Sentence explaining that the Data-egress permission dropdown is not editable by this reader, because changing it is reserved for owners of the organization. Shown as quiet helper text under the dropdown and again as an error when a save is refused for the same reason. A complete sentence stating a rule, not an instruction to the reader.",
+      },
+      "org.egressSettings.roleOptionViewer": {
+        description:
+          "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.roleOptionOwner": {
+        description:
+          "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.saveFailedFallback": {
+        description:
+          "Error shown under the Data-egress permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
+      },
       "org.addLanguagePopover.triggerAriaLabel": {
         description:
           "Accessible name for the icon-only '+ Language' trigger button on an OrgHome project row that opens the add-language popover.",
@@ -1811,6 +2080,18 @@ export const org = defineNamespace({
       "org.membersPage.orgTable.addMethodAriaLabel": {
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
+      },
+      "org.membersPage.orgTable.addMemberDescription": {
+        description:
+          "Dialog subtitle on the org Members 'Add a member' dialog. Explains that the action adds someone to the organization (or invites by email), not that it grants project access.",
+      },
+      "org.membersPage.orgTable.projectAccessNote": {
+        description:
+          "Helper paragraph under the add-member dialog subtitle (AQU-1107). States the rule that Contributor/Project lead/Viewer org membership does not open projects, and that only Maintainer and Owner see every project. Role names stay in this sentence as English role vocabulary matching the picker — they are not placeholders.",
+      },
+      "org.membersPage.orgTable.changeRoleDescription": {
+        description:
+          "Dialog subtitle when an org owner changes a member's organization-level role. Same access rule as org.membersPage.orgTable.projectAccessNote: Maintainer/Owner see every project; Contributor and below do not until added to a project or team.",
       },
       "org.membersPage.orgTable.copyEmailAriaLabel": {
         description:
@@ -2061,6 +2342,19 @@ export const org = defineNamespace({
           "dialog's project checklist.",
         placeholders: { name: "The project's name — not translated." },
       },
+      "org.multiProjectInviteDialog.searchPlaceholder": {
+        description:
+          "Placeholder in the filter box above the multi-project invite dialog's " +
+          "project checklist. Typing narrows the visible rows to projects whose " +
+          "name contains what was typed; it never changes what is already checked.",
+        maxLength: 24,
+      },
+      "org.multiProjectInviteDialog.searchProjectsAriaLabel": {
+        description:
+          "Accessible name for that same filter box. The input has no visible " +
+          "label, only the placeholder, so this is what a screen reader announces. " +
+          "No trailing ellipsis — punctuation is read aloud.",
+      },
       "org.multiProjectInviteDialog.projectsSelectedCount": {
         description:
           "Status line under the project checklist in the multi-project invite dialog, counting how many projects are currently checked.",
@@ -2070,6 +2364,22 @@ export const org = defineNamespace({
         description:
           "Trailing clause appended after org.multiProjectInviteDialog.projectsSelectedCount, only when more than one project is checked, listing the distinct roles chosen across them. Leading space is deliberate — it continues the preceding sentence rather than starting a new one.",
         placeholders: { roles: "Comma-joined list of the distinct, already-localized role names chosen across the checked projects." },
+      },
+      "org.multiProjectInviteDialog.addedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog grants an existing user membership, naming who was added and to how many projects. Counts only the projects that succeeded — when some fail, the failures stay as inline errors in the dialog and are not named here.",
+        placeholders: {
+          username: "The added person's username — not translated.",
+          count: "How many projects the grant succeeded on; also selects the plural form.",
+        },
+      },
+      "org.multiProjectInviteDialog.invitedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog sends email invites, naming the recipient address and how many project invites went out. Counts only the invites that were sent — failures stay as inline errors in the dialog.",
+        placeholders: {
+          email: "The recipient's email address — not translated.",
+          count: "How many project invites were sent; also selects the plural form.",
+        },
       },
       "org.removeOrgMemberDialog.title": {
         description: "Confirmation-dialog title naming who is being removed from which organization.",
@@ -2206,6 +2516,10 @@ export const org = defineNamespace({
         description: "Screen-reader name for the detail panel docked beside the plan.",
         placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
       },
+      "org.projectOverview.plan.openFile": {
+        description: "Link from the selected plan unit to its file in the translation editor.",
+        placeholders: { fileName: "The file's name. Not translated." },
+      },
       "org.projectOverview.plan.previousUnit": {
         description: "Tooltip on the up arrow that steps to the previous unit.",
         maxLength: 20,
@@ -2336,6 +2650,19 @@ export const org = defineNamespace({
           total: "Units in the project \u2014 a number.",
         },
       },
+      "org.projectOverview.plan.showAll": {
+        description:
+          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
+        placeholders: {
+          count: "Rows the list would draw once expanded — a number.",
+        },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.showFewer": {
+        description:
+          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
+        maxLength: 16,
+      },
       "org.projectOverview.plan.viewStatus": {
         description:
           "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
@@ -2394,6 +2721,21 @@ export const org = defineNamespace({
         description:
           "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
         maxLength: 16,
+      },
+      "org.projectOverview.offlineDownloadingProgress": {
+        description:
+          "Overflow-menu label on ProjectOverview's offline download item (Tauri desktop app, Phase 5), shown while 'Make available offline' is downloading and file-count progress is known. Falls back to org.projectOverview.offlineDownloading before the first file completes.",
+        placeholders: {
+          done: "Files downloaded so far — a number.",
+          total: "Total files in the project being downloaded — a number.",
+        },
+      },
+      "org.projectOverview.offlineRemoveBlocked": {
+        description:
+          "Inline error shown on ProjectOverview (Tauri desktop app, Phase 5) when 'Remove offline copy' is blocked because locally queued writes haven't reached the server yet. Full sentence, two sentences, second is an instruction.",
+        placeholders: {
+          count: "How many locally queued writes haven't synced yet.",
+        },
       },
     },
   },

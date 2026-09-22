@@ -96,6 +96,17 @@ For a harness update, build a new immutable commit tag, verify it, then replace
 `harness_sha` in the root-only config. The next job reads it automatically.
 PR pushes never update controller code or harness images automatically.
 
+### Pending harness update
+
+The translation sign-off journey (`smart-tests/journeys/validation-outcomes.spec.ts`),
+its oracle (`smart-tests/validation-oracle.ts`), the validation fixture seeding in
+`smart-tests/fixture.ts`, and the second qualification in
+`smart-tests/journeys/qualification.spec.ts` are journeys, so the deployed harness
+must be rebuilt at a reviewed commit containing them. Until that happens, reports
+from this host plan the smaller suite and those three checks are NOT VERIFIED, not
+passed. This requires no credential or infrastructure change: build the new tag,
+verify it, and replace `harness_sha`.
+
 ## Operations and evidence
 
 Inspect `systemctl status aquilla-qa-webhook aquilla-qa-runner` and

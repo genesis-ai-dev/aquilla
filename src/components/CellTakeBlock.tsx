@@ -110,6 +110,7 @@ export function CellTakeBlock({
     cellId: owner.id,
     username,
     onCommitted,
+    jwt: session?.jwt ?? null,
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 

@@ -5,7 +5,7 @@
 // recorder's take list, the timeline chip and the voice panel — hold a project,
 // a cell and a username and nothing else, and four copies of the same emit is
 // four chances for one of them to forget the role guard.
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitCellAudioUnvalidate, emitCellAudioValidate } from "@/lib/sync/events-emit"
@@ -18,6 +18,8 @@ import {
 } from "@/lib/audio/audio-validation-permissions"
 import type { AudioValidationTake } from "@/components/cell/AudioValidationControl"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
+import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
 
 export interface UseAudioValidation {
   /** Every selected dub take on the cell, with the project's policy applied. */
@@ -36,9 +38,20 @@ export function useAudioValidation(opts: {
   username: string
   /** Called after a vote lands, so the surface can refetch. */
   onCommitted?: (cellId: string) => void | Promise<void>
+  /**
+   * The signed-in JWT, for flushing the vote before the refresh. Taken rather
+   * than read from `useFrontierSession` so this hook stays mountable without a
+   * query client — every caller already holds a session.
+   */
+  jwt?: string | null
 }): UseAudioValidation {
-  const { project, fileId, cellId, username, onCommitted } = opts
+  const { project, fileId, cellId, username, onCommitted, jwt } = opts
   const { t } = useI18n()
+  const jwtRef = useRef<string | null>(jwt ?? null)
+  jwtRef.current = jwt ?? null
+  // Built once: the minter caches a token per (project, file), and rebuilding
+  // it on every vote would mint afresh for each one.
+  const getTokenForFile = useMemo(() => buildProjectAwareMinter(() => jwtRef.current), [])
   const roleLevel = project.syncRole?.level ?? null
 
   const reason = useMemo(() => audioBlockedReason(t), [t])
@@ -70,12 +83,19 @@ export function useAudioValidation(opts: {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({ projectId: project.id, fileId, cellId, audioId, author: username })
       await onCommitted?.(cellId)
+      // AQU-490: and the part `onCommitted` cannot do. It refreshes the CELLS
+      // read, which is where text validation lives; an audio vote lives in the
+      // per-file attachments read, and two of this hook's three callers pass
+      // no `onCommitted` at all. Without this the editor's gutter kept showing
+      // the old state after a vote cast in the Recording tab, the recorder or
+      // the voice panel — which is exactly what Sam found.
+      await commitAudioValidation([fileId], { getTokenForFile })
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
       return false
     }
-  }, [project.id, fileId, cellId, username, roleLevel, onCommitted])
+  }, [project.id, fileId, cellId, username, roleLevel, onCommitted, getTokenForFile])
 
   return {
     takesFor,

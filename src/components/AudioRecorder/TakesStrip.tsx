@@ -98,7 +98,7 @@ export function TakesStrip({
   chromeless = false,
 }: Props) {
   const t = useT()
-  const audioValidation = useAudioValidation({ project, fileId, cellId, username: author })
+  const audioValidation = useAudioValidation({ project, fileId, cellId, username: author, jwt: session?.jwt ?? null })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)

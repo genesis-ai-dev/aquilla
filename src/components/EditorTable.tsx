@@ -91,6 +91,7 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -5975,6 +5976,9 @@ function EditorRow({
   // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
   // a linked heard line's take must write to the cue sibling, not to this row.
   const { session: rowSession } = useFrontierSession()
+  // AQU-490: flush-then-poke after an audio vote, shared with every other
+  // surface that can cast one.
+  const commitAudioValidation = useAudioValidationCommit(rowSession?.jwt ?? null)
 
   // AQU-646: a recorded take IS target content. A line added into a silence may
   // never get text — the dub is the deliverable — and it still has to be
@@ -6412,6 +6416,12 @@ function EditorRow({
         audioId,
         author: username,
       })
+      // AQU-490: this handler used to emit and return, and looked fine — the
+      // control paints an optimistic vote and the underlying read never moved
+      // to contradict it. The picture was right for the wrong reason and only
+      // until the row recycled. Now the vote is flushed and every reader of
+      // this file refetches, including a timeline open beside the text view.
+      await commitAudioValidation([cell.fileId])
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)

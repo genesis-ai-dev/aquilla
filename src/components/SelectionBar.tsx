@@ -23,6 +23,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate } from "@/lib/sync/events-emit"
+import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { canPerform } from "@/lib/sync/role-policy"
@@ -93,11 +94,12 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const t = useT()
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
+  const commitAudioValidation = useAudioValidationCommit(session?.jwt ?? null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -205,13 +207,16 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     return out
   }, [selectedCells, audioByCellId, myScopes, activeLane, project, username])
 
-  const onValidateAudio = useCallback(() => {
+  const onValidateAudio = useCallback(async () => {
     if (isBusy || audioTakeTargets.length === 0) return
     if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
     setRunning({ kind: "validate-audio" })
     try {
+      // AWAITED, unlike the text loop beside it. These are not fire-and-forget
+      // here because the commit below flushes the outbox, and a flush that
+      // outruns its own enqueues sends nothing (AQU-490, 2026-09-22).
       for (const target of audioTakeTargets) {
-        void emitCellAudioValidate({
+        await emitCellAudioValidate({
           projectId: project.id,
           fileId: target.fileId,
           cellId: target.cellId,
@@ -223,11 +228,15 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         type: "success",
         title: t("editor.selection.validatedAudioToast", { count: audioTakeTargets.length }),
       })
-      onValidationCommitted?.()
+      // NOT `onValidationCommitted` — that is the TEXT refresher, and routing
+      // audio through it is why the gutter stayed hollow after a bulk vote.
+      // Every file the selection touched, because a subtitle selection's takes
+      // can live on a cue sibling.
+      await commitAudioValidation(audioTakeTargets.map((target) => target.fileId))
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [audioTakeTargets, isBusy, project, username, onValidationCommitted, t])
+  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t])
 
 
   const onTranslate = useCallback(async () => {

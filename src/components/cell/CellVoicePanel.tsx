@@ -415,6 +415,7 @@ export function CellVoicePanel({
     fileId: cell.fileId,
     cellId: cell.id,
     username,
+    jwt: sess?.jwt ?? null,
   })
   const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
 

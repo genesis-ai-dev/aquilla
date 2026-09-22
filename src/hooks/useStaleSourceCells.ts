@@ -159,6 +159,11 @@ export function useStaleSourceCells(
   // QA-BUG-3: cancelled on unmount/re-run so a stale generation's delayed
   // re-fetch never clobbers a newer fetch's result.
   const postSyncRefetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // `doFetch` re-enters itself from its own timers. It reaches those callbacks
+  // through this ref (kept pointed at the latest closure just below) rather than
+  // by name, so a deferred re-fetch always runs the current callback instead of
+  // the one captured when the timer was scheduled (react-hooks/immutability).
+  const doFetchRef = useRef<(triggerSync?: boolean) => Promise<void>>(async () => {})
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
@@ -200,7 +205,7 @@ export function useStaleSourceCells(
         if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
         tokenRetryRef.current = setTimeout(() => {
           tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetch()
+          if (generationRef.current === gen) void doFetchRef.current()
         }, delay)
         return
       }
@@ -217,7 +222,7 @@ export function useStaleSourceCells(
         void triggerLinkSync(pid, jwt).then(() => {
           postSyncRefetchRef.current = setTimeout(() => {
             postSyncRefetchRef.current = null
-            if (generationRef.current === gen) void doFetch(false)
+            if (generationRef.current === gen) void doFetchRef.current(false)
           }, POST_SYNC_REFETCH_DELAY_MS)
         })
       }
@@ -244,6 +249,7 @@ export function useStaleSourceCells(
       setIsLoading(false)
     }
   }, [resetToEmpty])
+  doFetchRef.current = doFetch
 
   useEffect(() => {
     void doFetch()

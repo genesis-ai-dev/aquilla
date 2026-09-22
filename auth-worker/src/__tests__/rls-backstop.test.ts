@@ -6,7 +6,9 @@
 //   2. asAdmin() causes SET LOCAL app.user_id = '' — verified the same way.
 //   3. Bare db (no withUser / asAdmin) does NOT set app.user_id.
 //   4. app_user_can_access_project() returns TRUE for each of the four access
-//      paths (direct / group / org / creator) and FALSE for foreign/no-access.
+//      paths (direct / group / org-at-Maintainer+ / creator) and FALSE for
+//      foreign/no-access. AQU-1107: a sub-maintainer org_members row is NOT
+//      a grant path.
 //   5. withUser() visibility: rows for an accessible project are returned;
 //      rows for a foreign project are invisible (0 rows) — this tests the
 //      SQL function indirectly through a query that reads project_id-scoped data.
@@ -37,6 +39,13 @@ const RLS_MIGRATION = readFileSync(
   ),
   "utf8",
 )
+const ORG_WIDE_FLOOR_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0083_org_wide_access_floor.sql",
+  ),
+  "utf8",
+)
 const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
   path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -52,6 +61,7 @@ beforeAll(async () => {
   // is not enforced by PGlite but the SQL function is available.
   try {
     await pg.exec(RLS_MIGRATION)
+    await pg.exec(ORG_WIDE_FLOOR_MIGRATION)
     await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
   } catch (e) {
     // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
@@ -442,7 +452,7 @@ describe("app_user_can_access_project() SQL function", () => {
     expect(r?.ok).toBe(true)
   })
 
-  it("Path 3 — org-wide grant (org_members, project has org_id) → TRUE", async () => {
+  it("Path 3 — org-wide grant is Maintainer+ only (AQU-435 / AQU-1107)", async () => {
     await seedUser(103, "org-member-user")
     await seedUser(203, "org-project-creator")
     await pg.query(
@@ -454,11 +464,18 @@ describe("app_user_can_access_project() SQL function", () => {
     await seedProject("proj-org", 203, 202) // project in org 202
 
     const db = makeShim().withUser(103)
-    const r = await db
+    const reviewer = await db
       .prepare("SELECT app_user_can_access_project($1) AS ok")
       .bind("proj-org")
       .first<{ ok: boolean }>()
-    expect(r?.ok).toBe(true)
+    expect(reviewer?.ok).toBe(false)
+
+    await pg.query("UPDATE org_members SET role_level = 600 WHERE org_id = 202 AND user_id = 103")
+    const maintainer = await db
+      .prepare("SELECT app_user_can_access_project($1) AS ok")
+      .bind("proj-org")
+      .first<{ ok: boolean }>()
+    expect(maintainer?.ok).toBe(true)
   })
 
   it("Path 4 — creator fallback (projects.created_by = user_id) → TRUE", async () => {

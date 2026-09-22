@@ -36,6 +36,21 @@ export interface UsfmExportPlan {
   edits: UsfmEdits
 }
 
+export interface UsfmExportPlanOptions {
+  /**
+   * AQU-1148: overlay ONLY translations that meet the project's validation
+   * threshold. A verse whose target is an unvalidated human draft or an
+   * untouched AI draft then contributes nothing, so the serializer leaves the
+   * client's own original words in its place — exactly what already happens to
+   * an untranslated verse. The SPA asks for this with `?validated=1`.
+   *
+   * `cells.validated` is the server-owned flag the projection writes; it is
+   * the one authoritative definition of validated (AQU-279), and the SPA's
+   * `CellData.status` is derived from the same row.
+   */
+  validatedOnly?: boolean
+}
+
 interface AddedCellRow {
   cell_id: string
   anchor_cell_id: string | null
@@ -53,7 +68,11 @@ export async function buildUsfmExportPlan(
   projectId: string,
   fileId: string,
   lane: string,
+  options: UsfmExportPlanOptions = {},
 ): Promise<UsfmExportPlan> {
+  // AQU-1148: one extra predicate rather than a second query — `cells` is
+  // already indexed on (project_id, file_id, side, validated).
+  const validatedPredicate = options.validatedOnly ? `\n          AND t.validated <> 0` : ''
   // 1. Translations. Every target cell paired with a source cell that has a
   //    canonical_ref (the verse address). The projection writes canonical_ref
   //    ONLY on the source side; the target side is paired by
@@ -73,7 +92,7 @@ export async function buildUsfmExportPlan(
           AND t.side       = 'target'
           AND t.target_lang = ?
           AND s.canonical_ref IS NOT NULL
-          AND t.value <> ''`,
+          AND t.value <> ''${validatedPredicate}`,
     )
     .bind(projectId, fileId, lane)
     .all<{ canonical_ref: string; value: string }>()
@@ -87,7 +106,7 @@ export async function buildUsfmExportPlan(
   //    degrade to today's behaviour (a correct file missing the new content)
   //    rather than lose the whole download.
   try {
-    const appendAfter = await resolveAdditions(db, projectId, fileId, lane)
+    const appendAfter = await resolveAdditions(db, projectId, fileId, lane, options)
     if (appendAfter.size > 0) edits.appendAfter = appendAfter
   } catch {
     // leave additions out
@@ -118,7 +137,12 @@ async function resolveAdditions(
   projectId: string,
   fileId: string,
   lane: string,
+  options: UsfmExportPlanOptions = {},
 ): Promise<Map<string, readonly string[]>> {
+  // AQU-1148: on the LEFT JOIN, so a non-validated addition comes back with a
+  // null value and falls out of the `.trim() !== ''` filter below — the same
+  // path an addition with no translation at all already takes.
+  const validatedPredicate = options.validatedOnly ? `\n          AND t.validated <> 0` : ''
   const added = await db
     .prepare(
       `SELECT s.cell_id AS cell_id, s.anchor_cell_id AS anchor_cell_id, t.value AS value
@@ -128,7 +152,7 @@ async function resolveAdditions(
           AND t.file_id    = s.file_id
           AND t.cell_id    = s.cell_id
           AND t.side       = 'target'
-          AND t.target_lang = ?
+          AND t.target_lang = ?${validatedPredicate}
         WHERE s.project_id = ?
           AND s.file_id    = ?
           AND s.side       = 'source'

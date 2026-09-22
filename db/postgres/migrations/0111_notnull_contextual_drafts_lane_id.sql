@@ -1,8 +1,8 @@
--- 0107_notnull_contextual_drafts_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
+-- 0111_notnull_contextual_drafts_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
 --
 -- AUXILIARY TABLE: apply ONLY after the verify script reports 0 NULL lane_id for
 -- contextual_drafts (forward-write coverage was added in PR1; legacy rows may lag).
--- Zero-downtime validated-CHECK pattern; see 0100/0104. Idempotent.
+-- Zero-downtime validated-CHECK pattern; see 0104/0108. Idempotent.
 DO $$
 BEGIN
   IF EXISTS (

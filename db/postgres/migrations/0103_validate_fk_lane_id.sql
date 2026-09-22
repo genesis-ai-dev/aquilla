@@ -1,12 +1,12 @@
--- 0099_validate_fk_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL), step 1/2.
+-- 0103_validate_fk_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL), step 1/2.
 --
--- Flip every composite lane_id FK from NOT VALID (added in 0098) to VALIDATED.
+-- Flip every composite lane_id FK from NOT VALID (added in 0102) to VALIDATED.
 -- VALIDATE CONSTRAINT takes only SHARE UPDATE EXCLUSIVE: it scans the table to
 -- prove every existing (project_id, lane_id) points at a real lane, but does NOT
 -- block concurrent reads or writes. A composite FK with a NULL member is exempt
 -- (MATCH SIMPLE), so this is safe to run even if some lane_id are still NULL —
 -- it proves referential integrity independently of the NOT NULL cutover, which
--- lives in the per-table 0100–0107 migrations.
+-- lives in the per-table 0104–0111 migrations.
 --
 -- Idempotent: skips any constraint already validated. Runs all 8 in one file;
 -- each VALIDATE is quick relative to a full rewrite and holds only a shared lock.

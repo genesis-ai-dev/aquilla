@@ -559,7 +559,7 @@ CREATE TABLE cells (
     target_lang       TEXT NOT NULL DEFAULT '',
     -- AQU-1240: opaque lane this row belongs to (lanes.id). Required.
     -- Writers resolve it from `lanes`; the backfill fills rows that predate that
-    -- (migrations 0100–0107 enforce NOT NULL on databases created before this).
+    -- (migrations 0104–0111 enforce NOT NULL on databases created before this).
     lane_id           TEXT NOT NULL,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
@@ -1112,7 +1112,7 @@ CREATE TABLE IF NOT EXISTS project_member_lane_roles (
 CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
     ON project_member_lane_roles(project_id, user_id);
 
--- First-class lanes with opaque IDs (0092_lanes.sql, AQU-1240 v2). Replaces the
+-- First-class lanes with opaque IDs (0096_lanes.sql, AQU-1240 v2). Replaces the
 -- implicit '' default lane. role='source' (one per project, not lane-addressable)
 -- or 'target' (one per distinct target_lang value, incl. '' = default lane).
 -- id is an opaque 8-hex app-generated value; PRIMARY KEY is (project_id, id).
@@ -1791,10 +1791,10 @@ CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
 -- schema.sql apply must create the referenced table first. On live these were
--- added NOT VALID in migration 0098 (instant, still enforced on new writes) and
--- flipped to VALIDATED in the cutover migration 0099 — the state declared here.
+-- added NOT VALID in migration 0102 (instant, still enforced on new writes) and
+-- flipped to VALIDATED in the cutover migration 0103 — the state declared here.
 -- A fresh apply validates trivially (empty tables). lane_id is NOT NULL here;
--- live databases reach that via migrations 0100–0107, which must run only after
+-- live databases reach that via migrations 0104–0111, which must run only after
 -- the backfill has filled every row (they fail closed if any NULL remains).
 ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);

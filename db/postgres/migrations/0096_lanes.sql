@@ -1,4 +1,4 @@
--- 0092_lanes.sql — AQU-1240 (v2): first-class lanes with opaque IDs.
+-- 0096_lanes.sql — AQU-1240 (v2): first-class lanes with opaque IDs.
 --
 -- Replaces the implicit '' default lane with real `lanes` rows. ADDITIVE and
 -- BEHAVIOR-NEUTRAL: nothing reads this table until the per-project backfill

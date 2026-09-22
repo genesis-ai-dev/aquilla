@@ -1,6 +1,6 @@
--- 0103_notnull_assignments_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
+-- 0107_notnull_assignments_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
 -- Enforce lane_id NOT NULL via the zero-downtime validated-CHECK pattern.
--- Requires backfill complete + 0099 FK validated. See 0100 for full rationale.
+-- Requires backfill complete + 0103 FK validated. See 0104 for full rationale.
 -- Idempotent.
 DO $$
 BEGIN

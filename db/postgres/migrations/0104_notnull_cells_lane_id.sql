@@ -1,4 +1,4 @@
--- 0100_notnull_cells_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL), step 2/2.
+-- 0104_notnull_cells_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL), step 2/2.
 --
 -- Enforce lane_id NOT NULL on cells with the zero-downtime pattern:
 --   1. ADD a CHECK (lane_id IS NOT NULL) NOT VALID (instant, no scan).
@@ -7,7 +7,7 @@
 --      second full-table scan, so the ACCESS EXCLUSIVE window is metadata-only.
 --   4. DROP the now-redundant CHECK.
 --
--- SAFE ONLY AFTER BACKFILL populated every cells.lane_id AND 0099 validated the
+-- SAFE ONLY AFTER BACKFILL populated every cells.lane_id AND 0103 validated the
 -- FK. If any lane_id is still NULL, step 2 fails loudly — that failure is the
 -- intended gate; do NOT force it. Run the verify script first (it must report 0
 -- NULL rows for cells). Idempotent: guarded, so a re-run is a no-op.

@@ -8,7 +8,7 @@
 // migrate-settings / migrate-ingest cannot drift:
 //   * source lane + default target lane (`legacy_tag = ''`) always exist
 //   * extra target lanes come from `targetLanes` and from data tags
-//   * INSERTs are idempotent (partial unique indexes from 0092)
+//   * INSERTs are idempotent (partial unique indexes from 0096)
 //   * a later named settings write may promote placeholder names, but never
 //     overwrites a human rename
 //

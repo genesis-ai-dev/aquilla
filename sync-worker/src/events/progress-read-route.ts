@@ -418,9 +418,9 @@ export async function readFirstOpenCell(
   const targetJoin = wantsText
     ? `LEFT JOIN cells t
          ON t.project_id = s.project_id AND t.file_id = s.file_id
-        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?`
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND ${targetLaneDualReadSql('t')}`
     : ''
-  if (wantsText) binds.push(lane)
+  if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
   if (unit) binds.push(unit, `${unit} %`)
 

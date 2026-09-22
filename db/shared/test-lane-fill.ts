@@ -2,7 +2,7 @@
 //
 // schema.sql declares lane_id NOT NULL with a composite FK to lanes. Production
 // writers resolve the id, and the backfill fills old rows before migrations
-// 0100–0107 enforce NOT NULL. Most unit tests never mention lanes: they seed a
+// 0104–0111 enforce NOT NULL. Most unit tests never mention lanes: they seed a
 // cell (or the projection inserts one) and stop. This BEFORE trigger, installed
 // only by the PGlite harnesses, mints the lane that row's tag implies and
 // stamps its id so those tests keep passing.

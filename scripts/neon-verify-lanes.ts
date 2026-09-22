@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 // AQU-1240 — verify lane_id population + referential integrity across the eight
 // lane-bearing tables. Read-only. Run it as the gate BEFORE the SET NOT NULL
-// cutover (db/postgres/deferred-notnull-cutover/) and again after the backfill
+// cutover (migrations 0104–0111) and again after the backfill
 // to confirm the environment is clean.
 //
 // For every table it reports:
@@ -37,7 +37,7 @@ function connectionString(): string {
   return url.toString()
 }
 
-// The eight lane_id-bearing tables (schema.sql / migration 0093). Every one has
+// The eight lane_id-bearing tables (schema.sql / migration 0097). Every one has
 // (project_id, lane_id); the composite FK references lanes(project_id, id).
 const TABLES = [
   'cells',

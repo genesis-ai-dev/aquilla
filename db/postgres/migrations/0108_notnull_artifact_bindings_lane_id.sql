@@ -1,4 +1,4 @@
--- 0104_notnull_artifact_bindings_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
+-- 0108_notnull_artifact_bindings_lane_id.sql — AQU-1240 cutover (PR2, POST-BACKFILL).
 --
 -- AUXILIARY TABLE: forward-write lane_id coverage was only added in PR1, so a
 -- legacy row whose target_lang has no matching lane could still be NULL after
@@ -7,7 +7,7 @@
 -- add the missing lane) before enforcing NOT NULL. The VALIDATE step fails
 -- loudly on residual NULLs — that is the gate, do not force it.
 --
--- Zero-downtime validated-CHECK pattern; see 0100. Idempotent.
+-- Zero-downtime validated-CHECK pattern; see 0104. Idempotent.
 DO $$
 BEGIN
   IF EXISTS (

@@ -1,4 +1,4 @@
--- 0093_lane_id_columns.sql — AQU-1240 (v2) slice 3a: additive lane_id columns.
+-- 0097_lane_id_columns.sql — AQU-1240 (v2) slice 3a: additive lane_id columns.
 --
 -- Adds a nullable lane_id TEXT to every table that carries target_lang. Pure
 -- metadata change (ADD COLUMN with no default is instant in Postgres, even on

@@ -56,12 +56,24 @@ beforeEach(() => { emitValidate.mockClear(); emitUnvalidate.mockClear() })
 describe("TakesStrip — audio validation", () => {
   // The vote belongs to the take that will be HEARD. Offering it on a take
   // nobody has chosen would collect sign-off on audio that never plays.
-  it("offers the control on the circled take only", () => {
+  // Sam, 2026-09-22: on EVERY take, not only the circled one. Validation is a
+  // property of the take — a vote stays on a take you switch away from — and
+  // this list is where you compare takes to pick the keeper.
+  it("offers the control on every take, circled or not", () => {
     draw([
       take({ audioId: "a", validatorCount: 0, validators: [] }),
       take({ audioId: "b", validatorCount: 0, validators: [] }),
     ], "b")
-    expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(1)
+    expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(2)
+  })
+
+  it("lets me vote on a take that is not the keeper", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 0, validators: [] }),
+      take({ audioId: "b", validatorCount: 0, validators: [] }),
+    ], "b")
+    await userEvent.click(screen.getAllByTestId("audio-validation-button")[0])
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "a" })
   })
 
   it("emits a vote naming that take", async () => {

@@ -592,12 +592,17 @@ export function TakesStrip({
                   </Button>
                 </AppTooltip>
               )}
-              {/* AQU-490. Only the CIRCLED take carries a vote: validation is
-                  about the take that will be heard, and offering it on a
-                  take nobody has chosen would collect sign-off on audio that
-                  never plays. */}
-              {isCircled && (
-                <AudioValidationControl
+              {/* AQU-490. On EVERY take, not only the circled one — Sam's
+                  call, 2026-09-22. Validation is a property of the take, not
+                  of the circle: a vote stays on a take you switch away from
+                  and comes back into force if you switch back, and this list
+                  is exactly where you compare takes to choose the keeper, so
+                  "that older one was signed off by two people" is part of
+                  the choice. Showing it on the circled take alone made it
+                  look as though validation belonged to the selection. A vote
+                  on an unselected take is a real vote with no effect on the
+                  line until that take is chosen. */}
+              <AudioValidationControl
                   cellRef={cellId}
                   takes={audioValidation.takeFor(
                     { attachments: { [att.audioId]: att }, selectedBySlot: { [att.slot]: att.audioId } },
@@ -609,7 +614,6 @@ export function TakesStrip({
                   onValidationChange={audioValidation.onValidationChange}
                   variant="inline"
                 />
-              )}
               <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button
                   type="button"

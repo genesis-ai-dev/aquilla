@@ -1073,3 +1073,34 @@ describe("review flags on a full-length episode (AQU-1360)", () => {
     expect(r.looseFit).toBe(true)
   })
 })
+
+describe("text a line already holds (AQU-1360)", () => {
+  const cells = [
+    cell({ cellId: "same", canonicalRef: "GEN 1:1", translated: "In the beginning" }),
+    cell({ cellId: "spaced", canonicalRef: "GEN 1:2", translated: "  And the earth " }),
+    cell({ cellId: "different", canonicalRef: "GEN 1:3", translated: "old wording" }),
+    cell({ cellId: "empty", canonicalRef: "GEN 1:4" }),
+  ]
+  const result = matchTargetRowsByRef(
+    [
+      { ref: "GEN 1:1", text: "In the beginning" },
+      { ref: "GEN 1:2", text: "And the earth" },
+      { ref: "GEN 1:3", text: "new wording" },
+      { ref: "GEN 1:4", text: "fresh" },
+    ],
+    cells,
+  )
+  const by = (id: string) => result.matched.find((m) => m.cellId === id)!
+
+  it("is 'already there', not a conflict — even when only surrounding spaces differ", () => {
+    expect(by("same")).toMatchObject({ alreadyThere: true, hasConflict: false })
+    expect(by("spaced")).toMatchObject({ alreadyThere: true, hasConflict: false })
+  })
+
+  it("leaves real conflicts and fresh lines exactly as before", () => {
+    expect(by("different")).toMatchObject({ hasConflict: true })
+    expect(by("different")).not.toHaveProperty("alreadyThere")
+    expect(by("empty")).toMatchObject({ hasConflict: false })
+    expect(by("empty")).not.toHaveProperty("alreadyThere")
+  })
+})

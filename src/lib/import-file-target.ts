@@ -124,6 +124,9 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched line's own cue timecode, when it has one. */
   cellRef?: string
   flag?: TargetMatchFlag
+  /** The line already holds exactly this text. Not a conflict — there is
+   *  nothing to overwrite — and nothing to import either. */
+  alreadyThere?: boolean
 }
 
 /** Why an incoming row found no line. Absent where the answer is structural
@@ -195,17 +198,22 @@ function toMatchedCell(
   flag?: TargetMatchFlag,
 ): FileTargetMatchedCell {
   const currentText = cell.translated ?? ""
+  const current = currentText.trim()
+  // Re-importing the text a line already holds used to count as a conflict,
+  // unticked, with "Replaces:" naming the very same words (AQU-1360).
+  const alreadyThere = current.length > 0 && current === text.trim()
   return {
     cellId: cell.cellId,
     fileId: cell.fileId,
     incomingText: text,
     currentText,
-    hasConflict: currentText.trim().length > 0,
+    hasConflict: current.length > 0 && !alreadyThere,
     parentId: cell.targetEventId ?? cell.sourceEventId ?? "",
     ref,
     sourceText: cell.original,
     ...(cell.cueRef ? { cellRef: cell.cueRef } : {}),
     ...(flag ? { flag } : {}),
+    ...(alreadyThere ? { alreadyThere } : {}),
   }
 }
 

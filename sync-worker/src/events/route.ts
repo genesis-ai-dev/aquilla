@@ -43,7 +43,7 @@ import {
 } from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
-import { checkProjectMembership, type MembershipCheck } from './membership'
+import { checkProjectMembershipDetailed, type MembershipDetail } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { createCommentFloorsCache } from './comment-floors'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
@@ -955,12 +955,12 @@ export async function handleEventsWriteRequest(
   // `src: "platform"` tokens (ADMIN_EMAILS operators) are exempt — they have
   // no membership rows to re-check. See events/membership.ts for the full
   // enforcement contract.
-  const membershipCache = new Map<string, Promise<MembershipCheck>>()
-  const membershipFor = (projectId: string, userId: number): Promise<MembershipCheck> => {
+  const membershipCache = new Map<string, Promise<MembershipDetail>>()
+  const membershipFor = (projectId: string, userId: number): Promise<MembershipDetail> => {
     const key = `${projectId}\0${userId}`
     let pending = membershipCache.get(key)
     if (!pending) {
-      pending = checkProjectMembership(db, projectId, userId)
+      pending = checkProjectMembershipDetailed(db, projectId, userId)
       membershipCache.set(key, pending)
     }
     return pending
@@ -1006,11 +1006,32 @@ export async function handleEventsWriteRequest(
         authResult.event.claims.projectId,
         authResult.event.claims.userId,
       )
-      if (membership === 'revoked') {
+      if (membership.status === 'revoked') {
         rejected.push({
           id: rawEvent.id ?? '(unknown)',
           status: 403,
           reason: 'membership revoked',
+        })
+        continue
+      }
+      // [Pen test 2026-09-21] Downgrade gate: authorize() above already
+      // passed using the ROLE BAKED INTO THE TOKEN AT MINT TIME (up to 15
+      // minutes stale). The revoked-membership check just above only catches
+      // full removal — a role_level lowered (not deleted) still has_grant,
+      // so it reports "ok" too. If the live-resolved role is now lower than
+      // what the token claims, the token's role can no longer be trusted for
+      // this write: reject and let the client's normal re-mint/reconnect
+      // path (same one "membership revoked" already relies on) pick up the
+      // corrected role. roleLevel is null when there's nothing to compare
+      // (no grant to resolve, or the query failed open) — never block on that.
+      if (
+        membership.roleLevel !== null &&
+        membership.roleLevel < authResult.event.claims.roleLevel
+      ) {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: 'role downgraded since token was issued',
         })
         continue
       }

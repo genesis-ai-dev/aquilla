@@ -139,6 +139,16 @@ admin.post("/elevation/request", async (c) => {
   // fast hash, and an HMAC would rest on SECRET_KEY, which prod and dev still
   // share (V7/SEC-1, open). Same helper the access-link PIN uses for the same
   // reason — a short numeric secret needs a slow KDF, not a fast digest.
+  //
+  // This SUPERSEDES the `sha256Hex(code)` written here by PR #705 (commit
+  // 2cf66061), a parallel auth/session pass that found the same plaintext
+  // storage the same morning and landed first. Unsalted SHA-256 over a 10^6
+  // keyspace is not a meaningful barrier: the whole table of digests is
+  // precomputable in well under a second, so a DB read still yields a working
+  // code — the exact disclosure the finding is about. That commit cites
+  // access-link PINs as its precedent, but `access-links.ts:184` hashes its
+  // PIN with `hashPasswordWerkzeugScrypt`; SHA-256 is right for the
+  // reset/verification tokens (32 bytes of entropy), not for six digits.
   const codeHash = await hashPasswordWerkzeugScrypt(code)
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO admin_elevation_codes (user_id, code_hash, expires_at) VALUES (?, ?, ?)`,

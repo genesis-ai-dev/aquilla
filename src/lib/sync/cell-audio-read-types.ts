@@ -1,6 +1,8 @@
 // Client mirror of the sync-worker's GET /api/v1/projects/:p/files/:f/audio-attachments
 // response (apps/sync/src/events/cell-audio-read-route.ts).
 
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+
 export interface AudioAttachmentOut {
   audioId: string
   url: string
@@ -148,11 +150,33 @@ export function slotSelections(
  * the editor and the plan board would disagree about the same line.
  */
 export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
-  const out: AudioAttachmentOut[] = []
-  for (const audioId of Object.values(slotSelections(entry))) {
+  const selections = slotSelections(entry)
+  const dubAt = (slot: string): AudioAttachmentOut | undefined => {
+    const audioId = selections[slot]
+    if (!audioId) return undefined
     const att = entry.attachments[audioId]
-    if (att && isDubTake(att)) out.push(att)
+    return att && isDubTake(att) ? att : undefined
   }
+
+  const out: AudioAttachmentOut[] = []
+  for (const slot of Object.keys(selections)) {
+    // The two default-track slots are handled together below.
+    if (slot === RECORDING_SLOT || slot === GENERATED_VOICE_SLOT) continue
+    const att = dubAt(slot)
+    if (att) out.push(att)
+  }
+
+  // ONE TAKE PER TRACK, and the default track is the only one that needs
+  // saying so: it owns TWO slots, `recording` and `generatedVoice`, while
+  // every added track owns exactly one. Only one of the two ever sounds —
+  // `resolveTargetAudio` prefers the recording slot and falls through to the
+  // voice — so counting both made a line with a real take AND a leftover
+  // generated voice ask to be validated twice on one track. Sam hit it on a
+  // two-track line reading "of 3" with only two chips to show for it
+  // (2026-09-21). This is that resolution restated over the read shape, which
+  // is what keeps the two from drifting.
+  const defaultTrack = dubAt(RECORDING_SLOT) ?? dubAt(GENERATED_VOICE_SLOT)
+  if (defaultTrack) out.push(defaultTrack)
   return out
 }
 

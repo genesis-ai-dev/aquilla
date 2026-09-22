@@ -307,6 +307,60 @@ describe("audio validator histogram", () => {
     expect((await rows(db, "book"))[0].audio_validator_histogram).toEqual({ "1": 1 })
   })
 
+  // THE DEFAULT TRACK IS ONE TRACK, not two. It alone owns two slots, and only
+  // one of them ever sounds — the client's resolveTargetAudio prefers the
+  // recording slot and falls through to the generated voice. Counting both
+  // asked a line to validate the same track twice, and the silent one, which
+  // nobody can hear to judge, held the whole line down. Sam found it on a
+  // two-track line reading "of 3" with two chips on screen (2026-09-21).
+  it("counts the default track once when a take and a generated voice are both selected", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        take({ audio_id: "a1", slot: "recording", validator_count: 2 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 0 }),
+      ],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_count).toBe(1)
+    // 2, not 0: the recording is what sounds, and it is fully signed off.
+    expect(book.audio_validator_histogram).toEqual({ "2": 1 })
+  })
+
+  // The other half of the same rule: with nothing in the recording slot the
+  // generated voice IS what sounds, so it is the take to judge.
+  it("falls through to the generated voice when the recording slot holds no dub", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        // The imported programme clip, selected in the recording slot exactly
+        // as an import leaves it — this is the shape the TTS path creates.
+        take({ audio_id: "src", slot: "recording", role: "source", validator_count: 0 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 1 }),
+      ],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_count).toBe(1)
+    expect(book.audio_validator_histogram).toEqual({ "1": 1 })
+  })
+
+  // And an ADDED track is still its own track, so the weakest-track rule keeps
+  // biting across real tracks — this is the case the fix must not swallow.
+  it("still takes the weakest track when the second one is an added track", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        take({ audio_id: "a1", slot: "recording", validator_count: 2 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 5 }),
+        take({ audio_id: "a3", slot: "track-2", validator_count: 1 }),
+      ],
+    })
+    await recompute(db)
+    expect((await rows(db, "book"))[0].audio_validator_histogram).toEqual({ "1": 1 })
+  })
+
   // A cell with no dub is NOT RECORDED, which is a different state from
   // recorded-and-unvalidated. Bucketing it at 0 would make an unrecorded file
   // indistinguishable from a recorded one nobody has listened to, and would

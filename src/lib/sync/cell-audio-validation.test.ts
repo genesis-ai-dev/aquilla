@@ -42,6 +42,40 @@ describe("cellAudioVotes", () => {
     expect(cellAudioVotes(entry([t], { recording: "a1" }))).toBe(2)
   })
 
+  // THE DEFAULT TRACK IS ONE TRACK. It alone owns two slots — `recording` and
+  // `generatedVoice` — and only one of them ever sounds: resolveTargetAudio
+  // prefers the recording slot and falls through to the voice. Counting both
+  // asked a line to validate the same track twice, and a silent generated
+  // voice nobody can hear held the whole line at unvalidated. Sam found it on
+  // a two-track line reading "of 3" with two chips on screen (2026-09-21).
+  // These three cases are the same three in progress-book-audio.test.ts.
+  it("counts the default track once when a take and a generated voice are both selected", () => {
+    const rec = take({ audioId: "a1", validatorCount: 2 })
+    const gen = take({ audioId: "a2", slot: "generatedVoice", voiceId: "preset-narrator", validatorCount: 0 })
+    const e = entry([rec, gen], { recording: "a1", generatedVoice: "a2" })
+    expect(selectedDubTakes(e).map((t) => t.audioId)).toEqual(["a1"])
+    expect(cellAudioVotes(e)).toBe(2)
+  })
+
+  it("falls through to the generated voice when the recording slot holds no dub", () => {
+    // The shape the TTS path leaves behind: the imported programme clip is
+    // shoved back into the recording slot so the voice is what sounds.
+    const src = take({ audioId: "src", role: "source" })
+    const gen = take({ audioId: "a2", slot: "generatedVoice", voiceId: "preset-narrator", validatorCount: 1 })
+    const e = entry([src, gen], { recording: "src", generatedVoice: "a2" })
+    expect(selectedDubTakes(e).map((t) => t.audioId)).toEqual(["a2"])
+    expect(cellAudioVotes(e)).toBe(1)
+  })
+
+  it("still takes the weakest track when an added track is in play", () => {
+    const rec = take({ audioId: "a1", validatorCount: 2 })
+    const gen = take({ audioId: "a2", slot: "generatedVoice", voiceId: "preset-narrator", validatorCount: 5 })
+    const other = take({ audioId: "a3", slot: "track-2", validatorCount: 1 })
+    const e = entry([rec, gen, other], { recording: "a1", generatedVoice: "a2", "track-2": "a3" })
+    expect(selectedDubTakes(e).map((t) => t.audioId).sort()).toEqual(["a1", "a3"])
+    expect(cellAudioVotes(e)).toBe(1)
+  })
+
   // THE MULTI-TRACK RULE. Both tracks sound together, so the cell is only as
   // validated as its weakest one.
   it("takes the MINIMUM across tracks, never the maximum", () => {

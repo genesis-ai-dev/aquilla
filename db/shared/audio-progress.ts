@@ -23,12 +23,23 @@
  *               every cell, which used to make a whole file read as fully
  *               recorded before anyone had dubbed a line of it.
  *
- *   dub_votes — the MINIMUM validator count across those selected dub takes,
- *               or NULL when there are none. The minimum is what makes "every
- *               track is validated" a single comparison: min >= N exactly when
- *               all of them have reached N. NULL means NOT RECORDED, which is
- *               a different state from recorded-and-unvalidated and must not
- *               be bucketed as zero.
+ *   dub_votes — the MINIMUM validator count across those takes, ONE PER
+ *               TRACK, or NULL when there are none. The minimum is what makes
+ *               "every track is validated" a single comparison: min >= N
+ *               exactly when all of them have reached N. NULL means NOT
+ *               RECORDED, which is a different state from
+ *               recorded-and-unvalidated and must not be bucketed as zero.
+ *
+ * ONE PER TRACK IS NOT ONE PER SLOT, and the difference is the default track:
+ * it alone owns two slots, `recording` and `generatedVoice`, of which only one
+ * ever sounds (the client's resolveTargetAudio prefers the recording slot and
+ * falls through to the voice). A line carrying a real take and a leftover
+ * generated voice was therefore asked to validate the same track twice, and
+ * the silent one — which nobody can hear to judge — held the whole line down.
+ * Every added track owns exactly one slot, so it needs no such rule.
+ * `selectedDubTakes` in cell-audio-read-types.ts is this same resolution in
+ * TypeScript; the two must move together or the gutter and the board disagree
+ * about one line.
  *
  * A verdict is deliberately not returned. The required number of validators is
  * a project setting applied when somebody READS, so that changing it does not
@@ -38,8 +49,19 @@
  * Reads through idx_cell_audio_file, the partial index on deleted = 0.
  */
 export const AUDIO_CTE_SQL = `SELECT ca.cell_id,
-            MAX(CASE WHEN ca.selected = 1 AND ca.role = 'dub' THEN 1 ELSE 0 END) AS has_dub,
-            MIN(CASE WHEN ca.selected = 1 AND ca.role = 'dub' THEN ca.validator_count END) AS dub_votes
-       FROM cell_audio ca
-      WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
+            MAX(CASE WHEN ca.qualifies = 1 THEN 1 ELSE 0 END) AS has_dub,
+            MIN(CASE WHEN ca.qualifies = 1 AND ca.track_rank = 1 THEN ca.validator_count END) AS dub_votes
+       FROM (SELECT cell_id,
+                    validator_count,
+                    CASE WHEN selected = 1 AND role = 'dub' THEN 1 ELSE 0 END AS qualifies,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY cell_id,
+                                   CASE WHEN slot IN ('recording', 'generatedVoice')
+                                        THEN 'target-audio' ELSE slot END
+                      ORDER BY CASE WHEN selected = 1 AND role = 'dub' THEN 0 ELSE 1 END,
+                               CASE WHEN slot = 'generatedVoice' THEN 1 ELSE 0 END,
+                               audio_id
+                    ) AS track_rank
+               FROM cell_audio
+              WHERE project_id = ? AND file_id = ? AND deleted = 0) ca
       GROUP BY ca.cell_id`

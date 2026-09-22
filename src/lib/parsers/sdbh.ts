@@ -106,6 +106,24 @@ export const SDBH_FIELD_TAG: Record<SdbhField, string> = {
 }
 export const SDBH_CONTEXTUAL_TAG = "Contextual meaning"
 
+// Verse-reference lists longer than this are NOT imported into cell metadata.
+// High-frequency lemmas list thousands; unbounded, one cell's metadata exceeded
+// the sync-worker's 64 KB cell.metadata limit and the whole import 400'd.
+// Rather than silently truncate, the cell carries `referencesNotImported: true`
+// + `referenceCount`, and the parse result lists every affected meaning so the
+// import flow can ask before proceeding. Export is unaffected: `injectSdbhXml`
+// rewrites sense text into the preserved edition skeleton and never touches
+// <CONReferences>.
+export const SDBH_MAX_REFERENCES = 1000
+
+export interface SdbhNotImportedField {
+  conId: string
+  lemma: string
+  field: "references"
+  /** Length of the omitted list. */
+  count: number
+}
+
 /** Gloss lists round-trip through a single cell joined with "; ". Verified
  *  against the real corpus: no gloss in any edition contains a semicolon; the
  *  exporter warns if a translator introduces one (it would split on export). */
@@ -181,6 +199,8 @@ export interface SdbhParseResult {
   /** Contextual meanings that produced at least one cell. */
   contextualMeaningCount: number
   entryCount: number
+  /** Fields dropped from cell metadata because they exceed the size budget. */
+  notImported: SdbhNotImportedField[]
 }
 
 /** Sense ordinal within its entry, derived from the LEXID structure
@@ -215,6 +235,7 @@ export function parseSdbhLexicon(entries: SdbhEntry[]): SdbhParseResult {
   const contextualDomains = new Map<string, string>()
   let senseCount = 0
   let contextualMeaningCount = 0
+  const notImported: SdbhNotImportedField[] = []
 
   const rememberLabels = (into: Map<string, string>, list: SdbhDomain[] | null | undefined) => {
     for (const d of list ?? []) {
@@ -286,6 +307,16 @@ export function parseSdbhLexicon(entries: SdbhEntry[]): SdbhParseResult {
           const collocations = (con.CONCollocations ?? []).filter(Boolean)
           const forms = (con.CONForms ?? []).filter(Boolean)
           const conGroup = `${entry.Lemma} ${contextualOrdinal(con.CONID)}`
+          const references = (con.CONReferences ?? []).filter(Boolean)
+          const referencesTooLong = references.length > SDBH_MAX_REFERENCES
+          const referenceMeta = references.length === 0
+            ? {}
+            : referencesTooLong
+              ? { referencesNotImported: true as const, referenceCount: references.length }
+              : { references, referenceCount: references.length }
+          if (referencesTooLong) {
+            notImported.push({ conId: con.CONID, lemma: entry.Lemma, field: "references", count: references.length })
+          }
           let conFirst = true
           for (const field of SDBH_FIELDS) {
             const value = senseFieldValue(conSense, field)
@@ -317,7 +348,7 @@ export function parseSdbhLexicon(entries: SdbhEntry[]): SdbhParseResult {
                   ...(con.CONType ? { contextualType: con.CONType } : {}),
                   ...(collocations.length ? { collocations } : {}),
                   ...(forms.length ? { forms } : {}),
-                  ...(con.CONReferences?.length ? { references: con.CONReferences } : {}),
+                  ...referenceMeta,
                   ...(conDomains.length ? { domains: conDomains } : {}),
                 },
               },
@@ -365,6 +396,7 @@ export function parseSdbhLexicon(entries: SdbhEntry[]): SdbhParseResult {
     senseCount,
     contextualMeaningCount,
     entryCount: entries.length,
+    notImported,
   }
 }
 

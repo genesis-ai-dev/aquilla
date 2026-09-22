@@ -11,6 +11,7 @@ import {
   joinGlosses,
   parseSdbhCellId,
   parseSdbhLexicon,
+  SDBH_MAX_REFERENCES,
   sdbhCellId,
   splitGlosses,
   type SdbhEntry,
@@ -316,8 +317,35 @@ describe("parseSdbhLexicon", () => {
       collocations: ["אסף אָב"],
       forms: ["verb qal"],
       references: ["00700201000020"],
+      referenceCount: 1,
       domains: [{ code: "099", label: "Life and death" }],
     })
+  })
+
+  it("marks oversized reference lists as not imported instead of blowing the 64 KB metadata limit", () => {
+    // WHY: high-frequency lemmas (e.g. CONID 001040001001011 in SDBH-en) list
+    // thousands of verse references; unbounded, one cell's metadata hit 72 KB
+    // and the sync-worker 400'd the whole import. We refuse to silently
+    // truncate: the field is dropped, the cell says so, and the parse result
+    // reports it so the import flow can ask the user first.
+    const refs = Array.from({ length: SDBH_MAX_REFERENCES + 1 }, (_, i) => String(i).padStart(14, "0"))
+    const entry = structuredClone(ENTRIES_EN[0])
+    entry.BaseForms![0].LEXMeanings![0].CONMeanings![0].CONReferences = refs
+    const parsed = parseSdbhLexicon([entry])
+    const con = parsed.files[0].strings[2]
+    const sdbh = con.metadata?.sdbh as Record<string, unknown>
+    expect(sdbh.references).toBeUndefined()
+    expect(sdbh.referencesNotImported).toBe(true)
+    expect(sdbh.referenceCount).toBe(SDBH_MAX_REFERENCES + 1)
+    expect(new TextEncoder().encode(JSON.stringify(con.metadata)).length).toBeLessThan(64 * 1024)
+    // Reported once per contextual meaning, not once per field cell.
+    expect(parsed.notImported).toEqual([
+      { conId: "000001001001001", lemma: "אֵב", field: "references", count: SDBH_MAX_REFERENCES + 1 },
+    ])
+  })
+
+  it("reports nothing not-imported for the normal fixture", () => {
+    expect(result.notImported).toEqual([])
   })
 
   it("carries lexicon context in metadata for downstream tooling", () => {

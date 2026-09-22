@@ -543,3 +543,63 @@ describe("AQU-207 — a confirmed alignment measurably influences BT output", ()
     )
   })
 })
+
+describe("AQU-207 — seeds reach the n-grams the decoder actually consults", () => {
+  // The decoder is greedy longest-n-gram-first. A seed that adjusted only the
+  // bare (target token → source token) entry was never consulted when a longer
+  // n-gram containing that token already had a corpus winner, so the qa-bot
+  // walk on PR #548 saw Invalidate persist a seed and the BT not move. This is
+  // that corpus shape: one scrambled pair teaches the trigram "la reine aime"
+  // → "the king loves" while a real pair teaches "reine" → "queen".
+  const pairs = [
+    { source: "The king loves the city.", target: "La reine aime le jardin" },
+    { source: "The queen loves the garden.", target: "La reine aime le jardin." },
+    { source: "The child loves the dog.", target: "L'enfant aime le chien." },
+    { source: "The king rules the city.", target: "Le roi gouverne la ville." },
+    { source: "The covenant was made.", target: "L'alliance a été faite." },
+    { source: "The dog runs in the garden.", target: "Le chien court dans le jardin." },
+    { source: "The city is large.", target: "La ville est grande." },
+    { source: "The queen is wise.", target: "La reine est sage." },
+    { source: "The child is small.", target: "L'enfant est petit." },
+    { source: "The garden is green.", target: "Le jardin est vert." },
+  ]
+  const target = "La reine aime le jardin"
+  const glossWith = (seeds: AlignmentSeed[]) =>
+    buildGlosser(pairs, btSeedsFromAlignmentSeeds(seeds)).gloss(target)
+
+  it("the unseeded corpus glosses the scrambled trigram as the model learned it", () => {
+    expect(glossWith([])).toContain("king")
+  })
+
+  it("invalidating a token pair stops that rendering even when a longer n-gram carried it", () => {
+    const after = glossWith([{ srcToken: "king", tgtToken: "reine", weight: -1 }])
+    expect(after).not.toContain("king")
+    expect(after).toContain("queen")
+  })
+
+  it("confirming a token pair makes every n-gram containing the token gloss through it", () => {
+    const after = glossWith([{ srcToken: "queen", tgtToken: "reine", weight: 1 }])
+    expect(after).toContain("queen")
+    expect(after).not.toContain("king")
+  })
+
+  it("confirming a pair the corpus disagrees with overrides the corpus winner", () => {
+    expect(glossWith([])).toContain("garden")
+    const after = glossWith([{ srcToken: "city", tgtToken: "jardin", weight: 1 }])
+    expect(after).toContain("city")
+    expect(after).not.toContain("garden")
+  })
+
+  it("invalidating a pair the corpus already rejects changes nothing", () => {
+    expect(glossWith([{ srcToken: "city", tgtToken: "jardin", weight: -1 }])).toBe(glossWith([]))
+  })
+
+  it("a multi-token seed applies to phrases containing the whole target phrase", () => {
+    // A termbase-style rendering: "le jardin" must gloss through "the garden".
+    // The scrambled pair also pairs "le jardin" with "the city"; the seed
+    // decides it.
+    const seeds: BtSeed[] = [{ source: "the garden", target: "le jardin", weight: 3 }]
+    const gloss = buildGlosser(pairs, seeds).gloss("aime le jardin")
+    expect(gloss).toContain("the garden")
+  })
+})

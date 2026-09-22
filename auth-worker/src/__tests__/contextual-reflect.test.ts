@@ -20,7 +20,9 @@ import {
   appendSteering,
   markSteeringConsumed,
   listContextualRunEvents,
+  listRuns,
   recordWaveOutcome,
+  getRunReflection,
   markRunReflected,
 } from "../../../db/shared/contextual-runs"
 import { createProposal, listMemories, reviewMemory } from "../../../db/shared/agent-memory"
@@ -165,7 +167,7 @@ describe("reflectAtPark — the span gate", () => {
     expect(reflectCalls).toBe(0)
     expect(await listMemories(db, PROJECT, "proposed")).toHaveLength(0)
     // Untouched, so the passage still counts toward the NEXT reflection.
-    expect((await getRun(db, run.id))?.reflectedAt).toBeNull()
+    expect((await getRunReflection(db, run.id))?.reflectedAt).toBeNull()
   })
 
   it("reflects once two passages have landed, and stages a reviewable proposal", async () => {
@@ -213,7 +215,7 @@ describe("reflectAtPark — the span gate", () => {
 
     expect(await reflectAtPark({ db, run: (await getRun(db, run.id))!, llm: llm() })).toBe(0)
     expect(reflectCalls).toBe(0)
-    expect((await getRun(db, run.id))?.reflectedAt).not.toBeNull()
+    expect((await getRunReflection(db, run.id))?.reflectedAt).not.toBeNull()
   })
 })
 
@@ -240,7 +242,7 @@ describe("reflectAtPark — deduplication", () => {
     // The reflection still happened and still counts — the model was asked and
     // had nothing new, which is exactly the outcome the prompt aims for.
     expect(reflectCalls).toBe(1)
-    expect((await getRun(db, run.id))?.reflectedAt).not.toBeNull()
+    expect((await getRunReflection(db, run.id))?.reflectedAt).not.toBeNull()
   })
 
   it("does not stack a second copy of a proposal still awaiting review", async () => {
@@ -281,7 +283,11 @@ describe("gatherReflectionEvidence", () => {
     })
     await answerDecision(db, decision.id, "informal", 1)
 
-    const evidence = await gatherReflectionEvidence(db, (await getRun(db, run.id))!)
+    const evidence = await gatherReflectionEvidence(
+      db,
+      (await getRun(db, run.id))!,
+      (await getRunReflection(db, run.id))!,
+    )
 
     expect(evidence.drafts.map((draft) => draft.text)).toEqual(["MOCK In the beginning"])
     expect(evidence.directions).toEqual(["keep the register plain"])
@@ -295,12 +301,17 @@ describe("gatherReflectionEvidence", () => {
     await stageDraft(run.id, "c1", "MOCK before")
     await markRunReflected(db, run.id)
     const afterMark = (await getRun(db, run.id))!
-    expect(reflectionWatermark(afterMark)).toBe(afterMark.reflectedAt)
+    const mark = (await getRunReflection(db, run.id))!
+    expect(reflectionWatermark(afterMark, mark)).toBe(mark.reflectedAt)
 
-    expect((await gatherReflectionEvidence(db, afterMark)).drafts).toEqual([])
+    expect((await gatherReflectionEvidence(db, afterMark, mark)).drafts).toEqual([])
 
     await stageDraft(run.id, "c2", "MOCK after")
-    const evidence = await gatherReflectionEvidence(db, (await getRun(db, run.id))!)
+    const evidence = await gatherReflectionEvidence(
+      db,
+      (await getRun(db, run.id))!,
+      (await getRunReflection(db, run.id))!,
+    )
     expect(evidence.drafts.map((draft) => draft.text)).toEqual(["MOCK after"])
   })
 
@@ -320,8 +331,64 @@ describe("gatherReflectionEvidence", () => {
     })
     await stageDraft(mine.id, "c1", "MOCK mine")
 
-    const evidence = await gatherReflectionEvidence(db, (await getRun(db, mine.id))!)
+    const evidence = await gatherReflectionEvidence(
+      db,
+      (await getRun(db, mine.id))!,
+      (await getRunReflection(db, mine.id))!,
+    )
     expect(evidence.drafts.map((draft) => draft.text)).toEqual(["MOCK mine"])
+  })
+})
+
+// ── The code-before-migration window ────────────────────────────────────────
+
+describe("before migration 0094 reaches the database", () => {
+  // This repo applies db/postgres/migrations BY HAND, so every deploy has a
+  // window where the code is live and the columns are not. Reflection is a
+  // bonus; the run list, the pill and the tick are the feature. A bonus must
+  // never be able to 500 the thing it decorates — which is exactly what
+  // happened on the PR preview when these columns rode RUN_COLS.
+  async function withoutReflectionColumns(body: () => Promise<void>): Promise<void> {
+    await db
+      .prepare(
+        `ALTER TABLE contextual_runs
+           DROP COLUMN reflected_at, DROP COLUMN reflected_done_spans`,
+      )
+      .run()
+    try {
+      await body()
+    } finally {
+      await db
+        .prepare(
+          `ALTER TABLE contextual_runs
+             ADD COLUMN reflected_at timestamptz,
+             ADD COLUMN reflected_done_spans integer NOT NULL DEFAULT 0`,
+        )
+        .run()
+    }
+  }
+
+  it("still reads runs, and reflection simply does not happen", async () => {
+    const run = await startRun()
+    await creditSpans(run.id, 2)
+    await stageDraft(run.id, "c1", "MOCK one")
+
+    await withoutReflectionColumns(async () => {
+      // The reads every surface depends on keep working…
+      const fetched = await getRun(db, run.id)
+      expect(fetched?.id).toBe(run.id)
+      expect((await listRuns(db, PROJECT)).runs.map((r) => r.id)).toContain(run.id)
+
+      // …and reflection declines rather than throwing or guessing.
+      expect(await getRunReflection(db, run.id)).toBeNull()
+      expect(await reflectAtPark({ db, run: fetched!, llm: llm() })).toBe(0)
+      expect(reflectCalls).toBe(0)
+      expect(await listMemories(db, PROJECT, "proposed")).toHaveLength(0)
+      expect(await markRunReflected(db, run.id)).toBe(false)
+    })
+
+    // Once the migration lands, the same run reflects normally.
+    expect(await reflectAtPark({ db, run: (await getRun(db, run.id))!, llm: llm() })).toBe(1)
   })
 })
 
@@ -380,6 +447,6 @@ describe("the tick reflects when a run parks", () => {
     expect(failures[0].status).toBe("failed")
     // The watermark stays put, so the next park retries over the same work
     // rather than losing it to one bad provider minute.
-    expect(parked?.reflectedAt).toBeNull()
+    expect((await getRunReflection(db, run.id))?.reflectedAt).toBeNull()
   })
 })

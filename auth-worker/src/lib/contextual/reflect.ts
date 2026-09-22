@@ -20,8 +20,10 @@
 
 import { createProposal, listMemories } from "../../../../db/shared/agent-memory"
 import {
+  getRunReflection,
   markRunReflected,
   type ContextualRun,
+  type ContextualRunReflection,
 } from "../../../../db/shared/contextual-runs"
 import type { AquillaDb } from "../../../../db/shim/postgres"
 import { loadProjectContext } from "./project-context"
@@ -209,8 +211,11 @@ export function parseReflectionNotes(raw: string): ReflectionNote[] {
 // ── The reflection call ─────────────────────────────────────────────────────
 
 /** True when the run has done enough NEW work to be worth reflecting on. */
-export function shouldReflect(run: ContextualRun): boolean {
-  return run.doneSpans - run.reflectedDoneSpans >= MIN_SPANS_SINCE_REFLECTION
+export function shouldReflect(
+  run: ContextualRun,
+  reflection: ContextualRunReflection,
+): boolean {
+  return run.doneSpans - reflection.reflectedDoneSpans >= MIN_SPANS_SINCE_REFLECTION
 }
 
 /** One model call over the run's evidence. Returns the parsed notes; the
@@ -253,15 +258,19 @@ interface DecisionRow {
 
 /** The instant everything in this reflection's evidence must be newer than.
  *  A run that never reflected reflects over its whole life — exactly once. */
-export function reflectionWatermark(run: ContextualRun): string {
-  return run.reflectedAt ?? run.createdAt
+export function reflectionWatermark(
+  run: ContextualRun,
+  reflection: ContextualRunReflection,
+): string {
+  return reflection.reflectedAt ?? run.createdAt
 }
 
 export async function gatherReflectionEvidence(
   db: AquillaDb,
   run: ContextualRun,
+  reflection: ContextualRunReflection,
 ): Promise<ReflectionEvidence> {
-  const since = reflectionWatermark(run)
+  const since = reflectionWatermark(run, reflection)
   const [draftRows, directionRows, decisionRows] = await Promise.all([
     db
       .prepare(
@@ -378,9 +387,14 @@ export interface ReflectAtParkDeps {
  */
 export async function reflectAtPark(deps: ReflectAtParkDeps): Promise<number> {
   const { db, run } = deps
-  if (!shouldReflect(run)) return 0
+  // Watermark first, and off its own columns: `getRunReflection` returns null
+  // when migration 0094 has not reached this database yet, and "we cannot tell
+  // what was already reflected on" must mean skip, not reflect again.
+  const reflection = await getRunReflection(db, run.id)
+  if (!reflection) return 0
+  if (!shouldReflect(run, reflection)) return 0
   const [evidence, { known, takenPaths }] = await Promise.all([
-    gatherReflectionEvidence(db, run),
+    gatherReflectionEvidence(db, run, reflection),
     loadReflectionKnown(db, run),
   ])
   if (evidence.drafts.length === 0) {

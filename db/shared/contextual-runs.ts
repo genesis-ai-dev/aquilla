@@ -128,14 +128,6 @@ export interface ContextualRun {
   anchorCellId: string | null
   /** Shared across every run one project-wide start created. */
   scopeGroup: string | null
-  /** AQU-1302 — when this run last reflected at a park. Evidence for the next
-   *  reflection is everything after this instant; NULL (never reflected) means
-   *  the run's own `createdAt` is the watermark. */
-  reflectedAt: string | null
-  /** `doneSpans` as of that reflection. The "at least 2 spans since the last
-   *  reflection" gate is a difference against this, so a single passage that
-   *  staged nine cells still counts as one passage. */
-  reflectedDoneSpans: number
   createdAt: string
   updatedAt: string
 }
@@ -366,8 +358,6 @@ interface RunRow {
   park_reason: string | null
   anchor_cell_id: string | null
   scope_group: string | null
-  reflected_at: unknown
-  reflected_done_spans: number | null
   created_at: unknown
   updated_at: unknown
 }
@@ -409,8 +399,6 @@ function rowToRun(r: RunRow): ContextualRun {
     parkReason: parseParkReason(r.park_reason ?? null),
     anchorCellId: r.anchor_cell_id ?? null,
     scopeGroup: r.scope_group ?? null,
-    reflectedAt: r.reflected_at == null ? null : toIso(r.reflected_at),
-    reflectedDoneSpans: Number(r.reflected_done_spans ?? 0),
     createdAt: toIso(r.created_at),
     updatedAt: toIso(r.updated_at),
   }
@@ -419,7 +407,7 @@ function rowToRun(r: RunRow): ContextualRun {
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, span_allowance, park_reason,
-  anchor_cell_id, scope_group, reflected_at, reflected_done_spans, created_at, updated_at`
+  anchor_cell_id, scope_group, created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -1176,30 +1164,82 @@ export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
 
 /**
- * Move the run's reflection watermark forward (AQU-1302). Called once a park's
- * reflection has actually run — whether it proposed notes or (just as validly)
- * proposed none. Leaving it where it was on a failed reflection is deliberate:
- * the next park retries over the same evidence rather than losing it.
+ * Reflection bookkeeping (AQU-1302), deliberately kept OFF `RUN_COLS`.
+ *
+ * `reflected_at` / `reflected_done_spans` arrive with migration `0094`, which
+ * this repo applies to Neon BY HAND — so there is always a window where the
+ * code is deployed and the columns are not there yet. Every run read goes
+ * through `RUN_COLS`, so selecting them there would turn that window into a
+ * 500 on the run list and the pill: reflection is a bonus, and a bonus must
+ * never be able to break the feature it decorates. Only the reflection step
+ * reads them, through these two functions, and both fail soft.
+ */
+export interface ContextualRunReflection {
+  /** When this run last reflected. NULL (never) means the caller falls back to
+   *  the run's own `createdAt`, so a first reflection sees the whole run. */
+  reflectedAt: string | null
+  /** `doneSpans` as of that reflection. The "at least 2 passages since the
+   *  last reflection" gate is a difference against this, so one passage that
+   *  staged nine cells still counts as one passage. */
+  reflectedDoneSpans: number
+}
+
+interface ReflectionRow {
+  reflected_at: unknown
+  reflected_done_spans: number | null
+}
+
+/** Read the watermark. `null` means the bookkeeping is unavailable (migration
+ *  not applied yet), which the caller treats as "do not reflect this time" —
+ *  never as "never reflected", which would re-propose the same notes. */
+export async function getRunReflection(
+  db: AquillaDb,
+  runId: string,
+): Promise<ContextualRunReflection | null> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT reflected_at, reflected_done_spans FROM contextual_runs WHERE id = ?`,
+      )
+      .bind(runId)
+      .first<ReflectionRow>()
+    if (!row) return null
+    return {
+      reflectedAt: row.reflected_at == null ? null : toIso(row.reflected_at),
+      reflectedDoneSpans: Number(row.reflected_done_spans ?? 0),
+    }
+  } catch (err) {
+    console.warn(`[contextual] reflection bookkeeping unavailable for run ${runId}:`, err)
+    return null
+  }
+}
+
+/**
+ * Move the watermark forward. Called once a park's reflection has actually run
+ * — whether it proposed notes or (just as validly) proposed none. Leaving it
+ * where it was on a FAILED reflection is deliberate: the next park retries over
+ * the same evidence rather than losing it.
  *
  * `reflected_done_spans` is written from the row itself, not from a caller's
  * snapshot, so a wave that landed between gathering the evidence and marking
  * cannot be skipped — it is simply counted toward the NEXT reflection.
  * Status is untouched: reflection is bookkeeping about a park, not a transition.
  */
-export async function markRunReflected(
-  db: AquillaDb,
-  runId: string,
-): Promise<ContextualRun | null> {
-  const row = await db
-    .prepare(
-      `UPDATE contextual_runs
-          SET reflected_at = now(), reflected_done_spans = done_spans
-        WHERE id = ?
-        RETURNING ${RUN_COLS}`,
-    )
-    .bind(runId)
-    .first<RunRow>()
-  return row ? rowToRun(row) : null
+export async function markRunReflected(db: AquillaDb, runId: string): Promise<boolean> {
+  try {
+    await db
+      .prepare(
+        `UPDATE contextual_runs
+            SET reflected_at = now(), reflected_done_spans = done_spans
+          WHERE id = ?`,
+      )
+      .bind(runId)
+      .run()
+    return true
+  } catch (err) {
+    console.warn(`[contextual] reflection watermark not written for run ${runId}:`, err)
+    return false
+  }
 }
 
 /** Block a live run on a decision (§4.5). `waiting` means "something left to

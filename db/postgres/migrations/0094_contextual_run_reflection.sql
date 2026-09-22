@@ -18,8 +18,14 @@
 --                         cells is still one passage, and reflecting on it is
 --                         the noise AQU-1300's one-span default exists to avoid.
 --
--- Both are additive and defaulted, so a code-before-migration deploy keeps
--- running: the reflection step reads them, nothing else does.
+-- Both are additive and defaulted. This file is applied to Neon BY HAND, so
+-- the code is always live for some window before the columns exist — which is
+-- why NOTHING on the shared run read path may name them. They are deliberately
+-- absent from `RUN_COLS` in db/shared/contextual-runs.ts (the run list, the
+-- pill, the tick and the sweeper all read through it, and a 500 there would
+-- take the whole feature down for a bonus). Only `getRunReflection` /
+-- `markRunReflected` touch them, and both fail soft: until this migration
+-- lands, reflection quietly does not happen and everything else is unaffected.
 ALTER TABLE contextual_runs
   ADD COLUMN IF NOT EXISTS reflected_at timestamptz,
   ADD COLUMN IF NOT EXISTS reflected_done_spans integer NOT NULL DEFAULT 0;

@@ -38,7 +38,7 @@ const known: ReflectionKnown = {
   terms: ["covenant → pacto (preferred)"],
 }
 
-function runAt(doneSpans: number, reflectedDoneSpans: number): ContextualRun {
+function runAt(doneSpans: number): ContextualRun {
   return {
     id: "run-1",
     projectId: "p",
@@ -61,24 +61,27 @@ function runAt(doneSpans: number, reflectedDoneSpans: number): ContextualRun {
     parkReason: "work_exhausted",
     anchorCellId: null,
     scopeGroup: null,
-    reflectedAt: null,
-    reflectedDoneSpans,
     createdAt: "2026-09-17T00:00:00.000Z",
     updatedAt: "2026-09-17T00:00:00.000Z",
   }
 }
 
+/** The watermark now rides its own row read (AQU-1302), not the run. */
+function reflectedAt(reflectedDoneSpans: number, at: string | null = null) {
+  return { reflectedAt: at, reflectedDoneSpans }
+}
+
 describe("shouldReflect", () => {
   it("needs at least two passages of NEW work", () => {
-    expect(shouldReflect(runAt(1, 0))).toBe(false)
-    expect(shouldReflect(runAt(MIN_SPANS_SINCE_REFLECTION, 0))).toBe(true)
+    expect(shouldReflect(runAt(1), reflectedAt(0))).toBe(false)
+    expect(shouldReflect(runAt(MIN_SPANS_SINCE_REFLECTION), reflectedAt(0))).toBe(true)
   })
 
   it("counts from the last reflection, not from the start of the run", () => {
     // A long run that already reflected at 10 must not reflect again on the
     // strength of that same history — only on what happened since.
-    expect(shouldReflect(runAt(11, 10))).toBe(false)
-    expect(shouldReflect(runAt(12, 10))).toBe(true)
+    expect(shouldReflect(runAt(11), reflectedAt(10))).toBe(false)
+    expect(shouldReflect(runAt(12), reflectedAt(10))).toBe(true)
   })
 })
 

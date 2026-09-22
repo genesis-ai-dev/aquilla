@@ -97,6 +97,33 @@ describe("the readout", () => {
     expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
   })
 
+  // Sam, 2026-09-21: on a second account, a line somebody else had already
+  // validated looked exactly like one nobody had touched. The text control
+  // fills its circle for that state; this one only stepped the grey, which is
+  // invisible at 14px. The mic's capsule now fills the same way — and only the
+  // capsule, because lucide's mic stand is an open path that fills as a blob.
+  it("fills the mic's capsule when someone else has validated but I have not", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("[&_rect]:fill-current")
+    // The stand must NOT be filled — that is the difference between a filled
+    // mic and a solid blob.
+    expect(icon.getAttribute("class")).not.toContain("fill-current path")
+    expect(icon.querySelector("rect")).not.toBeNull()
+  })
+
+  it("leaves the mic hollow when nobody has validated", () => {
+    draw([take({ audioId: "a" })], { validationRequirement: 2 })
+    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+  })
+
+  // Once the viewer has voted the icon is a CHECK, not a mic, so the fill
+  // would have nothing to act on — and must not be asked to.
+  it("does not fill once I have validated", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })], { validationRequirement: 2 })
+    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+  })
+
   it("shows no fraction on an ordinary one-take line", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })])
     expect(button()).not.toBeNull()

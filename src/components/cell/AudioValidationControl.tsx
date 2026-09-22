@@ -147,6 +147,24 @@ export function AudioValidationControl({
   const colorClass = state === "full" || state === "self"
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
+  /**
+   * SOMEBODY ELSE HAS VALIDATED THIS, and the threshold is not met yet.
+   *
+   * The text control says this by FILLING its circle (`fill="currentColor"`
+   * on the icon), and until Sam pointed it out this one said it only by
+   * stepping the grey from /30 to /60 — a difference you cannot see on a
+   * 14px glyph. On a second account, "nobody has listened to this" and
+   * "somebody has" looked identical, which is precisely the state a second
+   * validator needs to find.
+   *
+   * Only the CAPSULE fills, not the whole mic. Lucide's mic is three
+   * sub-elements and the U-shaped stand is an open path: SVG closes a path
+   * implicitly to fill it, so a blanket `fill` turns the lower two-thirds of
+   * the icon into a solid blob. The capsule is the one closed shape in it,
+   * and filling that alone reads exactly as the text control's filled circle
+   * does at the same size.
+   */
+  const fillCapsule = state === "others"
 
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
   const tooltip = mineToGive.length > 0
@@ -218,7 +236,10 @@ export function AudioValidationControl({
       // when there is nothing to give, because no handler is wired; the muted
       // colour is what says so. (Same trap as the AQU-1068 tooltip.)
     >
-      <Icon className="relative h-3.5 w-3.5" strokeWidth={2.5} />
+      <Icon
+        className={cn("relative h-3.5 w-3.5", fillCapsule && "[&_rect]:fill-current")}
+        strokeWidth={2.5}
+      />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
           {t("editor.audioValidation.takeFraction", { done: validatedTakes, total: displayed.length })}

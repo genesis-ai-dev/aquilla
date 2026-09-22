@@ -107,9 +107,23 @@ export interface TargetRow {
   endMs?: number
 }
 
+/** Why a pairing is left unticked for a person to check (AQU-1360). */
+export type TargetMatchFlag =
+  /** This row and another cue competed for one line; one of them ended up
+   *  elsewhere or nowhere. Both are shown, since from timing alone either
+   *  could be the one that belongs there. Wins over `sharedTiming`. */
+  | "contested"
+  /** Another incoming cue has exactly this time range — two people speaking
+   *  at once. Timing can't tell them apart, so which line each went to rests
+   *  on file order alone. */
+  | "sharedTiming"
+
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched cell's source text — review-screen context only. */
   sourceText: string
+  /** The matched line's own cue timecode, when it has one. */
+  cellRef?: string
+  flag?: TargetMatchFlag
 }
 
 /** Why an incoming row found no line. Absent where the answer is structural
@@ -120,6 +134,10 @@ export type TargetOrphanReason =
   /** The cue's timecode ends before it starts, so it can't be placed. That is
    *  a broken line in the partner's file, not drift — worth telling them. */
   | "backwardsTimecode"
+  /** The cue lies mostly on a line another cue already holds, and lost it.
+   *  Typically the second half of a line the translator split in two, whose
+   *  text would otherwise be dropped without a word. */
+  | "lostItsLine"
 
 /** An incoming row that was not paired with any line. */
 export interface TargetOrphan {
@@ -154,6 +172,9 @@ export interface FileTargetMatchResult {
   skippedCues?: number
   /** A frame-rate correction applied before matching, when one was. */
   timebase?: TimebaseAdjustment
+  /** Too many pairings only loosely overlap their lines — see
+   *  `LOOSE_FIT_SHARE`. Set only when true. */
+  looseFit?: boolean
 }
 
 function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCell[]): UncoveredLine[] {
@@ -167,7 +188,12 @@ function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCe
     }))
 }
 
-function toMatchedCell(cell: FileTargetCellRef, text: string, ref: string): FileTargetMatchedCell {
+function toMatchedCell(
+  cell: FileTargetCellRef,
+  text: string,
+  ref: string,
+  flag?: TargetMatchFlag,
+): FileTargetMatchedCell {
   const currentText = cell.translated ?? ""
   return {
     cellId: cell.cellId,
@@ -178,6 +204,8 @@ function toMatchedCell(cell: FileTargetCellRef, text: string, ref: string): File
     parentId: cell.targetEventId ?? cell.sourceEventId ?? "",
     ref,
     sourceText: cell.original,
+    ...(cell.cueRef ? { cellRef: cell.cueRef } : {}),
+    ...(flag ? { flag } : {}),
   }
 }
 
@@ -388,6 +416,75 @@ function closeMatchedRows(a: OverlapAssignment): Set<number> {
   return close
 }
 
+// ── Review checks (AQU-1360) ──────────────────────────────────────────────────
+
+/**
+ * Rows that competed for one line — the "contested" flag.
+ *
+ * It must fire ONLY when two cues genuinely fought over a line, and never on a
+ * correct file (a hard product requirement). An earlier rule keyed on file
+ * order false-alarmed on correct files merely listed in another order, and a
+ * rule keyed on "didn't get its best-scoring line" false-alarmed on four
+ * correct pairings (a 300ms shift over lines of unequal length, near-
+ * simultaneous speakers, a nudged cue, a short line slid clear of its slot)
+ * while missing split cues entirely. What separates the real case is that the
+ * loser was left with NOTHING real, while mostly sitting on the winner's line.
+ *
+ * A row r is a displaced claimant when all three hold:
+ *   1. r ended with no real overlap — unassigned, or paired only through the
+ *      gap tolerance (overlap 0);
+ *   2. r CLAIMS a line p another row w holds (overlap > half of r's length);
+ *   3. if r was assigned at all, it also covers more than half of p.
+ * Then w and r are both flagged; if r was left unassigned, its unmatched-list
+ * entry says it lost its line instead.
+ *
+ * Exact ties can't trip it: in the identical-timing speaker case the tie loser
+ * still gets a line it overlaps. And no uniform shift over non-overlapping
+ * lines can: a row claiming another line by more than half of both would have
+ * out-scored that line's own row. One behaviour is inherent — an EXTRA cue
+ * lying mostly on a line fires, since it can't be told from a split half; it
+ * is still a case where half a line would otherwise vanish without a word.
+ */
+function findContested(a: OverlapAssignment): { assigned: Set<number>; unassigned: Set<number> } {
+  const assigned = new Set<number>()
+  const unassigned = new Set<number>()
+  for (const candidate of a.candidates) {
+    if (candidate.overlap <= 0) continue
+    const r = candidate.rowAt
+    const holder = a.rowForCell.get(candidate.cellAt)
+    if (holder === undefined || holder === r) continue
+    const won = a.overlapForRow.get(r) // undefined: r was left unassigned
+    if (won !== undefined && won > 0) continue
+    if (!claims(candidate.overlap, a.rows[r].timing)) continue
+    if (won !== undefined && !(2 * candidate.overlap > durationOf(a.cells[candidate.cellAt].timing))) continue
+    assigned.add(holder)
+    if (won === undefined) unassigned.add(r)
+    else assigned.add(r)
+  }
+  return { assigned, unassigned }
+}
+
+/** Rows whose time range exactly equals another incoming row's. */
+function sharedTimingRows(a: OverlapAssignment): Set<number> {
+  const byRange = new Map<string, number[]>()
+  a.rows.forEach((r, at) => {
+    const key = `${r.timing.startMs}:${r.timing.endMs}`
+    byRange.set(key, [...(byRange.get(key) ?? []), at])
+  })
+  const shared = new Set<number>()
+  for (const group of byRange.values()) if (group.length > 1) group.forEach((at) => shared.add(at))
+  return shared
+}
+
+/** Warn when fewer than this share of the pairings are close matches. Every
+ *  correct file measured stays above 0.75; a start offset falls far below it
+ *  (a 2s offset on a 650-cue episode: 640 "matched", 7 correct) and so does a
+ *  file cut into different lines than the source's. */
+const LOOSE_FIT_SHARE = 0.75
+/** …judged only over this many pairings, so one odd cue in a tiny file can't
+ *  raise it. */
+const LOOSE_FIT_MIN_ROWS = 5
+
 // ── Frame-rate rescale (AQU-1360) ─────────────────────────────────────────────
 //
 // A partner file authored at the wrong frame rate (25 against 23.976 is a 4.3%
@@ -583,6 +680,10 @@ export function matchTargetRowsByOverlap(
     timedCells,
   )
 
+  const contested = findContested(assignment)
+  const shared = sharedTimingRows(assignment)
+  const close = closeMatchedRows(assignment)
+
   const matched: FileTargetMatchedCell[] = []
   const orphans: TargetOrphan[] = []
 
@@ -590,21 +691,31 @@ export function matchTargetRowsByOverlap(
   for (const { row, index } of incoming) {
     const at = timedAt.get(index)
     const cellAt = at === undefined ? undefined : assignment.cellForRow.get(at)
-    if (cellAt === undefined) {
+    if (at === undefined || cellAt === undefined) {
       orphans.push({
         ref: row.ref ?? `Row ${index + 1}`,
         text: row.text,
-        reason: backwards.has(index) ? "backwardsTimecode" : "noLineInReach",
+        reason: backwards.has(index)
+          ? "backwardsTimecode"
+          : at !== undefined && contested.unassigned.has(at)
+            ? "lostItsLine"
+            : "noLineInReach",
       })
       continue
     }
     const cell = assignment.cells[cellAt].cell
+    const flag: TargetMatchFlag | undefined = contested.assigned.has(at)
+      ? "contested"
+      : shared.has(at)
+        ? "sharedTiming"
+        : undefined
     // The cue's timecode is the only meaningful label a VTT row has — a
     // cue-sourced cell's `canonicalRef` is an opaque group id.
-    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`))
+    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`, flag))
   }
 
   const uncovered = uncoveredLines(cells, matched)
+  const looseFit = matched.length >= LOOSE_FIT_MIN_ROWS && close.size < LOOSE_FIT_SHARE * matched.length
   return {
     matched,
     orphans,
@@ -612,6 +723,7 @@ export function matchTargetRowsByOverlap(
     uncovered,
     alignedBy: "overlap",
     ...(timebase ? { timebase } : {}),
+    ...(looseFit ? { looseFit } : {}),
   }
 }
 

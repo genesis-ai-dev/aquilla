@@ -864,3 +864,212 @@ describe("frame-rate rescale (AQU-1360)", () => {
     expect(matchTargetRowsByOrder(delivered(cells, (t) => t / PAL), cells).timebase).toBeUndefined()
   })
 })
+
+describe("review flags (AQU-1360)", () => {
+  const line = (id: string, startMs: number, endMs: number) =>
+    cell({ cellId: id, startMs, endMs, original: `SOURCE ${id}` })
+  const cue = (text: string, startMs: number, endMs: number): TargetRow => ({
+    ref: `${startMs}-${endMs}`,
+    text,
+    startMs,
+    endMs,
+  })
+  /** Where each cue landed and what the review screen is told about it. */
+  function review(rows: TargetRow[], cells: FileTargetCellRef[]) {
+    const r = matchTargetRowsByOverlap(rows, cells)
+    return {
+      pairs: r.matched.map((m) => [m.incomingText, m.cellId, m.flag ?? null]),
+      orphans: r.orphans.map((o) => [o.text, o.reason]),
+    }
+  }
+
+  // The tight grid: line 1 then line 2 a tenth of a second later.
+  const tight = [line("L1", 10000, 10400), line("L2", 10500, 10900), line("L3", 20000, 20400)]
+
+  describe("the contested flag fires when two cues fought over one line", () => {
+    it("a cue shifted onto its neighbour's slot while the neighbour's own cue is there — flags both", () => {
+      expect(review([cue("T1", 10500, 10900), cue("T2", 10500, 10900), cue("T3", 20000, 20400)], tight).pairs)
+        .toEqual([["T1", "L2", "contested"], ["T2", "L1", "contested"], ["T3", "L3", null]])
+    })
+
+    it("the same swap listed the other way round — still both", () => {
+      expect(review([cue("T2", 10500, 10900), cue("T1", 10500, 10900), cue("T3", 20000, 20400)], tight).pairs)
+        .toEqual([["T2", "L2", "contested"], ["T1", "L1", "contested"], ["T3", "L3", null]])
+    })
+
+    it("a loose swap: the shifted cue lies mostly on the neighbour's slot, not exactly", () => {
+      expect(review([cue("T1", 10450, 10850), cue("T2", 10500, 10900), cue("T3", 20000, 20400)], tight).pairs)
+        .toEqual([["T1", "L1", "contested"], ["T2", "L2", "contested"], ["T3", "L3", null]])
+    })
+
+    const long = [line("L", 10000, 12000), line("N", 12500, 13500)]
+
+    it("a line split into two cues: the half that lost its line is named, the half that kept it is flagged", () => {
+      const r = review([cue("half 1", 10000, 11000), cue("half 2", 11000, 12000), cue("next", 12500, 13500)], long)
+      expect(r.pairs).toEqual([["half 1", "L", "contested"], ["next", "N", null]])
+      expect(r.orphans).toEqual([["half 2", "lostItsLine"]])
+    })
+
+    it("a split with a shorter second half", () => {
+      const r = review([cue("half 1", 10000, 11200), cue("half 2", 11200, 12000), cue("next", 12500, 13500)], long)
+      expect(r.pairs).toEqual([["half 1", "L", "contested"], ["next", "N", null]])
+      expect(r.orphans).toEqual([["half 2", "lostItsLine"]])
+    })
+
+    it("a split whose second half straddles into the gap before the next line", () => {
+      const r = review([cue("half 1", 10000, 11000), cue("half 2", 11000, 12300), cue("next", 12500, 13500)], long)
+      expect(r.pairs).toEqual([["half 1", "L", "contested"], ["next", "N", null]])
+      expect(r.orphans).toEqual([["half 2", "lostItsLine"]])
+    })
+
+    it("both halves inside one line", () => {
+      const r = review([cue("half 1", 10200, 11000), cue("half 2", 11000, 11800), cue("next", 12500, 13500)], long)
+      expect(r.pairs).toEqual([["half 1", "L", "contested"], ["next", "N", null]])
+      expect(r.orphans).toEqual([["half 2", "lostItsLine"]])
+    })
+  })
+
+  describe("the contested flag stays silent on every correct or merely imperfect file", () => {
+    const three = [line("A", 1000, 1800), line("B", 2000, 2800), line("C", 3000, 3800)]
+
+    it("a correct file whose cues are listed in a different order", () => {
+      expect(review([cue("c", 3000, 3800), cue("a", 1000, 1800), cue("b", 2000, 2800)], three).pairs)
+        .toEqual([["c", "C", null], ["a", "A", null], ["b", "B", null]])
+    })
+
+    it("a uniform 300ms shift", () => {
+      expect(review([cue("a", 1300, 2100), cue("b", 2300, 3100), cue("c", 3300, 4100)], three).pairs)
+        .toEqual([["a", "A", null], ["b", "B", null], ["c", "C", null]])
+    })
+
+    it("a 300ms shift over lines of unequal length (a false alarm under the first rule tried)", () => {
+      const cells = [line("short", 10000, 10400), line("long", 10500, 12500)]
+      expect(review([cue("s", 10300, 10700), cue("l", 10800, 12800)], cells).pairs)
+        .toEqual([["s", "short", null], ["l", "long", null]])
+    })
+
+    it("near-simultaneous speakers whose ranges differ (a former false alarm)", () => {
+      const cells = [line("A", 10000, 12000), line("B", 10000, 11500)]
+      expect(review([cue("x", 10000, 11600), cue("y", 10000, 12000)], cells).pairs)
+        .toEqual([["x", "B", null], ["y", "A", null]])
+    })
+
+    it("a cue nudged late toward its neighbour (a former false alarm)", () => {
+      expect(review([cue("T1", 10350, 10750), cue("T2", 10500, 10900), cue("T3", 20000, 20400)], tight).pairs)
+        .toEqual([["T1", "L1", null], ["T2", "L2", null], ["T3", "L3", null]])
+    })
+
+    it("a short line slid just clear of its slot (a former false alarm)", () => {
+      const cells = [line("short", 10000, 10200), line("next", 11000, 11800)]
+      expect(review([cue("s", 10250, 10450), cue("n", 11000, 11800)], cells).pairs)
+        .toEqual([["s", "short", null], ["n", "next", null]])
+    })
+
+    it("a short cue slid just clear of its slot, beside a long line it grazes", () => {
+      // The short cue lies mostly on the long line (150 of its 200ms) but
+      // covers a sliver of it, and pairs correctly with its own line through
+      // the gap tolerance. Guarded by the rule's third condition.
+      const cells = [line("short", 10000, 10200), line("long", 10300, 12300)]
+      expect(review([cue("s", 10250, 10450), cue("l", 10300, 12300)], cells).pairs)
+        .toEqual([["s", "short", null], ["l", "long", null]])
+    })
+
+    it("an extra cue that only grazes a line another cue holds", () => {
+      // It overlaps line A by 100 of its 900ms and otherwise sits in the gap.
+      // It doesn't CLAIM A, so nobody competed: it is just an unmatched cue.
+      const cells = [line("A", 1000, 1800), line("B", 3000, 3800)]
+      const r = review([cue("a", 1000, 1800), cue("extra", 1700, 2600), cue("b", 3000, 3800)], cells)
+      expect(r.pairs).toEqual([["a", "A", null], ["b", "B", null]])
+      expect(r.orphans).toEqual([["extra", "noLineInReach"]])
+    })
+
+    it("a missing cue, and an extra cue that reaches no line", () => {
+      const r = review([cue("a", 1000, 1800), cue("c", 3000, 3800), cue("extra", 50000, 50800)], three)
+      expect(r.pairs).toEqual([["a", "A", null], ["c", "C", null]])
+      expect(r.orphans).toEqual([["extra", "noLineInReach"]])
+    })
+
+    it("the tight grid with the neighbour's own cue absent — ruled user error, so only an uncovered line", () => {
+      expect(review([cue("T1", 10500, 10900), cue("T3", 20000, 20400)], tight).pairs)
+        .toEqual([["T1", "L2", null], ["T3", "L3", null]])
+    })
+  })
+
+  describe("the shared-timing flag", () => {
+    const speakers = [line("S1", 10000, 10800), line("S2", 20000, 21500), line("S3", 20000, 21500), line("S4", 30000, 30800)]
+
+    it("flags two cues with an identical range, and nothing else — timing can't tell them apart", () => {
+      expect(review(
+        [cue("T1", 10000, 10800), cue("PETER", 20000, 21500), cue("ANDREW", 20000, 21500), cue("T4", 30000, 30800)],
+        speakers,
+      ).pairs).toEqual([
+        ["T1", "S1", null],
+        ["PETER", "S2", "sharedTiming"],
+        ["ANDREW", "S3", "sharedTiming"],
+        ["T4", "S4", null],
+      ])
+    })
+  })
+
+  describe("the loose-fit warning", () => {
+    const grid = Array.from({ length: 10 }, (_, i) => line(`L${i}`, 10000 + i * 3000, 11500 + i * 3000))
+    const shifted = (by: number) => grid.map((c, i) => cue(`t${i}`, c.startMs! + by, c.endMs! + by))
+
+    it("stays quiet on a correct file and on a small shift", () => {
+      expect(matchTargetRowsByOverlap(shifted(0), grid).looseFit).toBeUndefined()
+      expect(matchTargetRowsByOverlap(shifted(300), grid).looseFit).toBeUndefined()
+    })
+
+    it("speaks up when the file is offset far enough that pairings only graze their lines", () => {
+      expect(matchTargetRowsByOverlap(shifted(1000), grid).looseFit).toBe(true)
+    })
+
+    it("never judges a file with too few pairings", () => {
+      expect(matchTargetRowsByOverlap(shifted(1000).slice(0, 4), grid).looseFit).toBeUndefined()
+    })
+  })
+})
+
+describe("review flags on a full-length episode (AQU-1360)", () => {
+  function episode(count: number, seed = 11): FileTargetCellRef[] {
+    let s = seed
+    const rand = () => {
+      s = (s * 1103515245 + 12345) % 2147483648
+      return s / 2147483648
+    }
+    const cells: FileTargetCellRef[] = []
+    let t = 5000
+    for (let i = 0; i < count; i++) {
+      const dur = 800 + Math.round(rand() * 2200)
+      cells.push(cell({ cellId: `c${i}`, startMs: t, endMs: t + dur }))
+      t += dur + 80 + Math.round(rand() * 1420)
+    }
+    return cells
+  }
+  const as = (cells: FileTargetCellRef[], f: (ms: number) => number): TargetRow[] =>
+    cells.map((c, i) => ({ ref: `cue ${i}`, text: `t${i}`, startMs: Math.round(f(c.startMs!)), endMs: Math.round(f(c.endMs!)) }))
+  const flagged = (r: ReturnType<typeof matchTargetRowsByOrder>) => r.matched.filter((m) => m.flag).length
+  const PAL = 25 / (24000 / 1001)
+
+  it("a correct episode raises no flag and no loose-fit warning", () => {
+    const cells = episode(650)
+    const r = matchTargetRowsByOrder(as(cells, (t) => t), cells)
+    expect(flagged(r)).toBe(0)
+    expect(r.looseFit).toBeUndefined()
+  })
+
+  it("a rescaled episode raises no flag and no loose-fit warning either", () => {
+    const cells = episode(650)
+    const r = matchTargetRowsByOrder(as(cells, (t) => t / PAL), cells)
+    expect(r.timebase).toBeDefined()
+    expect(flagged(r)).toBe(0)
+    expect(r.looseFit).toBeUndefined()
+  })
+
+  it("a 2s offset — which nothing corrects — raises the loose-fit warning", () => {
+    const cells = episode(650)
+    const r = matchTargetRowsByOrder(as(cells, (t) => t + 2000), cells)
+    expect(r.timebase).toBeUndefined()
+    expect(r.looseFit).toBe(true)
+  })
+})

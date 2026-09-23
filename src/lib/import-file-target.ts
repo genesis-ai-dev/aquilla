@@ -115,7 +115,9 @@ export type TargetMatchFlag =
   | "contested"
   /** Another incoming cue has exactly this time range — two people speaking
    *  at once. Timing can't tell them apart, so which line each went to rests
-   *  on file order alone. */
+   *  on file order alone. Unlike a contest this is a heads-up, not a
+   *  decision: when every cue in the group got a line the row starts ticked
+   *  (Sam, 09-23), and the review offers a Swap with its partner. */
   | "sharedTiming"
 
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
@@ -132,6 +134,12 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
    *  carrying the same number fought over one line — so with several contests
    *  in one file the user can tell which rows go together. */
   contest?: number
+  /** For a `sharedTiming` row: the lines its same-timing partners landed on,
+   *  in list order — what the review's Swap trades with. */
+  sharedWith?: string[]
+  /** For a `sharedTiming` row: some cue in its group got no line, so the
+   *  pairing is less settled — the row starts unticked. */
+  sharedTimingUnpaired?: boolean
   /** The line already holds exactly this text. Not a conflict — there is
    *  nothing to overwrite — and nothing to import either. */
   alreadyThere?: boolean
@@ -572,15 +580,16 @@ function findContested(
   return { assigned, unassigned, numberOf }
 }
 
-/** Rows whose time range exactly equals another incoming row's. */
-function sharedTimingRows(a: OverlapAssignment): Set<number> {
+/** Rows whose time range exactly equals another incoming row's, each mapped
+ *  to its whole group (row positions, in file order). */
+function sharedTimingRows(a: OverlapAssignment): Map<number, number[]> {
   const byRange = new Map<string, number[]>()
   a.rows.forEach((r, at) => {
     const key = `${r.timing.startMs}:${r.timing.endMs}`
     byRange.set(key, [...(byRange.get(key) ?? []), at])
   })
-  const shared = new Set<number>()
-  for (const group of byRange.values()) if (group.length > 1) group.forEach((at) => shared.add(at))
+  const shared = new Map<number, number[]>()
+  for (const group of byRange.values()) if (group.length > 1) group.forEach((at) => shared.set(at, group))
   return shared
 }
 
@@ -962,6 +971,10 @@ export function matchTargetRowsByOverlap(
       : shared.has(at)
         ? "sharedTiming"
         : undefined
+    const sharedGroup = flag === "sharedTiming" ? shared.get(at)! : []
+    const sharedWith = sharedGroup
+      .filter((other) => other !== at && assignment.cellForRow.has(other))
+      .map((other) => assignment.cells[assignment.cellForRow.get(other)!].cell.cellId)
     // Compared as numbers, on the timing the matcher used (rescaled when a
     // correction applied), so an SRT comma, a corrected frame rate, or a
     // sub-frame rounding difference never prints a second timecode.
@@ -981,6 +994,8 @@ export function matchTargetRowsByOverlap(
         flag === "contested" ? contested.numberOf.get(at) : undefined,
       ),
       rowIndex: index,
+      ...(flag === "sharedTiming" ? { sharedWith } : {}),
+      ...(sharedGroup.some((other) => !assignment.cellForRow.has(other)) ? { sharedTimingUnpaired: true } : {}),
     })
   }
 

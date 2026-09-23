@@ -211,6 +211,7 @@ const ReviewRow = memo(function ReviewRow({
   onToggleExpanded,
   rivals,
   onSwap,
+  onSwapSameTiming,
 }: {
   m: FileTargetMatchedCell
   checked: boolean
@@ -220,6 +221,7 @@ const ReviewRow = memo(function ReviewRow({
   /** Present on a contested row: the other cues that fit its line. */
   rivals: Rival[] | undefined
   onSwap: (cellId: string, rival: Rival) => void
+  onSwapSameTiming: (cellId: string) => void
 }) {
   const { t } = useI18n()
   // The label wraps only the tickbox and the text. The pills sit beside it,
@@ -281,6 +283,17 @@ const ReviewRow = memo(function ReviewRow({
                 {t("importExport.review.rowSharedTimingPill")}
               </Badge>
             )}
+            {m.flag === "sharedTiming" && !!m.sharedWith?.length && (
+              <Button
+                size="xs"
+                variant="outline"
+                className="h-5 px-1.5 text-[10px]"
+                title={t("importExport.review.swapSameTimingHint")}
+                onClick={() => onSwapSameTiming(m.cellId)}
+              >
+                {t("importExport.review.swap")}
+              </Button>
+            )}
             {m.cellRef && (
               <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
             )}
@@ -334,6 +347,7 @@ interface ReviewRowListProps {
   onToggleExpanded: (cellId: string) => void
   rivals: Map<string, Rival[]>
   onSwap: (cellId: string, rival: Rival) => void
+  onSwapSameTiming: (cellId: string) => void
 }
 
 const REVIEW_LIST_CLASS = "min-h-0 flex-1 overflow-y-auto rounded-md border"
@@ -352,7 +366,7 @@ function ReviewRowList(props: ReviewRowListProps) {
 }
 
 /** One row, with the list's shared props resolved for it. */
-function ReviewRowFor({ m, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
+function ReviewRowFor({ m, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
   return (
     <ReviewRow
       m={m}
@@ -362,6 +376,7 @@ function ReviewRowFor({ m, selected, onToggle, expanded, onToggleExpanded, rival
       onToggleExpanded={onToggleExpanded}
       rivals={rivals.get(m.cellId)}
       onSwap={onSwap}
+      onSwapSameTiming={onSwapSameTiming}
     />
   )
 }
@@ -512,13 +527,17 @@ export function FileTargetImportPanel({
     setMatchResult(result)
     setMatchedByOrder(byOrder)
     // Pre-select only rows that are safe to take as they stand. Overwriting an
-    // existing translation needs an explicit tick; so does a row the matcher
-    // flagged for a person to check (AQU-1360); and a row whose text the line
-    // already holds has nothing to import at all.
+    // existing translation needs an explicit tick; so does a contested row
+    // (AQU-1360); and a row whose text the line already holds has nothing to
+    // import at all.
     setSelectedCellIds(new Set(
       keepTicks
         ? result.matched.filter((m) => keepTicks.has(m.cellId) && !m.alreadyThere).map((m) => m.cellId)
-        : result.matched.filter((m) => !m.hasConflict && !m.alreadyThere && !m.flag).map((m) => m.cellId),
+        : result.matched
+          // A same-timing pair whose cues all found a line is a heads-up, not
+          // a decision: ticked, with its pill and a Swap (Sam, 09-23).
+          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && !m.sharedTimingUnpaired)
+          .map((m) => m.cellId),
     ))
     setStep("review")
   }, [])
@@ -883,23 +902,19 @@ export function FileTargetImportPanel({
     // this row's cue goes there; if it sat in the unmatched list, this row's
     // cue goes there instead. Re-matched with the choice pinned, so every
     // pill stays true, from the corrections already found (one pass).
-    function swap(cellId: string, rival: Rival) {
-      const row = matched.find((m) => m.cellId === cellId)
-      if (!subtitleRows || !matchResult || row?.rowIndex === undefined) return
-      const other = rival.onLine?.cellId
-      const pins: Array<readonly [number, string]> = overrides.pins.filter(
-        ([rowIndex, pinned]) =>
-          rowIndex !== row.rowIndex && rowIndex !== rival.rowIndex && pinned !== cellId && pinned !== other,
-      )
-      pins.push([rival.rowIndex, cellId])
-      if (other) pins.push([row.rowIndex, other])
-      const contest = [row.rowIndex, ...(rivalsByCell.get(cellId) ?? []).map((r) => r.rowIndex)]
-      const next = { pins, contests: mergeContests([...overrides.contests, contest]) }
+    /** Re-match with new pins (row index → line), replacing any pins those
+     *  rows or lines had; `contest` keeps a swapped contest together. */
+    function repin(entries: Array<readonly [number, string]>, contest: number[] | null, keep: Set<string>) {
+      if (!subtitleRows || !matchResult) return
+      const rowsTouched = new Set(entries.map(([rowIndex]) => rowIndex))
+      const linesTouched = new Set(entries.map(([, cellId]) => cellId))
+      const pins = [
+        ...overrides.pins.filter(([rowIndex, cellId]) => !rowsTouched.has(rowIndex) && !linesTouched.has(cellId)),
+        ...entries,
+      ]
+      const next = { pins, contests: contest ? mergeContests([...overrides.contests, contest]) : overrides.contests }
       setOverrides(next)
       const known = { rate: matchResult.rateCorrection ?? null, offset: matchResult.offsetCorrection ?? null }
-      // Both lines the swap touched come out unticked: swapping says which
-      // cue belongs there, not that it should be imported.
-      const keep = new Set([...selectedCellIds].filter((id) => id !== cellId && id !== other))
       showReview(
         {
           ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: offsetApplied, known, overrides: next }),
@@ -908,6 +923,33 @@ export function FileTargetImportPanel({
         true,
         keep,
       )
+    }
+
+    function swap(cellId: string, rival: Rival) {
+      const row = matched.find((m) => m.cellId === cellId)
+      if (row?.rowIndex === undefined) return
+      const other = rival.onLine?.cellId
+      // Both lines the swap touched come out unticked: swapping a contest says
+      // which cue belongs there, not that it should be imported.
+      repin(
+        [[rival.rowIndex, cellId], ...(other ? [[row.rowIndex, other] as const] : [])],
+        [row.rowIndex, ...(rivalsByCell.get(cellId) ?? []).map((r) => r.rowIndex)],
+        new Set([...selectedCellIds].filter((id) => id !== cellId && id !== other)),
+      )
+    }
+
+    // A same-timing row trades lines with its partner — the next in the
+    // group, in list order, so with three or more repeated swaps cycle.
+    // Ticks stay as they were: the pair was going to be imported anyway.
+    function swapSameTiming(cellId: string) {
+      const row = matched.find((m) => m.cellId === cellId)
+      if (row?.rowIndex === undefined || !row.sharedWith?.length) return
+      const listOrder = new Map(matched.map((m, i) => [m.cellId, i]))
+      const group = [cellId, ...row.sharedWith].sort((a, b) => listOrder.get(a)! - listOrder.get(b)!)
+      const partnerCell = group[(group.indexOf(cellId) + 1) % group.length]
+      const partner = matched.find((m) => m.cellId === partnerCell)
+      if (partner?.rowIndex === undefined) return
+      repin([[row.rowIndex, partnerCell], [partner.rowIndex, cellId]], null, new Set(selectedCellIds))
     }
 
     async function toggleOffset(apply: boolean) {
@@ -1029,6 +1071,7 @@ export function FileTargetImportPanel({
             onToggleExpanded={toggleExpanded}
             rivals={rivalsByCell}
             onSwap={swap}
+            onSwapSameTiming={swapSameTiming}
           />
         )}
 

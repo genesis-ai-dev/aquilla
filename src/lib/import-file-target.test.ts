@@ -1187,6 +1187,48 @@ describe("review flags (AQU-1360)", () => {
     })
   })
 
+  describe("same-timing partners (the review's Swap)", () => {
+    const speakers = [line("S1", 10000, 10800), line("S2", 20000, 21500), line("S3", 20000, 21500), line("S4", 30000, 30800)]
+    const rows = [cue("T1", 10000, 10800), cue("PETER", 20000, 21500), cue("ANDREW", 20000, 21500), cue("T4", 30000, 30800)]
+    const view = (overrides?: ContestOverrides) =>
+      matchTargetRowsByOverlap(rows, speakers, { overrides }).matched
+        .map((m) => [m.incomingText, m.cellId, m.flag ?? null, m.sharedWith ?? null, m.sharedTimingUnpaired ?? false])
+
+    it("names each row's partner by the line it landed on", () => {
+      expect(view()).toEqual([
+        ["T1", "S1", null, null, false],
+        ["PETER", "S2", "sharedTiming", ["S3"], false],
+        ["ANDREW", "S3", "sharedTiming", ["S2"], false],
+        ["T4", "S4", null, null, false],
+      ])
+    })
+
+    it("swapped by pins, they trade lines and stay partners", () => {
+      expect(view({ pins: [[1, "S3"], [2, "S2"]], contests: [] })).toEqual([
+        ["T1", "S1", null, null, false],
+        ["PETER", "S3", "sharedTiming", ["S2"], false],
+        ["ANDREW", "S2", "sharedTiming", ["S3"], false],
+        ["T4", "S4", null, null, false],
+      ])
+    })
+
+    it("a partner short of a line it CLAIMS is a contest, not a same-timing pair", () => {
+      // Three identical cues, two lines: the third fights for both lines.
+      const two = [line("A", 1000, 2000), line("B", 1000, 2000)]
+      const r = matchTargetRowsByOverlap([cue("x", 1000, 2000), cue("y", 1000, 2000), cue("z", 1000, 2000)], two)
+      expect(r.matched.map((m) => m.flag)).toEqual(["contested", "contested"])
+      expect(r.orphans.map((o) => [o.text, o.reason])).toEqual([["z", "lostItsLine"]])
+    })
+
+    it("marks the group unsettled when a partner got no line and claims none", () => {
+      // Both cues lie mostly outside the one line (600ms of 2s), so the one
+      // left over claims nothing: no contest — just an unsettled pair.
+      const r = matchTargetRowsByOverlap([cue("x", 1000, 3000), cue("y", 1000, 3000)], [line("A", 1000, 1600)])
+      expect(r.matched.map((m) => [m.incomingText, m.flag, m.sharedWith, m.sharedTimingUnpaired ?? false]))
+        .toEqual([["x", "sharedTiming", [], true]])
+    })
+  })
+
   describe("the loose-fit warning", () => {
     const grid = Array.from({ length: 10 }, (_, i) => line(`L${i}`, 10000 + i * 3000, 11500 + i * 3000))
     const shifted = (by: number) => grid.map((c, i) => cue(`t${i}`, c.startMs! + by, c.endMs! + by))

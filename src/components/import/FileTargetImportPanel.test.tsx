@@ -467,7 +467,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     for (const name of ["SOURCE 2", "SOURCE 3", "SOURCE 4"]) expect(screen.getByText(name)).toBeInTheDocument()
   })
 
-  it("leaves contested, shared-timing and already-there rows unticked, and won't tick an already-there row", async () => {
+  it("leaves contested and already-there rows unticked, ticks a paired same-timing pair, and won't tick an already-there row", async () => {
     renderPanel({
       cells: [
         line(1, 10000, 10400),
@@ -485,9 +485,12 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       [30000, 30800, "same words"],
     ]), "episode.vtt"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    for (const text of ["swap one", "swap two", "PETER", "ANDREW", "same words"]) {
+    for (const text of ["swap one", "swap two", "same words"]) {
       expect(checkboxFor(text).checked).toBe(false)
     }
+    // Both same-timing cues found a line: a heads-up, not a decision.
+    expect(checkboxFor("PETER").checked).toBe(true)
+    expect(checkboxFor("ANDREW").checked).toBe(true)
     expect(checkboxFor("same words").disabled).toBe(true)
     // Rows that fought over one line carry a "Contested" toggle; shared-timing rows get their own pill.
     expect(within(rowOf("swap one")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
@@ -657,6 +660,38 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
         expect.stringMatching(/part two.*Not placed/),
       ])
     })
+  })
+
+  it("gives a same-timing pair a Swap that trades their lines and keeps their ticks", async () => {
+    const lines = [line(1, 10000, 10800), line(2, 20000, 21500), line(3, 20000, 21500), line(4, 30000, 30800)]
+    renderPanel({ cells: lines })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "TARGET 1"], [20000, 21500, "ANDREW"], [20000, 21500, "PETER"], [30000, 30800, "TARGET 4"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const cueOn = (n: number) => document.querySelector(`[data-review-cell="line-${n}"] p.text-xs`)!.textContent
+    expect([cueOn(2), cueOn(3)]).toEqual(["ANDREW", "PETER"])
+    expect(screen.getByRole("tab", { name: "To check 2" })).toBeInTheDocument()
+    // No opening needed: the button sits beside the pill.
+    expect(within(rowOf("ANDREW")).queryByRole("button", { name: /Contested/ })).toBeNull()
+    fireEvent.click(within(rowOf("ANDREW")).getByRole("button", { name: "Swap" }))
+    expect([cueOn(2), cueOn(3)]).toEqual(["PETER", "ANDREW"])
+    expect(checkboxFor("PETER").checked).toBe(true)
+    expect(checkboxFor("ANDREW").checked).toBe(true)
+    // Still a same-timing pair, still swappable back.
+    fireEvent.click(within(rowOf("ANDREW")).getByRole("button", { name: "Swap" }))
+    expect([cueOn(2), cueOn(3)]).toEqual(["ANDREW", "PETER"])
+  })
+
+  it("leaves a same-timing row unticked when its partner found no line, and offers no Swap", async () => {
+    // Both cues run 2s but the one line is 0.6s: one gets it, the other nothing.
+    renderPanel({ cells: [line(1, 1000, 1600), line(2, 10000, 10800)] })
+    await selectFile(makeFile(vtt([[1000, 3000, "first"], [1000, 3000, "second"], [10000, 10800, "later"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(rowOf("first")).toHaveTextContent("Same timing")
+    expect(checkboxFor("first").checked).toBe(false)
+    expect(within(rowOf("first")).queryByRole("button", { name: "Swap" })).toBeNull()
+    expect(checkboxFor("later").checked).toBe(true)
   })
 
   it("counts conflicts as \"To check\" but not rows already there, and has no switch when nothing needs checking", async () => {

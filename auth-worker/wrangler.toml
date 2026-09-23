@@ -78,7 +78,11 @@ bucket_name = "aquilla-snapshots"
 [[send_email]]
 name = "EMAIL"
 
-# Secrets (provisioned via `wrangler secret put`, never committed):
+# Secrets (provisioned via `wrangler secret put`, never committed). They attach to a
+# Worker NAME and do not copy between environments — aquilla-identity and
+# aquilla-dev-identity must each be provisioned separately. The per-environment table,
+# the exact commands, and the fail-closed deploy check live in
+# docs/DEPLOYMENT-ENVIRONMENTS.md § "Worker secrets (per environment)" (AQU-762):
 #   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions

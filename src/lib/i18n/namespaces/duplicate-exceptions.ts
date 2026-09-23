@@ -491,14 +491,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "field label naming what a control selects are different grammatical " +
     "roles, and several languages inflect a fallback name differently from a " +
     "field label.",
-  "org.switcher.workspaceFallback":
-    "Fallback name shown in the org switcher/breadcrumb when the active " +
-    "organization has no name yet — same role as org.breadcrumb." +
-    "organizationFallback above, for 'Workspace' instead of 'Organization'. " +
-    "onboarding.preferences.workspace.groupLabel is the settings-group HEADING " +
-    "in personal Preferences that titles the sidebar-layout/confirm-replace " +
-    "section. A fallback placeholder name and a settings-section heading are " +
-    "different grammatical roles that happen to share one English noun.",
   "org.orgHome.pendingInvitations.expiresOn":
     "Lower-case trailing clause spliced mid-sentence into a Pending-invitations " +
     "row (' · expires {date}'), read as a continuation of the sentence before " +

@@ -68,6 +68,7 @@ import {
   DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
   DEFAULT_ROSTER_VIEW_MIN_ROLE,
   getOrCreateUserOrg,
+  getRosterViewMinRole,
   getProjectRosterViewMinRole,
   getTermbaseEditMinRole,
   getLanguageEditMinRole,

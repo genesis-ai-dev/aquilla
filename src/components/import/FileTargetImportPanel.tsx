@@ -15,7 +15,7 @@
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
  */
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { flushSync } from "react-dom"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Badge } from "@/components/ui/badge"
@@ -160,26 +160,66 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
 /** The amber pill a review row uses for anything a person should check. */
 const AMBER_PILL = "border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
 
-/** "Contest N" — rows (and unmatched cues) with the same number fought over one line. */
-function ContestPill({ number, title }: { number: number; title: string }) {
-  const { t, locale } = useI18n()
+/** One member of a contest: a row in the review list, or a cue in the
+ *  unmatched list (the half of a split that lost its line). */
+type ContestMember = { kind: "row"; cellId: string } | { kind: "orphan"; index: number }
+
+const sameMember = (a: ContestMember | null, b: ContestMember) =>
+  a !== null && (a.kind === "row" && b.kind === "row" ? a.cellId === b.cellId : a.kind === "orphan" && b.kind === "orphan" && a.index === b.index)
+
+/** The amber pill on a contested row or cue, as a button: it jumps to the cue
+ *  this one competed with, so a person never has to hunt for the other half. */
+function ContestedButton({ label, title, onJump }: { label: string; title: string; onJump: () => void }) {
   return (
-    <Badge className={cn(AMBER_PILL, "font-sans")} title={title}>
-      {t("importExport.review.rowContestPill", { number: formatCount(number, locale) })}
+    <Badge
+      className={cn(AMBER_PILL, "cursor-pointer font-sans hover:bg-amber-500/25 focus-visible:ring-amber-500/40")}
+      title={title}
+      aria-label={title}
+      render={
+        <button
+          type="button"
+          onClick={onJump}
+        />
+      }
+    >
+      {label}
     </Badge>
   )
 }
+
+/** A row or cue someone just jumped to glows amber for a moment. */
+const JUMP_HIGHLIGHT_MS = 1600
+const HIGHLIGHT_CLASS = "bg-amber-500/15 ring-2 ring-inset ring-amber-400 transition-colors"
 
 /** A collapsible list under the review's counts. Its entries are built only
  *  while it is open: a file an hour off leaves ~1,000 cues unmatched and ~1,000
  *  lines uncovered, and building both hidden lists froze the page ~1.2s at 6x
  *  CPU throttling. */
-function LazyDetails({ summary, children }: { summary: string; children: () => ReactNode }) {
-  const [open, setOpen] = useState(false)
+function LazyDetails({
+  summary,
+  children,
+  open,
+  onOpenChange,
+}: {
+  summary: string
+  children: () => ReactNode
+  /** Controlled when given — a contest jump opens the unmatched list. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [innerOpen, setInnerOpen] = useState(false)
+  const isOpen = open ?? innerOpen
+  const setIsOpen = onOpenChange ?? setInnerOpen
   return (
-    <details className="mt-2 text-xs" onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details
+      className="mt-2 text-xs"
+      open={isOpen}
+      onToggle={(e) => {
+        if (e.currentTarget.open !== isOpen) setIsOpen(e.currentTarget.open)
+      }}
+    >
       <summary className="cursor-pointer text-muted-foreground">{summary}</summary>
-      {open && children()}
+      {isOpen && children()}
     </details>
   )
 }
@@ -189,49 +229,70 @@ const ReviewRow = memo(function ReviewRow({
   m,
   checked,
   onToggle,
+  highlighted,
+  onJump,
 }: {
   m: FileTargetMatchedCell
   checked: boolean
   onToggle: (cellId: string) => void
+  highlighted: boolean
+  onJump: (from: ContestMember) => void
 }) {
   const { t } = useI18n()
+  // The label wraps only the tickbox and the text. The pills sit beside it,
+  // outside it: a button inside a <label> can tick the row on click in some
+  // environments (jsdom does, even with preventDefault).
   return (
-    <label className={cn("flex items-start gap-2 px-3 py-2 hover:bg-muted/30", m.alreadyThere && "opacity-60")}>
-      <input
-        type="checkbox"
-        className="mt-0.5 rounded"
-        checked={checked}
-        disabled={m.alreadyThere}
-        onChange={() => onToggle(m.cellId)}
-      />
-      <div className="flex-1 min-w-0">
-        <p className="font-mono text-[10px] text-muted-foreground">
-          {m.ref}
-          {m.alreadyThere && (
-            <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
-          )}
-        </p>
-        {/* The line's own timecode, present only when it disagrees
-            with the cue's — so drift announces itself, and a clean
-            file doesn't print every timecode twice. */}
-        <p className="truncate text-[10px] text-muted-foreground/80">
-          {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
-          {m.sourceText}
-        </p>
-        <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
-        {m.hasConflict && (
-          <p className="truncate text-[10px] text-amber-600">
-            {t("importExport.review.replacesExisting", { text: m.currentText })}
+    <div
+      data-review-cell={m.cellId}
+      data-highlighted={highlighted || undefined}
+      className={cn(
+        "flex items-start gap-2 px-3 py-2 hover:bg-muted/30",
+        m.alreadyThere && "opacity-60",
+        highlighted && HIGHLIGHT_CLASS,
+      )}
+    >
+      <label className="flex min-w-0 flex-1 items-start gap-2">
+        <input
+          type="checkbox"
+          className="mt-0.5 rounded"
+          checked={checked}
+          disabled={m.alreadyThere}
+          onChange={() => onToggle(m.cellId)}
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-mono text-[10px] text-muted-foreground">
+            {m.ref}
+            {m.alreadyThere && (
+              <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
+            )}
           </p>
-        )}
-      </div>
-      {/* Everything to check about a row sits in its corner. The
-          contest number pairs rows that fought over one line; a
-          timing pill means only the line's own timing is kept. */}
+          {/* The line's own timecode, present only when it disagrees
+              with the cue's — so drift announces itself, and a clean
+              file doesn't print every timecode twice. */}
+          <p className="truncate text-[10px] text-muted-foreground/80">
+            {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
+            {m.sourceText}
+          </p>
+          <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
+          {m.hasConflict && (
+            <p className="truncate text-[10px] text-amber-600">
+              {t("importExport.review.replacesExisting", { text: m.currentText })}
+            </p>
+          )}
+        </div>
+      </label>
+      {/* Everything to check about a row sits in its corner. "Contested"
+          jumps to the cue it fought with; a timing pill means only the
+          line's own timing is kept. */}
       {(m.contest !== undefined || m.flag === "sharedTiming" || m.cellRef) && (
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
           {m.contest !== undefined && (
-            <ContestPill number={m.contest} title={t("importExport.review.rowContested", { number: m.contest })} />
+            <ContestedButton
+              label={t("importExport.review.rowContestedPill")}
+              title={t("importExport.review.goToRival")}
+              onJump={() => onJump({ kind: "row", cellId: m.cellId })}
+            />
           )}
           {m.flag === "sharedTiming" && (
             <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
@@ -243,7 +304,7 @@ const ReviewRow = memo(function ReviewRow({
           )}
         </div>
       )}
-    </label>
+    </div>
   )
 })
 
@@ -254,28 +315,58 @@ const VIRTUALIZE_ABOVE = 150
 /** A typical row's height before it is measured. */
 const REVIEW_ROW_ESTIMATE_PX = 64
 
+/** Lets the panel bring a row into view, whichever way the list is drawn. */
+interface ReviewListHandle {
+  scrollToCell: (cellId: string) => void
+}
+
 interface ReviewRowListProps {
   matched: FileTargetMatchedCell[]
   selected: Set<string>
   onToggle: (cellId: string) => void
+  highlighted: ContestMember | null
+  onJump: (from: ContestMember) => void
+  handleRef: RefObject<ReviewListHandle | null>
 }
 
 const REVIEW_LIST_CLASS = "min-h-0 flex-1 overflow-y-auto rounded-md border"
 
+const isRowHighlighted = (h: ContestMember | null, cellId: string) => h?.kind === "row" && h.cellId === cellId
+
 function ReviewRowList(props: ReviewRowListProps) {
   if (props.matched.length > VIRTUALIZE_ABOVE) return <VirtualReviewRowList {...props} />
+  return <PlainReviewRowList {...props} />
+}
+
+function PlainReviewRowList({ matched, selected, onToggle, highlighted, onJump, handleRef }: ReviewRowListProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  useImperativeHandle(handleRef, () => ({
+    scrollToCell: (cellId) => {
+      const row = [...(containerRef.current?.querySelectorAll<HTMLElement>("[data-review-cell]") ?? [])]
+        .find((el) => el.dataset.reviewCell === cellId)
+      // jsdom has no scrollIntoView.
+      row?.scrollIntoView?.({ block: "center" })
+    },
+  }), [])
   return (
-    <div className={REVIEW_LIST_CLASS}>
+    <div ref={containerRef} className={REVIEW_LIST_CLASS}>
       <div className="divide-y">
-        {props.matched.map((m) => (
-          <ReviewRow key={m.cellId} m={m} checked={props.selected.has(m.cellId)} onToggle={props.onToggle} />
+        {matched.map((m) => (
+          <ReviewRow
+            key={m.cellId}
+            m={m}
+            checked={selected.has(m.cellId)}
+            onToggle={onToggle}
+            highlighted={isRowHighlighted(highlighted, m.cellId)}
+            onJump={onJump}
+          />
         ))}
       </div>
     </div>
   )
 }
 
-function VirtualReviewRowList({ matched, selected, onToggle }: ReviewRowListProps) {
+function VirtualReviewRowList({ matched, selected, onToggle, highlighted, onJump, handleRef }: ReviewRowListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
     count: matched.length,
@@ -294,6 +385,12 @@ function VirtualReviewRowList({ matched, selected, onToggle }: ReviewRowListProp
         cb({ width: rect.width > 0 ? rect.width : 560, height: rect.height > 0 ? rect.height : 480 })
       }),
   })
+  useImperativeHandle(handleRef, () => ({
+    scrollToCell: (cellId) => {
+      const index = matched.findIndex((m) => m.cellId === cellId)
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" })
+    },
+  }), [matched, virtualizer])
   return (
     <div ref={scrollRef} className={REVIEW_LIST_CLASS}>
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
@@ -307,7 +404,13 @@ function VirtualReviewRowList({ matched, selected, onToggle }: ReviewRowListProp
               className="absolute inset-x-0 top-0 border-b"
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              <ReviewRow m={m} checked={selected.has(m.cellId)} onToggle={onToggle} />
+              <ReviewRow
+                m={m}
+                checked={selected.has(m.cellId)}
+                onToggle={onToggle}
+                highlighted={isRowHighlighted(highlighted, m.cellId)}
+                onJump={onJump}
+              />
             </div>
           )
         })}
@@ -349,6 +452,12 @@ export function FileTargetImportPanel({
   // Bumped by every match started and by leaving the review, so a match that
   // finishes after the user moved on is dropped instead of shown.
   const matchRun = useRef(0)
+  // Contest jumps: the row or cue jumped to glows for a moment, and the
+  // unmatched list opens when the jump lands in it.
+  const [highlighted, setHighlighted] = useState<ContestMember | null>(null)
+  const [unmatchedOpen, setUnmatchedOpen] = useState(false)
+  const listHandle = useRef<ReviewListHandle | null>(null)
+  const unmatchedListRef = useRef<HTMLUListElement | null>(null)
 
   // Back goes one step: review → column mapping for a spreadsheet (the column
   // choice is what you'd fix, without re-uploading) and → the file picker for
@@ -403,6 +512,8 @@ export function FileTargetImportPanel({
 
   const showReview = useCallback((result: FileTargetMatchResult, byOrder: boolean) => {
     setMatchResult(result)
+    setHighlighted(null)
+    setUnmatchedOpen(false)
     setMatchedByOrder(byOrder)
     // Pre-select only rows that are safe to take as they stand. Overwriting an
     // existing translation needs an explicit tick; so does a row the matcher
@@ -413,6 +524,47 @@ export function FileTargetImportPanel({
     ))
     setStep("review")
   }, [])
+
+  // Everyone in each contest, in the order the screen shows them: review rows
+  // first, then unmatched cues.
+  const contestMembers = useMemo(() => {
+    const byContest = new Map<number, ContestMember[]>()
+    const add = (n: number, member: ContestMember) => byContest.set(n, [...(byContest.get(n) ?? []), member])
+    matchResult?.matched.forEach((m) => m.contest !== undefined && add(m.contest, { kind: "row", cellId: m.cellId }))
+    matchResult?.orphans.forEach((o, index) => o.contest !== undefined && add(o.contest, { kind: "orphan", index }))
+    return byContest
+  }, [matchResult])
+
+  /** From one contest member to the next, wrapping round: with two that is
+   *  simply "the other one"; with three or more, repeated clicks visit each. */
+  const jumpToRival = useCallback((from: ContestMember) => {
+    const contest =
+      from.kind === "row"
+        ? matchResult?.matched.find((m) => m.cellId === from.cellId)?.contest
+        : matchResult?.orphans[from.index]?.contest
+    const members = contest === undefined ? [] : (contestMembers.get(contest) ?? [])
+    const at = members.findIndex((m) => sameMember(from, m))
+    const to = members.length > 1 && at >= 0 ? members[(at + 1) % members.length] : undefined
+    if (!to) return
+    setHighlighted(to)
+    if (to.kind === "row") {
+      listHandle.current?.scrollToCell(to.cellId)
+    } else {
+      setUnmatchedOpen(true)
+      // After the list has opened and drawn its entries.
+      requestAnimationFrame(() => {
+        unmatchedListRef.current
+          ?.querySelector<HTMLElement>(`[data-orphan-index="${to.index}"]`)
+          ?.scrollIntoView?.({ block: "nearest" })
+      })
+    }
+  }, [matchResult, contestMembers])
+
+  useEffect(() => {
+    if (!highlighted) return
+    const timer = setTimeout(() => setHighlighted(null), JUMP_HIGHLIGHT_MS)
+    return () => clearTimeout(timer)
+  }, [highlighted])
 
   const toggleCell = useCallback((cellId: string) => {
     setSelectedCellIds((prev) => {
@@ -678,7 +830,7 @@ export function FileTargetImportPanel({
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // Rows a person can actually choose to import.
     const selectable = matched.filter((m) => !m.alreadyThere)
-    const contests = new Set(matched.flatMap((m) => (m.contest !== undefined ? [m.contest] : []))).size
+    const contestedRows = matched.filter((m) => m.flag === "contested").length
     const sharedTimingRows = matched.filter((m) => m.flag === "sharedTiming").length
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
     const unplaced = orphans.length - brokenTimecodes
@@ -774,9 +926,9 @@ export function FileTargetImportPanel({
               {t("importExport.review.orderMatchWarning")}
             </p>
           )}
-          {contests > 0 && (
+          {contestedRows > 0 && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.contestedWarning", { count: contests })}
+              {t("importExport.review.contestedWarning", { count: contestedRows })}
             </p>
           )}
           {sharedTimingRows > 0 && (
@@ -802,18 +954,31 @@ export function FileTargetImportPanel({
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
 
           {orphans.length > 0 && (
-            <LazyDetails summary={`${t("importExport.review.unmatchedListTitle")} (${formatCount(orphans.length, locale)})`}>
+            <LazyDetails
+              summary={`${t("importExport.review.unmatchedListTitle")} (${formatCount(orphans.length, locale)})`}
+              open={unmatchedOpen}
+              onOpenChange={setUnmatchedOpen}
+            >
               {() => (
-                <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                <ul ref={unmatchedListRef} className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
                   {orphans.map((o, i) => (
-                    <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
+                    <li
+                      key={`${o.ref}-${i}`}
+                      data-orphan-index={i}
+                      data-highlighted={sameMember(highlighted, { kind: "orphan", index: i }) || undefined}
+                      className={cn("px-3 py-1.5", sameMember(highlighted, { kind: "orphan", index: i }) && HIGHLIGHT_CLASS)}
+                    >
                       <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
                         {o.ref}
                         {reasonLabel(o.reason) && (
                           <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
                         )}
                         {o.contest !== undefined && (
-                          <ContestPill number={o.contest} title={t("importExport.review.rowContested", { number: o.contest })} />
+                          <ContestedButton
+                            label={t("importExport.review.goToLineItLostTo")}
+                            title={t("importExport.review.goToLineItLostTo")}
+                            onJump={() => jumpToRival({ kind: "orphan", index: i })}
+                          />
                         )}
                       </p>
                       <p className="truncate text-foreground/80">{o.text}</p>
@@ -845,7 +1010,14 @@ export function FileTargetImportPanel({
             <SkeletonRows />
           </div>
         ) : (
-          <ReviewRowList matched={matched} selected={selectedCellIds} onToggle={toggleCell} />
+          <ReviewRowList
+            matched={matched}
+            selected={selectedCellIds}
+            onToggle={toggleCell}
+            highlighted={highlighted}
+            onJump={jumpToRival}
+            handleRef={listHandle}
+          />
         )}
 
         {error && <p className="shrink-0 text-xs text-destructive">{error}</p>}

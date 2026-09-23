@@ -18,7 +18,7 @@
 
 import React from "react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, act, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, act, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
 // ── Mock the heavy outbox call ────────────────────────────────────────────────
 vi.mock("@/lib/import", () => ({
@@ -410,7 +410,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     ["WEBVTT", "", ...cues.flatMap(([a, b, text]) => [`${tc(a)} --> ${tc(b)}`, text, ""])].join("\n")
   const checkboxFor = (text: string) =>
     screen.getByText(text).closest("label")!.querySelector("input") as HTMLInputElement
-  const rowOf = (text: string) => screen.getByText(text).closest("label")!
+  const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
   /** Open a collapsible list under the counts; its entries are built only while open. */
   const openList = (title: RegExp) => {
     const details = screen.getByText(title).closest("details")!
@@ -471,14 +471,15 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(checkboxFor(text).checked).toBe(false)
     }
     expect(checkboxFor("same words").disabled).toBe(true)
-    // The two rows that fought over one line share a number; shared-timing rows get their own pill.
-    expect(screen.getAllByText("Contest 1")).toHaveLength(2)
-    expect(rowOf("swap one")).toHaveTextContent("Contest 1")
-    expect(rowOf("swap two")).toHaveTextContent("Contest 1")
+    // Rows that fought over one line carry a "Contested" button; shared-timing rows get their own pill.
+    expect(within(rowOf("swap one")).getByRole("button", { name: "Go to the cue this one competed with" }))
+      .toHaveTextContent("Contested")
+    expect(within(rowOf("swap two")).getByRole("button", { name: "Go to the cue this one competed with" }))
+      .toHaveTextContent("Contested")
     expect(screen.getAllByText("Same timing")).toHaveLength(2)
     expect(rowOf("PETER")).toHaveTextContent("Same timing")
     expect(screen.getByText("Already there")).toBeInTheDocument()
-    expect(screen.getByText(/1 contest: the rows marked Contest 1 competed for the same line/)).toBeInTheDocument()
+    expect(screen.getByText(/2 rows competed with another cue for the same line and were left unticked/)).toBeInTheDocument()
     expect(screen.getByText(/2 rows have exactly the same timing as another cue/)).toBeInTheDocument()
     // "Select all" never ticks a row whose text is already there.
     fireEvent.click(screen.getByText(/select all/i))
@@ -486,36 +487,88 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(checkboxFor("PETER").checked).toBe(true)
   })
 
-  it("numbers each contest, so the rows that fought over one line can be found together", async () => {
-    renderPanel({
-      cells: [
-        line(1, 10000, 10400), line(2, 10500, 10900), line(3, 20000, 20400),
-        line(4, 30000, 32000), line(5, 32500, 33500),
-      ],
-    })
-    await selectFile(makeFile(vtt([
+  describe("\"Contested\" jumps to the cue a row competed with", () => {
+    const contestLines = [
+      line(1, 10000, 10400), line(2, 10500, 10900), line(3, 20000, 20400),
+      line(4, 30000, 32000), line(5, 32500, 33500),
+    ]
+    const contestFile = vtt([
       [10450, 10850, "swap one"],
       [10500, 10900, "swap two"],
       [20000, 20400, "third"],
       [30000, 31000, "half one"],
       [31000, 32000, "half two"],
       [32500, 33500, "next"],
-    ]), "episode.vtt"))
-    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    expect(screen.getByText(/2 contests: rows marked with the same Contest number/)).toBeInTheDocument()
-    expect(rowOf("swap one")).toHaveTextContent("Contest 1")
-    expect(rowOf("swap two")).toHaveTextContent("Contest 1")
-    expect(rowOf("half one")).toHaveTextContent("Contest 2")
-    expect(rowOf("third")).not.toHaveTextContent("Contest")
-    // The half that lost its line is in the unmatched list, carrying the same number.
-    openList(/Cues that didn't find a line/)
-    const lost = screen.getByText("half two").closest("li")!
-    expect(lost).toHaveTextContent("Lost its line to another cue")
-    expect(lost).toHaveTextContent("Contest 2")
-    expect(screen.getAllByText("Contest 2")[0]).toHaveAttribute(
-      "title",
-      "Competed for the same line as the other rows marked Contest 2. Check them before importing.",
-    )
+    ])
+    const contestedButton = (text: string) =>
+      within(rowOf(text)).getByRole("button", { name: "Go to the cue this one competed with" })
+    const lit = () => [...document.querySelectorAll("[data-highlighted]")].map((el) => el.textContent)
+
+    it("goes to the row it competed with, and back — without ticking either", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText(/3 rows competed with another cue for the same line/)).toBeInTheDocument()
+      expect(within(rowOf("third")).queryByRole("button")).toBeNull()
+
+      fireEvent.click(contestedButton("swap one"))
+      expect(rowOf("swap two")).toHaveAttribute("data-highlighted", "true")
+      expect(lit()).toHaveLength(1)
+      fireEvent.click(contestedButton("swap two"))
+      expect(rowOf("swap one")).toHaveAttribute("data-highlighted", "true")
+      expect(rowOf("swap two")).not.toHaveAttribute("data-highlighted")
+      expect(checkboxFor("swap one").checked).toBe(false)
+      expect(checkboxFor("swap two").checked).toBe(false)
+    })
+
+    it("opens the unmatched list at the half that lost its line, and that cue goes back to the row", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByText("half two")).toBeNull() // the list starts closed
+
+      fireEvent.click(contestedButton("half one"))
+      const lost = screen.getByText("half two").closest("li")!
+      expect(lost).toHaveAttribute("data-highlighted", "true")
+      expect(lost).toHaveTextContent("Lost its line to another cue")
+
+      fireEvent.click(within(lost).getByRole("button", { name: "Go to the line it lost to" }))
+      expect(rowOf("half one")).toHaveAttribute("data-highlighted", "true")
+      expect(lost).not.toHaveAttribute("data-highlighted")
+    })
+
+    it("visits every cue in turn when three fought over one line", async () => {
+      renderPanel({ cells: [line(1, 30000, 33000), line(2, 40000, 41000)] })
+      await selectFile(makeFile(vtt([
+        [30000, 31000, "part one"],
+        [31000, 32000, "part two"],
+        [32000, 33000, "part three"],
+        [40000, 41000, "after"],
+      ]), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      fireEvent.click(contestedButton("part one"))
+      const entry = (text: string) => screen.getByText(text).closest("li")!
+      expect(entry("part two")).toHaveAttribute("data-highlighted", "true")
+      fireEvent.click(within(entry("part two")).getByRole("button", { name: "Go to the line it lost to" }))
+      expect(entry("part three")).toHaveAttribute("data-highlighted", "true")
+      fireEvent.click(within(entry("part three")).getByRole("button", { name: "Go to the line it lost to" }))
+      expect(rowOf("part one")).toHaveAttribute("data-highlighted", "true")
+    })
+
+    it("lets the glow fade", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      vi.useFakeTimers()
+      try {
+        fireEvent.click(contestedButton("swap one"))
+        expect(rowOf("swap two")).toHaveAttribute("data-highlighted", "true")
+        act(() => { vi.advanceTimersByTime(1700) })
+        expect(rowOf("swap two")).not.toHaveAttribute("data-highlighted")
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it("marks a shifted cue's row \"Timing differs\" and shows the line's own timecode, on that row only", async () => {

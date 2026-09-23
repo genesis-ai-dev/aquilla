@@ -331,6 +331,35 @@ describe("GET /attachments/:project/:file/:object", () => {
     expect(res!.headers.get("Content-Type")).toBe("application/octet-stream")
   })
 
+  it("serves an image inline but forces a PDF to download", async () => {
+    // A PDF is a document format with a scripting model. It is on the
+    // allow-list because attaching one is reasonable, but serving it inline
+    // would hand it to the browser's PDF viewer on a first-party origin behind
+    // a URL that needs no session. The UI never previews one anyway.
+    const env = makeEnv()
+    await put(env, { token: await makeToken() })
+    await put(env, {
+      token: await makeToken(),
+      contentType: "application/pdf",
+      objectName: "notes.pdf",
+    })
+
+    const image = await handleCellAttachmentRequest(
+      new Request(url(), { headers: { Authorization: `Bearer ${await makeToken()}` } }),
+      env,
+    )
+    expect(image!.headers.get("Content-Disposition")).toBe("inline")
+
+    const pdf = await handleCellAttachmentRequest(
+      new Request(url("notes.pdf"), {
+        headers: { Authorization: `Bearer ${await makeToken()}` },
+      }),
+      env,
+    )
+    expect(pdf!.headers.get("Content-Type")).toBe("application/pdf")
+    expect(pdf!.headers.get("Content-Disposition")).toBe("attachment")
+  })
+
   it("404s a missing object", async () => {
     const env = makeEnv()
     const res = await handleCellAttachmentRequest(

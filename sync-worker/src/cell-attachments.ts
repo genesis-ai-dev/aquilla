@@ -238,6 +238,13 @@ export async function handleCellAttachmentRequest(
   const contentType = ALLOWED_ATTACHMENT_CONTENT_TYPES.has(stored)
     ? stored
     : "application/octet-stream"
+  // Only an IMAGE is served inline. A PDF is on the allow-list because it is a
+  // reasonable thing to attach, but it is a document format with a scripting
+  // model, and serving it inline hands it to the browser's PDF viewer on a
+  // first-party origin behind a URL that needs no session (`?t=`). The UI
+  // never previews a PDF anyway — it renders an icon and a link — so forcing
+  // the download costs nothing and removes the inline-renderer surface.
+  const disposition = contentType.startsWith("image/") ? "inline" : "attachment"
   // Attachments are addressed by a uuidv7-derived objectName that is never
   // reused, so the bytes are immutable. `private` keeps authed responses out
   // of shared proxies (CACHE-5).
@@ -247,7 +254,7 @@ export async function handleCellAttachmentRequest(
       headers: {
         "Content-Type": contentType,
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": "inline",
+        "Content-Disposition": disposition,
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Length": String(obj.size),
       },

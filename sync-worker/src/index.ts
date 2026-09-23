@@ -188,7 +188,7 @@ declare global {
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
        *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
       POSTHOG_KEY?: string
-      /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+      /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
       POSTHOG_HOST?: string
       /**
        * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).

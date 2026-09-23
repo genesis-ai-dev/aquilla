@@ -157,9 +157,16 @@ binding = "CF_VERSION_METADATA"
 [env.production.vars]
 ENVIRONMENT = "production"
 DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
-# PostHog *project* token (public — same one shipped in the SPA bundle).
-# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+# PostHog ingest region + *project* token (public — same one shipped in the SPA
+# bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+# AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
+# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
+# EMPTY until the EU project exists — the retired US project token must not be
+# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
+# shipping stays off (local logging is unaffected) until the EU token is filled
+# in here. See the Linear issue's "Account-side dependency".
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.aquilla.app/identity"
 # SPA host for the ask-mode approval deep link (external/prepare.ts).

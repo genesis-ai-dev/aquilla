@@ -564,3 +564,122 @@ describe("worker deployment environment contract", () => {
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
   })
 })
+
+// AQU-854: Aquilla telemetry moved from PostHog US Cloud to PostHog EU Cloud.
+// The region is encoded in the ingest hostname, so there is no runtime signal
+// that it is wrong — a single producer left on `us.i.posthog.com` keeps
+// shipping browser analytics, session replays and worker error logs into a US
+// processor, silently and indefinitely. The only durable guard is that no live
+// config or producer default can name a US host at all, and that the deploy
+// config states the EU host explicitly rather than leaning on the code
+// default. The retired US *project token* must also not survive the cutover:
+// posting it to an EU endpoint would authenticate against nothing while still
+// putting the old credential on the wire.
+describe("PostHog EU region contract (AQU-854)", () => {
+  // The live config + every producer of a PostHog host. Vendored third-party
+  // docs under .claude/skills and .agents/skills are excluded on purpose:
+  // they are upstream PostHog samples, not Aquilla configuration.
+  const LIVE_POSTHOG_FILES = [
+    ["src", "lib", "posthog.ts"],
+    ["src", "lib", "posthog-host.ts"],
+    ["auth-worker", "src", "posthog-logs.ts"],
+    ["sync-worker", "src", "posthog-logs.ts"],
+    ["agent-worker", "src", "posthog-logs.ts"],
+    ["auth-worker", "src", "types.ts"],
+    ["agent-worker", "src", "types.ts"],
+    ["auth-worker", "wrangler.toml"],
+    ["sync-worker", "wrangler.toml"],
+    ["agent-worker", "wrangler.toml"],
+    ["config", "cloudflare-deployments.json"],
+    [".env.example"],
+    ["auth-worker", ".dev.vars.example"],
+    ["sync-worker", ".dev.vars.example"],
+    ["scripts", "posthog-ops-setup.mjs"],
+  ] as const
+
+  // Assembled rather than written out so this guard does not itself reintroduce
+  // the retired token as a grep-able literal.
+  const RETIRED_US_PROJECT_TOKEN = ["phc", "oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"].join("_")
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s names no US PostHog host",
+    (_label, segments) => {
+      const contents = readRepoFile(...segments)
+
+      expect(contents).not.toContain("us.i.posthog.com")
+      expect(contents).not.toContain("us.posthog.com")
+    },
+  )
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s does not carry the retired US project token",
+    (_label, segments) => {
+      expect(readRepoFile(...segments)).not.toContain(RETIRED_US_PROJECT_TOKEN)
+    },
+  )
+
+  it.each([
+    ["auth-worker", "identity"],
+    ["sync-worker", "sync"],
+    ["agent-worker", "agent sandbox"],
+  ])("%s declares the EU ingest host alongside every POSTHOG_KEY it sets", (directory) => {
+    const config = readRepoFile(directory, "wrangler.toml")
+    const hostDeclarations = config.match(/^POSTHOG_HOST = "https:\/\/eu\.i\.posthog\.com"$/gm) ?? []
+    const keyDeclarations = config.match(/^POSTHOG_KEY = /gm) ?? []
+
+    // Every [vars] / [env.*.vars] block that configures a key also pins the
+    // region, so no deployable profile falls back to the code default.
+    expect(keyDeclarations.length).toBeGreaterThan(0)
+    expect(hostDeclarations).toHaveLength(keyDeclarations.length)
+  })
+
+  it.each([
+    ["src/lib/posthog-host.ts", ["src", "lib", "posthog-host.ts"]],
+    ["auth-worker/src/posthog-logs.ts", ["auth-worker", "src", "posthog-logs.ts"]],
+    ["sync-worker/src/posthog-logs.ts", ["sync-worker", "src", "posthog-logs.ts"]],
+    ["agent-worker/src/posthog-logs.ts", ["agent-worker", "src", "posthog-logs.ts"]],
+  ] as const)("%s defaults its ingest host to EU in code", (_label, segments) => {
+    expect(readRepoFile(...segments)).toContain(
+      'POSTHOG_EU_INGEST_HOST = "https://eu.i.posthog.com"',
+    )
+  })
+
+  it("documents the EU host in the SPA and worker env examples", () => {
+    expect(readRepoFile(".env.example")).toContain("VITE_POSTHOG_HOST=https://eu.i.posthog.com")
+    for (const directory of ["auth-worker", "sync-worker"]) {
+      expect(readRepoFile(directory, ".dev.vars.example")).toContain(
+        'POSTHOG_HOST="https://eu.i.posthog.com"',
+      )
+    }
+  })
+
+  it("retires the US project token in the deployment manifest without pinning the host", () => {
+    // Blank until the EU project token exists (account-side dependency); a
+    // blank key makes `shipLog` a no-op instead of posting a retired token.
+    // The plainText check above asserts this against the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+
+    // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
+    // environment-guard turns every identity plainText key into a hard runtime
+    // requirement — an unset one makes the Worker answer 503 — so pinning a
+    // telemetry variable there would couple identity availability to
+    // telemetry configuration. The region is enforced on the wrangler
+    // profiles themselves by the per-worker check above, which also covers
+    // agent-worker (absent from this manifest entirely).
+    for (const surface of ["identity", "sync"]) {
+      expect(
+        deploymentManifest.surfaces[surface].environments.production.plainText,
+      ).not.toHaveProperty("POSTHOG_HOST")
+    }
+  })
+
+  it("points the one-off ops script at the EU control plane with a per-run project id", () => {
+    const script = readRepoFile("scripts", "posthog-ops-setup.mjs")
+
+    expect(script).toContain('const HOST = "https://eu.posthog.com"')
+    // The US project's numeric id is meaningless on the EU control plane, so it
+    // must not be baked in — that would silently target the retired project.
+    expect(script).toContain("process.env.POSTHOG_PROJECT_ID")
+    expect(script).not.toContain("401628")
+  })
+})

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One-shot PostHog ops setup for import observability (AQU — mp3 import triage).
 //
-// Creates in project 401628 (us.posthog.com):
+// Creates in the EU-Cloud project (eu.posthog.com) named by POSTHOG_PROJECT_ID:
 //   1. Funnel insight  — "import started" → "import succeeded", broken down by import_type
 //   2. Trend insight   — "import failed" count, broken down by file_exts
 //   3. Dashboard       — "Import health" holding both tiles
@@ -12,12 +12,21 @@
 //
 // Safe to re-run: existing objects are found by name and left in place.
 
-const HOST = "https://us.posthog.com"
-const PROJECT_ID = 401628
+const HOST = "https://eu.posthog.com"
+// AQU-854: the retired US project's numeric id is meaningless on the EU
+// control plane — the EU project gets its own — so it is supplied per-run
+// rather than baked in, which also stops a stray run from writing to the
+// old US project.
+const PROJECT_ID = process.env.POSTHOG_PROJECT_ID
 const KEY = process.env.POSTHOG_PERSONAL_API_KEY
 
 if (!KEY) {
-  console.error("Set POSTHOG_PERSONAL_API_KEY (phx_…) — create one at https://us.posthog.com/settings/user-api-keys")
+  console.error("Set POSTHOG_PERSONAL_API_KEY (phx_…) — create one at https://eu.posthog.com/settings/user-api-keys")
+  process.exit(1)
+}
+
+if (!PROJECT_ID) {
+  console.error("Set POSTHOG_PROJECT_ID — the numeric id of the EU-Cloud project (eu.posthog.com → Settings → Project)")
   process.exit(1)
 }
 

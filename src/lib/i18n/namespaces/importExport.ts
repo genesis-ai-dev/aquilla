@@ -1031,6 +1031,7 @@ export const importExport = defineNamespace({
     "importExport.review.rowAlreadyThere": "Already there",
     "importExport.review.rowContested": "Competed for the same line, check both",
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
+    "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.sharedTimingWarning": plural({
       one: "{count} row has exactly the same timing as another cue, so only file order " +
         "decided its line. It was left unticked.",
@@ -1053,8 +1054,6 @@ export const importExport = defineNamespace({
       other: "Timings in the uploaded file were adjusted by {percent}, which lined up {count} " +
         "more lines.",
     }),
-    "importExport.review.timingNote": "Translations keep this file's timings. Timings in the uploaded file are only used " +
-      "to find each line.",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
       one: "{count} cell not covered",
@@ -2888,6 +2887,14 @@ export const importExport = defineNamespace({
           "one both lay mostly on the same line, so the user should look at both rows " +
           "before importing. Short phrase ending in an instruction.",
       },
+      "importExport.review.rowTimingDiffers": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list, shown when the incoming subtitle's start or end time differs from " +
+          "the time of the line it was paired with. Only the text is imported and " +
+          "the line keeps its own time, so the pill tells the user to look at that " +
+          "row. Two or three words, no closing full stop.",
+      },
       "importExport.review.rowSharedTiming": {
         description:
           "Small amber tag on one row of the match-review list: another uploaded cue " +
@@ -2937,13 +2944,6 @@ export const importExport = defineNamespace({
           percent: "Signed percentage the timings were scaled by, e.g. \"+0.1%\".",
           count: "How many more lines lined up after the adjustment.",
         },
-      },
-      "importExport.review.timingNote": {
-        description:
-          "Grey note above the match-review list when a subtitle file was paired by " +
-          "time: importing fills in only the translated text, and each line keeps the " +
-          "open file's own start and end times. The uploaded file's timings are used " +
-          "only to work out which line each translation belongs to.",
       },
       "importExport.review.title": {
         description:

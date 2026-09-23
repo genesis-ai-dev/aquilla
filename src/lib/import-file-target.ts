@@ -486,10 +486,12 @@ function sharedTimingRows(a: OverlapAssignment): Set<number> {
   return shared
 }
 
-/** Below this, a cue's and its line's timings count as the same when deciding
- *  whether to show the line's own timecode: under half a frame at every rate
- *  in timebase.ts, so only real drift prints a second timecode. */
-const CELL_REF_TOLERANCE_MS = 20
+/** Up to this, a cue's and its line's timings count as the same when deciding
+ *  whether the review screen marks a row "Timing differs" and prints the line's
+ *  own timecode. Subtitle tools snap cues to video frames (40-42ms), so a
+ *  re-exported file can be off by about 20ms from rounding alone; 30ms clears
+ *  that and still catches any real shift (Sam's call, 2026-09-23). */
+const CELL_REF_TOLERANCE_MS = 30
 
 /** Warn when fewer than this share of the pairings are close matches. Every
  *  correct file measured stays above 0.75; a start offset falls far below it

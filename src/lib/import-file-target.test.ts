@@ -1124,6 +1124,17 @@ describe("showing the line's own timecode (AQU-1360)", () => {
       .toEqual(["00:00:10.000 --> 00:00:10.800"])
   })
 
+  it("ignores a frame's rounding, up to 30ms, and shows anything past it", () => {
+    expect(refs([{ ref: "00:00:10.025 --> 00:00:10.775", text: "a", startMs: 10025, endMs: 10775 }]))
+      .toEqual([null])
+    expect(refs([{ ref: "00:00:10.030 --> 00:00:10.800", text: "a", startMs: 10030, endMs: 10800 }]))
+      .toEqual([null])
+    expect(refs([{ ref: "00:00:10.031 --> 00:00:10.800", text: "a", startMs: 10031, endMs: 10800 }]))
+      .toEqual(["00:00:10.000 --> 00:00:10.800"])
+    expect(refs([{ ref: "00:00:10.000 --> 00:00:10.769", text: "a", startMs: 10000, endMs: 10769 }]))
+      .toEqual(["00:00:10.000 --> 00:00:10.800"])
+  })
+
   it("compares numbers, not strings — an SRT comma is not drift", () => {
     expect(refs([{ ref: "00:00:10,000 --> 00:00:10,800", text: "a", startMs: 10000, endMs: 10800 }]))
       .toEqual([null])

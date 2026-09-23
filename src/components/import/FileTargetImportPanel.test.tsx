@@ -469,14 +469,19 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(checkboxFor("PETER").checked).toBe(true)
   })
 
-  it("shows the line's own timecode beside a shifted cue, and says timings aren't kept", async () => {
+  it("marks a shifted cue's row \"Timing differs\" and shows the line's own timecode, on that row only", async () => {
     renderPanel({ cells: four })
     await selectFile(makeFile(vtt([[10300, 11100, "TARGET 1 late"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     // Line 1's own timecode appears because the cue is 300ms off; line 2's doesn't.
     expect(screen.getByText(/00:00:10\.000 --> 00:00:10\.800/)).toBeInTheDocument()
     expect(screen.queryByText(/00:00:20\.000 --> 00:00:20\.800 /)).not.toBeInTheDocument()
-    expect(screen.getByText(/Translations keep this file's timings/)).toBeInTheDocument()
+    const rowOf = (text: string) => screen.getByText(text).closest("label")!
+    expect(rowOf("TARGET 1 late")).toHaveTextContent("Timing differs")
+    expect(rowOf("TARGET 2")).not.toHaveTextContent("Timing differs")
+    expect(screen.getAllByText("Timing differs")).toHaveLength(1)
+    // The standing note it replaced is gone.
+    expect(screen.queryByText(/keep this file's timings/)).not.toBeInTheDocument()
   })
 
   it("counts the cues that never became rows", async () => {

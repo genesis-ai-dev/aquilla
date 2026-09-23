@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatPercent } from "@/lib/i18n/format"
@@ -483,9 +484,6 @@ export function FileTargetImportPanel({
             <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
           )}
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
-          {matchResult.alignedBy === "overlap" && (
-            <p className="mt-1.5 text-xs text-muted-foreground">{t("importExport.review.timingNote")}</p>
-          )}
 
           {orphans.length > 0 && (
             <details className="mt-2 text-xs">
@@ -566,6 +564,13 @@ export function FileTargetImportPanel({
                     </p>
                   )}
                 </div>
+                {/* The row's own timing differs from the line's. Only the
+                    line's timing is kept, so this is the row to look at. */}
+                {m.cellRef && (
+                  <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
+                    {t("importExport.review.rowTimingDiffers")}
+                  </Badge>
+                )}
               </label>
             ))}
           </div>

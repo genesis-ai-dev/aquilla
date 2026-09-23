@@ -14,6 +14,7 @@ import {
   buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
+  buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
   selectApprovedExamples,
@@ -25,6 +26,7 @@ export {
   buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
+  buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
   selectApprovedExamples,
@@ -266,6 +268,9 @@ export function buildBatchPrompt(options: {
   examples: PassageExample[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the batch (AQU-934) — the union
+   *  of what applies to its cells, since the batch shares one system prompt. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -287,6 +292,8 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -380,6 +387,8 @@ export function buildParagraphPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** Active project rules injected into the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the paragraph group (AQU-934). */
+  styleInstructions?: string[]
   /** Project brief L1 summary. */
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
@@ -411,6 +420,8 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {

@@ -61,6 +61,11 @@ import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
+import { useStyleRules } from "@/hooks/useStyleRules"
+import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "@/lib/rules/applicability"
+import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
+import { resolveFileGenre } from "@/lib/rules/file-genre"
+import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import {
@@ -4294,6 +4299,63 @@ export function ProjectWorkspace() {
     activeLane,
     localConcepts,
   )
+
+  // AQU-934: style-rule library + applicability graph. The resolver answers
+  // "which rules apply to THIS cell", so a draft prompt carries only the
+  // guidance in force for its passage instead of the whole library.
+  const { rules: styleRules, applicability: styleApplicability } = useStyleRules(projectId ?? null)
+  const styleApplicabilityIndex = useMemo(
+    () => buildApplicabilityIndex(styleApplicability),
+    [styleApplicability],
+  )
+  const fileGenres = project?.fileGenres
+  const styleInstructionsFor = useCallback((cell: CellData): string[] => {
+    if (styleRules.length === 0) return []
+    const file = projectFiles.find((f) => f.id === cell.fileId)
+    const genre = resolveFileGenre(cell.fileId, file?.bookCode, fileGenres)
+    const coords = cellCoordinates(
+      cell,
+      {
+        fileId: cell.fileId,
+        ...(file?.bookCode ? { bookCode: file.bookCode } : {}),
+        ...(genre ? { genre } : {}),
+      },
+      bookGenre,
+    )
+    return resolveEffectiveRules(styleRules, styleApplicabilityIndex, coords)
+      .map((effective) => effective.rule.instruction)
+  }, [styleRules, styleApplicabilityIndex, projectFiles, fileGenres])
+
+  const bookCodeByFileId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const file of projectFiles) if (file.bookCode) map.set(file.id, file.bookCode)
+    return map
+  }, [projectFiles])
+
+  // AQU-934 phase 3a: library rules that carry a deterministic check lint only
+  // where the applicability graph puts them in force. Memoized because the
+  // resolver builds the index + signature once and caches per coordinate —
+  // rebuilding per render would be correct but throw that away.
+  const libraryLint = useMemo(
+    () => buildLibraryLintResolver({
+      styleRules,
+      applicability: styleApplicability,
+      coordsFor: (cell) => {
+        const bookCode = bookCodeByFileId.get(cell.fileId)
+        const genre = resolveFileGenre(cell.fileId, bookCode, fileGenres)
+        return cellCoordinates(
+          cell,
+          {
+            fileId: cell.fileId,
+            ...(bookCode ? { bookCode } : {}),
+            ...(genre ? { genre } : {}),
+          },
+          bookGenre,
+        )
+      },
+    }),
+    [styleRules, styleApplicability, bookCodeByFileId, fileGenres],
+  )
   const {
     comments: allProjectComments,
     counts: commentCounts,
@@ -5041,6 +5103,7 @@ export function ProjectWorkspace() {
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
     commitCompletedCells,
+    styleInstructionsFor,
   )
 
   const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
@@ -5622,7 +5685,13 @@ export function ProjectWorkspace() {
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations, enabled: healthCalculationsEnabled },
+    {
+      decaySettings: project?.decaySettings,
+      requiredValidations,
+      enabled: healthCalculationsEnabled,
+      rulesForCell: libraryLint.rulesForCell,
+      rulesForCellSig: libraryLint.signature,
+    },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase

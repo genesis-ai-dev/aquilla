@@ -244,7 +244,7 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
@@ -4681,7 +4681,12 @@ export function ProjectWorkspace() {
       rememberPendingTargetCommit(cell.id, eventId, parentId)
       draftDeadLettered = false
       const flushedEventId = eventId
-      await flushOutboxBatch({
+      // AQU-579: settle THIS event, not just "one batch". A single
+      // flushOutboxBatch posts the oldest file group, so with any older row
+      // queued the draft goes out later under the background flusher, where a
+      // dead-letter only reaches the tab-wide stale listener — it clears the
+      // shadow with no rebase, erasing the draft after "Saved".
+      await flushOutboxUntilSettled([flushedEventId], {
         getTokenForFile: getTokenForProjectFile,
         onStaleSiblings: (entries) => {
           if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
@@ -4862,7 +4867,8 @@ export function ProjectWorkspace() {
         )
       }
     }
-    await flushOutboxBatch({
+    // AQU-579: settle this response's own events (see flushOutboxUntilSettled).
+    await flushOutboxUntilSettled(eventIds, {
       getTokenForFile: getTokenForProjectFile,
       onStaleSiblings: (entries) => {
         for (const entry of entries) {
@@ -4987,7 +4993,7 @@ export function ProjectWorkspace() {
               )
             }
           }
-          await flushOutboxBatch({
+          await flushOutboxUntilSettled(retryEventIds, {
             getTokenForFile: getTokenForProjectFile,
             onStaleSiblings: (entries) => {
               for (const entry of entries) {

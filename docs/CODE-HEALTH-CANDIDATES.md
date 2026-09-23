@@ -313,24 +313,29 @@ across `src`, `e2e`, `scripts`, all four worker packages, `parity` and `index.ht
 these besides the two files deleted above. None were attempted — the run's budget was spent —
 and each needs its own zero-importer re-verification before deletion, since files move.
 
-- `src/components/CheckFileButton.tsx` (100 lines) — zero references anywhere in code; only
-  mentions are an i18n section-header comment and two historical docs
-  (`docs/superpowers/plans/2026-08-10-namespace-partition.md`). Likely the same
-  supersession story as the rules dialogs (`CheckFindingsDrawer` is the live surface), but
-  that was not verified this run.
-- `src/components/onboarding/checklist/AiProviderStep.tsx` (221 lines) — zero importers, and
-  `docs/superpowers/plans/2026-04-23-settings-state-model.md` (Task 5) explicitly plans
-  "Delete: `src/components/onboarding/checklist/AiProviderStep.tsx`", replaced by
-  `LlmSettingsForm compact` in `AiSetupDialog` and `SetupChecklistDrawer`. Reads like a
-  half-completed migration — confirm both call sites actually swapped before deleting.
+- `src/components/CheckFileButton.tsx` (100 lines) — **done 2026-09-21.** Re-verified zero
+  importers; the only remaining mention is the i18n section-header comment at
+  `namespaces/rules.ts:111`. Supersession confirmed: `FileChapterToolbar.tsx:52` renders the
+  live "Check file" trigger off the same `rules.checkFileButton.label` key, and
+  `checkScopeSummary` (the one export it pulled from `CheckFindingsDrawer`) stays live via
+  `CheckFindingsDrawer.tsx:301,308`. `FileChapterToolbar.test.tsx:200` asserts the
+  `check-file-button` testid is *absent*, so it is unaffected.
+- `src/components/onboarding/checklist/AiProviderStep.tsx` (221 lines) — **done 2026-09-21.**
+  Both documented call sites are gone: `AiSetupDialog.tsx` no longer exists at all, and
+  `SetupChecklistDrawer.tsx` imports seven checklist siblings but reaches AI provider setup
+  through `AiModelsStep` instead. The migration the plan doc described had already completed;
+  only the orphan file was left.
 - `src/components/AudioRecorder/RecordingVideoStage.tsx` (134 lines) — zero references
   anywhere in the repo, not even in docs. Note the neighbouring
   `RecordingVideoSurface.test.tsx` is a known full-suite timing flake (see the issue #410
   family above), so a deletion here needs extra care reading the before/after failure lists.
-- `src/lib/audio/browser-process-stub.ts` (14 lines) — a worker-only `process` stand-in for
-  phonemizer, with zero references including in `vite.config.ts`. Probably orphaned when an
-  alias was removed, but bundler shims are exactly the kind of thing a grep sweep gets wrong;
-  needs someone to confirm no build config reaches it by path before it goes.
+  Still open — left out of the 2026-09-21 run only to keep that run inside its line budget.
+- `src/lib/audio/browser-process-stub.ts` (14 lines) — **done 2026-09-21.** The build-config
+  question this entry raised is answered: nothing aliases it. phonemizer's Node detection is
+  now patched at transform time by `phonemizerBrowserUnpackPlugin`
+  (`scripts/vite-phonemizer-browser.ts`) delegating to
+  `src/lib/audio/phonemizer-browser-env.ts`; `vite.config.ts` has no stub alias, and the
+  module was debris from the superseded alias-based approach. `pnpm build` stayed green.
 - `src/components/ui/{attachment,item,toggle-group,bar-spinner}.tsx` (537 lines total) —
   unused shadcn/ui primitives. Deliberately NOT logged as dead code: `src/components/ui/` is
   a vendored primitive library where "added ahead of first use" is normal, and `shadcn add`
@@ -340,6 +345,68 @@ and each needs its own zero-importer re-verification before deletion, since file
   (~3,900 lines, blocked on issue #410) and `src/hooks/useSubscribedConcepts.ts` (looks dead,
   is not — see below). (`TerminologyPage.tsx` and its `candidates-worker.ts` were listed here
   too; both went on 2026-09-21 — see the component-cleanup entry above.)
+
+## 2026-09-21 — `dev`'s own gates are red, which freezes the i18n catalog
+
+The 2026-09-21 run's baseline (clean tree at `origin/dev` `b001b2cb`) found **`pnpm lint` and
+`pnpm test` both failing on trunk**. All of it reproduces in isolation — none are full-suite
+flakes — so future runs should expect these and re-baseline rather than assume green:
+
+- `pnpm lint` — exit 2, 6 errors: `sync-worker/src/external/commands.ts:39-42` (four unused
+  type imports), `auth-worker/src/routes/changeset-approvals.ts:34` (unused `ROLE`),
+  `src/components/org/ProjectAutopilotPanel.test.tsx:439` (`prefer-const` on `gate`). ESLint
+  also reports stale `eslint-suppressions.json` entries ("suppressions left that do not occur
+  anymore"), which is a *separate* finding from the nested-`dist` entry above.
+- `pnpm test` — exit 1, 4 files / 6 tests: `src/lib/i18n/context.test.ts` (2),
+  `src/hooks/useProject.deviceLocalLive.test.tsx` (3),
+  `src/lib/export/exporters/idml.rejoin.test.ts` (1), and
+  `scripts/cloudflare-preview-comment.test.mjs` (a collection error, not a test failure — the
+  file imports `node:test` but the root vitest config now sweeps it in).
+- `pnpm build` is green.
+
+**Consequence for this ledger**: `src/lib/i18n/context.test.ts` is a whole-catalog invariant
+test, so by the routine's "a file whose tests are already red is frozen" rule it freezes
+*every* `src/lib/i18n/namespaces/*.ts` file. That blocks the `rules.page.*` /
+`rules.createDialog.*` / `rules.suggestDialog.*` orphan-key sweep logged above — which this
+run had otherwise fully scoped and verified, and which turns out to be **well inside budget**,
+correcting that entry's "easily 15-20 files" estimate:
+
+- The repo has only 6 locale files (`ar`, `ms`, `my`, `th`, `zh-Hans`, `zh-Hant`); `en.ts` is
+  a barrel that spreads the namespaces and carries no keys of its own. In every locale file
+  the 26 keys sit on 26 contiguous single lines.
+- Real scope: `namespaces/rules.ts` (26 keys + 26 `context.keys` entries + 3 section headers)
+  + 6 locale files + `namespaces/duplicate-exceptions.ts` + `source-hashes.json` = **9 files,
+  ~460 deleted lines**, of which 156 are the inert `source-hashes.json` sidecar.
+- Confirmed orphaned repo-wide (`src`, `e2e`, `scripts`, all four worker packages): the only
+  non-i18n mentions are this ledger and `docs/swarm/I18N-COVERAGE-ORCHESTRATION.md`'s
+  historical retrospective table.
+- **`rules.loadingLabel` must survive** — `ProjectSettings/RulesSection.tsx:129` still uses it.
+  It sits *inside* the `── RulesPage.tsx ──` section in both the keys block and the context
+  block, so it has to be lifted out rather than swept with its neighbours, and its context
+  description ("Rendered in two places … the standalone Rules page and the Rules section
+  inside Project Settings") is itself drift now that the standalone page is gone.
+- **`duplicate-exceptions.ts` must change in the same commit.**
+  `no-duplicates.test.ts > keeps every documented exception real and justified` hard-fails on
+  an exception for a key that no longer exists, and `rules.createDialog.descriptionLabel` has
+  one (it collides with `nav.report.descriptionFieldLabel`). Simulated against the live
+  catalog: that is the **only** exception affected — no other entry stops colliding once the
+  26 keys go.
+- `source-hashes.json`'s 156 orphan entries are provably inert: `i18n-todo.ts` iterates
+  `catalogLeafKeys(locale)` (derived from `en`) and only *looks up* hashes, and
+  `i18n-catalog.ts`'s `runCheck()` only validates context coverage. They are worth deleting
+  for tidiness, not correctness.
+- **Proof needed**: whoever picks this up needs `context.test.ts` green first (fix the
+  `onboarding.connect.{account,agent,confirm}` context entries), then `pnpm lint`,
+  `pnpm build`, `pnpm test` — in particular `no-duplicates.test.ts` and `context.test.ts`.
+
+**Grown by this run**: deleting `CheckFileButton.tsx` orphaned three more keys in the same
+namespace — `rules.checkFileButton.{issueCount,lastCheckTooltip,idleTooltip}`. `.label` is
+*not* orphaned (`FileChapterToolbar.tsx:52` uses it), so the `── "Check file" toolbar button ──`
+section header stays. Deleting `AiProviderStep.tsx` likewise orphans the keys under the
+`— AiProviderStep —` header in `namespaces/onboarding.ts:232`. Per the 2026-09-18 convention,
+both section-header comments were left in place so the still-live keys under them keep their
+provenance; remove each header together with its keys, not before. Sweep all of this in the
+one pass with the three `rules.*` prefixes above.
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 

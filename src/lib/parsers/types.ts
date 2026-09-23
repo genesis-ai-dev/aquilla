@@ -240,7 +240,12 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
   },
 }
 
-export type TtsProvider = "omnivoice" | "gemini" | "kokoro" | "mms"
+/**
+ * `"omnivoice"` and `"kokoro"` are persisted legacy ids. Opening a project
+ * rewrites them to `"inworld"` (language tags included); runtime still remaps
+ * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
+ */
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -253,12 +258,37 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "omnivoice" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "inworld" when absent. Leftover `"kokoro"` is rewritten to inworld. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
-  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name. */
+  /** Gemini prebuilt voice id (e.g. "Kore"). For Inworld, the catalog `voiceId`
+   *  (Dennis, Alex), an Instant Clone id, or a published Voice Design id
+   *  (`workspace__design-voice-…`). Leftover Kokoro speaker ids (`af_heart`)
+   *  are rewritten to the Inworld stock default on load. */
   voiceName?: string
+  /**
+   * BCP-47 language this Inworld stock voice was picked for (AQU-1189). Used
+   * to badge the name when a project has more than one target-language lane,
+   * and as the synthesize/catalog language when the project lane is a
+   * display name Inworld cannot map.
+   */
+  language?: string
+  /**
+   * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
+   * `audioConfig.speakingRate`.
+   */
+  speakingRate?: number
+  /**
+   * Inworld delivery: STABLE | BALANCED | CREATIVE. Only sent when audio
+   * quality is Highest (`inworld-tts-2`); Flash ignores it.
+   */
+  deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
+  /**
+   * Inworld audio quality. Highest = `inworld-tts-2` (default, unlocks Delivery
+   * and steering); Standard = `inworld-tts-2-flash`.
+   */
+  audioQuality?: "standard" | "highest"
   /** Spoken accent or oral reading tradition. */
   accent?: string
   /** Closest high-resource language whose pronunciation should be used as a fallback. */
@@ -278,6 +308,13 @@ export interface Voice {
    */
   referenceAudioId?: string
   /**
+   * R2 object name (incl. ext) of the Voice Design sample the user picked.
+   * The editor plays this clip so it matches the preview, instead of
+   * synthesizing the script again. Voices saved before this field existed
+   * fall back to a fresh TTS request.
+   */
+  designPreviewAudioId?: string
+  /**
    * When the clone reference was lifted from a line take, `${cellId}:${slot}`
    * of that take. The Reference audio tab is filled only when `referenceAudioId`
    * is set *without* this key (a recorded or uploaded clip).
@@ -286,7 +323,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "omnivoice" (hosted, no key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. */
+  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "mms" runs locally. Legacy `"omnivoice"` / `"kokoro"` are rewritten to inworld on load and remapped at runtime. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string
@@ -642,6 +679,8 @@ export interface ProjectRecord {
   /** Authored living-memory entries (instructions + standards). Persisted and
    *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /** AQU-934: per-file genre assignment (fileId → genre id). Synced settings. */
+  fileGenres?: Record<string, string>
   /** The project's skopos/Paratext translation brief. Persisted and synced via
    *  ProjectWideSettings the same way as `livingMemoryEntries`. */
   translationBrief?: import("@/lib/brief/types").TranslationBrief

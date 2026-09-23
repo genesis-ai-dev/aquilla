@@ -47,6 +47,10 @@ import {
 } from "../../../shared/span-label"
 import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
+  splitPendingActions,
+  type PendingPassageGroup,
+} from "@/lib/contextual/pending-groups"
+import {
   commandContextualRun,
   fetchContextualDecisions,
   fetchContextualRunActivity,
@@ -487,6 +491,7 @@ const EVENT_KIND_KEYS: Record<string, MessageKey> = {
   steering_queued: "autopilot.inspector.event.kind.steeringQueued",
   run_command: "autopilot.inspector.event.kind.runCommand",
   draft_reviewed: "autopilot.inspector.event.kind.draftReviewed",
+  memories_proposed: "autopilot.inspector.event.kind.memoriesProposed",
 }
 
 function detailNumber(event: ContextualActivityEvent, key: string): number | null {
@@ -586,6 +591,13 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
       ? t("autopilot.inspector.event.runCommandPause")
       : t("autopilot.inspector.event.runCommandStop")
   }
+  if (event.kind === "memories_proposed") {
+    // A failed reflection is recorded rather than hidden (AQU-1302): a run
+    // that stopped learning should say so where its other work is.
+    if (event.status === "failed") return t("autopilot.inspector.event.memoriesUnavailable")
+    const count = detailNumber(event, "count") ?? 0
+    return t("autopilot.inspector.event.memoriesProposed", { count })
+  }
   if (event.kind === "draft_reviewed") {
     if (event.details.outcome === "applied") return t("autopilot.inspector.event.draftApplied")
     if (event.details.outcome === "superseded") {
@@ -677,6 +689,49 @@ function ReviewDraft({
         </CardFooter>
       )}
     </Card>
+  )
+}
+
+/** One passage in the expanded backlog: its reference, its draft count, and a
+ *  link that takes the editor straight there. Listing every draft of every
+ *  earlier passage is the pile AQU-1301 removes, so the group stays a row. */
+function PassageRow({
+  group,
+  projectId,
+  runTargetLang,
+}: {
+  group: PendingPassageGroup
+  projectId: string
+  runTargetLang?: string
+}) {
+  const t = useT()
+  const label = group.spanLabel
+  const first = group.drafts[0]
+  const href = group.fileId && first
+    ? draftReviewHref(projectId, group.fileId, first.cellId, runTargetLang ?? "")
+    : null
+  const title = label ?? t("autopilot.inspector.review.currentPassageUnlabelled")
+  return (
+    <li className="flex items-center justify-between gap-2 border-b py-2 last:border-b-0">
+      <span className="min-w-0">
+        {href
+          ? (
+            <a
+              href={href}
+              aria-label={label
+                ? t("autopilot.inspector.review.openPassage", { spanLabel: label })
+                : t("autopilot.inspector.review.inEditor")}
+              className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {title}
+            </a>
+          )
+          : <span className="text-sm font-medium">{title}</span>}
+      </span>
+      <Badge variant="secondary">
+        {t("autopilot.inspector.review.passageDrafts", { count: group.drafts.length })}
+      </Badge>
+    </li>
   )
 }
 
@@ -802,6 +857,8 @@ export function AutopilotActivityInspector({
   const [detailsOpen, setDetailsOpen] = useState(initialSection === "attention")
   const [reviewOpen, setReviewOpen] = useState(initialSection === "review")
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** The backlog behind the parked passage stays shut until asked for (AQU-1301). */
+  const [backlogOpen, setBacklogOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(initialSection === "context")
   const [technicalOpen, setTechnicalOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -1199,6 +1256,18 @@ export function AutopilotActivityInspector({
       visible: draftHistory.length,
       total: authoritativeDraftHistory,
     })
+  // AQU-1301: the pending set leads with the passage the run is parked on.
+  // Everything behind it is a count, so a 200-draft backlog still opens on one
+  // actionable passage rather than on every draft the run ever staged.
+  const pending = splitPendingActions(proposedDrafts, decisions, selectedRun?.spanLabel ?? null)
+  // The draft page is bounded, so the loaded groups can under-report the
+  // backlog. The parked passage is always on the first page (drafts come back
+  // newest-first), so anything the server counts beyond it is backlog too —
+  // report the larger of the two rather than a number the "showing X of Y"
+  // line below would immediately contradict.
+  const restDraftCount = pending.current
+    ? Math.max(pending.restDraftCount, authoritativeProposedDrafts - pending.current.drafts.length)
+    : pending.restDraftCount
   const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
   const runsWarningText = runsWarning ? t(runsWarning) : null
   const activityWarningText = activityWarning ? t(activityWarning) : null
@@ -1510,8 +1579,77 @@ export function AutopilotActivityInspector({
                 </section>
 
                 <Disclosure title={t("autopilot.status.readyForReview")} open={reviewOpen} onOpenChange={setReviewOpen} badge={<Badge variant="secondary">{proposedDraftCountLabel}</Badge>}>
-                  {proposedDrafts.length > 0
-                    ? proposedDrafts.map((draft, index) => <ReviewDraft key={draft.id ?? index} draft={draft} projectId={projectId} runTargetLang={selectedRun.targetLang} />)
+                  {pending.current
+                    ? (
+                      <div className="flex flex-col gap-3" data-testid="autopilot-current-passage">
+                        <h4 className="text-sm font-medium">
+                          {pending.current.spanLabel
+                            ? t("autopilot.inspector.review.currentPassage", {
+                              spanLabel: pending.current.spanLabel,
+                            })
+                            : t("autopilot.inspector.review.currentPassageUnlabelled")}
+                        </h4>
+                        {/* The question that parked the run gates every draft
+                            under it. Its one interactive card lives in the
+                            "Needs your decision" section above — never inside
+                            the collapsed backlog — so this names the link
+                            rather than rendering a second copy of the control. */}
+                        {pending.current.decisions.length > 0 && (
+                          <p
+                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                            data-testid="autopilot-current-passage-blocked"
+                          >
+                            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                            {t("autopilot.inspector.review.blockedByDecision", {
+                              count: pending.current.decisions.length,
+                            })}
+                          </p>
+                        )}
+                        {pending.current.drafts.map((draft, index) => (
+                          <ReviewDraft
+                            key={draft.id ?? index}
+                            draft={draft}
+                            projectId={projectId}
+                            runTargetLang={selectedRun.targetLang}
+                          />
+                        ))}
+                        {pending.rest.length > 0 && (
+                          <div className="flex flex-col gap-2" data-testid="autopilot-passage-backlog">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="self-start"
+                              aria-expanded={backlogOpen}
+                              onClick={() => setBacklogOpen((open) => !open)}
+                            >
+                              {backlogOpen
+                                ? t("autopilot.inspector.review.restHide")
+                                : t("autopilot.inspector.review.restToggle", {
+                                  count: restDraftCount,
+                                })}
+                            </Button>
+                            <p className="text-xs text-muted-foreground">
+                              {t("autopilot.inspector.review.restSummary", {
+                                count: pending.restFileCount,
+                              })}
+                            </p>
+                            {backlogOpen && (
+                              <ul className="flex flex-col">
+                                {pending.rest.map((group) => (
+                                  <PassageRow
+                                    key={group.key}
+                                    group={group}
+                                    projectId={projectId}
+                                    runTargetLang={selectedRun.targetLang}
+                                  />
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
                     : authoritativeProposedDrafts > 0
                       ? (
                         <p className="text-sm text-muted-foreground">

@@ -645,4 +645,34 @@ describe("OrgSwitcher", () => {
       expect(screen.queryByRole("option", { name: /alice co admin/i })).not.toBeInTheDocument()
     })
   })
+
+  // AQU-1113: the switcher used to hardcode an untranslated English
+  // "Workspace" for an org with no name, while the breadcrumb, members page
+  // and projects page all called the same thing "Organization". One entity,
+  // two nouns — and non-English users saw the English word either way.
+  describe("unnamed-organization fallback (AQU-1113)", () => {
+    it("labels a nameless org 'Organization', never 'Workspace'", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: null, role: { level: 700, name: "owner" } }])
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+      const trigger = await screen.findByRole("combobox", { name: "Organization switcher: Organization" })
+      expect(trigger).toBeInTheDocument()
+      expect(screen.queryByText("Workspace")).not.toBeInTheDocument()
+    })
+
+    it("uses the same fallback noun in the dropdown row as on the trigger", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: null, role: { level: 700, name: "owner" } },
+        { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      ])
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+      await openOrgSwitcher("Organization switcher: All organizations")
+
+      // Option text is "<mark initials><label><role>", e.g. "OROrganizationOwner".
+      const optionTexts = screen.getAllByRole("option").map((o) => o.textContent ?? "")
+      expect(optionTexts.some((text) => text.includes("Organization") && text.includes("Owner"))).toBe(true)
+      expect(optionTexts.some((text) => text.includes("Workspace"))).toBe(false)
+    })
+  })
 })

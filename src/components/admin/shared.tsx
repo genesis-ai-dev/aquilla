@@ -1,4 +1,28 @@
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
+
 export { ValidatedBar } from "./ValidatedBar"
+
+/**
+ * First-load placeholder for an admin console section (AQU-942).
+ *
+ * Only for a section that has never resolved its data. Once a section holds
+ * rows, a revalidation must keep the real shell mounted — every admin mutation
+ * here re-fetches, and swapping back to a placeholder takes the table, its
+ * filters and the admin's scroll position with it.
+ */
+export function AdminSectionSkeleton({ label, blocks = 3 }: { label: string; blocks?: number }) {
+  return (
+    <LoadingTemplate label={label} className="min-h-[18rem]" templateClassName="min-h-[18rem]">
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-6 w-56 rounded-md" />
+        {Array.from({ length: blocks }).map((_, i) => (
+          <Skeleton key={i} className="h-24 rounded-lg border bg-card" />
+        ))}
+      </div>
+    </LoadingTemplate>
+  )
+}
 
 /** GitLab full_paths lead with the org's own path; drop it so a team reads locally. */
 export function relativeTeamPath(name: string): string {

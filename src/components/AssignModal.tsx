@@ -112,6 +112,14 @@ interface AssignModalProps {
    * it down to project-specific members — see AQU-676 / partitionMembers.
    */
   members: ProjectMember[]
+  /**
+   * AQU-1308: why `members` is empty, when it is empty for a reason the user
+   * should see. The host owns the roster fetch, so only the host can tell an
+   * org-policy refusal ("hidden") or a failed fetch ("load-failed") apart from
+   * a project that genuinely has no other members. Omitted / null ⇒ the roster
+   * loaded fine, and the picker renders exactly as before.
+   */
+  rosterUnavailable?: "hidden" | "load-failed" | null
   /** Current user's role level — used to gate the modal. */
   roleLevel: number
   /**
@@ -171,6 +179,7 @@ export function AssignModal({
   defaultLane = "",
   defaultLaneLabel,
   members,
+  rosterUnavailable = null,
   roleLevel,
   allowSelfAssignment = false,
   assignmentMinRole = ROLE.PROJECT_LEAD,
@@ -724,6 +733,14 @@ export function AssignModal({
             </Select>
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
+            )}
+            {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
+            {rosterUnavailable && (
+              <FieldError>
+                {rosterUnavailable === "hidden"
+                  ? t("org.assignWork.rosterHiddenError")
+                  : t("org.assignWork.rosterLoadError")}
+              </FieldError>
             )}
           </Field>
 

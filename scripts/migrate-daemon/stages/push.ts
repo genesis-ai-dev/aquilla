@@ -42,6 +42,15 @@ export interface PushResult {
   reseeded: boolean
 }
 
+/** Running state threaded through the push passes. `touchedFileIds` collects
+ *  the files whose events prod has *acked* — it scopes the finalize (AQU-557),
+ *  so a chunk that threw must not contribute to it. */
+interface PushState {
+  chunkNo: number
+  pushed: number
+  touchedFileIds: Set<string>
+}
+
 /** Throw away the local ledger and rebuild it from prod's own event ids.
  *  `onPage` runs before each page fetch — the weekly reseed uses it to pace
  *  per page rather than per project, so one 17M-id project cannot burst. */
@@ -74,7 +83,7 @@ export async function pushJob(deps: PushDeps, input: PushInput): Promise<PushRes
     db.setProjectFields(project.gitlab_id, { project_upserted: 1 })
   }
 
-  const state = { chunkNo: 0, pushed: 0 }
+  const state: PushState = { chunkNo: 0, pushed: 0, touchedFileIds: new Set() }
   // Prerequisites (IDML `file.create`) must land before the source artifact
   // copy references their fileId, and the copies before the rest of the events.
   await pushPass(deps, input, state, (l) => l.prerequisite === true)
@@ -92,7 +101,9 @@ export async function pushJob(deps: PushDeps, input: PushInput): Promise<PushRes
 
   let finalized = false
   if (state.pushed > 0) {
-    await sync.finalize(project.aquilla_id)
+    // AQU-557: finalize only the files this push landed events for. A push
+    // that touched one book used to recompute every file in the project.
+    await sync.finalize(project.aquilla_id, [...state.touchedFileIds])
     finalized = true
   }
 
@@ -123,7 +134,7 @@ export async function pushJob(deps: PushDeps, input: PushInput): Promise<PushRes
 async function pushPass(
   deps: PushDeps,
   input: PushInput,
-  state: { chunkNo: number; pushed: number },
+  state: PushState,
   keep: (l: PlanLine) => boolean,
 ): Promise<void> {
   let buf: PlanLine[] = []
@@ -143,7 +154,7 @@ async function pushPass(
 async function sendChunk(
   deps: PushDeps,
   input: PushInput,
-  state: { chunkNo: number; pushed: number },
+  state: PushState,
   chunk: PlanLine[],
 ): Promise<void> {
   const { db, sync, pacer } = deps
@@ -164,6 +175,13 @@ async function sendChunk(
     jobId: input.job.id, chunkNo, ms: r.ms, httpStatus: r.status, attempt: 1,
   })
   state.pushed += chunk.length
+  // Recorded only past the ack, alongside the ledger, so a thrown chunk leaves
+  // the finalize scope a strict prefix of what prod holds (same contract as
+  // the ledger's write-after-ack).
+  for (const line of chunk) {
+    const fileId = line.event.fileId
+    if (typeof fileId === "string" && fileId !== "") state.touchedFileIds.add(fileId)
+  }
 }
 
 /** Mirrors `applyCast` in scripts/migrate-all.ts — same speaker filter, same

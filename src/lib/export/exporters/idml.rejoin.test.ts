@@ -172,13 +172,19 @@ describe("IDML export of a note block that was imported as several cells", () =>
   })
 
   /**
-   * AQU-1234: the reason the Agent API refuses InsertCell / DeleteCell /
-   * SplitCell on a file imported with preserved export slots. A row that never
-   * came from the package has no locator, and the exporter has nowhere to put
-   * it — so ONE inserted line takes the whole deliverable down. Refusing the
-   * structural edit is what keeps this file round-trippable.
+   * AQU-1234 is why the Agent API refuses InsertCell / DeleteCell / SplitCell on
+   * a file imported with preserved export slots: a row that never came from the
+   * package has no locator, and the exporter has nowhere to put it. That refusal
+   * lives at the editing gate (`rowActionAvailability`), NOT here.
+   *
+   * AQU-1068 settled what the exporter does if such a row reaches it anyway: an
+   * added row is marked with `aquillaOrigin`, and the exporter leaves it out
+   * rather than failing the download, because losing the whole deliverable over
+   * one stray line is the worse failure. AQU-1343: these two tests pin both
+   * halves, which previously disagreed — the marked row is skipped, an unmarked
+   * row with no locator still stops the export.
    */
-  it("refuses to export a file containing a row that carries no IDML locator", async () => {
+  it("leaves a row somebody added after the import out of the export", async () => {
     const { bytes, cells } = await importBiblicaCells()
     for (const cell of cells) translate(cell)
     const inserted: CellData = {
@@ -190,7 +196,38 @@ describe("IDML export of a note block that was imported as several cells", () =>
       metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
     }
 
-    await expect(exportIdml(bytes, [...cells, inserted], directExecutor)).rejects.toThrow(
+    const baseline = await exportIdml(bytes.slice(0), cells, directExecutor)
+    const result = await exportIdml(bytes, [...cells, inserted], directExecutor)
+    const story = await storyOf(result.blob)
+
+    // The added line is dropped, and every imported row still lands: the export
+    // is byte-identical to the one without it.
+    expect(story).not.toContain("A line somebody added after the import.")
+    expect(result.report).toMatchObject({
+      missing: 0,
+      rejected: 0,
+      translated: baseline.report.translated,
+    })
+    expect(new Uint8Array(await result.blob.arrayBuffer()))
+      .toEqual(new Uint8Array(await baseline.blob.arrayBuffer()))
+  })
+
+  it("refuses to export a row that carries no IDML locator and no added-line marker", async () => {
+    const { bytes, cells } = await importBiblicaCells()
+    for (const cell of cells) translate(cell)
+    // Same row as above minus `aquillaOrigin`: nothing says a person added it,
+    // so it reads as an imported row whose locator went missing — corruption the
+    // exporter must not paper over by silently dropping the content.
+    const orphaned: CellData = {
+      ...cells[0]!,
+      id: "orphaned-line",
+      original: "A row whose IDML locator went missing.",
+      originalHtml: undefined,
+      translatedHtml: undefined,
+      metadata: {},
+    }
+
+    await expect(exportIdml(bytes, [...cells, orphaned], directExecutor)).rejects.toThrow(
       IdmlWebExportError,
     )
   })

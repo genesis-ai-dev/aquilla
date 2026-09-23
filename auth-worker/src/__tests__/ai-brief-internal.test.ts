@@ -127,13 +127,25 @@ describe("POST /api/v1/ai/agent/internal/brief-summary", () => {
     expect(settings?.n).toBe(0)
   })
 
-  it("truncates an over-long summary to the L1 cap", async () => {
+  it("truncates an over-long summary to the L1 cap and SAYS it truncated", async () => {
     await seedProject(600)
     mockModel("x".repeat(BRIEF_L1_MAX_CHARS + 500))
     const res = await briefReq(`Bearer ${env.SYNC_SECRET_KEY}`, baseBody)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { summary: string }
+    const body = (await res.json()) as { summary: string; truncated: boolean }
     expect(body.summary).toHaveLength(BRIEF_L1_MAX_CHARS)
+    // AQU-1323: the caller cannot infer this from the length — the clip is
+    // trimEnd'd, so a truncated summary can come back under the cap. Without
+    // the flag a receipt would present a clipped brief as a clean render.
+    expect(body.truncated).toBe(true)
+  })
+
+  it("reports truncated=false for a summary that fits", async () => {
+    await seedProject(600)
+    mockModel("Translate for rural youth. Prefer natural, contemporary phrasing.")
+    const res = await briefReq(`Bearer ${env.SYNC_SECRET_KEY}`, baseBody)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { truncated: boolean }).truncated).toBe(false)
   })
 
   it("reports an empty model reply as job_failed rather than blanking the brief", async () => {

@@ -102,3 +102,65 @@ describe("clipRangesToSegment", () => {
     expect(seg.text.slice(all[0].start, all[0].end)).toBe("def")
   })
 })
+
+// AQU-578 — Biblica/BSB styling preservation. Unwrapping a character marker
+// must not silently discard the styling it carried: `\bd word\bd*` rendered
+// as plain text, so the source column never showed the bold a translator was
+// supposed to mirror, and nothing downstream could enforce it.
+describe("segmentUsfmForDisplay — inline character-marker formatting", () => {
+  const marksFor = (raw: string, needle: string): readonly string[] => {
+    const seg = segmentUsfmForDisplay(raw)!
+      .filter((s): s is UsfmTextSegment => s.kind === "text")
+      .find((s) => s.text.includes(needle))
+    return seg?.marks ?? []
+  }
+
+  it("reports bold for \\bd and italic for \\it, and leaves surrounding text unmarked", () => {
+    const raw = "plain \\bd strong\\bd* middle \\it slanted\\it* tail"
+    expect(marksFor(raw, "strong")).toEqual(["bold"])
+    expect(marksFor(raw, "slanted")).toEqual(["italic"])
+    expect(marksFor(raw, "plain")).toEqual([])
+    expect(marksFor(raw, "tail")).toEqual([])
+  })
+
+  it("maps the remaining visual roles: \\bdit, \\em, \\add, \\sc, \\nd, \\sup", () => {
+    expect(marksFor("\\bdit both\\bdit*", "both")).toEqual(["bold", "italic"])
+    expect(marksFor("\\em stressed\\em*", "stressed")).toEqual(["italic"])
+    expect(marksFor("\\add supplied\\add*", "supplied")).toEqual(["italic"])
+    expect(marksFor("\\sc caps\\sc*", "caps")).toEqual(["small-caps"])
+    expect(marksFor("\\nd Lord\\nd*", "Lord")).toEqual(["small-caps"])
+    expect(marksFor("\\sup 1\\sup*", "1")).toEqual(["superscript"])
+  })
+
+  it("carries no marks for semantic-only character markers (\\w, \\wj, \\pn)", () => {
+    expect(marksFor("\\w word|strong=\"H1\"\\w*", "word")).toEqual([])
+    expect(marksFor("\\wj said\\wj*", "said")).toEqual([])
+    expect(marksFor("\\pn Moses\\pn*", "Moses")).toEqual([])
+  })
+
+  it("unions nested markers and emits them in a stable order regardless of nesting", () => {
+    expect(marksFor("\\bd \\+it deep\\+it*\\bd*", "deep")).toEqual(["bold", "italic"])
+    expect(marksFor("\\it \\+bd deep\\+bd*\\it*", "deep")).toEqual(["bold", "italic"])
+  })
+
+  it("closes the mark at the end marker — WHY: an unclosed run would bold the rest of the verse", () => {
+    const raw = "\\bd one\\bd* two"
+    expect(marksFor(raw, "one")).toEqual(["bold"])
+    expect(marksFor(raw, "two")).toEqual([])
+  })
+
+  it("\\no cancels the enclosing styling for its own run only", () => {
+    const raw = "\\bd bolded \\+no reset\\+no* again\\bd*"
+    expect(marksFor(raw, "bolded")).toEqual(["bold"])
+    expect(marksFor(raw, "reset")).toEqual([])
+    expect(marksFor(raw, "again")).toEqual(["bold"])
+  })
+
+  it("keeps text, raw spans and plain display text untouched — WHY: marks are additive, the round-trip must not move", () => {
+    const raw = "a \\bd bold\\bd* b \\it it\\it* c"
+    expect(usfmDisplayText(raw)).toBe("a bold b it c")
+    for (const seg of segmentUsfmForDisplay(raw)!) {
+      if (seg.kind === "text") expect(raw.slice(seg.rawStart, seg.rawEnd)).toBe(seg.text)
+    }
+  })
+})

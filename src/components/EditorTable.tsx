@@ -76,6 +76,7 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -88,6 +89,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
+import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
@@ -132,6 +134,7 @@ import {
   SanitizedRichHtml,
   TargetIdmlHtml,
   TargetRichHtml,
+  UsfmMarkedText,
   UsfmNoteChip,
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
@@ -511,8 +514,8 @@ function SynthStatusBadge({
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
       error.category === "sign-in-required" ||
-      error.category === "omnivoice-not-configured" ||
-      error.category === "omnivoice-failed" ||
+      error.category === "hosted-tts-not-configured" ||
+      error.category === "hosted-tts-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
       error.category === "gemini-failed" ||
@@ -4148,13 +4151,14 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
       return
     }
     parts.push(
-      <SourceWithTermLookup
-        key={`t-${i}`}
-        {...props}
-        inline
-        text={seg.text}
-        ranges={clipRangesToSegment(props.ranges, seg)}
-      />,
+      <UsfmMarkedText key={`t-${i}`} marks={seg.marks}>
+        <SourceWithTermLookup
+          {...props}
+          inline
+          text={seg.text}
+          ranges={clipRangesToSegment(props.ranges, seg)}
+        />
+      </UsfmMarkedText>,
     )
   })
 
@@ -4410,15 +4414,16 @@ function TargetReadText({
       return
     }
     parts.push(
-      <TargetDecoratedText
-        key={`t-${i}`}
-        text={seg.text}
-        concepts={concepts}
-        ranges={clipRangesToSegment(ranges, seg)}
-        onRangeClick={onRangeClick}
-        onTermChipClick={onTermChipClick}
-        showKeyTermHighlights={showKeyTermHighlights}
-      />,
+      <UsfmMarkedText key={`t-${i}`} marks={seg.marks}>
+        <TargetDecoratedText
+          text={seg.text}
+          concepts={concepts}
+          ranges={clipRangesToSegment(ranges, seg)}
+          onRangeClick={onRangeClick}
+          onTermChipClick={onTermChipClick}
+          showKeyTermHighlights={showKeyTermHighlights}
+        />
+      </UsfmMarkedText>,
     )
   })
 
@@ -4606,6 +4611,71 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
         ),
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SourceTagChips — small read-only chips from the extensible
+// `cell.metadata.tags` bucket (a flat list of labels). Importers that know a
+// cell's category — the SDBH lexicon's headword / "Contextual meaning" / Gloss
+// tags (AQU-793) — put it here so the reader sees it on the row itself instead
+// of opening the metadata drawer. Non-array or empty values render nothing.
+// ---------------------------------------------------------------------------
+function SourceTagChips({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const tags = (metadata as { tags?: unknown } | null | undefined)?.tags
+  if (!Array.isArray(tags)) return null
+  const labels = tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="source-tag-chips" className="flex shrink-0 items-center gap-1">
+      {labels.map((tag, i) => (
+        <span
+          key={`${tag}-${i}`}
+          dir="auto"
+          className="rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {tag}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MetadataFieldLabels — AQU-1369. The metadata keys the project switched on
+// from a cell's Metadata tab ("show on cells"), rendered as small labels on
+// every row that carries the key. Rows without the key, or whose value has no
+// one-line label (nested objects), render nothing for it.
+// ---------------------------------------------------------------------------
+function MetadataFieldLabels({
+  projectId,
+  metadata,
+}: {
+  projectId: string
+  metadata?: Record<string, unknown> | null
+}) {
+  const fields = useCellDisplayFields(projectId)
+  if (!metadata || fields.length === 0) return null
+  const labels = fields.flatMap((key) => {
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) return []
+    const text = displayFieldLabel(metadata[key])
+    return text == null ? [] : [{ key, text }]
+  })
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="metadata-field-labels" className="flex shrink-0 items-center gap-1">
+      {labels.map(({ key, text }) => (
+        <span
+          key={key}
+          dir="auto"
+          title={`${key}: ${text}`}
+          data-metadata-key={key}
+          className="max-w-[12rem] truncate rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {text}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -5461,6 +5531,12 @@ function EditorRow({
     // lives inside this source cell, so its mouseup bubbles here after focus
     // has already collapsed the browser selection (AQU-1006 / AQU-260).
     if (!text) return
+    // The context line (reference, cell label, tag chips, metadata field
+    // labels — AQU-1369) is chrome, not source text: selecting any of it must
+    // not offer "Ask AI" / "Add to terminology".
+    const anchor = sel?.anchorNode
+    const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
+    if (anchorEl?.closest("[data-selection-ignore]")) return
     capturedSelectionRef.current = text
     setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
@@ -5887,6 +5963,7 @@ function EditorRow({
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+  const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
@@ -6363,6 +6440,7 @@ function EditorRow({
                     castName={gutterCastName}
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
+                    showLanguageBadge={gutterLanguageBadge}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
                     onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
                   />
@@ -6583,7 +6661,7 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               {/* AQU-646: the character, on the SOURCE side too (Sam,
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
@@ -6615,6 +6693,8 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              <SourceTagChips metadata={cell.metadata} />
+              <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -7082,7 +7162,7 @@ function EditorRow({
               overflowOpen={railOverflowOpen}
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
-              overflowLabel={t("editor.rail.moreActions")}
+              overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
               // AQU-200: AI-generate is the one action that stays a direct
               // button. Validate is the other always-visible action, and it
               // already lives in the row's left gutter — it is not moved.
@@ -7627,7 +7707,12 @@ function EditorRow({
                     value: "metadata",
                     icon: <Braces className="h-3 w-3" />,
                     label: t("editor.expansion.metadata"),
-                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                    renderContent: () => (
+                      <CellMetadataTab
+                        metadata={cell.metadata as Record<string, unknown>}
+                        projectId={project.id}
+                      />
+                    ),
                   },
                 ]
               : []),

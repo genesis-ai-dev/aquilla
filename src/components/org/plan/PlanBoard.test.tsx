@@ -21,21 +21,57 @@ function renderBoard(units: PlanUnit[], selectedId: string | null = null) {
   return { onSelect }
 }
 
+/**
+ * AQU-1278. 100 cells with 96 validated is four short, under the
+ * max(6% of 100, 7) = 7 threshold, so this unit is Nearly complete. It carries
+ * no target date on purpose: the whole case the group exists for is the unit
+ * nobody dated, which no other signal on the board could surface.
+ */
+function nearlyDone(over: Partial<PlanUnit> = {}): PlanUnit {
+  return unit({ filledCount: 100, validatedCount: 96, ...over })
+}
+
 describe("grouping", () => {
-  it("orders groups by urgency, with Done last", () => {
+  it("puts Nearly complete under the two dated groups and above In progress, Done last", () => {
+    // The rung AQU-1278 settled on. A blown date still outranks "a few cells
+    // left", so Overdue and Due soon keep the top — but a unit four cells from
+    // finished is more actionable than the rest of In progress, so it sits
+    // directly above it rather than being buried inside it.
     renderBoard([
       unit({ fileId: "a", doneAt: NOW, doneBy: "r" }),
       unit({ fileId: "b", targetDate: "2026-08-01" }),
       unit({ fileId: "c", filledCount: 5 }),
       unit({ fileId: "d" }),
+      unit({ fileId: "e", targetDate: "2026-09-05", filledCount: 5 }),
+      nearlyDone({ fileId: "f" }),
     ])
     const groups = screen.getAllByTestId(/^plan-group-/).map((el) => el.getAttribute("data-testid"))
     expect(groups).toEqual([
       "plan-group-overdue",
+      "plan-group-soon",
+      "plan-group-nearly_complete",
       "plan-group-in_progress",
       "plan-group-not_started",
       "plan-group-done",
     ])
+  })
+
+  it("sends a unit a handful of cells from done to the new group, not to In progress", () => {
+    // The row this feature is for: before AQU-1278 a book four cells short and
+    // a book at 40% sat in the same group, sorted by a date neither of them
+    // had, and only the width of a bar told them apart.
+    renderBoard([
+      nearlyDone({ fileId: "near", fileName: "Titus" }),
+      unit({ fileId: "mid", fileName: "Judges", filledCount: 40 }),
+    ])
+    const near = screen.getByTestId("plan-group-nearly_complete")
+    expect(within(near).getByTestId("plan-row-near-")).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId("plan-group-in_progress")).getByTestId("plan-row-mid-"),
+    ).toBeInTheDocument()
+    // And above it on the page, which is the entire claim of the new rung.
+    const groups = screen.getAllByTestId(/^plan-group-/).map((el) => el.getAttribute("data-testid"))
+    expect(groups).toEqual(["plan-group-nearly_complete", "plan-group-in_progress"])
   })
 
   it("hides empty groups so a healthy project reads short", () => {
@@ -46,8 +82,12 @@ describe("grouping", () => {
   })
 
   it("counts the rows in each group header", () => {
-    renderBoard([unit({ fileId: "a" }), unit({ fileId: "b" }), unit({ fileId: "c", filledCount: 1 })])
+    renderBoard([
+      unit({ fileId: "a" }), unit({ fileId: "b" }), unit({ fileId: "c", filledCount: 1 }),
+      nearlyDone({ fileId: "d" }), nearlyDone({ fileId: "e", validatedCount: 100 }),
+    ])
     expect(within(screen.getByTestId("plan-group-not_started")).getByText("2")).toBeInTheDocument()
+    expect(within(screen.getByTestId("plan-group-nearly_complete")).getByText("2")).toBeInTheDocument()
   })
 
   it("puts the soonest target first within a group", () => {
@@ -76,6 +116,31 @@ describe("summary", () => {
   it("shows no overdue badge when everything is on time", () => {
     renderBoard([unit({ filledCount: 1 })])
     expect(screen.queryByTestId("plan-summary-overdue")).toBeNull()
+  })
+
+  it("gives nearly complete its own pill, ahead of in progress in the strip", () => {
+    // AQU-1278. Ahead of it because the strip reads in urgency order like the
+    // groups below, and this is the one number a manager can act on today.
+    renderBoard([
+      nearlyDone({ fileId: "a" }),
+      nearlyDone({ fileId: "b", validatedCount: 99 }),
+      unit({ fileId: "c", filledCount: 40 }),
+    ])
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("2 nearly complete")
+    // Counted APART from in progress, never on top of it: two pills describing
+    // the same unit would make the strip add up to more than the project.
+    expect(screen.getByTestId("plan-summary-in-progress")).toHaveTextContent("1 in progress")
+    const pills = screen.getAllByTestId(/^plan-summary/).map((el) => el.getAttribute("data-testid"))
+    expect(pills).toEqual([
+      "plan-summary",
+      "plan-summary-nearly-complete",
+      "plan-summary-in-progress",
+    ])
+  })
+
+  it("drops the nearly complete pill when nothing is close, like its siblings", () => {
+    renderBoard([unit({ filledCount: 40 })])
+    expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
   })
 })
 
@@ -123,7 +188,7 @@ describe("audio columns", () => {
   it("shows them as soon as one unit has a recording", () => {
     renderBoard([unit({ filledCount: 50, audioCount: 20, audioValidatedCount: 5 })])
     expect(screen.getByLabelText(/^Audio/)).toBeInTheDocument()
-    // Labelled, so "20/5%" is not a riddle.
+    // Labelled, so "20% | 5%" is not a riddle.
     expect(screen.getByText("AUD")).toBeInTheDocument()
     expect(screen.getByText("TXT")).toBeInTheDocument()
   })
@@ -251,14 +316,23 @@ describe("filtering by name", () => {
     expect(rowCount()).toBe(3)
   })
 
-  it("KEEPS THE SUMMARY PROJECT-WIDE while filtered", () => {
+  it("KEEPS EVERY SUMMARY PILL PROJECT-WIDE while filtered, the AQU-1278 one included", () => {
     // The load-bearing invariant. "1 of 1 done" under a filter that hid the
-    // other two would be a lie, and the strip is the one thing on this card a
+    // other three would be a lie, and the strip is the one thing on this card a
     // reader trusts without checking.
-    renderBoard(BOOKS)
+    //
+    // The new pill is pinned HERE rather than in a test of its own: it is the
+    // same invariant, and a parallel test is exactly how the two drift until
+    // one pill counts the filtered view and the others count the project.
+    renderBoard([
+      ...BOOKS,
+      nearlyDone({ fileId: "b", sectionKey: "NUM", fileName: "Bible.usfm", validatedCount: 97 }),
+    ])
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("1 nearly complete")
     fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
-    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 3 done")
-    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 1 of 3.")
+    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 4 done")
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("1 nearly complete")
+    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 1 of 4.")
   })
 })
 
@@ -418,7 +492,7 @@ describe("keyboard navigation", () => {
   })
 })
 
-// ── AQU-1255: the card draws the first five rows and stops ──────────────────
+// ── every row is drawn; the cap AQU-1255 added is gone ─────────────────────
 
 /**
  * `n` in-progress units in one unfolded group. Names are zero-padded because
@@ -431,116 +505,49 @@ function manyUnits(n: number, over: Partial<PlanUnit> = {}): PlanUnit[] {
   })
 }
 
-describe("truncating a long plan", () => {
-  it("draws only the first five rows and a Show all button naming the total", () => {
-    // The bug this pins: a full-Bible project drew 66 rows with two progress
-    // bars each, burying everything below the plan.
+describe("a long plan", () => {
+  it("draws every row, with no Show all button to press", () => {
+    // AQU-1255 drew the first five and hid the rest behind "Show all 12". Sam,
+    // 2026-09-16: a manager opening the plan wants the plan. Folding a group
+    // is the way to see less, because a fold names what it is hiding.
     renderBoard(manyUnits(12))
-    expect(rowCount()).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 12")
-  })
-
-  it("draws every row and no button at all when there are five or fewer", () => {
-    renderBoard(manyUnits(5))
-    expect(rowCount()).toBe(5)
+    expect(rowCount()).toBe(12)
     expect(screen.queryByTestId("plan-show-all")).toBeNull()
   })
 
-  it("expands in place and collapses again", () => {
-    renderBoard(manyUnits(12))
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(12)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show fewer")
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(5)
-  })
-
-  it("is a real button that announces what it opens", () => {
-    renderBoard(manyUnits(12))
-    const button = screen.getByRole("button", { name: "Show all 12" })
-    expect(button).toHaveAttribute("aria-expanded", "false")
-    fireEvent.click(button)
-    expect(screen.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("caps the WHOLE list, not each group, and keeps every group's real count", () => {
-    // Overdue (3) then In progress (4): five rows across the boundary, and the
-    // In progress header still says 4 even though only 2 of them are drawn.
+  it("still hides a folded group's rows, and only those", () => {
     renderBoard([
       ...manyUnits(3, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
       ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
     ])
-    expect(rowCount()).toBe(5)
-    expect(within(screen.getByTestId("plan-group-overdue")).getAllByTestId(/^plan-row-/).length).toBe(3)
-    const inProgress = screen.getByTestId("plan-group-in_progress")
-    expect(within(inProgress).getAllByTestId(/^plan-row-/).length).toBe(2)
-    expect(within(inProgress).getByText("4")).toBeInTheDocument()
-  })
-
-  it("lets a folded group's rows go to the groups below it", () => {
-    // A fold draws no rows, so it must not spend the cap either.
-    renderBoard([
-      ...manyUnits(6, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
-      ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
-    ])
-    expect(within(screen.getByTestId("plan-group-in_progress")).queryAllByTestId(/^plan-row-/).length).toBe(0)
+    expect(rowCount()).toBe(7)
     fireEvent.click(screen.getByTestId("plan-fold-overdue"))
     expect(rowCount()).toBe(4)
-    expect(within(screen.getByTestId("plan-group-in_progress")).getAllByTestId(/^plan-row-/).length).toBe(4)
+    // The header keeps its own honest count while its rows are away.
+    expect(screen.getByTestId("plan-group-overdue")).toHaveTextContent("3")
   })
 
-  it("applies to the matches under a filter, and leaves the Showing note counting matches", () => {
-    renderBoard([...manyUnits(8), ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `Z${i}`, fileName: `Other ${i}` }))])
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "s0" } })
-    expect(rowCount()).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 8")
-    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 8 of 12.")
-  })
-
-  it("drops the button when a filter narrows the list below the cap", () => {
-    renderBoard([...manyUnits(8), unit({ fileId: "z", fileName: "Zephaniah", filledCount: 40 })])
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "zeph" } })
-    expect(rowCount()).toBe(1)
-    expect(screen.queryByTestId("plan-show-all")).toBeNull()
-  })
-
-  it("stays expanded across a filter change and a view switch", () => {
+  it("draws every match under a filter", () => {
     renderBoard(manyUnits(12))
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "s" } })
-    expect(rowCount()).toBe(12)
-    fireEvent.click(screen.getByTestId("plan-view-order"))
-    expect(rowCount()).toBe(12)
+    // The filter matches the unit LABEL, which for a sub-file unit is its
+    // section key — "S01"…"S12", not the file name beside it.
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "S0" } })
+    expect(rowCount()).toBe(9) // S01…S09
+    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 9 of 12.")
   })
 
-  it("caps the In order arrangement too", () => {
+  it("draws every row in the In order arrangement too", () => {
     renderBoard(manyUnits(12))
     fireEvent.click(screen.getByTestId("plan-view-order"))
-    expect(within(screen.getByTestId("plan-order-list")).getAllByTestId(/^plan-row-/).length).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 12")
+    expect(screen.getByTestId("plan-order-list").querySelectorAll("li")).toHaveLength(12)
   })
 
-  it("does not remember being expanded across a remount — a reload starts at five", () => {
-    const { unmount } = render(
-      <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />,
-    )
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(12)
-    unmount()
-    render(<PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />)
-    expect(rowCount()).toBe(5)
-  })
-
-  it("walks only the drawn rows with the arrow keys, and everything after Show all", () => {
-    const onSelect = vi.fn()
-    render(
-      <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId="b:S05" onSelect={onSelect} />,
-    )
-    const region = () => screen.getByRole("region", { name: /Planning units/ })
-    fireEvent.keyDown(region(), { key: "ArrowDown" })
-    expect(onSelect).toHaveBeenLastCalledWith("b:S05") // clamped at the fifth row
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    fireEvent.keyDown(region(), { key: "ArrowDown" })
+  it("lets the arrow keys walk past where the cap used to stop", () => {
+    // Selection is a controlled prop, so one keypress from a known row is the
+    // whole assertion: standing on the fifth row, ArrowDown reaches the sixth.
+    // Under AQU-1255 the ordered list ended at five and this clamped to itself.
+    const { onSelect } = renderBoard(manyUnits(12), "b:S05")
+    fireEvent.keyDown(screen.getByRole("region", { name: /Planning units/ }), { key: "ArrowDown" })
     expect(onSelect).toHaveBeenLastCalledWith("b:S06")
   })
 })
@@ -566,16 +573,408 @@ describe("the order ref the inspector navigates by", () => {
       selectedId={null} onSelect={vi.fn()} />)
   })
 
-  it("stops at the cap, so the inspector's chevrons cannot step onto a hidden row", () => {
-    // AQU-1255. The inspector walks this ref; a truncated list must hand it
-    // the five drawn rows, and Show all must hand it the whole plan.
+  it("hands over every row of a long plan", () => {
+    // The inspector walks this ref. It used to stop at AQU-1255's five drawn
+    // rows; with the cap gone it is the whole plan, every time.
     const orderRef = { current: [] as PlanUnit[] }
     render(
       <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" orderRef={orderRef}
         selectedId={null} onSelect={vi.fn()} />,
     )
-    expect(orderRef.current.length).toBe(5)
-    fireEvent.click(screen.getByTestId("plan-show-all"))
     expect(orderRef.current.length).toBe(12)
+  })
+})
+
+// ── AQU-1278: the third column, after Sam's review of the build ─────────────
+
+describe("what the third column says", () => {
+  const withProps = (units: PlanUnit[], props: Partial<React.ComponentProps<typeof PlanBoard>> = {}) =>
+    render(
+      <PlanBoard units={units} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} {...props} />,
+    )
+
+  const dateCell = () => screen.getByTestId("plan-date-f1-").parentElement!
+
+  it("drops the noun when two shortfall terms share the line", () => {
+    // 300 cells, 294 written, 286 validated: six to translate and eight to
+    // validate, fourteen short against a threshold of eighteen. In full this
+    // read "6 cells to translate · 8 cells to validate", which wrapped the row.
+    withProps([unit({ totalCount: 300, filledCount: 294, validatedCount: 286 })])
+    expect(dateCell()).toHaveTextContent("6 to translate · 8 to validate")
+  })
+
+  it("keeps the noun when the line carries one term", () => {
+    withProps([nearlyDone()])
+    expect(dateCell()).toHaveTextContent("4 cells to validate")
+  })
+
+  it("joins the short chapters with a conjunction", () => {
+    withProps([nearlyDone()], { shortChaptersByUnit: new Map([["f1:", ["12", "40"]]]) })
+    expect(dateCell()).toHaveTextContent("chapters 12 and 40")
+  })
+
+  it("names three chapters and counts the rest, with one 'and' between them", () => {
+    withProps([nearlyDone()], {
+      shortChaptersByUnit: new Map([["f1:", ["4", "9", "17", "22", "28"]]]),
+    })
+    // "4, 9, 17 and 2 more" — the conjunction belongs to the remainder here, so
+    // the named list keeps the plain join or the line reads "…, and 17 and 2 more".
+    expect(dateCell()).toHaveTextContent("4, 9, 17 and 2 more")
+  })
+
+  it("says a finished unit is not marked done, rather than that it has no date", () => {
+    withProps([unit({ filledCount: 100, validatedCount: 100, lastEditAt: NOW - 3600_000 })])
+    const cell = dateCell()
+    expect(cell).toHaveTextContent("Nothing left")
+    expect(cell).toHaveTextContent("not marked done")
+    expect(cell).not.toHaveTextContent("no target date")
+  })
+
+  it("marks a unit nobody holds as unassigned, once its assignments are known", () => {
+    withProps([unit({ filledCount: 40, lastEditAt: NOW - 3600_000 })], {
+      assigneesByUnit: new Map([["f1:", []]]),
+    })
+    expect(dateCell()).toHaveTextContent("unassigned")
+  })
+
+  it("stays silent about a unit whose assignments nobody has read yet", () => {
+    // `undefined` is "not asked" and `[]` is "asked, nobody" — there is no
+    // project-wide assignee read, so the board only learns a unit's people
+    // when a manager opens it. Printing "unassigned" for the first would send
+    // someone to staff a book that already has two people on it.
+    withProps([unit({ filledCount: 40, lastEditAt: NOW - 3600_000 })], {
+      assigneesByUnit: new Map(),
+    })
+    expect(dateCell()).not.toHaveTextContent("unassigned")
+  })
+
+  it("does not call a nearly-complete unit unassigned, where the line says what is left", () => {
+    withProps([nearlyDone()], { assigneesByUnit: new Map([["f1:", []]]) })
+    expect(dateCell()).not.toHaveTextContent("unassigned")
+  })
+})
+
+// AQU-1278, Sam's second review: a date used to cost a row its link and its
+// chapter list. Line 1 belongs to the date, so both moved to line 2 as plain
+// grey text — on EVERY dated row, not only the overdue ones. A unit four cells
+// from finished said so and gave the reader nowhere to click.
+describe("a target date does not cost the row its link", () => {
+  // Three days out, so the row is filed under Due soon and its note says so —
+  // the fullest version of line 2, with all three fragments on it.
+  const dated = (over: Partial<PlanUnit> = {}) =>
+    nearlyDone({ targetDate: "2026-09-05", ...over })
+  const shortfall = () => screen.getByTestId("plan-shortfall-f1-")
+
+  const withRow = (units: PlanUnit[], props: Partial<React.ComponentProps<typeof PlanBoard>> = {}) =>
+    render(
+      <PlanBoard units={units} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} {...props} />,
+    )
+
+  it("keeps the date on line 1 and puts the shortfall, the chapters and the note on line 2", () => {
+    withRow([dated()], { shortChaptersByUnit: new Map([["f1:", ["12", "40"]]]) })
+    expect(screen.getByTestId("plan-date-f1-")).toHaveTextContent("September 5")
+    expect(screen.getByTestId("plan-date-f1-").nextElementSibling!.textContent)
+      .toBe("4 cells to validate · chapters 12 and 40 · in 3 days")
+  })
+
+  it("makes that shortfall the link, and a click on it does not select the row", () => {
+    const onSelect = vi.fn()
+    const onOpenShortfall = vi.fn()
+    withRow([dated()], { onSelect, onOpenShortfall })
+    fireEvent.click(shortfall())
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("links an OVERDUE row too — the one a manager could close today", () => {
+    const onOpenShortfall = vi.fn()
+    withRow([dated({ targetDate: "2026-08-18" })], { onOpenShortfall })
+    expect(screen.getByTestId("plan-date-f1-").parentElement!)
+      .toHaveTextContent("4 cells to validate · 15 days late")
+    fireEvent.click(shortfall())
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no link on a dated row with nothing left to open", () => {
+    // "Nothing left" has no first outstanding cell to land on.
+    withRow([dated({ validatedCount: 100 })], { onOpenShortfall: vi.fn() })
+    expect(screen.queryByTestId("plan-shortfall-f1-")).toBeNull()
+    expect(screen.getByTestId("plan-date-f1-").parentElement!).toHaveTextContent("Nothing left")
+  })
+
+  it("offers no link on a row that is not nearly complete, dated or not", () => {
+    withRow([unit({ targetDate: "2026-09-05", filledCount: 40 })], { onOpenShortfall: vi.fn() })
+    expect(screen.queryByTestId("plan-shortfall-f1-")).toBeNull()
+  })
+})
+
+describe("naming the lane", () => {
+  // The tabs that choose the lane live in the Progress card a screen above, so
+  // a reader standing at the board could not tell which language they were
+  // reading without scrolling up.
+  it("says which language the numbers belong to, beside the heading", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} laneLabel="German" />,
+    )
+    expect(screen.getByTestId("plan-lane-label")).toHaveTextContent("German")
+  })
+
+  it("says nothing on a project with one language", () => {
+    renderBoard(BOOKS)
+    expect(screen.queryByTestId("plan-lane-label")).toBeNull()
+  })
+})
+
+describe("the selected row", () => {
+  it("takes the hover shade, so an empty bar track still shows against it", () => {
+    // A bar's empty track is bg-muted; a selected row painted the same colour
+    // swallowed every 0% bar into its background.
+    renderBoard([unit({ fileId: "f1", filledCount: 40 })], "f1:")
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(row.className).toContain("bg-muted/60")
+    expect(row.className).not.toMatch(/(^|\s)bg-muted(\s|$)/)
+  })
+})
+
+describe("the row's link follows the audio once the text is done (round 5)", () => {
+  it("names the first unrecorded cell as its destination", () => {
+    const onOpenShortfall = vi.fn()
+    render(
+      <PlanBoard
+        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96 })]}
+        now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        onOpenShortfall={onOpenShortfall}
+      />,
+    )
+    const link = screen.getByTestId("plan-shortfall-f1-")
+    expect(link).toHaveTextContent("4 takes to record")
+    expect(link).toHaveAttribute("aria-label", "4 takes to record · Go to first unrecorded")
+    fireEvent.click(link)
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the percentages say what they stand for, on hover (round 7)", () => {
+  it("gives each figure the count out of the bar's own total as its accessible name", () => {
+    // Sam, 2026-09-17: percentages everywhere in print; the cells, with an
+    // "of", one hover away. Numbers grouped for the reader.
+    renderBoard([unit({ totalCount: 1533, filledCount: 1533, validatedCount: 1530, audioCount: 540, audioValidatedCount: 0, audioTotalCount: 548 })])
+    const names = screen.getAllByTestId("plan-readout-figure").map((el) => el.getAttribute("aria-label"))
+    expect(names).toEqual([
+      "1,533 of 1,533 translated",
+      "1,530 of 1,533 validated",
+      // The audio bar's total is the CUE SHEET's, not the file's.
+      "540 of 548 recorded",
+      "0 of 548 validated",
+    ])
+  })
+
+  it("no longer repeats the percentages in a title on the bar itself", () => {
+    renderBoard([unit({ filledCount: 40 })])
+    expect(screen.getByLabelText(/^Text/)).not.toHaveAttribute("title")
+  })
+})
+
+
+describe("collapse all (AQU-1278, Sam 2026-09-17)", () => {
+  // What AQU-1255's five-row cap was for — a board short enough to take in at
+  // once — without hiding a row: every group folds to its header and count.
+  const three = () => [
+    unit({ fileId: "a", doneAt: NOW, doneBy: "r" }),
+    unit({ fileId: "b", filledCount: 5 }),
+    nearlyDone({ fileId: "c" }),
+  ]
+  const folds = () => screen.getAllByTestId(/^plan-fold-/).map((el) => el.getAttribute("aria-expanded"))
+
+  it("folds every group on screen in one click, then offers to open them all", () => {
+    renderBoard(three())
+    const button = screen.getByTestId("plan-collapse-all")
+    expect(button).toHaveTextContent("Collapse all")
+    fireEvent.click(button)
+    expect(folds()).toEqual(["false", "false", "false"])
+    expect(screen.queryAllByTestId(/^plan-row-/)).toHaveLength(0)
+    expect(button).toHaveTextContent("Expand all")
+    fireEvent.click(button)
+    expect(folds()).toEqual(["true", "true", "true"])
+    expect(screen.getAllByTestId(/^plan-row-/)).toHaveLength(3)
+  })
+
+  it("sets the same folds the chevrons set, so one chevron opens one group", () => {
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(screen.getByTestId("plan-fold-done")).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("plan-fold-in_progress")).toHaveAttribute("aria-expanded", "false")
+    // One group open again is not "all folded", so the button reads Collapse.
+    expect(screen.getByTestId("plan-collapse-all")).toHaveTextContent("Collapse all")
+  })
+
+  it("judges 'all folded' over the groups drawn, not over every status", () => {
+    // No Done group on this board; folding the two that exist must count.
+    renderBoard([unit({ fileId: "b", filledCount: 5 }), nearlyDone({ fileId: "c" })])
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    expect(screen.getByTestId("plan-collapse-all")).toHaveTextContent("Expand all")
+  })
+
+  it("remembers the folds per project, like the chevrons do", () => {
+    localStorage.clear()
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    expect(JSON.parse(localStorage.getItem("aquilla:planGroups:p1") ?? "[]"))
+      .toEqual(["nearly_complete", "in_progress", "done"])
+  })
+
+  it("works on the folders in the In order arrangement, with its own folds", () => {
+    localStorage.clear()
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    const button = screen.getByTestId("plan-collapse-all")
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(screen.getByTestId("plan-fold-folder-All")).toHaveAttribute("aria-expanded", "false")
+    expect(button).toHaveTextContent("Expand all")
+    // Folded a folder, not a status: back in By status everything is open.
+    expect(localStorage.getItem("aquilla:planGroups:p1")).toBeNull()
+    fireEvent.click(screen.getByTestId("plan-view-status"))
+    expect(screen.getAllByTestId(/^plan-row-/)).toHaveLength(3)
+  })
+})
+
+// AQU-1278, Sam 2026-09-17: the in-order arrangement lives in folders — the
+// project's own, as the sidebar shows them — or in one group for everything.
+describe("in order, in folders", () => {
+  const seasons = () => [
+    unit({ fileId: "e1", fileName: "Episode 1", corpusMarker: "Season 1", filledCount: 5 }),
+    unit({ fileId: "e2", fileName: "Episode 2", corpusMarker: "Season 1", filledCount: 5 }),
+    unit({ fileId: "e3", fileName: "Episode 3", corpusMarker: "Season 2", filledCount: 5 }),
+    unit({ fileId: "notes", fileName: "notes.txt", filledCount: 5 }),
+  ]
+  const inOrder = (units: PlanUnit[]) => {
+    localStorage.clear()
+    const r = renderBoard(units)
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    return r
+  }
+
+  it("groups by the files' folders, with the marker-less ones under Ungrouped", () => {
+    inOrder(seasons())
+    expect(screen.getAllByTestId(/^plan-folder-/).map((el) => el.getAttribute("data-testid")))
+      .toEqual(["plan-folder-Season 1", "plan-folder-Season 2", "plan-folder-Ungrouped"])
+    expect(within(screen.getByTestId("plan-folder-Season 1")).getAllByTestId(/^plan-row-/)).toHaveLength(2)
+    expect(screen.getByTestId("plan-fold-folder-Ungrouped")).toHaveTextContent("Ungrouped")
+  })
+
+  it("puts a Bible's books under their testaments", () => {
+    inOrder([
+      unit({ fileId: "bible", sectionKey: "GEN", fileName: "Bible", filledCount: 5 }),
+      unit({ fileId: "bible", sectionKey: "MAT", fileName: "Bible", filledCount: 5 }),
+    ])
+    expect(screen.getAllByTestId(/^plan-folder-/).map((el) => el.getAttribute("data-testid")))
+      .toEqual(["plan-folder-OT", "plan-folder-NT"])
+  })
+
+  it("gives a project with no folders one group, named for everything", () => {
+    inOrder([unit({ fileId: "a", filledCount: 5 }), unit({ fileId: "b", filledCount: 5 })])
+    expect(screen.getAllByTestId(/^plan-folder-/)).toHaveLength(1)
+    expect(screen.getByTestId("plan-fold-folder-All")).toHaveTextContent("All files")
+  })
+
+  it("says on the header how a folder stands, folded or not", () => {
+    inOrder([
+      unit({ fileId: "e1", corpusMarker: "Season 1", doneAt: NOW, doneBy: "r" }),
+      unit({ fileId: "e2", corpusMarker: "Season 1", filledCount: 5 }),
+      nearlyDone({ fileId: "e3", corpusMarker: "Season 1" }),
+    ])
+    expect(screen.getByTestId("plan-fold-folder-Season 1"))
+      .toHaveTextContent("1 nearly complete · 1 in progress · 1 done")
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 1"))
+    expect(screen.queryAllByTestId(/^plan-row-/)).toHaveLength(0)
+    expect(screen.getByTestId("plan-fold-folder-Season 1")).toHaveTextContent("1 done")
+  })
+
+  it("remembers folder folds per project, apart from the status folds", () => {
+    inOrder(seasons())
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 2"))
+    expect(JSON.parse(localStorage.getItem("aquilla:planFolders:p1") ?? "[]")).toEqual(["Season 2"])
+    expect(localStorage.getItem("aquilla:planGroups:p1")).toBeNull()
+  })
+
+  it("hands the inspector only the rows that are open", () => {
+    const orderRef = { current: [] as PlanUnit[] }
+    localStorage.clear()
+    render(
+      <PlanBoard units={seasons()} now={NOW} projectId="p1" orderRef={orderRef}
+        selectedId={null} onSelect={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(orderRef.current.map((u) => u.fileId)).toEqual(["e1", "e2", "e3", "notes"])
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 1"))
+    expect(orderRef.current.map((u) => u.fileId)).toEqual(["e3", "notes"])
+  })
+})
+
+/**
+ * AQU-1278 (Sam, 2026-09-17). The board has always counted ONE language and
+ * never said so anywhere you could act on it: the page's only lane control
+ * sits in the Progress card far above, and nothing there suggests it also
+ * decides what the plan below is measuring.
+ */
+describe("choosing which language the plan counts", () => {
+  const LANES = [{ tag: "", label: "German" }, { tag: "tpi", label: "tpi" }]
+
+  it("names the lane it is showing, as a control", () => {
+    const onLaneChange = vi.fn()
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={onLaneChange} laneLabel="German" />,
+    )
+    expect(screen.getByTestId("plan-lane-picker")).toHaveTextContent("German")
+    // The caption it replaces is gone, not doubled up beside it.
+    expect(screen.queryByTestId("plan-lane-label")).toBeNull()
+  })
+
+  it("hands the chosen lane's tag back, so the whole page follows one selection", () => {
+    const onLaneChange = vi.fn()
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={onLaneChange} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-lane-picker"))
+    fireEvent.click(screen.getByTestId("plan-lane-option-tpi"))
+    // The menu hands its change handler a second argument (the originating
+    // event); only the tag is asserted, and only the tag is forwarded.
+    expect(onLaneChange.mock.calls[0]?.[0]).toBe("tpi")
+  })
+
+  it("offers no All: every number here belongs to one language", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-lane-picker"))
+    expect(screen.getAllByTestId(/^plan-lane-option-/)).toHaveLength(2)
+  })
+
+  it("stays a plain caption on a project with one language", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={[{ tag: "", label: "German" }]} lane="" onLaneChange={vi.fn()} laneLabel="German" />,
+    )
+    expect(screen.queryByTestId("plan-lane-picker")).toBeNull()
+    expect(screen.getByTestId("plan-lane-label")).toHaveTextContent("German")
+  })
+
+  it("names the lane it is actually reading when the selection is one it does not know", () => {
+    // The Progress tabs carry an "All" the plan cannot honour, and `planLane`
+    // has always resolved it to the default lane. The picker must say the
+    // default lane rather than go blank.
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="nope" onLaneChange={vi.fn()} />,
+    )
+    expect(screen.getByTestId("plan-lane-picker")).toHaveTextContent("German")
   })
 })

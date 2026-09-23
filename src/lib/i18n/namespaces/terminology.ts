@@ -127,6 +127,10 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.offlineTooltip": "You are offline. Reconnect to edit.",
     "terminology.livingMemory.maintainerRequiredTooltip":
       "Editing requires Maintainer role (600) or above.",
+    "terminology.livingMemory.contributorRequiredTooltip":
+      "This requires Contributor role (400) or above.",
+    "terminology.livingMemory.projectLeadRequiredTooltip":
+      "This requires Project lead role (500) or above.",
     "terminology.livingMemory.addEntryAria": "Add {section} entry",
     "terminology.livingMemory.exampleLabel": "Example:",
     "terminology.livingMemory.editEntryAria": "Edit entry",
@@ -189,6 +193,181 @@ export const terminology = defineNamespace({
     // Default-prediction-prompt block (instructions pane, collapsed by default).
     "terminology.livingMemory.prompt.defaultBadge": "Default",
     "terminology.livingMemory.prompt.customBadge": "Custom",
+
+    // ── Style-rule library + applicability (quality pane, AQU-934) ───────────
+    // Reused keys (no duplicates added): agent.approve / agent.reject for the
+    // candidate verdicts (the same human-gate act as every other agent review
+    // queue), common.edit / common.save / common.cancel / common.add /
+    // common.close for generic actions, common.file for the `file` target type,
+    // rules.editor.severityLabel + rules.severity.major/minor for severity, and
+    // rules.surface.enabledLabel for the enabled toggle.
+    "terminology.livingMemory.styleRules.title": "Style rules",
+    "terminology.livingMemory.styleRules.description":
+      "Rules extracted from your knowledge base or written by hand. Approved rules steer " +
+      "every AI draft, and each one can be narrowed to the books, sections, or passages " +
+      "it governs.",
+    "terminology.livingMemory.styleRules.loadError":
+      "Couldn't load the style-rule library: {message}",
+    "terminology.livingMemory.styleRules.candidates.heading": "Proposed rules",
+    "terminology.livingMemory.styleRules.candidates.pendingCount": plural({
+      one: "{count} awaiting review",
+      other: "{count} awaiting review",
+    }),
+    "terminology.livingMemory.styleRules.candidates.empty": "Nothing is waiting for review.",
+    "terminology.livingMemory.styleRules.candidates.citation": "Extracted from {doc}",
+    "terminology.livingMemory.styleRules.candidates.editTitle": "Edit proposed rule",
+    "terminology.livingMemory.styleRules.candidates.editDescription":
+      "Reword or reclassify the rule before deciding on it. Saving an edit does not " +
+      "approve it.",
+    "terminology.livingMemory.styleRules.field.instruction": "Instruction",
+    "terminology.livingMemory.styleRules.field.instructionPlaceholder":
+      "Say what the translator must do…",
+    "terminology.livingMemory.styleRules.field.category": "Category",
+    "terminology.livingMemory.styleRules.field.conditions": "Conditions",
+    "terminology.livingMemory.styleRules.field.conditionsPlaceholder":
+      "When it applies, e.g. only in direct speech",
+    "terminology.livingMemory.styleRules.category.terminology": "Terminology rules",
+    "terminology.livingMemory.styleRules.category.register": "Register rules",
+    "terminology.livingMemory.styleRules.category.formatting": "Formatting rules",
+    "terminology.livingMemory.styleRules.category.grammar": "Grammar rules",
+    "terminology.livingMemory.styleRules.category.orthography": "Orthography rules",
+    "terminology.livingMemory.styleRules.category.style": "General style rules",
+    "terminology.livingMemory.styleRules.category.other": "Other rules",
+    "terminology.livingMemory.styleRules.scope.global": "Project-wide",
+    "terminology.livingMemory.styleRules.scope.genre": "Genre",
+    "terminology.livingMemory.styleRules.scope.document": "Document",
+    "terminology.livingMemory.styleRules.scope.section": "Chapter or section",
+    "terminology.livingMemory.styleRules.scope.passage": "Verse range",
+    "terminology.livingMemory.styleRules.scope.segment": "Segment",
+    "terminology.livingMemory.styleRules.target.book": "Scripture book",
+    "terminology.livingMemory.styleRules.relationship.applies": "Applies",
+    "terminology.livingMemory.styleRules.relationship.likelyApplies": "Likely applies",
+    "terminology.livingMemory.styleRules.relationship.excluded": "Excluded",
+    "terminology.livingMemory.styleRules.assignedBy.human": "Set by a person",
+    "terminology.livingMemory.styleRules.assignedBy.model": "Suggested by AI",
+    "terminology.livingMemory.styleRules.assignedBy.inherited": "Inherited",
+    "terminology.livingMemory.styleRules.library.heading": "Approved rules",
+    "terminology.livingMemory.styleRules.library.empty":
+      "No approved style rules yet. Extract them from a knowledge-base document, or " +
+      "approve one that is waiting for review.",
+    "terminology.livingMemory.styleRules.library.applicability": "Where it applies",
+    "terminology.livingMemory.styleRules.applicability.title": "Where this rule applies",
+    "terminology.livingMemory.styleRules.applicability.empty":
+      "This rule has no targets yet, so only project-wide rules stay active.",
+    "terminology.livingMemory.styleRules.applicability.removeAria": "Remove this target",
+    "terminology.livingMemory.styleRules.applicability.typeLabel": "Target type",
+    "terminology.livingMemory.styleRules.applicability.valueLabel": "Target value",
+    "terminology.livingMemory.styleRules.applicability.relationshipLabel": "Relationship",
+    "terminology.livingMemory.styleRules.applicability.hint.genre":
+      "A genre name, for example: poetry",
+    "terminology.livingMemory.styleRules.applicability.hint.book":
+      "A three-letter USFM book code, for example: PSA",
+    "terminology.livingMemory.styleRules.applicability.hint.file":
+      "A file id from this project's file list",
+    "terminology.livingMemory.styleRules.applicability.hint.section":
+      "A chapter label, for example: PSA 23",
+    "terminology.livingMemory.styleRules.applicability.hint.passage":
+      "A verse range inside one chapter, for example: LUK 1:1-4",
+    "terminology.livingMemory.styleRules.applicability.hint.segment":
+      "A single segment (cell) id",
+    "terminology.livingMemory.styleRules.extract.button": "Extract from knowledge base",
+    "terminology.livingMemory.styleRules.extract.title": "Extract style rules",
+    "terminology.livingMemory.styleRules.extract.description":
+      "Read one knowledge-base document section by section and propose the rules it " +
+      "states. Nothing reaches a draft until you approve it.",
+    "terminology.livingMemory.styleRules.extract.docLabel": "Knowledge document",
+    "terminology.livingMemory.styleRules.extract.noDocs":
+      "No indexed knowledge documents yet. Upload one from the Knowledge base section first.",
+    "terminology.livingMemory.styleRules.extract.start": "Start extraction",
+    "terminology.livingMemory.styleRules.extract.progress": "Section {current} of {total}",
+    "terminology.livingMemory.styleRules.extract.found": plural({
+      one: "{count} rule found",
+      other: "{count} rules found",
+    }),
+    "terminology.livingMemory.styleRules.extract.saved": plural({
+      one: "Added {count} proposed rule.",
+      other: "Added {count} proposed rules.",
+    }),
+    "terminology.livingMemory.styleRules.extract.none": "That document produced no rules.",
+    "terminology.livingMemory.styleRules.extract.needsModel":
+      "Set up an AI model for this project before extracting rules.",
+    "terminology.livingMemory.styleRules.extract.failed": "Extraction stopped: {message}",
+
+    // ── Applicability refinement (quality pane, AQU-934 phase 3c) ───────────
+    // Reused keys (no duplicates added): styleRules.relationship.applies /
+    // .excluded head the two proposal groups, styleRules.scope.* +
+    // styleRules.target.book + common.file name each proposed target's type
+    // (the same vocabulary the manual applicability editor uses), common.cancel
+    // stops a run, common.discard drops the proposals, and common.selectAll /
+    // common.clear drive the bulk selection.
+    "terminology.livingMemory.styleRules.refine.button": "Refine",
+    "terminology.livingMemory.styleRules.refine.title": "Refine where this rule applies",
+    "terminology.livingMemory.styleRules.refine.description":
+      "Read the segments in one scope and propose the targets this rule really governs, " +
+      "grouped as broadly as the evidence allows. Nothing is saved until you confirm it.",
+    "terminology.livingMemory.styleRules.refine.scopeLabel": "Segments to inspect",
+    "terminology.livingMemory.styleRules.refine.scopeProject": "All documents",
+    "terminology.livingMemory.styleRules.refine.start": "Start inspection",
+    "terminology.livingMemory.styleRules.refine.progress": "Segment {current} of {total}",
+    "terminology.livingMemory.styleRules.refine.matched": plural({
+      one: "{count} match so far",
+      other: "{count} matches so far",
+    }),
+    "terminology.livingMemory.styleRules.refine.truncated":
+      "Only the first {count} segments of this scope were inspected.",
+    "terminology.livingMemory.styleRules.refine.needsModel":
+      "Set up an AI model for this project before inspecting segments.",
+    "terminology.livingMemory.styleRules.refine.none":
+      "Nothing new to propose — the rule already reaches these segments the way they read.",
+    "terminology.livingMemory.styleRules.refine.failed": "Inspection stopped: {message}",
+    "terminology.livingMemory.styleRules.refine.coverage": plural({
+      one: "{count} segment",
+      other: "{count} segments",
+    }),
+    "terminology.livingMemory.styleRules.refine.confidence": "{percent} confident",
+    "terminology.livingMemory.styleRules.refine.includeAria": "Include {target}",
+    "terminology.livingMemory.styleRules.refine.confirm": plural({
+      one: "Confirm {count} target",
+      other: "Confirm {count} targets",
+    }),
+
+    // ── Document genres (quality pane, AQU-934 phase 3b) ────────────────────
+    // Reused keys (no duplicates added): styleRules.assignedBy.human labels a
+    // genre a person set (same "how did this value get here" vocabulary as the
+    // applicability rows), common.save confirms suggestions, common.discard
+    // drops them, and common.reset clears one assignment back to derived.
+    "terminology.livingMemory.genres.title": "Document genres",
+    "terminology.livingMemory.genres.description":
+      "A document's genre decides which genre-scoped style rules reach its passages. " +
+      "Scripture books start from their book code; assign a genre to override that, or " +
+      "to give any other document one.",
+    "terminology.livingMemory.genres.empty": "No documents in this project yet.",
+    "terminology.livingMemory.genres.derived": "From the book",
+    "terminology.livingMemory.genres.unclassified": "Unclassified",
+    "terminology.livingMemory.genres.pickerAria": "Genre for {file}",
+    "terminology.livingMemory.genres.resetAria": "Clear the genre assigned to {file}",
+    "terminology.livingMemory.genres.suggestButton": "Suggest genres",
+    "terminology.livingMemory.genres.suggesting": "Classifying documents…",
+    "terminology.livingMemory.genres.suggestHeading": "Suggested genres",
+    "terminology.livingMemory.genres.suggestHint":
+      "Nothing is saved until you confirm these.",
+    "terminology.livingMemory.genres.suggestNone":
+      "No genres suggested. Assign them by hand instead.",
+    "terminology.livingMemory.genres.suggestNeedsModel":
+      "Set up an AI model for this project before suggesting genres.",
+    "terminology.livingMemory.genres.suggestFailed": "Couldn't suggest genres: {message}",
+    "terminology.livingMemory.genres.name.law": "Law",
+    "terminology.livingMemory.genres.name.history": "Historical narrative",
+    "terminology.livingMemory.genres.name.wisdom": "Wisdom",
+    "terminology.livingMemory.genres.name.poetry": "Poetry",
+    "terminology.livingMemory.genres.name.prophecy": "Prophecy",
+    "terminology.livingMemory.genres.name.gospel": "Gospel",
+    "terminology.livingMemory.genres.name.epistle": "Epistle",
+    "terminology.livingMemory.genres.name.apocalyptic": "Apocalyptic",
+    "terminology.livingMemory.genres.name.narrative": "Narrative",
+    "terminology.livingMemory.genres.name.teaching": "Teaching",
+    "terminology.livingMemory.genres.name.dialogue": "Dialogue",
+    "terminology.livingMemory.genres.name.reference": "Reference",
 
     // ── TerminologyTermDetail.tsx ────────────────────────────────────────────
     "terminology.termDetail.closeAria": "Close detail",
@@ -658,6 +837,145 @@ export const terminology = defineNamespace({
           "Badge on the collapsed prediction-prompt row: the project overrides the " +
           "default prompt (adjective, one word). Paired with the 'Default' badge.",
         maxLength: 16,
+      },
+      "terminology.livingMemory.styleRules.loadError": {
+        description:
+          "Inline alert shown above the Style rules section when its library fetch " +
+          "fails; {message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying fetch error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.candidates.pendingCount": {
+        description:
+          "Badge beside the 'Proposed rules' heading counting the extracted style rules " +
+          "still awaiting a human verdict; {count} is that count.",
+        placeholders: { count: "Number of proposed style rules awaiting review." },
+      },
+      "terminology.livingMemory.styleRules.candidates.citation": {
+        description:
+          "Small caption under a proposed rule naming the knowledge-base document the " +
+          "rule was extracted from; {doc} is that document's own file name, verbatim.",
+        placeholders: { doc: "The knowledge document's own name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.styleRules.applicability.removeAria": {
+        description:
+          "Accessible name for the trash button that deletes one applicability row " +
+          "(one target a style rule is scoped to) in the 'Where this rule applies' dialog.",
+      },
+      "terminology.livingMemory.styleRules.extract.progress": {
+        description:
+          "Live progress line while extraction walks a knowledge document's sections; " +
+          "{current} is the 1-based section being read and {total} the section count.",
+        placeholders: {
+          current: "1-based index of the section currently being read.",
+          total: "Total number of sections in the chosen document.",
+        },
+      },
+      "terminology.livingMemory.styleRules.extract.found": {
+        description:
+          "Running tally beside the extraction progress line: how many candidate rules " +
+          "the pass has produced so far; {count} is that count.",
+        placeholders: { count: "Number of candidate rules found so far." },
+      },
+      "terminology.livingMemory.styleRules.extract.saved": {
+        description:
+          "Completion summary after extraction finishes, stating how many rules were " +
+          "added to the review queue; {count} is that count.",
+        placeholders: { count: "Number of rules added as proposed." },
+      },
+      "terminology.livingMemory.styleRules.extract.failed": {
+        description:
+          "Inline alert in the extraction dialog when the run stops on an error; " +
+          "{message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.button": {
+        description:
+          "Button on an approved style rule's row that opens the dialog where AI reads " +
+          "the project's segments and proposes finer targets for the rule. Sits beside " +
+          "the 'Where it applies' button, so it must read as a distinct action.",
+        maxLength: 16,
+      },
+      "terminology.livingMemory.styleRules.refine.progress": {
+        description:
+          "Live progress line while the refinement run reads segments; {current} is how " +
+          "many segments have been judged and {total} how many the run will judge.",
+        placeholders: {
+          current: "Number of segments judged so far.",
+          total: "Total number of segments this run inspects.",
+        },
+      },
+      "terminology.livingMemory.styleRules.refine.matched": {
+        description:
+          "Running tally beside the refinement progress line: how many inspected " +
+          "segments the rule was judged to govern; {count} is that count.",
+        placeholders: { count: "Number of segments judged to match the rule so far." },
+      },
+      "terminology.livingMemory.styleRules.refine.truncated": {
+        description:
+          "Notice shown when the chosen scope holds more segments than one run may " +
+          "inspect, so only the first {count} were read. Never silently sampled.",
+        placeholders: { count: "Maximum number of segments one run inspects." },
+      },
+      "terminology.livingMemory.styleRules.refine.failed": {
+        description:
+          "Inline alert in the refinement dialog when the run stops on an error; " +
+          "{message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.coverage": {
+        description:
+          "Badge on one proposed target saying how many inspected segments it covers — " +
+          "the evidence behind the proposal; {count} is that count.",
+        placeholders: { count: "Number of inspected segments this proposed target covers." },
+      },
+      "terminology.livingMemory.styleRules.refine.confidence": {
+        description:
+          "Badge on one proposed target carrying how sure the AI was; {percent} is an " +
+          "already-localized percentage such as '90%'.",
+        placeholders: { percent: "Confidence as a formatted percentage, e.g. '90%'." },
+      },
+      "terminology.livingMemory.styleRules.refine.includeAria": {
+        description:
+          "Accessible name for the checkbox that keeps one proposed target in the set " +
+          "about to be saved; {target} is the target's own address (a chapter label, " +
+          "verse range or segment id), verbatim.",
+        placeholders: { target: "The proposed target's own address, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.confirm": {
+        description:
+          "Primary button in the refinement dialog: saves the ticked proposals as " +
+          "targets a person confirmed; {count} is how many are ticked.",
+        placeholders: { count: "Number of proposed targets currently ticked." },
+      },
+      "terminology.livingMemory.genres.pickerAria": {
+        description:
+          "Accessible name for one document's genre dropdown in the Document genres " +
+          "list; {file} is that document's own file name, verbatim.",
+        placeholders: { file: "The document's own file name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.genres.resetAria": {
+        description:
+          "Accessible name for the button that removes a document's assigned genre so " +
+          "it derives from its book code again; {file} is the document's own file name.",
+        placeholders: { file: "The document's own file name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.genres.derived": {
+        description:
+          "Badge on a document whose genre was derived from its scripture book code " +
+          "rather than assigned by a person. Sits next to the genre name.",
+        maxLength: 20,
+      },
+      "terminology.livingMemory.genres.unclassified": {
+        description:
+          "Badge on a document with no genre at all — no assignment and no scripture " +
+          "book code to derive one from. Sits where the genre name would be.",
+        maxLength: 20,
+      },
+      "terminology.livingMemory.genres.suggestFailed": {
+        description:
+          "Inline alert under the Document genres heading when the classification run " +
+          "fails; {message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
       },
       "terminology.common.occurrenceCount": {
         description:

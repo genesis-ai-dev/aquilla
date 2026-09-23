@@ -76,6 +76,8 @@ export interface BudgetFrame {
 /** The run hit its cost cap and halted gracefully. Credits, same as BudgetFrame. */
 export interface BudgetExhaustedFrame {
   type: "budget.exhausted"
+  /** Set when the weekly workspace allowance, not the per-run cap, stopped the run. */
+  reason?: "weekly_allowance"
   runId: string
   spentCredits: number
   capCredits: number

@@ -61,6 +61,11 @@ import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
+import { useStyleRules } from "@/hooks/useStyleRules"
+import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "@/lib/rules/applicability"
+import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
+import { resolveFileGenre } from "@/lib/rules/file-genre"
+import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import {
@@ -239,7 +244,7 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
@@ -4294,6 +4299,63 @@ export function ProjectWorkspace() {
     activeLane,
     localConcepts,
   )
+
+  // AQU-934: style-rule library + applicability graph. The resolver answers
+  // "which rules apply to THIS cell", so a draft prompt carries only the
+  // guidance in force for its passage instead of the whole library.
+  const { rules: styleRules, applicability: styleApplicability } = useStyleRules(projectId ?? null)
+  const styleApplicabilityIndex = useMemo(
+    () => buildApplicabilityIndex(styleApplicability),
+    [styleApplicability],
+  )
+  const fileGenres = project?.fileGenres
+  const styleInstructionsFor = useCallback((cell: CellData): string[] => {
+    if (styleRules.length === 0) return []
+    const file = projectFiles.find((f) => f.id === cell.fileId)
+    const genre = resolveFileGenre(cell.fileId, file?.bookCode, fileGenres)
+    const coords = cellCoordinates(
+      cell,
+      {
+        fileId: cell.fileId,
+        ...(file?.bookCode ? { bookCode: file.bookCode } : {}),
+        ...(genre ? { genre } : {}),
+      },
+      bookGenre,
+    )
+    return resolveEffectiveRules(styleRules, styleApplicabilityIndex, coords)
+      .map((effective) => effective.rule.instruction)
+  }, [styleRules, styleApplicabilityIndex, projectFiles, fileGenres])
+
+  const bookCodeByFileId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const file of projectFiles) if (file.bookCode) map.set(file.id, file.bookCode)
+    return map
+  }, [projectFiles])
+
+  // AQU-934 phase 3a: library rules that carry a deterministic check lint only
+  // where the applicability graph puts them in force. Memoized because the
+  // resolver builds the index + signature once and caches per coordinate —
+  // rebuilding per render would be correct but throw that away.
+  const libraryLint = useMemo(
+    () => buildLibraryLintResolver({
+      styleRules,
+      applicability: styleApplicability,
+      coordsFor: (cell) => {
+        const bookCode = bookCodeByFileId.get(cell.fileId)
+        const genre = resolveFileGenre(cell.fileId, bookCode, fileGenres)
+        return cellCoordinates(
+          cell,
+          {
+            fileId: cell.fileId,
+            ...(bookCode ? { bookCode } : {}),
+            ...(genre ? { genre } : {}),
+          },
+          bookGenre,
+        )
+      },
+    }),
+    [styleRules, styleApplicability, bookCodeByFileId, fileGenres],
+  )
   const {
     comments: allProjectComments,
     counts: commentCounts,
@@ -4619,7 +4681,12 @@ export function ProjectWorkspace() {
       rememberPendingTargetCommit(cell.id, eventId, parentId)
       draftDeadLettered = false
       const flushedEventId = eventId
-      await flushOutboxBatch({
+      // AQU-579: settle THIS event, not just "one batch". A single
+      // flushOutboxBatch posts the oldest file group, so with any older row
+      // queued the draft goes out later under the background flusher, where a
+      // dead-letter only reaches the tab-wide stale listener — it clears the
+      // shadow with no rebase, erasing the draft after "Saved".
+      await flushOutboxUntilSettled([flushedEventId], {
         getTokenForFile: getTokenForProjectFile,
         onStaleSiblings: (entries) => {
           if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
@@ -4800,7 +4867,8 @@ export function ProjectWorkspace() {
         )
       }
     }
-    await flushOutboxBatch({
+    // AQU-579: settle this response's own events (see flushOutboxUntilSettled).
+    await flushOutboxUntilSettled(eventIds, {
       getTokenForFile: getTokenForProjectFile,
       onStaleSiblings: (entries) => {
         for (const entry of entries) {
@@ -4925,7 +4993,7 @@ export function ProjectWorkspace() {
               )
             }
           }
-          await flushOutboxBatch({
+          await flushOutboxUntilSettled(retryEventIds, {
             getTokenForFile: getTokenForProjectFile,
             onStaleSiblings: (entries) => {
               for (const entry of entries) {
@@ -5041,6 +5109,7 @@ export function ProjectWorkspace() {
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
     commitCompletedCells,
+    styleInstructionsFor,
   )
 
   const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
@@ -5492,7 +5561,18 @@ export function ProjectWorkspace() {
   // ── FRO-192: assignment data ──────────────────────────────────────────────
   // Members list: used by AssignModal for the assignee picker and for building
   // the username→userId reverse map.
-  const { members: projectMembers } = useProjectMembers(project?.id ?? null)
+  const {
+    members: projectMembers,
+    rosterHidden: projectRosterHidden,
+    error: projectRosterError,
+  } = useProjectMembers(project?.id ?? null)
+  // AQU-1308: the roster gate and the assign gate used to disagree, so a
+  // project lead got a 403 here and AssignModal rendered an empty "Select
+  // member…" with no explanation. The server side is fixed; this keeps the
+  // picker honest whenever the fetch still fails (a genuinely hidden roster,
+  // or a network/server error).
+  const projectRosterUnavailable: "hidden" | "load-failed" | null =
+    projectRosterHidden ? "hidden" : projectRosterError ? "load-failed" : null
 
   // Current user's open assignments in this project, fetched once on mount and
   // on each new assignment (assignmentsRefreshKey increment).
@@ -5611,7 +5691,13 @@ export function ProjectWorkspace() {
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations, enabled: healthCalculationsEnabled },
+    {
+      decaySettings: project?.decaySettings,
+      requiredValidations,
+      enabled: healthCalculationsEnabled,
+      rulesForCell: libraryLint.rulesForCell,
+      rulesForCellSig: libraryLint.signature,
+    },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
@@ -8432,8 +8518,26 @@ export function ProjectWorkspace() {
     audioCounts,
   }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
 
+  // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
+  // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
+  // `project.syncRole?.level` — the SAME expression the action registry's
+  // `roleAllows` uses — so the button's enabled state and the action's
+  // `isAvailable` can never disagree and leave a live button that no-ops.
+  // Fails open on a null role (local/unsynced project, no server floor).
+  const canImportSource = canPerform("file.create", project?.syncRole?.level ?? null)
+  const importDenialReason = canImportSource
+    ? null
+    : denialMessage(t, ROLE.PROJECT_LEAD, project?.syncRole?.level ?? null)
+
   const openImportFlow = useCallback(() => {
     if (!project) return
+    // AQU-481: the single choke point for the source-import dialog. Every
+    // entry (header button, setup checklist step 1, "Import again" in the
+    // export dialog, the empty-state CTA) funnels through here, so a
+    // below-floor role cannot reach the type picker by any route — each of
+    // those callers also disables its own affordance, so this is the backstop
+    // rather than the explanation.
+    if (!canPerform("file.create", project.syncRole?.level ?? null)) return
     setImportOpen(true)
   }, [project])
 
@@ -11439,6 +11543,7 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onImport={project ? handleHeaderImport : undefined}
+            importDisabledReason={importDenialReason}
             onSettings={project ? openProjectSettings : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
@@ -12348,7 +12453,10 @@ export function ProjectWorkspace() {
             fileName={activeFile?.name}
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
-            onImportClick={openImportFlow}
+            /* AQU-481: no empty-state "Import" CTA below the file.create floor —
+               the placeholder renders without one when it's absent, so a viewer
+               gets the explanatory empty state rather than a dead button. */
+            onImportClick={canImportSource ? openImportFlow : undefined}
             onRetryClick={retryCells}
           />
         )}
@@ -12677,7 +12785,9 @@ export function ProjectWorkspace() {
             // closes. Using step 1 must not silently abandon the setup flow.
             setResumeChecklistAfterImport(true)
             setChecklistOpen(false)
-            setImportOpen(true)
+            // AQU-481: through the guarded opener, not setImportOpen directly,
+            // so step 1 cannot become a second ungated route to the dialog.
+            openImportFlow()
           }}
         />
       )}
@@ -12704,6 +12814,7 @@ export function ProjectWorkspace() {
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}
           members={projectMembers}
+          rosterUnavailable={projectRosterUnavailable}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
           assignmentMinRole={assignmentMinRole}
@@ -12902,10 +13013,13 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
           orgId={projectOrg?.id.toString()}
-          onReimport={() => {
+          /* AQU-481: "Import again" is an import affordance too — omitted below
+             the file.create floor, which leaves the dialog's own button
+             disabled (`disabled={!onReimport}`) instead of dead. */
+          onReimport={canImportSource ? () => {
             setExportOpen(false)
-            setImportOpen(true)
-          }}
+            openImportFlow()
+          } : undefined}
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>

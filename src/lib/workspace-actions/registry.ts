@@ -47,7 +47,16 @@ export function getDefaultAction(
 export const workspaceActions: WorkspaceAction[] = [
   {
     id: "import-new", labelKey: "nav.workspaceActions.import", icon: Plus, group: "primary",
-    isAvailable: () => true,
+    // AQU-481: source import emits `file.create` + N `source.cell.create`, and
+    // `file.create` sits at PROJECT_LEAD (500) server-side — so a viewer's
+    // import is always refused. This action was the one primary entry left
+    // ungated (`() => true`), which is why the full type-picker dialog opened
+    // for a read-only role with every importer clickable. The header button is
+    // rendered outside this registry, so it carries its own disabled+tooltip
+    // affordance (WorkspaceHeaderActions) rather than vanishing; `isAvailable`
+    // is what makes the click itself refuse. Fails OPEN on an unknown role, so
+    // local/legacy projects with no syncRole are unaffected.
+    isAvailable: (c) => roleAllows(c, "file.create"),
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },

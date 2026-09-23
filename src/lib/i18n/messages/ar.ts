@@ -2009,7 +2009,6 @@ export const ar: Catalog = {
   "autopilot.readiness.languages.unset": "لم تُضبط لغة المصدر أو لغة الهدف، لذا على الطيار الآلي استنتاجها من ترجماتك الحالية.",
   "org.breadcrumb.allOrganizations": "جميع المؤسسات",
   "org.breadcrumb.organizationFallback": "مؤسسة",
-  "org.switcher.workspaceFallback": "مساحة العمل",
   "org.switcher.triggerAriaLabel": "مبدّل المؤسسات: {org}",
   "org.switcher.searchPlaceholder": "البحث عن مؤسسة…",
   "org.switcher.searchAriaLabel": "البحث عن مؤسسة",

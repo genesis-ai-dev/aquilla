@@ -406,6 +406,24 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     endMs,
     cueRef: `${tc(startMs)} --> ${tc(endMs)}`,
   })
+  /** An irregular grid, like a real subtitle file (lengths 0.8-3s, gaps
+   *  0.08-1.5s). A regular or periodic grid lets a file shifted by a whole
+   *  number of lines fit almost as well as the true shift, and the shift
+   *  search rightly refuses to choose — which a test would read as a bug. */
+  const irregularLines = (count: number, seed = 7) => {
+    let s = seed
+    const rand = () => {
+      s = (s * 1103515245 + 12345) % 2147483648
+      return s / 2147483648
+    }
+    let t = 5000
+    return Array.from({ length: count }, (_, i) => {
+      const dur = 800 + Math.round(rand() * 2200)
+      const l = line(i + 1, t, t + dur)
+      t += dur + 80 + Math.round(rand() * 1420)
+      return l
+    })
+  }
   const vtt = (cues: [number, number, string][]) =>
     ["WEBVTT", "", ...cues.flatMap(([a, b, text]) => [`${tc(a)} --> ${tc(b)}`, text, ""])].join("\n")
   const checkboxFor = (text: string) =>
@@ -471,15 +489,13 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(checkboxFor(text).checked).toBe(false)
     }
     expect(checkboxFor("same words").disabled).toBe(true)
-    // Rows that fought over one line carry a "Contested" button; shared-timing rows get their own pill.
-    expect(within(rowOf("swap one")).getByRole("button", { name: "Go to the cue this one competed with" }))
-      .toHaveTextContent("Contested")
-    expect(within(rowOf("swap two")).getByRole("button", { name: "Go to the cue this one competed with" }))
-      .toHaveTextContent("Contested")
+    // Rows that fought over one line carry a "Contested" toggle; shared-timing rows get their own pill.
+    expect(within(rowOf("swap one")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
+    expect(within(rowOf("swap two")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
     expect(screen.getAllByText("Same timing")).toHaveLength(2)
     expect(rowOf("PETER")).toHaveTextContent("Same timing")
     expect(screen.getByText("Already there")).toBeInTheDocument()
-    expect(screen.getByText(/2 rows competed with another cue for the same line and were left unticked/)).toBeInTheDocument()
+    expect(screen.getByText(/2 rows competed with another cue for the same line and were left unticked\. Open Contested on a row to compare and swap\./)).toBeInTheDocument()
     expect(screen.getByText(/2 rows have exactly the same timing as another cue/)).toBeInTheDocument()
     // "Select all" never ticks a row whose text is already there.
     fireEvent.click(screen.getByText(/select all/i))
@@ -487,7 +503,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(checkboxFor("PETER").checked).toBe(true)
   })
 
-  describe("\"Contested\" jumps to the cue a row competed with", () => {
+  describe("\"Contested\" opens the row to compare, and swap, the cues that fit its line", () => {
     const contestLines = [
       line(1, 10000, 10400), line(2, 10500, 10900), line(3, 20000, 20400),
       line(4, 30000, 32000), line(5, 32500, 33500),
@@ -500,44 +516,101 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       [31000, 32000, "half two"],
       [32500, 33500, "next"],
     ])
-    const contestedButton = (text: string) =>
-      within(rowOf(text)).getByRole("button", { name: "Go to the cue this one competed with" })
-    const lit = () => [...document.querySelectorAll("[data-highlighted]")].map((el) => el.textContent)
+    const toggle = (text: string) => within(rowOf(text)).getByRole("button", { name: /Contested/ })
+    /** The opened comparison under a row: each rival's text and where it is now. */
+    const rivalsUnder = (text: string) =>
+      [...rowOf(text).querySelectorAll("[data-rival]")].map((el) => el.textContent)
+    const onLine = (n: number) => [...document.querySelectorAll("[data-review-cell]")]
+      .find((el) => el.getAttribute("data-review-cell") === `line-${n}`)!
+    const cueOn = (n: number) => onLine(n).querySelector("p.text-xs")!.textContent
+    const tickOn = (n: number) => (onLine(n).querySelector("input[type=checkbox]") as HTMLInputElement).checked
 
-    it("goes to the row it competed with, and back — without ticking either", async () => {
+    it("starts closed, and opens to show the other cue and where it is now", async () => {
       renderPanel({ cells: contestLines })
       await selectFile(makeFile(contestFile, "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      expect(screen.getByText(/3 rows competed with another cue for the same line/)).toBeInTheDocument()
+      expect(screen.queryByText("Also fits this line")).toBeNull()
       expect(within(rowOf("third")).queryByRole("button")).toBeNull()
 
-      fireEvent.click(contestedButton("swap one"))
-      expect(rowOf("swap two")).toHaveAttribute("data-highlighted", "true")
-      expect(lit()).toHaveLength(1)
-      fireEvent.click(contestedButton("swap two"))
-      expect(rowOf("swap one")).toHaveAttribute("data-highlighted", "true")
-      expect(rowOf("swap two")).not.toHaveAttribute("data-highlighted")
+      fireEvent.click(toggle("swap one"))
+      expect(toggle("swap one")).toHaveAttribute("aria-expanded", "true")
+      expect(rivalsUnder("swap one")).toEqual([expect.stringMatching(/swap two.*Now on: SOURCE 2/)])
+      fireEvent.click(toggle("half one"))
+      expect(rivalsUnder("half one")).toEqual([expect.stringMatching(/half two.*Not placed/)])
+      // Opening a row never ticks it.
       expect(checkboxFor("swap one").checked).toBe(false)
-      expect(checkboxFor("swap two").checked).toBe(false)
+      fireEvent.click(toggle("swap one"))
+      expect(rivalsUnder("swap one")).toEqual([])
     })
 
-    it("opens the unmatched list at the half that lost its line, and that cue goes back to the row", async () => {
+    it("swaps two rows' lines, keeps every other tick, and can swap back", async () => {
       renderPanel({ cells: contestLines })
       await selectFile(makeFile(contestFile, "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      expect(screen.queryByText("half two")).toBeNull() // the list starts closed
+      fireEvent.click(checkboxFor("next")) // untick one unrelated row
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap one", "swap two"])
 
-      fireEvent.click(contestedButton("half one"))
-      const lost = screen.getByText("half two").closest("li")!
-      expect(lost).toHaveAttribute("data-highlighted", "true")
-      expect(lost).toHaveTextContent("Lost its line to another cue")
+      fireEvent.click(toggle("swap one"))
+      fireEvent.click(within(rowOf("swap one")).getByRole("button", { name: "Swap" }))
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap two", "swap one"])
+      // Still one contest, still open on line 1, now offering the other cue.
+      expect(toggle("swap two")).toHaveAttribute("aria-expanded", "true")
+      expect(rivalsUnder("swap two")).toEqual([expect.stringMatching(/swap one.*Now on: SOURCE 2/)])
+      // Ticks: the unrelated rows keep theirs; the swapped lines stay unticked.
+      expect(tickOn(3)).toBe(true) // "third"
+      expect(tickOn(5)).toBe(false) // "next", unticked by hand before the swap
+      expect(tickOn(1)).toBe(false)
+      expect(tickOn(2)).toBe(false)
 
-      fireEvent.click(within(lost).getByRole("button", { name: "Go to the line it lost to" }))
-      expect(rowOf("half one")).toHaveAttribute("data-highlighted", "true")
-      expect(lost).not.toHaveAttribute("data-highlighted")
+      fireEvent.click(within(rowOf("swap two")).getByRole("button", { name: "Swap" }))
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap one", "swap two"])
     })
 
-    it("visits every cue in turn when three fought over one line", async () => {
+    it("swaps the half that lost its line onto it, and the other half goes to the unmatched list", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(cueOn(4)).toBe("half one")
+
+      fireEvent.click(toggle("half one"))
+      fireEvent.click(within(rowOf("half one")).getByRole("button", { name: "Swap" }))
+      expect(cueOn(4)).toBe("half two")
+      expect(rivalsUnder("half two")).toEqual([expect.stringMatching(/half one.*Not placed/)])
+      openList(/Cues that didn't find a line/)
+      const lost = screen.getByText("half one", { selector: "li p" }).closest("li")!
+      expect(lost).toHaveTextContent("Lost its line to another cue")
+      // The unmatched list is plain text now: nothing to click there.
+      expect(within(lost).queryByRole("button")).toBeNull()
+    })
+
+    it("keeps a swap when the shift tickbox is toggled", async () => {
+      const lines = irregularLines(30)
+      // Line 10 split in two, and the whole file 2s late.
+      const l10 = lines[9]
+      const mid = Math.round((l10.startMs + l10.endMs) / 2)
+      const cues: [number, number, string][] = lines.flatMap((c, i): [number, number, string][] => i === 9
+        ? [[c.startMs + 2000, mid + 2000, "ten a"], [mid + 2000, c.endMs + 2000, "ten b"]]
+        : [[c.startMs + 2000, c.endMs + 2000, `TARGET ${i + 1}`]])
+      renderPanel({ cells: lines })
+      await selectFile(makeFile(vtt(cues), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const before = cueOn(10)
+      const other = before === "ten a" ? "ten b" : "ten a"
+      fireEvent.click(toggle(before))
+      fireEvent.click(within(rowOf(before)).getByRole("button", { name: "Swap" }))
+      expect(cueOn(10)).toBe(other)
+
+      const box = () => screen.getByLabelText(/Shift the uploaded file's timings/)
+      fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(cueOn(10)).toBe(other)
+      fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(box()).toBeChecked()
+      expect(cueOn(10)).toBe(other)
+    })
+
+    it("offers every other cue when three fit one line", async () => {
       renderPanel({ cells: [line(1, 30000, 33000), line(2, 40000, 41000)] })
       await selectFile(makeFile(vtt([
         [30000, 31000, "part one"],
@@ -546,28 +619,18 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
         [40000, 41000, "after"],
       ]), "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      fireEvent.click(contestedButton("part one"))
-      const entry = (text: string) => screen.getByText(text).closest("li")!
-      expect(entry("part two")).toHaveAttribute("data-highlighted", "true")
-      fireEvent.click(within(entry("part two")).getByRole("button", { name: "Go to the line it lost to" }))
-      expect(entry("part three")).toHaveAttribute("data-highlighted", "true")
-      fireEvent.click(within(entry("part three")).getByRole("button", { name: "Go to the line it lost to" }))
-      expect(rowOf("part one")).toHaveAttribute("data-highlighted", "true")
-    })
-
-    it("lets the glow fade", async () => {
-      renderPanel({ cells: contestLines })
-      await selectFile(makeFile(contestFile, "episode.vtt"))
-      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      vi.useFakeTimers()
-      try {
-        fireEvent.click(contestedButton("swap one"))
-        expect(rowOf("swap two")).toHaveAttribute("data-highlighted", "true")
-        act(() => { vi.advanceTimersByTime(1700) })
-        expect(rowOf("swap two")).not.toHaveAttribute("data-highlighted")
-      } finally {
-        vi.useRealTimers()
-      }
+      fireEvent.click(toggle("part one"))
+      expect(rivalsUnder("part one")).toEqual([
+        expect.stringMatching(/part two.*Not placed/),
+        expect.stringMatching(/part three.*Not placed/),
+      ])
+      const swapThird = within(rowOf("part one")).getAllByRole("button", { name: "Swap" })[1]
+      fireEvent.click(swapThird)
+      expect(cueOn(1)).toBe("part three")
+      expect(rivalsUnder("part three")).toEqual([
+        expect.stringMatching(/part one.*Not placed/),
+        expect.stringMatching(/part two.*Not placed/),
+      ])
     })
   })
 
@@ -598,10 +661,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
   describe("a whole-file shift, offered as a tickbox", () => {
     // An irregular grid, like a real subtitle file: a regular one can't tell
     // the true shift from the one-line-over shift, and is rightly refused.
-    const episodeLines = Array.from({ length: 30 }, (_, i) => {
-      const start = 5000 + i * 2600 + (i % 4) * 170
-      return line(i + 1, start, start + 900 + (i % 5) * 260)
-    })
+    const episodeLines = irregularLines(30)
     const shifted = (by: number) =>
       vtt(episodeLines.map((c, i) => [c.startMs + by, c.endMs + by, `TARGET ${i + 1}`]))
     const onOwnLine = () =>

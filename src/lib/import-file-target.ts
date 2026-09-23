@@ -124,6 +124,9 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched line's own cue timecode, when it has one. */
   cellRef?: string
   flag?: TargetMatchFlag
+  /** Where the incoming row sits in the uploaded file. Set by overlap
+   *  matching: the review screen's swap pins rows to lines by it. */
+  rowIndex?: number
   /** For a `contested` row: which contest it belongs to, numbered from 1 in
    *  the order the review list shows them. Every row, and every unmatched cue,
    *  carrying the same number fought over one line — so with several contests
@@ -155,6 +158,21 @@ export interface TargetOrphan {
   /** For a `lostItsLine` cue: the contest it lost, matching the number on
    *  the row that holds the line. */
   contest?: number
+  /** Where the cue sits in the uploaded file (overlap matching only). */
+  rowIndex?: number
+}
+
+/** Pairings a person fixed on the review screen by swapping a contest
+ *  (AQU-1360). Re-matching with these keeps every other pairing, pill and
+ *  flag computed exactly as usual. */
+export interface ContestOverrides {
+  /** Incoming row index → the line (cell id) it goes on, before the usual
+   *  pairing runs for everything else. */
+  pins: ReadonlyArray<readonly [rowIndex: number, cellId: string]>
+  /** Incoming row indices that stay one contest whatever the timing rule
+   *  says afterwards — so a swapped pair keeps its Contested row, and can be
+   *  swapped back. */
+  contests: ReadonlyArray<readonly number[]>
 }
 
 /** An open-file line no incoming row covered. Listed by name (AQU-1360): a
@@ -378,7 +396,12 @@ function timedCellsOf(cells: FileTargetCellRef[]): TimedCell[] {
 /** The AQU-1143 assignment: every row/line pair within tolerance becomes a
  *  candidate, ranked by overlap (largest first, then smallest gap), and taken
  *  greedily — each row and each line used at most once. */
-function assignByOverlap(rows: TimedRow[], cells: TimedCell[]): OverlapAssignment {
+function assignByOverlap(
+  rows: TimedRow[],
+  cells: TimedCell[],
+  /** Row position → cell position, taken before the greedy pass. */
+  pins?: ReadonlyMap<number, number>,
+): OverlapAssignment {
   const candidates: Candidate[] = []
 
   for (let r = 0; r < rows.length; r++) {
@@ -411,6 +434,14 @@ function assignByOverlap(rows: TimedRow[], cells: TimedCell[]): OverlapAssignmen
   const cellForRow = new Map<number, number>()
   const rowForCell = new Map<number, number>()
   const overlapForRow = new Map<number, number>()
+  for (const [rowAt, cellAt] of pins ?? []) {
+    if (cellForRow.has(rowAt) || rowForCell.has(cellAt)) continue
+    const row = rows[rowAt].timing
+    const cell = cells[cellAt].timing
+    cellForRow.set(rowAt, cellAt)
+    rowForCell.set(cellAt, rowAt)
+    overlapForRow.set(rowAt, Math.max(0, Math.min(row.endMs, cell.endMs) - Math.max(row.startMs, cell.startMs)))
+  }
   for (const candidate of candidates) {
     if (cellForRow.has(candidate.rowAt) || rowForCell.has(candidate.cellAt)) continue
     cellForRow.set(candidate.rowAt, candidate.cellAt)
@@ -486,7 +517,11 @@ interface Contests {
   numberOf: Map<number, number>
 }
 
-function findContested(a: OverlapAssignment): Contests {
+function findContested(
+  a: OverlapAssignment,
+  /** Row positions that must stay one contest (a person swapped them). */
+  forced: ReadonlyArray<readonly number[]> = [],
+): Contests {
   const assigned = new Set<number>()
   const unassigned = new Set<number>()
   // Union-find over row positions: each contest pair joins holder and claimant.
@@ -514,6 +549,12 @@ function findContested(a: OverlapAssignment): Contests {
     if (won === undefined) unassigned.add(r)
     else assigned.add(r)
     join(holder, r)
+  }
+  for (const group of forced) {
+    // Only a group that still holds a line is a contest over it.
+    if (group.length < 2 || !group.some((at) => a.cellForRow.has(at))) continue
+    for (const at of group) (a.cellForRow.has(at) ? assigned : unassigned).add(at)
+    for (const at of group.slice(1)) join(group[0], at)
   }
 
   // Number the contests in review-list order: by the earliest incoming
@@ -838,7 +879,13 @@ export function matchTargetRowsByOverlap(
    *  screen's tickbox) while still reporting it. `known` skips the search and
    *  uses corrections a previous match of the same rows and cells found — the
    *  search is ~25 matching passes, and the tickbox can't change its answer. */
-  options: { rescale?: boolean; applyOffset?: boolean; known?: TimebaseCorrections } = {},
+  options: {
+    rescale?: boolean
+    applyOffset?: boolean
+    known?: TimebaseCorrections
+    /** Swaps made on the review screen — see `ContestOverrides`. */
+    overrides?: ContestOverrides
+  } = {},
 ): FileTargetMatchResult {
   // Rows carrying no text can't commit anything, and must not hold a cell
   // hostage — a blank incoming cue never clears an existing translation.
@@ -864,12 +911,27 @@ export function matchTargetRowsByOverlap(
     options.known ?? (options.rescale ? chooseTimebase(timedRows, timedCells) : { rate: null, offset: null })
   const timebase =
     corrections.offset && options.applyOffset !== false ? corrections.offset : corrections.rate
+  // Swaps pin by incoming row index and cell id; the matcher works in positions.
+  const cellAtById = new Map(timedCells.map((c, at) => [c.cell.cellId, at]))
+  const pins = new Map<number, number>()
+  for (const [rowIndex, cellId] of options.overrides?.pins ?? []) {
+    const rowAt = timedAt.get(rowIndex)
+    const cellAt = cellAtById.get(cellId)
+    if (rowAt !== undefined && cellAt !== undefined) pins.set(rowAt, cellAt)
+  }
+  const forced = (options.overrides?.contests ?? []).map((group) =>
+    group.flatMap((rowIndex) => {
+      const at = timedAt.get(rowIndex)
+      return at === undefined ? [] : [at]
+    }),
+  )
   const assignment = assignByOverlap(
     timebase ? adjustTimedRows(timedRows, timebase.scale, timebase.offsetMs) : timedRows,
     timedCells,
+    pins,
   )
 
-  const contested = findContested(assignment)
+  const contested = findContested(assignment, forced)
   const shared = sharedTimingRows(assignment)
   const close = closeMatchedRows(assignment)
 
@@ -890,6 +952,7 @@ export function matchTargetRowsByOverlap(
             ? "lostItsLine"
             : "noLineInReach",
         ...(at !== undefined && contested.unassigned.has(at) ? { contest: contested.numberOf.get(at) } : {}),
+        rowIndex: index,
       })
       continue
     }
@@ -908,8 +971,8 @@ export function matchTargetRowsByOverlap(
       Math.abs(cueTiming.endMs - lineTiming.endMs) > CELL_REF_TOLERANCE_MS
     // The cue's timecode is the only meaningful label a VTT row has — a
     // cue-sourced cell's `canonicalRef` is an opaque group id.
-    matched.push(
-      toMatchedCell(
+    matched.push({
+      ...toMatchedCell(
         cell,
         row.text,
         row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`,
@@ -917,7 +980,8 @@ export function matchTargetRowsByOverlap(
         drifted,
         flag === "contested" ? contested.numberOf.get(at) : undefined,
       ),
-    )
+      rowIndex: index,
+    })
   }
 
   const uncovered = uncoveredLines(cells, matched)
@@ -954,7 +1018,7 @@ export function matchTargetRowsByOrder(
   /** `applyOffset: false` — the review screen's tickbox, unticked. `known` —
    *  the corrections an earlier match of these rows found (see
    *  `matchTargetRowsByOverlap`). */
-  options: { applyOffset?: boolean; known?: TimebaseCorrections } = {},
+  options: { applyOffset?: boolean; known?: TimebaseCorrections; overrides?: ContestOverrides } = {},
 ): FileTargetMatchResult {
   const nonEmptyRows = rows.filter((row) => row.text.trim().length > 0)
   const canMatchByOverlap =
@@ -964,7 +1028,12 @@ export function matchTargetRowsByOrder(
     nonEmptyRows.every((row) => rowTimingMs(row) !== null)
 
   return canMatchByOverlap
-    ? matchTargetRowsByOverlap(rows, cells, { rescale: true, applyOffset: options.applyOffset, known: options.known })
+    ? matchTargetRowsByOverlap(rows, cells, {
+        rescale: true,
+        applyOffset: options.applyOffset,
+        known: options.known,
+        overrides: options.overrides,
+      })
     : matchRowsPositionally(rows, cells)
 }
 

@@ -9,6 +9,7 @@ import {
   vttToTargetRows,
   vttToTargetRowsWithReport,
   toFileTargetCells,
+  type ContestOverrides,
   type FileTargetCellRef,
   type FileTargetCellSource,
   type TargetRow,
@@ -215,7 +216,7 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
   it("a cue beyond tolerance of every cell is an orphan, never a wrong-cell commit", () => {
     const result = matchTargetRowsByOrder([cueRow(60000, 60800, "way out")], cells)
     expect(result.matched).toHaveLength(0)
-    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out", reason: "noLineInReach" }])
+    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out", reason: "noLineInReach", rowIndex: 0 }])
     expect(result.unmatchedSourceCount).toBe(4)
   })
 
@@ -230,8 +231,8 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
       cells,
     )
     expect(result.orphans).toEqual([
-      { ref: "cue 3000", text: "backwards by field", reason: "backwardsTimecode" },
-      { ref: "00:00:04.800 --> 00:00:04.000", text: "backwards by label", reason: "backwardsTimecode" },
+      { ref: "cue 3000", text: "backwards by field", reason: "backwardsTimecode", rowIndex: 1 },
+      { ref: "00:00:04.800 --> 00:00:04.000", text: "backwards by label", reason: "backwardsTimecode", rowIndex: 2 },
     ])
     expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([["c1", "one"]])
   })
@@ -1037,6 +1038,70 @@ describe("review flags (AQU-1360)", () => {
       const speakers = [line("S2", 20000, 21500), line("S3", 20000, 21500)]
       const r = matchTargetRowsByOverlap([cue("PETER", 20000, 21500), cue("ANDREW", 20000, 21500)], speakers)
       expect(r.matched.map((m) => [m.flag ?? null, m.contest ?? null])).toEqual([["sharedTiming", null], ["sharedTiming", null]])
+    })
+  })
+
+  describe("swapping a contest (the review screen's Swap)", () => {
+    const cells = [
+      line("L1", 10000, 10400), line("L2", 10500, 10900), line("L3", 20000, 20400),
+      line("M", 30000, 32000), line("N", 32500, 33500),
+    ]
+    const rows = [
+      cue("T1", 10450, 10850), cue("T2", 10500, 10900), cue("T3", 20000, 20400),
+      cue("half 1", 30000, 31000), cue("half 2", 31000, 32000), cue("next", 32500, 33500),
+    ]
+    const view = (overrides?: ContestOverrides) => {
+      const r = matchTargetRowsByOverlap(rows, cells, { overrides })
+      return {
+        pairs: r.matched.map((m) => [m.incomingText, m.cellId, m.flag ?? null]),
+        orphans: r.orphans.map((o) => [o.text, o.reason, o.rowIndex]),
+      }
+    }
+
+    it("carries each row's place in the file, so a swap can name it", () => {
+      const r = matchTargetRowsByOverlap(rows, cells)
+      expect(r.matched.map((m) => [m.incomingText, m.rowIndex])).toEqual([
+        ["T1", 0], ["T2", 1], ["T3", 2], ["half 1", 3], ["next", 5],
+      ])
+      expect(r.orphans.map((o) => [o.text, o.rowIndex])).toEqual([["half 2", 4]])
+    })
+
+    it("two rows: exchanges their lines, and they stay one contest", () => {
+      expect(view({ pins: [[0, "L2"], [1, "L1"]], contests: [[0, 1]] }).pairs).toEqual([
+        ["T1", "L2", "contested"], ["T2", "L1", "contested"], ["T3", "L3", null],
+        ["half 1", "M", "contested"], ["next", "N", null],
+      ])
+    })
+
+    it("a split: the half that lost its line takes it, and the other half is the one listed", () => {
+      expect(view({ pins: [[4, "M"]], contests: [[3, 4]] })).toEqual({
+        pairs: [
+          ["T1", "L1", "contested"], ["T2", "L2", "contested"], ["T3", "L3", null],
+          ["half 2", "M", "contested"], ["next", "N", null],
+        ],
+        orphans: [["half 1", "lostItsLine", 3]],
+      })
+    })
+
+    it("stays a contest even where the timing rule alone wouldn't call it one", () => {
+      // "main" holds A but mostly lies outside it (2s of its 4.5s), so once a
+      // cue that only grazes A is swapped on, main no longer CLAIMS A and the
+      // timing rule alone flags nothing. The pair must stay one contest, so
+      // the person can swap back.
+      const two = [line("A", 1000, 3000)]
+      const graze = [cue("main", 0, 4500), cue("graze", 2800, 4800)]
+      expect(matchTargetRowsByOverlap(graze, two, { overrides: { pins: [[1, "A"]], contests: [] } }).matched[0].flag)
+        .toBeUndefined()
+      const swapped = matchTargetRowsByOverlap(graze, two, { overrides: { pins: [[1, "A"]], contests: [[0, 1]] } })
+      expect(swapped.matched.map((m) => [m.incomingText, m.cellId, m.flag, m.contest])).toEqual([["graze", "A", "contested", 1]])
+      expect(swapped.orphans.map((o) => [o.text, o.reason, o.contest])).toEqual([["main", "lostItsLine", 1]])
+    })
+
+    it("carries through matchTargetRowsByOrder, with a shift applied", () => {
+      const shifted = rows.map((r) => ({ ...r, startMs: r.startMs! + 2000, endMs: r.endMs! + 2000 }))
+      const known = { rate: null, offset: { scale: 1, offsetMs: -2000, fromFps: null, toFps: null, closeBefore: 0, closeAfter: 0 } }
+      const r = matchTargetRowsByOrder(shifted, cells, { known, overrides: { pins: [[4, "M"]], contests: [[3, 4]] } })
+      expect(r.matched.find((m) => m.cellId === "M")?.incomingText).toBe("half 2")
     })
   })
 

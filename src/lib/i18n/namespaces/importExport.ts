@@ -1008,12 +1008,11 @@ export const importExport = defineNamespace({
     }),
     "importExport.review.contestedWarning": plural({
       one: "{count} row competed with another cue for the same line and was left unticked. " +
-        "Use Contested on it to see the other cue.",
+        "Open Contested on it to compare and swap.",
       other: "{count} rows competed with another cue for the same line and were left " +
-        "unticked. Use Contested on a row to see what it competed with.",
+        "unticked. Open Contested on a row to compare and swap.",
     }),
-    "importExport.review.goToLineItLostTo": "Go to the line it lost to",
-    "importExport.review.goToRival": "Go to the cue this one competed with",
+    "importExport.review.contestedToggleHint": "Compare with the other cue that fits this line",
     "importExport.review.deselectAll": "Deselect all",
     "importExport.review.importCellCount": plural({
       one: "Import {count} cell",
@@ -1031,6 +1030,9 @@ export const importExport = defineNamespace({
     "importExport.review.reasonNoLineInReach": "No line within reach",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.rowAlreadyThere": "Already there",
+    "importExport.review.rivalHeading": "Also fits this line",
+    "importExport.review.rivalNotPlaced": "Not placed",
+    "importExport.review.rivalOnLine": "Now on: {source}",
     "importExport.review.rowContestedPill": "Contested",
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
     "importExport.review.rowSharedTimingPill": "Same timing",
@@ -1045,6 +1047,8 @@ export const importExport = defineNamespace({
       one: "{count} cue skipped (empty or unreadable)",
       other: "{count} cues skipped (empty or unreadable)",
     }),
+    "importExport.review.swap": "Swap",
+    "importExport.review.swapHint": "Put this cue on this line instead",
     "importExport.review.matching": "Matching lines…",
     "importExport.review.offsetAlsoRateNamed": "This also adjusts them from {fromFps} to {toFps} frames per second.",
     "importExport.review.offsetAlsoRateUnnamed": "This also stretches them by {percent}.",
@@ -2810,25 +2814,18 @@ export const importExport = defineNamespace({
           "subtitle file lay mostly on the same line of the open file as another cue, " +
           "so one of them ended up on a different line or none. From timing alone " +
           "either could be the right one, so those rows were left unticked. Each has " +
-          "a \"Contested\" pill that jumps to the other cue; \"Contested\" here must be " +
-          "the same word as on that pill (importExport.review.rowContestedPill).",
+          "a \"Contested\" pill that opens a comparison with the other cue and a Swap " +
+          "button; \"Contested\" here must be the same word as on that pill " +
+          "(importExport.review.rowContestedPill).",
         placeholders: {
           count: "Number of review rows involved in such a contest.",
         },
       },
-      "importExport.review.goToLineItLostTo": {
+      "importExport.review.contestedToggleHint": {
         description:
-          "Small amber button beside a cue in the list of uploaded cues that found no " +
-          "line, when the cue lost its line to another cue (typically the second half " +
-          "of a line the translator split in two). Clicking it scrolls the review list " +
-          "to the row that holds that line and highlights it. Short imperative phrase.",
-      },
-      "importExport.review.goToRival": {
-        description:
-          "Tooltip and screen-reader label of the \"Contested\" pill on a review row: " +
-          "clicking it scrolls to, and highlights, the other cue this row competed " +
-          "with for the same line — another row, or an entry in the list of cues that " +
-          "found no line. Short imperative phrase.",
+          "Tooltip on the \"Contested\" pill of a match-review row. Clicking the pill " +
+          "opens the row downward to show the other uploaded cue that also fits this " +
+          "line, so the two can be compared and swapped. Short imperative phrase.",
       },
       "importExport.review.deselectAll": {
         description:
@@ -2910,11 +2907,31 @@ export const importExport = defineNamespace({
           "Small grey tag on one row of the match-review list: the line already holds " +
           "exactly this text, so importing it would change nothing. Two or three words.",
       },
+      "importExport.review.rivalHeading": {
+        description:
+          "Small heading inside an opened \"Contested\" row of the match-review list, " +
+          "above the other uploaded cue(s) whose timing also fits this row's line.",
+      },
+      "importExport.review.rivalNotPlaced": {
+        description:
+          "Under a competing cue shown inside an opened \"Contested\" row: that cue is " +
+          "not on any line at the moment (it is in the list of cues that found no line). " +
+          "Two or three words.",
+      },
+      "importExport.review.rivalOnLine": {
+        description:
+          "Under a competing cue shown inside an opened \"Contested\" row: the line of " +
+          "the open file that cue is on at the moment, named by that line's source text.",
+        placeholders: {
+          source: "The source text of the line the competing cue is on now.",
+        },
+      },
       "importExport.review.rowContestedPill": {
         description:
           "Small amber pill in the top-right corner of a review row that competed with " +
-          "another cue for the same line. It is a button: clicking it jumps to the other " +
-          "cue. One word, the same word the warning above the list uses.",
+          "another cue for the same line. It is a toggle with a small arrow: clicking " +
+          "it opens the row to compare the two cues. One word, the same word the " +
+          "warning above the list uses.",
       },
       "importExport.review.rowTimingDiffers": {
         description:
@@ -2956,6 +2973,17 @@ export const importExport = defineNamespace({
         placeholders: {
           count: "Number of cues in the uploaded file that produced no row.",
         },
+      },
+      "importExport.review.swap": {
+        description:
+          "Small button beside a competing cue inside an opened \"Contested\" row: puts " +
+          "that cue on this row's line, and moves this row's cue to where the other one " +
+          "was (another line, or the list of cues that found no line). One word.",
+      },
+      "importExport.review.swapHint": {
+        description:
+          "Tooltip on the Swap button inside an opened \"Contested\" row of the " +
+          "match-review list. Short imperative phrase.",
       },
       "importExport.review.matching": {
         description:

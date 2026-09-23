@@ -1043,6 +1043,9 @@ export const importExport = defineNamespace({
       other: "{count} rows have exactly the same timing as another cue, so only file order " +
         "decided their lines. They were left unticked.",
     }),
+    "importExport.review.showAll": "All {count}",
+    "importExport.review.showFilterAriaLabel": "Which rows to show",
+    "importExport.review.showToCheck": "To check {count}",
     "importExport.review.skippedCueCount": plural({
       one: "{count} cue skipped (empty or unreadable)",
       other: "{count} cues skipped (empty or unreadable)",
@@ -2962,6 +2965,29 @@ export const importExport = defineNamespace({
           "went to. Those rows were left unticked for the user to check.",
         placeholders: {
           count: "Number of review rows sharing an identical time range with another cue.",
+        },
+      },
+      "importExport.review.showAll": {
+        description:
+          "First option of a two-way switch above the match-review list: show every " +
+          "row. Followed by how many rows there are. One word and the number.",
+        placeholders: {
+          count: "Number of rows in the review list, already formatted.",
+        },
+      },
+      "importExport.review.showFilterAriaLabel": {
+        description:
+          "Screen-reader label of the two-way switch above the match-review list that " +
+          "chooses between showing every row and only the rows that need checking.",
+      },
+      "importExport.review.showToCheck": {
+        description:
+          "Second option of the two-way switch above the match-review list: show only " +
+          "the rows a person needs to look at (cues that competed for a line, cues " +
+          "sharing a timing, and rows that would replace existing text). Followed by " +
+          "how many there are. Two words and the number.",
+        placeholders: {
+          count: "Number of rows that need checking, already formatted.",
         },
       },
       "importExport.review.skippedCueCount": {

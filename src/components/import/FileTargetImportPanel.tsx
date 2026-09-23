@@ -22,6 +22,7 @@ import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatNumber, formatPercent } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
@@ -444,6 +445,9 @@ export function FileTargetImportPanel({
   // Both survive a re-match (a swap, or the shift tickbox); a new file clears them.
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [overrides, setOverrides] = useState<ContestOverrides>(NO_OVERRIDES)
+  // "To check": show only the rows left unticked for a reason. Kept across a
+  // re-match; a new file starts on "All".
+  const [onlyToCheck, setOnlyToCheck] = useState(false)
 
   // Back goes one step: review → column mapping for a spreadsheet (the column
   // choice is what you'd fix, without re-uploading) and → the file picker for
@@ -468,6 +472,7 @@ export function FileTargetImportPanel({
         setSubtitleRows(null)
         setExpandedRows(new Set())
         setOverrides(NO_OVERRIDES)
+        setOnlyToCheck(false)
         setError(null)
         setStep("file")
       },
@@ -571,6 +576,7 @@ export function FileTargetImportPanel({
     const run = ++matchRun.current
     setExpandedRows(new Set())
     setOverrides(NO_OVERRIDES)
+    setOnlyToCheck(false)
     flushSync(() => setStep("matching"))
     await nextPaint()
     return run === matchRun.current
@@ -820,8 +826,18 @@ export function FileTargetImportPanel({
     const { matched, orphans, uncovered, timebase, looseFit, skippedCues = 0 } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
     const alreadyThere = matched.filter((m) => m.alreadyThere)
-    // Rows a person can actually choose to import.
-    const selectable = matched.filter((m) => !m.alreadyThere)
+    // "To check": the rows left unticked for a reason a person has to settle —
+    // a contest, a shared timing, or text that would be replaced. Membership
+    // follows the flag, not the tick, so a row never vanishes while being
+    // worked on. "Timing differs" alone is not a reason: the pairing still
+    // holds, and on a shifted file every row has it.
+    const toCheck = matched.filter((m) => m.flag === "contested" || m.flag === "sharedTiming" || m.hasConflict)
+    const filtering = onlyToCheck && toCheck.length > 0
+    const shown = filtering ? toCheck : matched
+    // Select all acts on the rows shown; rows already there have nothing to import.
+    const shownSelectable = shown.filter((m) => !m.alreadyThere)
+    const allShownSelected =
+      shownSelectable.length > 0 && shownSelectable.every((m) => selectedCellIds.has(m.cellId))
     const contestedRows = matched.filter((m) => m.flag === "contested").length
     const sharedTimingRows = matched.filter((m) => m.flag === "sharedTiming").length
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
@@ -847,7 +863,7 @@ export function FileTargetImportPanel({
       ? [
           t(offsetCorrection.offsetMs < 0 ? "importExport.review.offsetEarlier" : "importExport.review.offsetLater", {
             amount: formatShift(offsetCorrection.offsetMs, locale),
-            count: offsetCorrection.closeAfter - offsetCorrection.closeBefore,
+            count: formatCount(offsetCorrection.closeAfter - offsetCorrection.closeBefore, locale),
           }),
           offsetCorrection.scale === 1
             ? null
@@ -869,11 +885,11 @@ export function FileTargetImportPanel({
         ? t("importExport.review.timebaseNamed", {
             fromFps: timebase.fromFps,
             toFps: timebase.toFps,
-            count: timebase.closeAfter - timebase.closeBefore,
+            count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
           })
         : t("importExport.review.timebaseUnnamed", {
             percent: formatPercent(timebase.scale - 1, locale, { maximumFractionDigits: 1, signDisplay: "always" }),
-            count: timebase.closeAfter - timebase.closeBefore,
+            count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
           })
       : null
 
@@ -936,13 +952,13 @@ export function FileTargetImportPanel({
               and uncovered counts used to share the grey of "8 matched", so a
               file that mostly failed looked exactly like a perfect one. */}
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{t("importExport.review.matchedCount", { count: matched.length })}</span>
-            {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: alreadyThere.length })}</span>}
-            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: conflicts.length })}</span>}
-            {unplaced > 0 && <span className="text-amber-600">{t("importExport.review.unmatchedRowCount", { count: unplaced })}</span>}
-            {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: brokenTimecodes })}</span>}
-            {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: uncovered.length })}</span>}
-            {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: skippedCues })}</span>}
+            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length, locale) })}</span>
+            {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: formatCount(alreadyThere.length, locale) })}</span>}
+            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: formatCount(conflicts.length, locale) })}</span>}
+            {unplaced > 0 && <span className="text-amber-600">{t("importExport.review.unmatchedRowCount", { count: formatCount(unplaced, locale) })}</span>}
+            {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: formatCount(brokenTimecodes, locale) })}</span>}
+            {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: formatCount(uncovered.length, locale) })}</span>}
+            {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: formatCount(skippedCues, locale) })}</span>}
           </div>
           {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
@@ -951,12 +967,12 @@ export function FileTargetImportPanel({
           )}
           {contestedRows > 0 && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.contestedWarning", { count: contestedRows })}
+              {t("importExport.review.contestedWarning", { count: formatCount(contestedRows, locale) })}
             </p>
           )}
           {sharedTimingRows > 0 && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.sharedTimingWarning", { count: sharedTimingRows })}
+              {t("importExport.review.sharedTimingWarning", { count: formatCount(sharedTimingRows, locale) })}
             </p>
           )}
           {looseFit && (
@@ -1011,6 +1027,19 @@ export function FileTargetImportPanel({
           )}
         </div>
 
+        {toCheck.length > 0 && toCheck.length < matched.length && (
+          <SegmentTabs
+            className="shrink-0"
+            aria-label={t("importExport.review.showFilterAriaLabel")}
+            value={filtering ? "toCheck" : "all"}
+            onValueChange={(v) => setOnlyToCheck(v === "toCheck")}
+            options={[
+              { value: "all", label: t("importExport.review.showAll", { count: formatCount(matched.length, locale) }) },
+              { value: "toCheck", label: t("importExport.review.showToCheck", { count: formatCount(toCheck.length, locale) }) },
+            ]}
+          />
+        )}
+
         {rematching !== null ? (
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border" aria-busy="true">
             <span className="sr-only" role="status">{t("importExport.review.matching")}</span>
@@ -1018,7 +1047,7 @@ export function FileTargetImportPanel({
           </div>
         ) : (
           <ReviewRowList
-            matched={matched}
+            matched={shown}
             selected={selectedCellIds}
             onToggle={toggleCell}
             expanded={expandedRows}
@@ -1035,13 +1064,17 @@ export function FileTargetImportPanel({
             type="button"
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => {
-              // Rows whose text is already there have nothing to import.
-              const allIds = new Set(selectable.map((m) => m.cellId))
-              const allSelected = allIds.size > 0 && [...allIds].every((id) => selectedCellIds.has(id))
-              setSelectedCellIds(allSelected ? new Set() : allIds)
+              setSelectedCellIds((prev) => {
+                const next = new Set(prev)
+                for (const m of shownSelectable) {
+                  if (allShownSelected) next.delete(m.cellId)
+                  else next.add(m.cellId)
+                }
+                return next
+              })
             }}
           >
-            {selectedCellIds.size === selectable.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
+            {allShownSelected ? t("importExport.review.deselectAll") : t("common.selectAll")}
           </button>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
@@ -1049,7 +1082,7 @@ export function FileTargetImportPanel({
               disabled={selectedCellIds.size === 0 || applying || rematching !== null}
               onClick={handleApply}
             >
-              {t("importExport.review.importCellCount", { count: selectedCellIds.size })}
+              {t("importExport.review.importCellCount", { count: formatCount(selectedCellIds.size, locale) })}
             </Button>
           </div>
         </div>

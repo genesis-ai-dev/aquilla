@@ -610,6 +610,29 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(cueOn(10)).toBe(other)
     })
 
+    it("\"To check\" shows only the rows that need a decision, and Select all acts on those", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const shownRows = () => [...document.querySelectorAll("[data-review-cell]")].map((el) => el.getAttribute("data-review-cell"))
+      expect(screen.getByRole("tab", { name: "All 5" })).toHaveAttribute("aria-selected", "true")
+      fireEvent.click(checkboxFor("next")) // untick an unrelated row first
+
+      fireEvent.click(screen.getByRole("tab", { name: "To check 3" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-4"])
+      // A swap inside the filter keeps the rows in view.
+      fireEvent.click(toggle("half one"))
+      fireEvent.click(within(rowOf("half one")).getByRole("button", { name: "Swap" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-4"])
+      // Select all ticks only what's shown; the hidden rows keep their own ticks.
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+      expect([tickOn(1), tickOn(2), tickOn(4)]).toEqual([true, true, true])
+      fireEvent.click(screen.getByRole("tab", { name: "All 5" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-3", "line-4", "line-5"])
+      expect(tickOn(3)).toBe(true) // "third", untouched
+      expect(tickOn(5)).toBe(false) // "next", unticked by hand, untouched
+    })
+
     it("offers every other cue when three fit one line", async () => {
       renderPanel({ cells: [line(1, 30000, 33000), line(2, 40000, 41000)] })
       await selectFile(makeFile(vtt([
@@ -634,6 +657,23 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     })
   })
 
+  it("counts conflicts as \"To check\" but not rows already there, and has no switch when nothing needs checking", async () => {
+    const lines = [line(1, 10000, 10800, "old words"), line(2, 20000, 20800, "same words"), line(3, 30000, 30800), line(4, 40000, 40800)]
+    renderPanel({ cells: lines })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "new words"], [20000, 20800, "same words"], [30000, 30800, "three"], [40000, 40800, "four"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "To check 1" }))
+    expect([...document.querySelectorAll("[data-review-cell]")].map((el) => el.getAttribute("data-review-cell"))).toEqual(["line-1"])
+
+    cleanup()
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByRole("tab")).toBeNull()
+  })
+
   it("marks a shifted cue's row \"Timing differs\" and shows the line's own timecode, on that row only", async () => {
     renderPanel({ cells: four })
     await selectFile(makeFile(vtt([[10300, 11100, "TARGET 1 late"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
@@ -644,6 +684,8 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(rowOf("TARGET 1 late")).toHaveTextContent("Timing differs")
     expect(rowOf("TARGET 2")).not.toHaveTextContent("Timing differs")
     expect(screen.getAllByText("Timing differs")).toHaveLength(1)
+    // A timing difference alone isn't something to decide: no "To check" switch.
+    expect(screen.queryByRole("tab")).toBeNull()
     // The standing note it replaced is gone.
     expect(screen.queryByText(/keep this file's timings/)).not.toBeInTheDocument()
   })

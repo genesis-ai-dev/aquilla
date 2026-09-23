@@ -64,6 +64,21 @@ describe("AQU-730 read wall", () => {
     ))!
     const darkBody = (await dark.json()) as { cells: Array<{ value: string }> }
     expect(darkBody.cells.map((c) => c.value)).toContain("bonjour")
+
+    const codeGrant = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: FILE,
+      role: 400,
+      laneGrants: [{ lane: "es", level: 100 }],
+    })
+    const byCode = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
+        headers: { Authorization: `Bearer ${codeGrant}` },
+      }),
+      envWith(db, true),
+    ))!
+    const byCodeBody = (await byCode.json()) as { cells: Array<{ value: string }> }
+    expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["default-hola", "hola", "source-text"])
   })
 
   it("does not return another lane's progress to a contributor without that grant", async () => {
@@ -71,12 +86,19 @@ describe("AQU-730 read wall", () => {
       files: [{ id: FILE, project_id: PROJECT, name: "Genesis", event_id: "file-event" }],
       lanes: [
         { id: FR, project_id: PROJECT, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+        { id: DEFAULT, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "" },
       ],
       file_section_progress: [
         {
           project_id: PROJECT, file_id: FILE, scope: "file", section_key: "",
           target_lang: "fr", lane_id: FR,
           total_count: 9, filled_count: 4, validator_histogram: {},
+          revision: 1, updated_at: 1, audio_count: 0, audio_validated_count: 0,
+        },
+        {
+          project_id: PROJECT, file_id: FILE, scope: "file", section_key: "",
+          target_lang: "", lane_id: DEFAULT,
+          total_count: 3, filled_count: 1, validator_histogram: {},
           revision: 1, updated_at: 1, audio_count: 0, audio_validated_count: 0,
         },
       ],
@@ -97,5 +119,15 @@ describe("AQU-730 read wall", () => {
     const body = (await res.json()) as { file: { totalCount: number; filledCount: number } }
     expect(body.file.totalCount).toBe(0)
     expect(body.file.filledCount).toBe(0)
+
+    const own = (await handleProgressReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/progress`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db, true),
+    ))!
+    const ownBody = (await own.json()) as { file: { totalCount: number; filledCount: number } }
+    expect(ownBody.file.totalCount).toBe(3)
+    expect(ownBody.file.filledCount).toBe(1)
   })
 })

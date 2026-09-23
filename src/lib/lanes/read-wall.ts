@@ -1,10 +1,11 @@
 /**
  * AQU-730 read wall — pure visibility rules.
  *
- * The wall is dark unless `LANE_READ_WALL` is "1" or "true". While it is off,
- * every caller sees every lane, which is today's behavior. Turn it on only
- * after `project_member_lane_roles` has been backfilled in that environment:
- * below Maintainer, no grant means no target lane.
+ * The wall is on when `LANE_READ_WALL` is "1" or "true". Deployed dev and prod
+ * set that in wrangler. Local and e2e leave it unset, so every caller still
+ * sees every lane. Below Maintainer, no grant means no target lane — the
+ * grant phase of scripts/neon-backfill-lanes.ts has to have been applied in
+ * that environment before the workers that set the flag are deployed.
  *
  * A grant is a lane id. The screen shows that lane's name, which may be the
  * language. A grant below Viewer (100) does not reveal a lane. Maintainer (600) and

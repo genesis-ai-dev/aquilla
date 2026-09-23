@@ -108,7 +108,8 @@ export interface Env {
   ENVIRONMENT?: string
   /**
    * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
-   * members below Maintainer. Leave unset until lane grants are backfilled.
+   * members below Maintainer. Set on deployed dev and prod after the lane
+   * backfill's grant phase. Local and e2e leave it unset.
    */
   LANE_READ_WALL?: string
 

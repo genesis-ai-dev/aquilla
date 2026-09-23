@@ -1045,6 +1045,7 @@ export const importExport = defineNamespace({
       one: "{count} cue skipped (empty or unreadable)",
       other: "{count} cues skipped (empty or unreadable)",
     }),
+    "importExport.review.matching": "Matching lines…",
     "importExport.review.offsetAlsoRateNamed": "This also adjusts them from {fromFps} to {toFps} frames per second.",
     "importExport.review.offsetAlsoRateUnnamed": "This also stretches them by {percent}.",
     "importExport.review.offsetEarlier": plural({
@@ -2956,6 +2957,13 @@ export const importExport = defineNamespace({
         placeholders: {
           count: "Number of cues in the uploaded file that produced no row.",
         },
+      },
+      "importExport.review.matching": {
+        description:
+          "Heading shown while an uploaded file is being paired with the open " +
+          "file's lines, above grey placeholder rows that pulse until the real " +
+          "review list appears. Also read out by screen readers while the list " +
+          "re-pairs after the shift tickbox changes. Short, ends with an ellipsis.",
       },
       "importExport.review.offsetAlsoRateNamed": {
         description:

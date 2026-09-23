@@ -188,6 +188,10 @@ export interface FileTargetMatchResult {
    *  The review screen offers it as a tickbox; unticking re-runs the match with
    *  `applyOffset: false`. Absent when no shift qualifies. */
   offsetCorrection?: TimebaseAdjustment
+  /** A frame-rate stretch on its own that lines the file up, whether or not it
+   *  was applied (a shift may have been preferred). Carried so the tickbox can
+   *  hand both corrections back via `known` instead of searching again. */
+  rateCorrection?: TimebaseAdjustment
   /** Too many pairings only loosely overlap their lines — see
    *  `LOOSE_FIT_SHARE`. Set only when true. */
   looseFit?: boolean
@@ -608,6 +612,13 @@ const OFFSET_MIN_MARGIN = 0.25
  *  just as clearly in 200 cues as in 2,000, and it keeps the count cheap. */
 const OFFSET_SAMPLE_ROWS = 200
 
+/** The corrections the search found for one file; either may be null. Pass
+ *  them back as `known` to re-match without searching again. */
+export interface TimebaseCorrections {
+  rate: TimebaseAdjustment | null
+  offset: TimebaseAdjustment | null
+}
+
 /** A correction applied to the uploaded file's timings: each incoming time t
  *  becomes t × scale + offsetMs. */
 export interface TimebaseAdjustment {
@@ -704,10 +715,7 @@ const byFit = (a: ScaleEvaluation, b: ScaleEvaluation) => b.close - a.close || b
  *  plus it must beat the best DIFFERENT shift by `OFFSET_MIN_MARGIN` and line
  *  up more than the stretch alone would. On an exact tie between one shift at
  *  two scales, the plain shift (scale 1) is kept. */
-function chooseTimebase(
-  rows: TimedRow[],
-  cells: TimedCell[],
-): { rate: TimebaseAdjustment | null; offset: TimebaseAdjustment | null } {
+function chooseTimebase(rows: TimedRow[], cells: TimedCell[]): TimebaseCorrections {
   const none = { rate: null, offset: null }
   if (rows.length < RESCALE_MIN_ROWS || cells.length === 0) return none
   const maxCloseMatches = Math.min(rows.length, cells.length)
@@ -827,8 +835,10 @@ export function matchTargetRowsByOverlap(
    *  matching (AQU-1360). Off here so a direct call is pure overlap;
    *  `matchTargetRowsByOrder`, the policy entry point the dialog uses, turns it
    *  on. `applyOffset: false` leaves a qualifying shift unapplied (the review
-   *  screen's tickbox) while still reporting it. */
-  options: { rescale?: boolean; applyOffset?: boolean } = {},
+   *  screen's tickbox) while still reporting it. `known` skips the search and
+   *  uses corrections a previous match of the same rows and cells found — the
+   *  search is ~25 matching passes, and the tickbox can't change its answer. */
+  options: { rescale?: boolean; applyOffset?: boolean; known?: TimebaseCorrections } = {},
 ): FileTargetMatchResult {
   // Rows carrying no text can't commit anything, and must not hold a cell
   // hostage — a blank incoming cue never clears an existing translation.
@@ -850,7 +860,8 @@ export function matchTargetRowsByOverlap(
   const timedCells = timedCellsOf(cells)
   // Adjusted rows keep their `row` (so their label is still the file's own
   // timecode); only the timing the matcher compares changes.
-  const corrections = options.rescale ? chooseTimebase(timedRows, timedCells) : { rate: null, offset: null }
+  const corrections: TimebaseCorrections =
+    options.known ?? (options.rescale ? chooseTimebase(timedRows, timedCells) : { rate: null, offset: null })
   const timebase =
     corrections.offset && options.applyOffset !== false ? corrections.offset : corrections.rate
   const assignment = assignByOverlap(
@@ -919,6 +930,7 @@ export function matchTargetRowsByOverlap(
     alignedBy: "overlap",
     ...(timebase ? { timebase } : {}),
     ...(corrections.offset ? { offsetCorrection: corrections.offset } : {}),
+    ...(corrections.rate ? { rateCorrection: corrections.rate } : {}),
     ...(looseFit ? { looseFit } : {}),
   }
 }
@@ -939,8 +951,10 @@ export function matchTargetRowsByOverlap(
 export function matchTargetRowsByOrder(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
-  /** `applyOffset: false` — the review screen's tickbox, unticked. */
-  options: { applyOffset?: boolean } = {},
+  /** `applyOffset: false` — the review screen's tickbox, unticked. `known` —
+   *  the corrections an earlier match of these rows found (see
+   *  `matchTargetRowsByOverlap`). */
+  options: { applyOffset?: boolean; known?: TimebaseCorrections } = {},
 ): FileTargetMatchResult {
   const nonEmptyRows = rows.filter((row) => row.text.trim().length > 0)
   const canMatchByOverlap =
@@ -950,7 +964,7 @@ export function matchTargetRowsByOrder(
     nonEmptyRows.every((row) => rowTimingMs(row) !== null)
 
   return canMatchByOverlap
-    ? matchTargetRowsByOverlap(rows, cells, { rescale: true, applyOffset: options.applyOffset })
+    ? matchTargetRowsByOverlap(rows, cells, { rescale: true, applyOffset: options.applyOffset, known: options.known })
     : matchRowsPositionally(rows, cells)
 }
 

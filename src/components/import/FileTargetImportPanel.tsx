@@ -15,9 +15,12 @@
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { flushSync } from "react-dom"
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatNumber, formatPercent } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
@@ -32,6 +35,7 @@ import {
   CUE_TARGET_EXTENSIONS,
   vttToTargetRowsWithReport,
   type FileTargetCellRef,
+  type FileTargetMatchedCell,
   type FileTargetMatchResult,
   type TargetOrphanReason,
   type TargetRow,
@@ -80,7 +84,7 @@ export interface FileTargetPanelBack {
   disabled: boolean
 }
 
-type PanelStep = "file" | "sheet" | "mapping" | "review"
+type PanelStep = "file" | "sheet" | "mapping" | "matching" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
@@ -122,6 +126,37 @@ function formatShift(offsetMs: number, locale: string): string {
   return `${Math.floor(totalSeconds / 3600)}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}`
 }
 
+/** Resolves once the browser has painted: a frame, then a task after it. Heavy
+ *  matching runs only after this, so the skeleton it replaces is actually on
+ *  screen — set state and compute in one go, and the page freezes on the OLD
+ *  screen instead (a 1,062-line file took ~2.8s at 6x CPU throttling). The
+ *  skeleton's state must be COMMITTED first (flushSync): React may otherwise
+ *  commit it after the frame this waits for, and the matching starts unseen. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => setTimeout(resolve, 0))
+    else setTimeout(resolve, 0)
+  })
+}
+
+/** Placeholder rows shaped like review rows, pulsing while matching runs. */
+function SkeletonRows({ count = 6 }: { count?: number }) {
+  return (
+    <div className="divide-y" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="flex items-start gap-2 px-3 py-2">
+          <Skeleton className="mt-0.5 size-3.5 rounded-sm" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-2.5 w-44 max-w-full" />
+            <Skeleton className="h-2.5 w-64 max-w-full" />
+            <Skeleton className="h-3.5 w-56 max-w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** The amber pill a review row uses for anything a person should check. */
 const AMBER_PILL = "border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
 
@@ -132,6 +167,152 @@ function ContestPill({ number, title }: { number: number; title: string }) {
     <Badge className={cn(AMBER_PILL, "font-sans")} title={title}>
       {t("importExport.review.rowContestPill", { number: formatCount(number, locale) })}
     </Badge>
+  )
+}
+
+/** A collapsible list under the review's counts. Its entries are built only
+ *  while it is open: a file an hour off leaves ~1,000 cues unmatched and ~1,000
+ *  lines uncovered, and building both hidden lists froze the page ~1.2s at 6x
+ *  CPU throttling. */
+function LazyDetails({ summary, children }: { summary: string; children: () => ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details className="mt-2 text-xs" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-muted-foreground">{summary}</summary>
+      {open && children()}
+    </details>
+  )
+}
+
+/** One pairing in the review list. Memoised: ticking one row re-renders only it. */
+const ReviewRow = memo(function ReviewRow({
+  m,
+  checked,
+  onToggle,
+}: {
+  m: FileTargetMatchedCell
+  checked: boolean
+  onToggle: (cellId: string) => void
+}) {
+  const { t } = useI18n()
+  return (
+    <label className={cn("flex items-start gap-2 px-3 py-2 hover:bg-muted/30", m.alreadyThere && "opacity-60")}>
+      <input
+        type="checkbox"
+        className="mt-0.5 rounded"
+        checked={checked}
+        disabled={m.alreadyThere}
+        onChange={() => onToggle(m.cellId)}
+      />
+      <div className="flex-1 min-w-0">
+        <p className="font-mono text-[10px] text-muted-foreground">
+          {m.ref}
+          {m.alreadyThere && (
+            <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
+          )}
+        </p>
+        {/* The line's own timecode, present only when it disagrees
+            with the cue's — so drift announces itself, and a clean
+            file doesn't print every timecode twice. */}
+        <p className="truncate text-[10px] text-muted-foreground/80">
+          {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
+          {m.sourceText}
+        </p>
+        <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
+        {m.hasConflict && (
+          <p className="truncate text-[10px] text-amber-600">
+            {t("importExport.review.replacesExisting", { text: m.currentText })}
+          </p>
+        )}
+      </div>
+      {/* Everything to check about a row sits in its corner. The
+          contest number pairs rows that fought over one line; a
+          timing pill means only the line's own timing is kept. */}
+      {(m.contest !== undefined || m.flag === "sharedTiming" || m.cellRef) && (
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {m.contest !== undefined && (
+            <ContestPill number={m.contest} title={t("importExport.review.rowContested", { number: m.contest })} />
+          )}
+          {m.flag === "sharedTiming" && (
+            <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
+              {t("importExport.review.rowSharedTimingPill")}
+            </Badge>
+          )}
+          {m.cellRef && (
+            <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
+          )}
+        </div>
+      )}
+    </label>
+  )
+})
+
+/** Above this many rows only the rows on screen are drawn. Below it every row
+ *  is, which is cheap and keeps every row in the page for find-in-page. A
+ *  1,062-line episode drawn whole froze the page ~0.9s at 6x CPU throttling. */
+const VIRTUALIZE_ABOVE = 150
+/** A typical row's height before it is measured. */
+const REVIEW_ROW_ESTIMATE_PX = 64
+
+interface ReviewRowListProps {
+  matched: FileTargetMatchedCell[]
+  selected: Set<string>
+  onToggle: (cellId: string) => void
+}
+
+const REVIEW_LIST_CLASS = "min-h-0 flex-1 overflow-y-auto rounded-md border"
+
+function ReviewRowList(props: ReviewRowListProps) {
+  if (props.matched.length > VIRTUALIZE_ABOVE) return <VirtualReviewRowList {...props} />
+  return (
+    <div className={REVIEW_LIST_CLASS}>
+      <div className="divide-y">
+        {props.matched.map((m) => (
+          <ReviewRow key={m.cellId} m={m} checked={props.selected.has(m.cellId)} onToggle={props.onToggle} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VirtualReviewRowList({ matched, selected, onToggle }: ReviewRowListProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: matched.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => matched[index]?.cellId ?? index,
+    estimateSize: () => REVIEW_ROW_ESTIMATE_PX,
+    // A row that reports no height (not laid out yet, or jsdom) keeps the
+    // estimate rather than collapsing to 0 and pulling hundreds into view.
+    measureElement: (element) => element.getBoundingClientRect().height || REVIEW_ROW_ESTIMATE_PX,
+    overscan: 8,
+    initialRect: { width: 560, height: 480 },
+    // jsdom/happy-dom report 0×0 for CSS-sized scrollports; coerce so rows
+    // mount there too (as ChapterNavigator does).
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => {
+        cb({ width: rect.width > 0 ? rect.width : 560, height: rect.height > 0 ? rect.height : 480 })
+      }),
+  })
+  return (
+    <div ref={scrollRef} className={REVIEW_LIST_CLASS}>
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const m = matched[item.index]
+          return (
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              className="absolute inset-x-0 top-0 border-b"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              <ReviewRow m={m} checked={selected.has(m.cellId)} onToggle={onToggle} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -162,6 +343,12 @@ export function FileTargetImportPanel({
   const [subtitleRows, setSubtitleRows] = useState<{ rows: TargetRow[]; skippedCues: number } | null>(null)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
+  // The shift tickbox's new value while the list re-matches under it; null
+  // when nothing is pending.
+  const [rematching, setRematching] = useState<boolean | null>(null)
+  // Bumped by every match started and by leaving the review, so a match that
+  // finishes after the user moved on is dropped instead of shown.
+  const matchRun = useRef(0)
 
   // Back goes one step: review → column mapping for a spreadsheet (the column
   // choice is what you'd fix, without re-uploading) and → the file picker for
@@ -176,6 +363,8 @@ export function FileTargetImportPanel({
     const toFilePicker = {
       label: t("importExport.dialog.backToFileSelection"),
       onBack: () => {
+        matchRun.current++
+        setRematching(null)
         setMatchResult(null)
         setSelectedCellIds(new Set())
         setSheets([])
@@ -191,6 +380,8 @@ export function FileTargetImportPanel({
         ? {
             label: t("importExport.fileTarget.backToColumnMapping"),
             onBack: () => {
+              matchRun.current++
+              setRematching(null)
               setMatchResult(null)
               setSelectedCellIds(new Set())
               setError(null)
@@ -223,6 +414,24 @@ export function FileTargetImportPanel({
     setStep("review")
   }, [])
 
+  const toggleCell = useCallback((cellId: string) => {
+    setSelectedCellIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(cellId)) next.delete(cellId)
+      else next.add(cellId)
+      return next
+    })
+  }, [])
+
+  /** Show the matching skeleton and let it paint before the matching blocks
+   *  the page. False when the user moved on meanwhile. */
+  const showMatching = useCallback(async () => {
+    const run = ++matchRun.current
+    flushSync(() => setStep("matching"))
+    await nextPaint()
+    return run === matchRun.current
+  }, [])
+
   const handleFile = useCallback(async (file: File) => {
     setError(null)
     setSourceFile(file)
@@ -230,11 +439,12 @@ export function FileTargetImportPanel({
     try {
       assertSourceUploadByteLength(file.size)
       if (USFM_EXTENSIONS.has(ext)) {
-        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), {
-          excludeFrontMatter,
-        })
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const rows = usfmToTargetRows(text, { excludeFrontMatter })
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noVersesInUsfm"))
+          setStep("file")
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
@@ -243,11 +453,12 @@ export function FileTargetImportPanel({
         // positionally (cue N → cell N) — the review screen surfaces any
         // misalignment before commit via the same order-match warning used
         // for spreadsheets without a ref column.
-        const { rows, skippedCues } = vttToTargetRowsWithReport(
-          decodeImportText(await file.arrayBuffer(), file.name),
-        )
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const { rows, skippedCues } = vttToTargetRowsWithReport(text)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInVtt"))
+          setStep("file")
           return
         }
         setSubtitleRows({ rows, skippedCues })
@@ -256,12 +467,12 @@ export function FileTargetImportPanel({
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
         // the same ref-less path as VTT — timecode overlap when the file's
         // cells carry timings (AQU-1143), cue N → cell N otherwise.
-        const { rows, skippedCues } = subtitleToTargetRowsWithReport(
-          decodeImportText(await file.arrayBuffer(), file.name),
-          ext,
-        )
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const { rows, skippedCues } = subtitleToTargetRowsWithReport(text, ext)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
+          setStep("file")
           return
         }
         setSubtitleRows({ rows, skippedCues })
@@ -293,9 +504,10 @@ export function FileTargetImportPanel({
     } catch (err) {
       const message = err instanceof Error ? err.message : t("importExport.errors.failedToParseFile")
       setError(message)
+      setStep("file")
       onError?.(message, "parse")
     }
-  }, [cells, showReview, onError, excludeFrontMatter, t])
+  }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
@@ -441,6 +653,24 @@ export function FileTargetImportPanel({
     )
   }
 
+  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
+  if (step === "matching") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
+        <div className="shrink-0">
+          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
+          <Skeleton className="mt-1.5 h-3 w-48" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+          <SkeletonRows />
+        </div>
+        <div className="flex shrink-0 justify-end">
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
     const { matched, orphans, uncovered, timebase, looseFit, skippedCues = 0 } = matchResult
@@ -503,13 +733,24 @@ export function FileTargetImportPanel({
           })
       : null
 
-    function toggleCell(cellId: string) {
-      setSelectedCellIds((prev) => {
-        const next = new Set(prev)
-        if (next.has(cellId)) next.delete(cellId)
-        else next.add(cellId)
-        return next
-      })
+    // Flip the box at once, show skeleton rows, and re-match from the
+    // corrections already found — the tickbox can't change them, so the
+    // ~25-pass search never runs twice.
+    async function toggleOffset(apply: boolean) {
+      if (!subtitleRows || !matchResult) return
+      const known = { rate: matchResult.rateCorrection ?? null, offset: matchResult.offsetCorrection ?? null }
+      const run = ++matchRun.current
+      flushSync(() => setRematching(apply))
+      await nextPaint()
+      if (run !== matchRun.current) return
+      showReview(
+        {
+          ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: apply, known }),
+          skippedCues: subtitleRows.skippedCues,
+        },
+        true,
+      )
+      setRematching(null)
     }
 
     return (
@@ -551,16 +792,9 @@ export function FileTargetImportPanel({
               <input
                 type="checkbox"
                 className="mt-0.5 rounded"
-                checked={offsetApplied}
-                onChange={(e) =>
-                  showReview(
-                    {
-                      ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: e.target.checked }),
-                      skippedCues: subtitleRows.skippedCues,
-                    },
-                    true,
-                  )
-                }
+                checked={rematching ?? offsetApplied}
+                disabled={rematching !== null}
+                onChange={(e) => void toggleOffset(e.target.checked)}
               />
               <span>{offsetLabel}</span>
             </label>
@@ -568,102 +802,51 @@ export function FileTargetImportPanel({
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
 
           {orphans.length > 0 && (
-            <details className="mt-2 text-xs">
-              <summary className="cursor-pointer text-muted-foreground">
-                {t("importExport.review.unmatchedListTitle")} ({formatCount(orphans.length, locale)})
-              </summary>
-              <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
-                {orphans.map((o, i) => (
-                  <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
-                    <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                      {o.ref}
-                      {reasonLabel(o.reason) && (
-                        <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
-                      )}
-                      {o.contest !== undefined && (
-                        <ContestPill number={o.contest} title={t("importExport.review.rowContested", { number: o.contest })} />
-                      )}
-                    </p>
-                    <p className="truncate text-foreground/80">{o.text}</p>
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <LazyDetails summary={`${t("importExport.review.unmatchedListTitle")} (${formatCount(orphans.length, locale)})`}>
+              {() => (
+                <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                  {orphans.map((o, i) => (
+                    <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
+                      <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                        {o.ref}
+                        {reasonLabel(o.reason) && (
+                          <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                        )}
+                        {o.contest !== undefined && (
+                          <ContestPill number={o.contest} title={t("importExport.review.rowContested", { number: o.contest })} />
+                        )}
+                      </p>
+                      <p className="truncate text-foreground/80">{o.text}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </LazyDetails>
           )}
           {uncovered.length > 0 && (
-            <details className="mt-2 text-xs">
-              <summary className="cursor-pointer text-muted-foreground">
-                {t("importExport.review.uncoveredListTitle")} ({formatCount(uncovered.length, locale)})
-              </summary>
-              <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
-                {uncovered.map((u) => (
-                  <li key={u.cellId} className="px-3 py-1.5">
-                    {u.cellRef && <p className="font-mono text-[10px] text-muted-foreground">{u.cellRef}</p>}
-                    <p className="truncate text-foreground/80">{u.sourceText}</p>
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <LazyDetails summary={`${t("importExport.review.uncoveredListTitle")} (${formatCount(uncovered.length, locale)})`}>
+              {() => (
+                <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                  {uncovered.map((u) => (
+                    <li key={u.cellId} className="px-3 py-1.5">
+                      {u.cellRef && <p className="font-mono text-[10px] text-muted-foreground">{u.cellRef}</p>}
+                      <p className="truncate text-foreground/80">{u.sourceText}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </LazyDetails>
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
-          <div className="divide-y">
-            {matched.map((m) => (
-              <label
-                key={m.cellId}
-                className={cn("flex items-start gap-2 px-3 py-2 hover:bg-muted/30", m.alreadyThere && "opacity-60")}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 rounded"
-                  checked={selectedCellIds.has(m.cellId)}
-                  disabled={m.alreadyThere}
-                  onChange={() => toggleCell(m.cellId)}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="font-mono text-[10px] text-muted-foreground">
-                    {m.ref}
-                    {m.alreadyThere && (
-                      <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
-                    )}
-                  </p>
-                  {/* The line's own timecode, present only when it disagrees
-                      with the cue's — so drift announces itself, and a clean
-                      file doesn't print every timecode twice. */}
-                  <p className="truncate text-[10px] text-muted-foreground/80">
-                    {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
-                    {m.sourceText}
-                  </p>
-                  <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
-                  {m.hasConflict && (
-                    <p className="truncate text-[10px] text-amber-600">
-                      {t("importExport.review.replacesExisting", { text: m.currentText })}
-                    </p>
-                  )}
-                </div>
-                {/* Everything to check about a row sits in its corner. The
-                    contest number pairs rows that fought over one line; a
-                    timing pill means only the line's own timing is kept. */}
-                {(m.contest !== undefined || m.flag === "sharedTiming" || m.cellRef) && (
-                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                    {m.contest !== undefined && (
-                      <ContestPill number={m.contest} title={t("importExport.review.rowContested", { number: m.contest })} />
-                    )}
-                    {m.flag === "sharedTiming" && (
-                      <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
-                        {t("importExport.review.rowSharedTimingPill")}
-                      </Badge>
-                    )}
-                    {m.cellRef && (
-                      <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
-                    )}
-                  </div>
-                )}
-              </label>
-            ))}
+        {rematching !== null ? (
+          <div className="min-h-0 flex-1 overflow-hidden rounded-md border" aria-busy="true">
+            <span className="sr-only" role="status">{t("importExport.review.matching")}</span>
+            <SkeletonRows />
           </div>
-        </div>
+        ) : (
+          <ReviewRowList matched={matched} selected={selectedCellIds} onToggle={toggleCell} />
+        )}
 
         {error && <p className="shrink-0 text-xs text-destructive">{error}</p>}
 
@@ -683,7 +866,7 @@ export function FileTargetImportPanel({
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
             <Button
-              disabled={selectedCellIds.size === 0 || applying}
+              disabled={selectedCellIds.size === 0 || applying || rematching !== null}
               onClick={handleApply}
             >
               {t("importExport.review.importCellCount", { count: selectedCellIds.size })}

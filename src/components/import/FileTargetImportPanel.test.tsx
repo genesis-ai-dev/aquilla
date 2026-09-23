@@ -17,7 +17,7 @@
  */
 
 import React from "react"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, act, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
 // ── Mock the heavy outbox call ────────────────────────────────────────────────
@@ -411,6 +411,14 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
   const checkboxFor = (text: string) =>
     screen.getByText(text).closest("label")!.querySelector("input") as HTMLInputElement
   const rowOf = (text: string) => screen.getByText(text).closest("label")!
+  /** Open a collapsible list under the counts; its entries are built only while open. */
+  const openList = (title: RegExp) => {
+    const details = screen.getByText(title).closest("details")!
+    act(() => {
+      details.open = true
+      fireEvent(details, new Event("toggle"))
+    })
+  }
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -430,7 +438,11 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(screen.getByText("1 unmatched row")).toHaveClass("text-amber-600")
     expect(screen.getByText("1 broken timecode")).toHaveClass("text-amber-600")
     expect(screen.getByText("3 cells not covered")).toHaveClass("text-amber-600")
-    // The lists, with a reason per cue and each uncovered line by name.
+    // The lists, with a reason per cue and each uncovered line by name —
+    // built only once opened.
+    expect(screen.queryByText("TARGET 3 backwards")).not.toBeInTheDocument()
+    openList(/Cues that didn't find a line/)
+    openList(/Lines left without a translation/)
     expect(screen.getByText("Timecode ends before it starts")).toBeInTheDocument()
     expect(screen.getByText("No line within reach")).toBeInTheDocument()
     expect(screen.getByText("TARGET 3 backwards")).toBeInTheDocument()
@@ -496,6 +508,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(rowOf("half one")).toHaveTextContent("Contest 2")
     expect(rowOf("third")).not.toHaveTextContent("Contest")
     // The half that lost its line is in the unmatched list, carrying the same number.
+    openList(/Cues that didn't find a line/)
     const lost = screen.getByText("half two").closest("li")!
     expect(lost).toHaveTextContent("Lost its line to another cue")
     expect(lost).toHaveTextContent("Contest 2")
@@ -561,10 +574,16 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
       const box = () => screen.getByLabelText(/Shift the uploaded file's timings/)
       fireEvent.click(box())
+      // The box flips at once and the list turns to placeholders while it re-matches.
+      expect(box()).not.toBeChecked()
+      expect(box()).toBeDisabled()
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      await waitFor(() => expect(box()).toBeEnabled())
       expect(box()).not.toBeChecked()
       expect(onOwnLine()).toBeLessThan(10)
       expect(screen.getByText(/partly overlap/)).toBeInTheDocument()
       fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
       expect(box()).toBeChecked()
       expect(onOwnLine()).toBe(30)
     })
@@ -585,6 +604,57 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
       expect(screen.queryByLabelText(/Shift the uploaded file's timings/)).not.toBeInTheDocument()
     })
+  })
+
+  describe("while it works", () => {
+    // Hold the browser's next frame, so the in-between state can be looked at
+    // before the matching runs.
+    let frames: FrameRequestCallback[] = []
+    beforeEach(() => {
+      frames = []
+      vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.push(cb); return frames.length })
+    })
+    afterEach(() => vi.unstubAllGlobals())
+    const releaseFrame = async () => {
+      await act(async () => {
+        frames.splice(0).forEach((cb) => cb(0))
+        await new Promise((r) => setTimeout(r, 0))
+      })
+    }
+
+    it("shows pulsing placeholder rows under \"Matching lines…\" until the review is ready", async () => {
+      renderPanel({ cells: four })
+      await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"]]), "episode.vtt"))
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(5)
+      expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+      await releaseFrame()
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeNull()
+    })
+
+    it("drops a match that finishes after the user went back", async () => {
+      let back: FileTargetPanelBack | null = null
+      renderPanel({ cells: four, onBackChange: (b) => { back = b } })
+      await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"]]), "episode.vtt"))
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      act(() => back!.onBack())
+      await releaseFrame()
+      expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+      expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+    })
+  })
+
+  it("draws only the rows on screen for a long file, and every row for a short one", async () => {
+    const many = Array.from({ length: 400 }, (_, i) => line(i + 1, 5000 + i * 3000, 6000 + i * 3000))
+    renderPanel({ cells: many })
+    await selectFile(makeFile(vtt(many.map((c, i) => [c.startMs, c.endMs, `TARGET ${i + 1}`])), "episode.vtt"))
+    expect(await screen.findByText("400 matched")).toBeInTheDocument()
+    const drawn = document.querySelectorAll("label input[type=checkbox]").length
+    expect(drawn).toBeGreaterThan(0)
+    expect(drawn).toBeLessThan(60)
+    expect(screen.getByText("TARGET 1")).toBeInTheDocument()
+    expect(screen.queryByText("TARGET 400")).not.toBeInTheDocument()
   })
 
   it("explains a frame-rate correction", async () => {

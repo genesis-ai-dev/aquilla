@@ -862,6 +862,23 @@ describe("frame-rate rescale (AQU-1360)", () => {
     expect(unticked.looseFit).toBe(true)
   })
 
+  it("re-matches from corrections it already found, without searching again, to the same result", () => {
+    const cells = episode(650)
+    for (const f of [(t: number) => t + 2000, (t: number) => t / PAL + 2000, (t: number) => t / PAL]) {
+      const rows = delivered(cells, f)
+      const first = matchTargetRowsByOrder(rows, cells)
+      const known = { rate: first.rateCorrection ?? null, offset: first.offsetCorrection ?? null }
+      for (const applyOffset of [true, false]) {
+        expect(matchTargetRowsByOrder(rows, cells, { applyOffset, known }))
+          .toEqual(matchTargetRowsByOrder(rows, cells, { applyOffset }))
+      }
+    }
+    // And it really does skip the search: a correction handed in is used as is.
+    const rows = delivered(cells, (t) => t)
+    const planted = { scale: 1, offsetMs: 40_000, fromFps: null, toFps: null, closeBefore: 0, closeAfter: 0 }
+    expect(matchTargetRowsByOrder(rows, cells, { known: { rate: null, offset: planted } }).timebase).toEqual(planted)
+  })
+
   it("unticked, still applies a frame-rate correction that stands on its own", () => {
     const cells = episode(650)
     const unticked = matchTargetRowsByOrder(delivered(cells, (t) => t / PAL + 2000), cells, { applyOffset: false })

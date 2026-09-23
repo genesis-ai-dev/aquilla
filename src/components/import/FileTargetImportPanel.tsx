@@ -104,6 +104,19 @@ function sourceArtifactFormat(fileName: string) {
   return "csv" as const
 }
 
+/** The amber pill a review row uses for anything a person should check. */
+const AMBER_PILL = "border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
+
+/** "Contest N" — rows (and unmatched cues) with the same number fought over one line. */
+function ContestPill({ number, title }: { number: number; title: string }) {
+  const { t, locale } = useI18n()
+  return (
+    <Badge className={cn(AMBER_PILL, "font-sans")} title={title}>
+      {t("importExport.review.rowContestPill", { number: formatCount(number, locale) })}
+    </Badge>
+  )
+}
+
 export function FileTargetImportPanel({
   projectId,
   username,
@@ -411,7 +424,7 @@ export function FileTargetImportPanel({
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // Rows a person can actually choose to import.
     const selectable = matched.filter((m) => !m.alreadyThere)
-    const contestedRows = matched.filter((m) => m.flag === "contested").length
+    const contests = new Set(matched.flatMap((m) => (m.contest !== undefined ? [m.contest] : []))).size
     const sharedTimingRows = matched.filter((m) => m.flag === "sharedTiming").length
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
     const unplaced = orphans.length - brokenTimecodes
@@ -470,9 +483,9 @@ export function FileTargetImportPanel({
               {t("importExport.review.orderMatchWarning")}
             </p>
           )}
-          {contestedRows > 0 && (
+          {contests > 0 && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.contestedWarning", { count: contestedRows })}
+              {t("importExport.review.contestedWarning", { count: contests })}
             </p>
           )}
           {sharedTimingRows > 0 && (
@@ -493,10 +506,13 @@ export function FileTargetImportPanel({
               <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
                 {orphans.map((o, i) => (
                   <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
-                    <p className="font-mono text-[10px] text-muted-foreground">
+                    <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
                       {o.ref}
                       {reasonLabel(o.reason) && (
-                        <span className="ms-1.5 font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                        <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                      )}
+                      {o.contest !== undefined && (
+                        <ContestPill number={o.contest} title={t("importExport.review.rowContested", { number: o.contest })} />
                       )}
                     </p>
                     <p className="truncate text-foreground/80">{o.text}</p>
@@ -539,13 +555,6 @@ export function FileTargetImportPanel({
                 <div className="flex-1 min-w-0">
                   <p className="font-mono text-[10px] text-muted-foreground">
                     {m.ref}
-                    {m.flag && (
-                      <span className="ms-1.5 font-sans text-amber-600">
-                        {m.flag === "contested"
-                          ? t("importExport.review.rowContested")
-                          : t("importExport.review.rowSharedTiming")}
-                      </span>
-                    )}
                     {m.alreadyThere && (
                       <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
                     )}
@@ -564,12 +573,23 @@ export function FileTargetImportPanel({
                     </p>
                   )}
                 </div>
-                {/* The row's own timing differs from the line's. Only the
-                    line's timing is kept, so this is the row to look at. */}
-                {m.cellRef && (
-                  <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
-                    {t("importExport.review.rowTimingDiffers")}
-                  </Badge>
+                {/* Everything to check about a row sits in its corner. The
+                    contest number pairs rows that fought over one line; a
+                    timing pill means only the line's own timing is kept. */}
+                {(m.contest !== undefined || m.flag === "sharedTiming" || m.cellRef) && (
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {m.contest !== undefined && (
+                      <ContestPill number={m.contest} title={t("importExport.review.rowContested", { number: m.contest })} />
+                    )}
+                    {m.flag === "sharedTiming" && (
+                      <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
+                        {t("importExport.review.rowSharedTimingPill")}
+                      </Badge>
+                    )}
+                    {m.cellRef && (
+                      <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
+                    )}
+                  </div>
                 )}
               </label>
             ))}

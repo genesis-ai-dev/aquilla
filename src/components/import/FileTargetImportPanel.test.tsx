@@ -410,6 +410,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     ["WEBVTT", "", ...cues.flatMap(([a, b, text]) => [`${tc(a)} --> ${tc(b)}`, text, ""])].join("\n")
   const checkboxFor = (text: string) =>
     screen.getByText(text).closest("label")!.querySelector("input") as HTMLInputElement
+  const rowOf = (text: string) => screen.getByText(text).closest("label")!
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -458,15 +459,50 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect(checkboxFor(text).checked).toBe(false)
     }
     expect(checkboxFor("same words").disabled).toBe(true)
-    expect(screen.getAllByText("Competed for the same line, check both")).toHaveLength(2)
-    expect(screen.getAllByText("Same timing as another cue, check which is which")).toHaveLength(2)
+    // The two rows that fought over one line share a number; shared-timing rows get their own pill.
+    expect(screen.getAllByText("Contest 1")).toHaveLength(2)
+    expect(rowOf("swap one")).toHaveTextContent("Contest 1")
+    expect(rowOf("swap two")).toHaveTextContent("Contest 1")
+    expect(screen.getAllByText("Same timing")).toHaveLength(2)
+    expect(rowOf("PETER")).toHaveTextContent("Same timing")
     expect(screen.getByText("Already there")).toBeInTheDocument()
-    expect(screen.getByText(/2 rows competed with another cue for the same line/)).toBeInTheDocument()
+    expect(screen.getByText(/1 contest: the rows marked Contest 1 competed for the same line/)).toBeInTheDocument()
     expect(screen.getByText(/2 rows have exactly the same timing as another cue/)).toBeInTheDocument()
     // "Select all" never ticks a row whose text is already there.
     fireEvent.click(screen.getByText(/select all/i))
     expect(checkboxFor("same words").checked).toBe(false)
     expect(checkboxFor("PETER").checked).toBe(true)
+  })
+
+  it("numbers each contest, so the rows that fought over one line can be found together", async () => {
+    renderPanel({
+      cells: [
+        line(1, 10000, 10400), line(2, 10500, 10900), line(3, 20000, 20400),
+        line(4, 30000, 32000), line(5, 32500, 33500),
+      ],
+    })
+    await selectFile(makeFile(vtt([
+      [10450, 10850, "swap one"],
+      [10500, 10900, "swap two"],
+      [20000, 20400, "third"],
+      [30000, 31000, "half one"],
+      [31000, 32000, "half two"],
+      [32500, 33500, "next"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 contests: rows marked with the same Contest number/)).toBeInTheDocument()
+    expect(rowOf("swap one")).toHaveTextContent("Contest 1")
+    expect(rowOf("swap two")).toHaveTextContent("Contest 1")
+    expect(rowOf("half one")).toHaveTextContent("Contest 2")
+    expect(rowOf("third")).not.toHaveTextContent("Contest")
+    // The half that lost its line is in the unmatched list, carrying the same number.
+    const lost = screen.getByText("half two").closest("li")!
+    expect(lost).toHaveTextContent("Lost its line to another cue")
+    expect(lost).toHaveTextContent("Contest 2")
+    expect(screen.getAllByText("Contest 2")[0]).toHaveAttribute(
+      "title",
+      "Competed for the same line as the other rows marked Contest 2. Check them before importing.",
+    )
   })
 
   it("marks a shifted cue's row \"Timing differs\" and shows the line's own timecode, on that row only", async () => {
@@ -476,7 +512,6 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     // Line 1's own timecode appears because the cue is 300ms off; line 2's doesn't.
     expect(screen.getByText(/00:00:10\.000 --> 00:00:10\.800/)).toBeInTheDocument()
     expect(screen.queryByText(/00:00:20\.000 --> 00:00:20\.800 /)).not.toBeInTheDocument()
-    const rowOf = (text: string) => screen.getByText(text).closest("label")!
     expect(rowOf("TARGET 1 late")).toHaveTextContent("Timing differs")
     expect(rowOf("TARGET 2")).not.toHaveTextContent("Timing differs")
     expect(screen.getAllByText("Timing differs")).toHaveLength(1)

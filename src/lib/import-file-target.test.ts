@@ -929,6 +929,42 @@ describe("review flags (AQU-1360)", () => {
     })
   })
 
+  describe("numbering contests, so several in one file can be told apart", () => {
+    const cells = [
+      line("L1", 10000, 10400), line("L2", 10500, 10900), line("L3", 20000, 20400),
+      line("M", 30000, 32000), line("N", 32500, 33500),
+    ]
+    const swap = [cue("T1", 10450, 10850), cue("T2", 10500, 10900), cue("T3", 20000, 20400)]
+    const split = [cue("half 1", 30000, 31000), cue("half 2", 31000, 32000), cue("next", 32500, 33500)]
+    const numbered = (rows: TargetRow[]) => {
+      const r = matchTargetRowsByOverlap(rows, cells)
+      return {
+        pairs: r.matched.map((m) => [m.incomingText, m.cellId, m.contest ?? null]),
+        orphans: r.orphans.map((o) => [o.text, o.reason, o.contest ?? null]),
+      }
+    }
+
+    it("gives each contest its own number, in list order, and the cue that lost carries its number too", () => {
+      expect(numbered([...swap, ...split])).toEqual({
+        pairs: [["T1", "L1", 1], ["T2", "L2", 1], ["T3", "L3", null], ["half 1", "M", 2], ["next", "N", null]],
+        orphans: [["half 2", "lostItsLine", 2]],
+      })
+    })
+
+    it("numbers by where the rows sit in the file, not by time", () => {
+      expect(numbered([...split, ...swap])).toEqual({
+        pairs: [["half 1", "M", 1], ["next", "N", null], ["T1", "L1", 2], ["T2", "L2", 2], ["T3", "L3", null]],
+        orphans: [["half 2", "lostItsLine", 1]],
+      })
+    })
+
+    it("leaves every row outside a contest unnumbered, including shared-timing rows", () => {
+      const speakers = [line("S2", 20000, 21500), line("S3", 20000, 21500)]
+      const r = matchTargetRowsByOverlap([cue("PETER", 20000, 21500), cue("ANDREW", 20000, 21500)], speakers)
+      expect(r.matched.map((m) => [m.flag ?? null, m.contest ?? null])).toEqual([["sharedTiming", null], ["sharedTiming", null]])
+    })
+  })
+
   describe("the contested flag stays silent on every correct or merely imperfect file", () => {
     const three = [line("A", 1000, 1800), line("B", 2000, 2800), line("C", 3000, 3800)]
 

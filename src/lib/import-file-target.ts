@@ -124,6 +124,11 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched line's own cue timecode, when it has one. */
   cellRef?: string
   flag?: TargetMatchFlag
+  /** For a `contested` row: which contest it belongs to, numbered from 1 in
+   *  the order the review list shows them. Every row, and every unmatched cue,
+   *  carrying the same number fought over one line — so with several contests
+   *  in one file the user can tell which rows go together. */
+  contest?: number
   /** The line already holds exactly this text. Not a conflict — there is
    *  nothing to overwrite — and nothing to import either. */
   alreadyThere?: boolean
@@ -147,6 +152,9 @@ export interface TargetOrphan {
   ref: string
   text: string
   reason?: TargetOrphanReason
+  /** For a `lostItsLine` cue: the contest it lost, matching the number on
+   *  the row that holds the line. */
+  contest?: number
 }
 
 /** An open-file line no incoming row covered. Listed by name (AQU-1360): a
@@ -198,6 +206,7 @@ function toMatchedCell(
   flag?: TargetMatchFlag,
   /** Show the line's own timecode — only when it disagrees with the cue's. */
   showCellRef = false,
+  contest?: number,
 ): FileTargetMatchedCell {
   const currentText = cell.translated ?? ""
   const current = currentText.trim()
@@ -215,6 +224,7 @@ function toMatchedCell(
     sourceText: cell.original,
     ...(showCellRef && cell.cueRef ? { cellRef: cell.cueRef } : {}),
     ...(flag ? { flag } : {}),
+    ...(contest !== undefined ? { contest } : {}),
     ...(alreadyThere ? { alreadyThere } : {}),
   }
 }
@@ -448,6 +458,11 @@ function closeMatchedRows(a: OverlapAssignment): Set<number> {
  * Then w and r are both flagged; if r was left unassigned, its unmatched-list
  * entry says it lost its line instead.
  *
+ * Rows that fought over one line form one contest, and contests are numbered
+ * from 1 in the order the review list shows them (by the incoming position of
+ * each contest's first paired row), so the screen can say which rows go
+ * together. A row that turns up in two contests merges them into one.
+ *
  * Exact ties can't trip it: in the identical-timing speaker case the tie loser
  * still gets a line it overlaps. And no uniform shift over non-overlapping
  * lines can: a row claiming another line by more than half of both would have
@@ -455,9 +470,28 @@ function closeMatchedRows(a: OverlapAssignment): Set<number> {
  * lying mostly on a line fires, since it can't be told from a split half; it
  * is still a case where half a line would otherwise vanish without a word.
  */
-function findContested(a: OverlapAssignment): { assigned: Set<number>; unassigned: Set<number> } {
+interface Contests {
+  assigned: Set<number>
+  unassigned: Set<number>
+  /** Row position → its contest's number, from 1. */
+  numberOf: Map<number, number>
+}
+
+function findContested(a: OverlapAssignment): Contests {
   const assigned = new Set<number>()
   const unassigned = new Set<number>()
+  // Union-find over row positions: each contest pair joins holder and claimant.
+  const parent = new Map<number, number>()
+  const find = (x: number): number => {
+    let root = x
+    while (parent.get(root) !== root) root = parent.get(root)!
+    parent.set(x, root)
+    return root
+  }
+  const join = (x: number, y: number) => {
+    for (const z of [x, y]) if (!parent.has(z)) parent.set(z, z)
+    parent.set(find(x), find(y))
+  }
   for (const candidate of a.candidates) {
     if (candidate.overlap <= 0) continue
     const r = candidate.rowAt
@@ -470,8 +504,22 @@ function findContested(a: OverlapAssignment): { assigned: Set<number>; unassigne
     assigned.add(holder)
     if (won === undefined) unassigned.add(r)
     else assigned.add(r)
+    join(holder, r)
   }
-  return { assigned, unassigned }
+
+  // Number the contests in review-list order: by the earliest incoming
+  // position among each contest's paired rows (a holder is always paired).
+  const firstShown = new Map<number, number>()
+  for (const at of assigned) {
+    const root = find(at)
+    firstShown.set(root, Math.min(firstShown.get(root) ?? Infinity, a.rows[at].index))
+  }
+  const numberOfRoot = new Map(
+    [...firstShown].sort((x, y) => x[1] - y[1]).map(([root], i) => [root, i + 1]),
+  )
+  const numberOf = new Map<number, number>()
+  for (const at of parent.keys()) numberOf.set(at, numberOfRoot.get(find(at))!)
+  return { assigned, unassigned, numberOf }
 }
 
 /** Rows whose time range exactly equals another incoming row's. */
@@ -717,6 +765,7 @@ export function matchTargetRowsByOverlap(
           : at !== undefined && contested.unassigned.has(at)
             ? "lostItsLine"
             : "noLineInReach",
+        ...(at !== undefined && contested.unassigned.has(at) ? { contest: contested.numberOf.get(at) } : {}),
       })
       continue
     }
@@ -736,7 +785,14 @@ export function matchTargetRowsByOverlap(
     // The cue's timecode is the only meaningful label a VTT row has — a
     // cue-sourced cell's `canonicalRef` is an opaque group id.
     matched.push(
-      toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`, flag, drifted),
+      toMatchedCell(
+        cell,
+        row.text,
+        row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`,
+        flag,
+        drifted,
+        flag === "contested" ? contested.numberOf.get(at) : undefined,
+      ),
     )
   }
 

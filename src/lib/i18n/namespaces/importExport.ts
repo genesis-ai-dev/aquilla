@@ -1007,10 +1007,10 @@ export const importExport = defineNamespace({
       other: "{count} conflicts",
     }),
     "importExport.review.contestedWarning": plural({
-      one: "{count} row competed with another cue for the same line and was left unticked. " +
-        "Check it before importing.",
-      other: "{count} rows competed with another cue for the same line and were left " +
-        "unticked. Check them before importing.",
+      one: "{count} contest: the rows marked Contest 1 competed for the same line and were " +
+        "left unticked. Check them before importing.",
+      other: "{count} contests: rows marked with the same Contest number competed for the " +
+        "same line and were left unticked. Check them before importing.",
     }),
     "importExport.review.deselectAll": "Deselect all",
     "importExport.review.importCellCount": plural({
@@ -1029,8 +1029,11 @@ export const importExport = defineNamespace({
     "importExport.review.reasonNoLineInReach": "No line within reach",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.rowAlreadyThere": "Already there",
-    "importExport.review.rowContested": "Competed for the same line, check both",
+    "importExport.review.rowContestPill": "Contest {number}",
+    "importExport.review.rowContested": "Competed for the same line as the other rows marked " +
+      "Contest {number}. Check them before importing.",
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
+    "importExport.review.rowSharedTimingPill": "Same timing",
     "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.sharedTimingWarning": plural({
       one: "{count} row has exactly the same timing as another cue, so only file order " +
@@ -2796,9 +2799,11 @@ export const importExport = defineNamespace({
           "subtitle file both lay mostly on the same line of the open file, so one " +
           "of them ended up on a different line or none. From timing alone either " +
           "could be the right one, so the affected rows were left unticked and the " +
-          "user is asked to check them.",
+          "user is asked to check them. Rows in one contest carry a pill with the " +
+          "same number; \"Contest\" here must be the same word as on that pill " +
+          "(importExport.review.rowContestPill).",
         placeholders: {
-          count: "Number of review rows involved in such a contest.",
+          count: "Number of contests: groups of rows that competed for one line.",
         },
       },
       "importExport.review.deselectAll": {
@@ -2881,11 +2886,25 @@ export const importExport = defineNamespace({
           "Small grey tag on one row of the match-review list: the line already holds " +
           "exactly this text, so importing it would change nothing. Two or three words.",
       },
+      "importExport.review.rowContestPill": {
+        description:
+          "Small amber pill in the top-right corner of a row of the match-review " +
+          "list, and beside a cue in the list of cues that found no line. Rows " +
+          "carrying the same number competed for one line of the open file, so the " +
+          "number tells the user which rows go together. Keep it to one short word " +
+          "and the number.",
+        placeholders: {
+          number: "The contest's number, from 1, in the order the list shows them.",
+        },
+      },
       "importExport.review.rowContested": {
         description:
-          "Small amber tag on one row of the match-review list: this cue and another " +
-          "one both lay mostly on the same line, so the user should look at both rows " +
-          "before importing. Short phrase ending in an instruction.",
+          "Tooltip on the \"Contest N\" pill: this cue and the other rows with the " +
+          "same number all lay mostly on the same line, so the user should look at " +
+          "them all before importing. One sentence and an instruction.",
+        placeholders: {
+          number: "The contest's number, the same one shown on the pill.",
+        },
       },
       "importExport.review.rowTimingDiffers": {
         description:
@@ -2897,10 +2916,16 @@ export const importExport = defineNamespace({
       },
       "importExport.review.rowSharedTiming": {
         description:
-          "Small amber tag on one row of the match-review list: another uploaded cue " +
-          "has exactly the same start and end time, as when two people speak at " +
+          "Tooltip on the \"Same timing\" pill of a match-review row: another uploaded " +
+          "cue has exactly the same start and end time, as when two people speak at " +
           "once, so which line each went to was decided only by their order in the " +
           "file. Short phrase ending in an instruction.",
+      },
+      "importExport.review.rowSharedTimingPill": {
+        description:
+          "Small amber pill in the top-right corner of a match-review row whose cue " +
+          "has exactly the same start and end time as another uploaded cue, as when " +
+          "two people speak at once. Two words at most.",
       },
       "importExport.review.sharedTimingWarning": {
         description:

@@ -329,6 +329,16 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 # deploys to omit it.
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://dev.aquilla.app"
+# Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
+# requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
+# two vars cannot enable anything on production even if copied there.
+# Secrets to install with `wrangler secret put <NAME> --env development`:
+# STRIPE_SECRET_KEY (sk_test_…), STRIPE_WEBHOOK_SECRET (whsec_… from the
+# sandbox endpoint pointed at https://api.dev.aquilla.app/identity/billing/webhook),
+# STRIPE_PRICE_CATALOG (config/pricing/stripe-sandbox-native.json contents),
+# STRIPE_PORTAL_PERSONAL_CONFIGURATION and STRIPE_PORTAL_TEAM_CONFIGURATION (bpc_…).
+BILLING_WORKSPACE_CHECKOUT_REHEARSAL = "true"
+BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "development"

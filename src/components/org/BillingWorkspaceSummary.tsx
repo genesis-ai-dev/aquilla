@@ -60,7 +60,12 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           Work on this workspace’s projects uses this workspace’s allowance.
           A collaborator’s personal subscription does not add capacity here.
         </p>
-        {data.entitlement ? <p className="text-sm text-muted-foreground">
+        {typeof data.usagePercent === 'number' && data.usageResetsAt ? (
+          <p className="text-sm text-muted-foreground" data-testid="billing-usage-percent" role="status">
+            {data.usagePercent}% of this week’s AI allowance used.
+            Resets {new Date(data.usageResetsAt).toLocaleString()}.
+          </p>
+        ) : data.entitlement ? <p className="text-sm text-muted-foreground">
           Usage period ends {new Date(data.entitlement.usagePeriodEnd).toLocaleString()}.
           Usage measurement is not available yet.
         </p> : null}

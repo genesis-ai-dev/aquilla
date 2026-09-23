@@ -23,14 +23,32 @@ capacity requires a new explicit policy/version, not hidden repricing.
 Missing provider cost is unresolved, not zero or an invented flat charge.
 Percentage-only presentation does not remove the need for an explicit unit.
 
+## Launch decisions — 2026-09-16
+
+See the pricing model's decision list. Implementation consequences: the
+reservation bound is `prompt tokens × live input price + output cap × live output
+price` from OpenRouter's model list, cached server-side and refused when missing;
+the agent may finish an in-progress step up to 5% over the weekly allowance;
+audio rails stay unmetered for now; the credit and word guards are removed once
+every LLM producer is connected. Measured 2026-08 rates from the local
+`agent_cost_meter` ledger: Luna ≈ 0.07¢ per autopilot call, DeepSeek v4 flash
+≈ 0.03¢; Sonnet and Opus were never measured.
+
 ## Implemented foundation
 
 - `db/shared/billing-cost.ts` defines the common conversion and strict provider
   cost parser. Agent, chat, and speech use the same multiplier.
+- Migration `0098_workspace_usage_provider_ref.sql` adds the provider generation
+  reference used to reconcile held reservations; `usage-reconcile.ts` settles a
+  held request only from the provider's own generation record.
 - Migration `0097_workspace_usage_requests.sql` adds exact-period reservations,
   raw settled cost, rate snapshots, and terminal-state constraints. It is prepared,
   not deployed. Freshly fetched main `c1aad5636` ends at migration 0089;
   0097 does not collide there. Recheck pending branches at release integration.
+- `rate-card.ts` reads OpenRouter's live model prices (cached) and bounds a
+  request from prompt characters and the enforced output cap; unknown models
+  are refused. `reserveWorkspaceUsage` admits only below 100% and lets a bound
+  end up to 5% over (`OVERAGE_FACTOR`).
 - `workspace-usage.ts` reads the verified workspace entitlement inside the same
   organization lock used by billing changes. It reserves against settled plus
   outstanding usage, deduplicates request IDs, and settles actual cost atomically.
@@ -41,9 +59,11 @@ Percentage-only presentation does not remove the need for an explicit unit.
   Exact weekly boundaries leave old usage intact. Explicit Free workspace periods
   start at workspace creation; unknown/legacy/covered workspaces require their
   separate access contract instead of automatic reclassification.
-- The authenticated chat and import-classification routes now consume this
-  foundation in explicit local scripted-provider rehearsal; other production
-  callers remain unconnected. It does
+- The authenticated chat, import-classification, and agent routes now consume
+  this foundation in explicit local scripted-provider rehearsal, and the
+  autopilot graph funds background waves from the run owner. Knowledge
+  indexing and Monday analysis are explicitly platform-funded, so every
+  producer is now either metered or classified. It does
   not authorize users itself: funded endpoints must validate project access first,
   calculate a trusted maximum cost, reserve before the call, and settle afterward.
   Billing usage remains unavailable until all active producers are connected.
@@ -53,16 +73,20 @@ Percentage-only presentation does not remove the need for an explicit unit.
 | Entry point | Current accounting | Weekly enforcement work |
 | --- | --- | --- |
 | `auth-worker/src/routes/chat.ts` | Post-response cost and input words; streaming uses a flat cost estimate | Authorize owning workspace; reserve before provider call; reconcile streamed/non-streamed result. Projectless, unknown, and unauthorized projects currently fall back to org 0, so do not reuse this behavior for enforced billing. |
-| `auth-worker/src/routes/agent.ts` and `lib/agent/tools/draft.ts` | Aggregate run cost and input words after run; separate optional per-call instrumentation | Enforce advanced capability and shared allowance at each billable model/tool step, including nested drafting, retries, and cancellation; stop further work safely on exhaustion. |
-| `auth-worker/src/routes/contextual.ts` and `lib/contextual/tick.ts` | Optional `CostMeter` instrumentation; not the product billing ledger | Resolve project owner for background leases, resume, and multi-wave work; reserve/settle each provider call and stop further waves after exhaustion. |
+| `auth-worker/src/routes/agent.ts` and `lib/agent/tools/draft.ts` | Legacy aggregate run cost after run; local rehearsal reserves and settles each orchestrator turn and drafting pass (`agent-usage.ts`) | Remaining: capability checks, legacy guard retirement, contextual background work. Exhaustion stops the next step and preserves staged work. |
+| `auth-worker/src/routes/contextual.ts` and `lib/contextual/tick.ts` | Local rehearsal reserves and settles each graph call via `makeLlmCall({ admit })`, funded by the run's persisted owner; exhaustion pauses at the span edge | Segmentation generation is metered too (429 on a spent week). Remaining: automatic resume after reset. |
 | `auth-worker/src/routes/import-classify.ts` | Legacy cost plus sampled input words on valid result; local rehearsal reserves before the call and settles reported cost even for rejected recipes | Remaining: real-provider cost bound; a retry with a new key reserves again (same key returns 409). Manual import is untouched. |
 | `auth-worker/src/routes/import-sandbox.ts` | Cost plus filename words | Filename word count does not measure conversion-model work. Integrate selected unit and preserve source/commit artifacts on exhaustion. |
-| `auth-worker/src/lib/knowledge/index-doc.ts` | Direct provider request | Resolve document/project ownership; include or explicitly classify system-funded indexing before launch. |
-| `auth-worker/src/lib/monday/analyze.ts` | Direct provider request with usage parsing | Resolve organization and invoking workflow; include or explicitly classify system-funded analysis. |
+| `auth-worker/src/lib/knowledge/index-doc.ts` | Direct provider request; one bounded call per upload (`MAX_KB_TEXT_CHARS`), org-scoped docs may have no project | **Classified platform-funded (2026-09-17)**: not charged to the weekly allowance. The ledger keys reservations to a project, and widening it for this bounded, non-selectable call is not worth the schema change. Revisit if upload volume makes it material. |
+| `auth-worker/src/lib/monday/analyze.ts` | Direct provider request during Monday onboarding | **Classified platform-funded (2026-09-17)**: onboarding integration work, not translation capacity; not charged to the weekly allowance. |
 | `sync-worker/src/tts.ts` | Audio seconds plus configured compute cost after synthesis | Shared workspace pool across workers; reserve before synthesis, settle duration/cost, handle missing duration without recording free work. |
 | `sync-worker/src/voice-convert.ts`, `diarization.ts` | Separate media processing paths | Audit whether Aquilla-funded processing consumes this allowance; avoid accidental unmetered paid paths. |
 | External-agent tokens | Ordinary identity/permission boundaries | Check owning workspace capability and same usage pool at every funded AI endpoint; external provider bills stay outside Aquilla's allowance. |
-| Workspace billing API / UI | Period and effective offer; `usagePercent` is null | Read authoritative settled plus reserved usage and exact reset time; do not fabricate zero usage when the store is unavailable. Hide internal units. |
+| Workspace billing API / UI | `usagePercent` and `usageResetsAt` from the same allowance/period admission uses; null for unmeasured workspaces, absent on ledger failure | Remaining: percentage in exhaustion errors, agent panel, onboarding; frontend handling of the `weekly_allowance` exhaustion reason. |
+
+`usage-mode.ts` is the single switch: `off`, `rehearsal` (local only), or
+`enforce` (any provider). A metered call skips the legacy credit and word
+guards and ledgers; unmetered producers keep them until connected.
 
 `CostMeter` is optional development instrumentation (`COST_METER=1`), buffers
 writes, and drops failed batches. It cannot serve as a paid-access authority.

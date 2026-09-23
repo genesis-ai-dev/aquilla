@@ -1,4 +1,5 @@
-import { admitChatUsage, chatUsageRehearsalAllowed, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -193,10 +194,9 @@ chat.post(
     // org's caps once an admin turns enforcement on (log-only by default).
     const orgId = await resolveChatOrgId(c.env, user, request.projectId)
     let usage: ChatUsage | undefined
-    if (c.env.BILLING_CHAT_USAGE_REHEARSAL === 'true') {
-      if (!chatUsageRehearsalAllowed(c.env, c.req.url)) {
-        return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
-      }
+    const weekly = weeklyUsageActive(c.env, c.req.url)
+    if (weekly === 'unavailable') return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
+    if (weekly === 'on') {
       // Unlike legacy attribution, enforced usage must never fall back to org 0.
       if (!request.projectId || orgId <= 0) return c.json({ error: 'forbidden' }, 403)
       const suppliedId = c.req.header('Idempotency-Key')
@@ -205,27 +205,34 @@ chat.post(
       }
       usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
     }
-    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-    if (!chatCreditCheck.ok) {
-      return c.json(
-        { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
-        429,
-      )
-    }
-    const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!chatWordCheck.ok) {
-      return c.json(wordCapBody(chatWordCheck.reason), 429)
+    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    if (!usage) {
+      const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+      if (!chatCreditCheck.ok) {
+        return c.json(
+          { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
+          429,
+        )
+      }
+      const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!chatWordCheck.ok) {
+        return c.json(wordCapBody(chatWordCheck.reason), 429)
+      }
     }
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
     if (usage) {
+      // Metered requests carry a server-enforced output cap so the bound holds.
+      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
       try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId! })
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
+          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
         if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
       } catch (error) {
         if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
           return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
         }
+        if (error instanceof Error && error.message === 'Model price unavailable') return c.json({ error: 'model_price_unavailable' }, 503)
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }
@@ -278,8 +285,10 @@ chat.post(
         // object from a streaming response without buffering it (defeats the
         // point). Record a flat 1¢ fallback estimate so the ledger always has
         // a row — this is the cheap/low-priority rail.
-        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
-        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+        if (!usage) {
+          await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
+          await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+        }
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -305,8 +314,10 @@ chat.post(
         /* ignore — use the fallback */
       }
       // Record asynchronously (graceful-degrade) — never block the response.
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      if (!usage) {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      }
 
       if (ab) {
         c.header("X-AB-Request-Id", ab.requestId)

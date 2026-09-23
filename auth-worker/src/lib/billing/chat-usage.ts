@@ -1,31 +1,25 @@
 import type { Env } from '../../types'
 import { readProviderCostCents } from '../../../../db/shared/billing-cost'
-import { reserveWorkspaceUsage, settleWorkspaceUsage } from './workspace-usage'
+import { recordUsageProviderRef, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
+import { boundRequestCostCents, readRateCard } from './rate-card'
+import { weeklyUsageActive } from './usage-mode'
+
+/** Server-enforced output cap while metering; clients cannot raise it. */
+export const METERED_MAX_OUTPUT_TOKENS = 4096
 
 export interface ChatUsage { orgId: number; requestId: string }
-const loopback = (url: string) => {
-  const parsed = new URL(url)
-  return ['http:', 'https:'].includes(parsed.protocol)
-    && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
-    && !parsed.username && !parsed.password
-}
 
-/** This first integration only targets the local scripted provider. Real
- * providers require validated request-cost bounds before enabling enforcement.
- */
+/** Kept for callers; see `usage-mode.ts` for the off/rehearsal/enforce policy. */
 export function chatUsageRehearsalAllowed(env: Env, requestUrl: string) {
-  try {
-    return env.WRANGLER_LOCAL === '1' && loopback(requestUrl)
-      && Boolean(env.OPENROUTER_BASE_URL && loopback(env.OPENROUTER_BASE_URL))
-  } catch { return false }
+  return weeklyUsageActive(env, requestUrl) === 'on'
 }
 export async function admitChatUsage(env: Env, input: {
   orgId: number; userId: number; projectId: string; requestId: string
+  model: string; promptChars: number; maxOutputTokens: number
 }) {
-  // Scripted local provider reservation only; never an actual-cost fallback.
-  const result = await reserveWorkspaceUsage(env.AQUILLA_PG, {
-    ...input, rail: 'llm', maxRawCostCents: 1,
-  })
+  const { model, promptChars, maxOutputTokens, ...request } = input
+  const maxRawCostCents = boundRequestCostCents(await readRateCard(env), { model, promptChars, maxOutputTokens })
+  const result = await reserveWorkspaceUsage(env.AQUILLA_PG, { ...request, rail: 'llm', maxRawCostCents })
   return result.created
 }
 
@@ -33,14 +27,28 @@ export async function admitChatUsage(env: Env, input: {
  * The durable reservation stays held if cost is missing or persistence fails.
  */
 export async function settleChatUsage(env: Env, usage: ChatUsage, body: unknown) {
+  const ref = providerRefOf(body)
   try {
     const cents = readProviderCostCents(body)
-    await settleWorkspaceUsage(env.AQUILLA_PG, usage.orgId, usage.requestId, cents)
+    await settleWorkspaceUsage(env.AQUILLA_PG, usage.orgId, usage.requestId, cents, ref)
     return 'settled' as const
   } catch {
     console.warn('[billing] chat usage requires reconciliation', usage)
+    await holdChatUsage(env, usage, ref)
     return 'pending' as const
   }
+}
+/** The provider's generation id lets a held reservation be reconciled from the
+ * provider's own record later. Recording it never settles anything.
+ */
+export function providerRefOf(body: unknown) {
+  const id = (body as { id?: unknown } | null)?.id
+  return validProviderRef(id) ? id : undefined
+}
+export async function holdChatUsage(env: Env, usage: ChatUsage, ref: string | undefined) {
+  if (ref === undefined) return
+  try { await recordUsageProviderRef(env.AQUILLA_PG, usage.orgId, usage.requestId, ref) }
+  catch { console.warn('[billing] chat usage provider reference not recorded', usage) }
 }
 
 /** Observe SSE with backpressure and bounded parser state; output bytes remain
@@ -54,6 +62,7 @@ export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, us
   let buffer = ''
   let event = ''
   let cost: unknown
+  let ref: string | undefined
   let terminal = false
   let invalid = false
   let settlementAttempted = false
@@ -65,6 +74,7 @@ export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, us
       if (data === '[DONE]') { terminal = true; return }
       try {
         const parsed = JSON.parse(data)
+        ref ??= providerRefOf(parsed)
         if (parsed.error) invalid = true
         if (parsed.usage?.cost !== undefined) {
           // Validate now so a malformed final cost cannot reuse an earlier one.
@@ -95,13 +105,17 @@ export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, us
         if (next.done) {
           buffer += decoder.decode()
           if (buffer.trim() || event.trim()) invalid = true
-          if (!settlementAttempted) console.warn('[billing] incomplete chat stream requires reconciliation', usage)
+          if (!settlementAttempted) {
+            settlementAttempted = true
+            console.warn('[billing] incomplete chat stream requires reconciliation', usage)
+            await holdChatUsage(env, usage, ref)
+          }
           controller.close(); reader.releaseLock()
         } else {
           observe(next.value)
           if (terminal && !invalid && cost !== undefined && !settlementAttempted) {
             settlementAttempted = true
-            await settleChatUsage(env, usage, cost)
+            await settleChatUsage(env, usage, { ...(cost as object), ...(ref ? { id: ref } : {}) })
           }
           controller.enqueue(next.value)
         }
@@ -113,6 +127,7 @@ export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, us
     },
     async cancel(reason) {
       try { await reader.cancel(reason) } finally { reader.releaseLock() }
+      if (!settlementAttempted) { settlementAttempted = true; await holdChatUsage(env, usage, ref) }
     },
   })
 }

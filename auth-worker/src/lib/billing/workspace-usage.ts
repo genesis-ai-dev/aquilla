@@ -3,16 +3,37 @@ import { MICRO_UNITS_PER_UNIT, quoteProviderCost, type CostRail } from '../../..
 import { readBillingWorkspace } from './workspace'
 import { weeklyAllowance, weeklyUsagePeriod } from './pricing-model'
 
+export const OVERAGE_FACTOR = 1.05
+
 interface UsageRequest {
   org_id: number; request_id: string; user_id: number; project_id: string
   rail: CostRail; rate_version: string; multiplier: number
   period_start: string; period_end: string; reserved_micro_units: number
   state: 'reserved' | 'settled' | 'released'
   raw_micro_cents: number | null; settled_micro_units: number | null
+  provider_ref: string | null; created_at: string
 }
 const columns = `org_id, request_id, user_id, project_id, rail, rate_version,
   multiplier, period_start::text, period_end::text, reserved_micro_units,
-  state, raw_micro_cents, settled_micro_units`
+  state, raw_micro_cents, settled_micro_units, provider_ref, created_at::text`
+
+export function validProviderRef(ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.trim().length > 0 && ref.length <= 200 && ref.trim() === ref
+}
+/** A stored reference identifies the provider's generation record. Once set it
+ * cannot change: a different id means the request would be billed for someone
+ * else's work, so reject instead of overwriting.
+ */
+async function attachProviderRef(tx: AquillaDb, request: UsageRequest, providerRef: string | undefined) {
+  if (providerRef === undefined) return
+  if (!validProviderRef(providerRef)) throw new Error('Invalid usage provider reference')
+  if (request.provider_ref !== null) {
+    if (request.provider_ref !== providerRef) throw new Error('Usage provider reference conflict')
+    return
+  }
+  await tx.prepare('UPDATE workspace_usage_requests SET provider_ref = ? WHERE org_id = ? AND request_id = ?')
+    .bind(providerRef, request.org_id, request.request_id).run()
+}
 
 function readRequest(db: AquillaDb, orgId: number, requestId: string) {
   return db.prepare(`SELECT ${columns} FROM workspace_usage_requests
@@ -79,7 +100,12 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
     } : weeklyUsagePeriod(org!.created_at, now.toISOString())
     const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
     const totals = await readUsageTotals(tx, input.orgId, period)
-    if (quote.microUnits > allowance - totals.committed) throw new Error('Weekly AI allowance exhausted')
+    // Decision 2026-09-16: nothing new starts at or past 100%, but a bounded
+    // request may finish up to 5% over so a pessimistic bound does not strand
+    // the last step of the week. Customers only ever see 100%.
+    if (totals.committed >= allowance || totals.committed + quote.microUnits > allowance * OVERAGE_FACTOR) {
+      throw new Error('Weekly AI allowance exhausted')
+    }
     await tx.prepare(`INSERT INTO workspace_usage_requests
       (org_id, request_id, user_id, project_id, rail, rate_version, multiplier,
        period_start, period_end, reserved_micro_units)
@@ -94,10 +120,11 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
  * an overrun. Subsequent admission sees the actual total and stops further work.
  * Unknown spend must keep its reservation until authoritative reconciliation.
  */
-export async function settleWorkspaceUsage(db: AquillaDb, orgId: number, requestId: string, rawCostCents: number) {
+export async function settleWorkspaceUsage(db: AquillaDb, orgId: number, requestId: string, rawCostCents: number, providerRef?: string) {
   return locked(db, orgId, async tx => {
     const request = await readRequest(tx, orgId, requestId)
     if (!request) throw new Error('Usage reservation not found')
+    await attachProviderRef(tx, request, providerRef)
     const quote = quoteProviderCost(rawCostCents, request.rail)
     if (quote.rateVersion !== request.rate_version || quote.multiplier !== request.multiplier) {
       throw new Error('Usage rate version mismatch')
@@ -128,4 +155,45 @@ export async function releaseWorkspaceUsage(db: AquillaDb, orgId: number, reques
       WHERE org_id = ? AND request_id = ?`).bind(orgId, requestId).run()
     return true
   })
+}
+
+/** Record which provider generation a held reservation belongs to, so it can be
+ * reconciled later from the provider's own record. This never settles usage.
+ */
+export async function recordUsageProviderRef(db: AquillaDb, orgId: number, requestId: string, providerRef: string) {
+  return locked(db, orgId, async tx => {
+    const request = await readRequest(tx, orgId, requestId)
+    if (!request) throw new Error('Usage reservation not found')
+    await attachProviderRef(tx, request, providerRef)
+  })
+}
+export function readUsageRequest(db: AquillaDb, orgId: number, requestId: string) {
+  return readRequest(db, orgId, requestId)
+}
+/** Reservations still awaiting settlement, oldest first. */
+export async function listHeldUsage(db: AquillaDb, orgId: number, limit = 100) {
+  const rows = await db.prepare(`SELECT ${columns} FROM workspace_usage_requests
+    WHERE org_id = ? AND state = 'reserved' ORDER BY created_at ASC LIMIT ?`)
+    .bind(orgId, limit).all<UsageRequest>()
+  return rows.results
+}
+
+/** Customer-facing usage: the same allowance and period admission uses, so the
+ * percentage can never disagree with enforcement. Display caps at 100 while
+ * the ledger keeps the true overrun. Returns null rather than a fabricated
+ * zero for workspaces without a measured allowance.
+ */
+export async function readWorkspaceUsageSummary(db: AquillaDb, orgId: number, now = new Date()) {
+  const workspace = await readBillingWorkspace(db, orgId, now)
+  if (!workspace || !['ready', 'already_subscribed'].includes(workspace.eligibility.reason)) return null
+  if (workspace.entitlement && !workspace.entitlement.access) return null
+  const org = await db.prepare('SELECT created_at::text FROM organizations WHERE id = ?')
+    .bind(orgId).first<{ created_at: string }>()
+  if (!org) return null
+  const period = workspace.entitlement ? {
+    start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
+  } : weeklyUsagePeriod(org.created_at, now.toISOString())
+  const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
+  const totals = await readUsageTotals(db, orgId, period)
+  return { percent: Math.min(100, Math.floor((totals.committed / allowance) * 100)), resetsAt: period.end }
 }

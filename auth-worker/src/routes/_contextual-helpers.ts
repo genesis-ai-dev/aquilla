@@ -19,7 +19,9 @@ type ErrorCode =
   | "credit_cap_exceeded"
   | "not_configured"
   | "segmentation_failed"
-  | "context_required"
+  | "usage_rehearsal_unavailable"
+  | "usage_accounting_unavailable"
+  | "weekly_ai_allowance_exhausted"
 
 export function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {

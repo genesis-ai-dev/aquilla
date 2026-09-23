@@ -7,7 +7,7 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify)\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {

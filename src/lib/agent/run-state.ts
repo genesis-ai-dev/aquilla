@@ -138,6 +138,9 @@ export interface AgentBudget {
   capCredits: number
   /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
   exhausted: boolean
+  /** Why it stopped: the workspace's weekly AI allowance (AQU-837) rather
+   *  than this run's own cost cap. Absent for the per-run cap. */
+  reason?: 'weekly_allowance'
 }
 
 export interface AgentProgress {
@@ -301,7 +304,8 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
     case "budget":
       return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: false } }
     case "budget.exhausted":
-      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true } }
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true,
+        ...(frame.reason ? { reason: frame.reason } : {}) } }
     case "progress":
       return { ...run, progress: { label: frame.label, done: frame.done, total: frame.total } }
     case "usage":

@@ -1,6 +1,226 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-09-17. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+
+## Deployed sandbox on dev — 2026-09-17
+
+Stage 1 of the live switch: run the real Stripe **sandbox** against the deployed
+`dev` environment so the payment → webhook → workspace access → portal journey
+is exercised on real hosts before any live key exists.
+
+- [x] The sandbox gate accepts two shapes only: wrangler-local loopback (as
+  before), or `ENVIRONMENT=development` with the request host and the app
+  return origin listed in `BILLING_SANDBOX_HOSTS`. Both still require
+  `BILLING_WORKSPACE_CHECKOUT_REHEARSAL=true` and an `sk_test_`/`rk_test_`
+  key. Production (`ENVIRONMENT=production`, live key) cannot satisfy it even
+  if the vars are copied. Success, cancel, and portal return URLs use the
+  allowlisted app origin, never a browser-provided URL.
+- [x] `wrangler.toml` `[env.development.vars]` sets the flag and
+  `BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"`.
+- [ ] Install the dev secrets (Ryder): `wrangler secret put <NAME> --env
+  development` for `STRIPE_SECRET_KEY` (sandbox `sk_test_…`),
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CATALOG` (paste
+  `config/pricing/stripe-sandbox-native.json`), and the two
+  `STRIPE_PORTAL_*_CONFIGURATION` ids from `config/pricing/stripe-sandbox-portal.json`.
+- [ ] In the Stripe sandbox dashboard add a webhook endpoint
+  `https://api.dev.aquilla.app/identity/billing/webhook` with events
+  `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `customer.subscription.updated`, `customer.subscription.deleted`,
+  `invoice.paid`, `invoice.payment_failed`; its signing secret is the
+  `STRIPE_WEBHOOK_SECRET` above.
+- [ ] Deploy `dev` (the guarded repository deploy commands), then run the
+  journey below. Record the outcomes in this runbook.
+
+Journey (the SPA has no checkout button yet; start checkout through the API):
+
+```sh
+API=https://api.dev.aquilla.app/identity
+JWT=$(curl -s -X POST $API/api/v2/auth/token -H 'Content-Type: application/json' \
+  -d '{"username":"<you>","password":"<pw>"}' | jq -r .access_token)
+ORG=<your personal workspace id from GET $API/api/v2/orgs/me>
+# 1. Review the offer; copy priceVersion, offer.totalAmount, offer.currency.
+curl -s -X POST $API/api/v2/orgs/$ORG/billing/review -H "Authorization: Bearer $JWT" \
+  -H 'Content-Type: application/json' -d '{"offer":"pro","interval":"month","quantity":1}'
+# 2. Start sandbox checkout; open the returned url in a browser and pay with 4242 4242 4242 4242.
+curl -s -X POST $API/api/v2/orgs/$ORG/billing/checkout-rehearsal -H "Authorization: Bearer $JWT" \
+  -H 'Content-Type: application/json' -d '{"offer":"pro","interval":"month","quantity":1,
+  "confirmedPriceVersion":"<priceVersion>","confirmedTotalAmount":<totalAmount>,"confirmedCurrency":"usd"}'
+# 3. Stripe posts the signed event to dev; then the workspace shows the plan:
+curl -s $API/api/v2/orgs/$ORG/billing/workspace -H "Authorization: Bearer $JWT"
+# 4. Manage billing in the app (Settings → Billing) opens the sandbox portal;
+#    upgrade to Max 5×, then cancel, and re-read the workspace after each webhook.
+# 5. If a session expires or is abandoned:
+curl -s -X POST $API/api/v2/orgs/$ORG/billing/checkout-rehearsal/reconcile -H "Authorization: Bearer $JWT"
+```
+
+Delayed-payment and 3DS cases use Stripe's test cards (`4000 0025 0000 3155`
+for 3DS, `4000 0000 0000 0341` for a failing attach). Weekly metering on dev is a
+separate switch: set `BILLING_WEEKLY_USAGE_ENFORCE=true` on dev only if you
+also want percentages and enforcement exercised against real provider cost.
+
+Test impact: the checkout suite adds the deployed-sandbox case (faithful dev
+bindings pass the environment guard; production environment, an unlisted API
+host, a live key, an unlisted app origin, and a missing allowlist each fail
+closed) — 87 pass; portal, change, and webhook recovery suites pass (156 total);
+deployment contract and config tests pass (73). Worker lint and tsc pass.
+
+## Segmentation metering and weekly-stop client copy — 2026-09-17
+
+- [x] Merge the dev-synced billing branch (f64a43ce8); conflicts resolved in
+  the draft context, schema, journeys, and env example.
+- [x] Meter `POST /:projectId/contextual/segmentation/generate` through the
+  same `makeLlmCall` admission; a spent week answers 429
+  `weekly_ai_allowance_exhausted` and unpriced/unavailable accounting 503,
+  instead of storing a silently degraded whole-file segmentation. Usage
+  refusals now propagate out of the segmentation pass; other call failures
+  still keep the surrounding passage whole.
+- [x] The agent client understands `budget.exhausted` with
+  `reason: "weekly_allowance"`: the meter shows a weekly-allowance stop with no
+  credit figures and notes that staged work is kept (`agent.budget.weeklyExhausted`).
+- [x] Knowledge indexing and Monday analysis are classified platform-funded
+  (bounded, not user-selectable, org-scoped); see the usage map. Every
+  producer is now metered or explicitly classified. Ryder to confirm.
+
+Test impact: autopilot usage suite adds the segmentation case (4 pass);
+segmentation, contextual route, and tick suites pass (83); BudgetMeter adds
+the weekly case; agent client and i18n suites pass except two i18n catalog
+checks that already fail on the merged HEAD (`onboarding.connect.account`
+placeholder documentation, from dev), unrelated to the new key.
+
+## Enforcement mode and legacy guard retirement — 2026-09-16
+
+- [x] One policy module (`lib/billing/usage-mode.ts`) decides metering for
+  every producer: `off` (default), `rehearsal` (`BILLING_CHAT_USAGE_REHEARSAL`,
+  wrangler-local with loopback request and provider only, fails closed
+  elsewhere), and `enforce` (`BILLING_WEEKLY_USAGE_ENFORCE=true`, any provider).
+- [x] A metered call retires the legacy ledgers for itself: chat, import
+  classification, agent runs, and autopilot starts skip `creditGuard`,
+  `wordGuard`, `recordCredit`, and `recordWords` when the weekly ledger admits
+  them. Unmetered calls (mode off, segmentation generation, indexing, Monday)
+  keep the legacy guards until they are connected.
+- [ ] Enabling `enforce` in a deployed environment is a launch decision: it
+  requires the production catalog, migrations 0097 and 0098 applied, and the
+  reconcile sweep. Delete the legacy guard code and admin credits panel only
+  after enforcement is live and no producer still depends on them.
+
+Test impact: new `billing-usage-mode.test.ts` (two unit tests covering off,
+rehearsal gates, and enforce precedence); the chat suite adds an enforce-mode
+case against a live provider URL proving the legacy tables stay empty for a
+metered call and still fill when metering is off. All metered producer suites
+(33) and off-mode suites for chat, classify, agent, autopilot, and workspace
+(83) pass. Worker lint and type checks pass.
+
+## Measured usage percentage — 2026-09-16
+
+- [x] The billing workspace API reports `usagePercent` (whole percent of the
+  current week's settled plus reserved usage against the same allowance and
+  period admission uses, capped at 100) and `usageResetsAt` (exact reset
+  instant). Explicit Free workspaces measure from creation; paid workspaces
+  from activation. Legacy, covered, and unconfirmed workspaces stay `null`,
+  and a ledger outage leaves the field absent rather than zero.
+- [x] The workspace billing card shows "N% of this week's AI allowance used"
+  with the reset time when measured, and keeps the previous period-only copy
+  otherwise. No credit counts or internal units are exposed.
+- [x] Frontend `budget.exhausted` handling for the `weekly_allowance` reason
+  (2026-09-17 checkpoint). Percentage in exhaustion errors and onboarding copy
+  remain open.
+
+Test impact: ledger suite adds a summary case (96% reserved, 100% capped
+overrun, null for legacy); the chat suite asserts the API percent after real
+settlement; checkout and workspace route expectations move from `null` to a
+measured 0 with the reset instant (115 + 15 pass). RTL adds the percentage
+copy case (24 pass). The summary component already had 16 pre-existing
+unkeyed-string lint errors on HEAD; this adds the new string in the same style.
+
+## Autopilot cost-ledger integration — 2026-09-16
+
+- [x] Meter every contextual graph call (construe, summarize, draft, verifiers)
+  as its own step through `makeLlmCall`'s new `admit` hook: reserve the
+  live-card bound with the call's own `maxTokens` before the request, settle
+  the reported cost after, hold on transport/HTTP failure. Retries within one
+  call share one reservation; capacity rejections are not charged.
+- [x] Fund background and sweeper-resumed runs from the run's persisted role
+  snapshot owner and the project's workspace; metering on with no owner, no
+  workspace, or a non-local provider fails the run rather than running unmetered.
+- [x] Exhaustion requests a pause; the tick confirms `paused` at the next span
+  edge and staged drafts stay reviewable. Spans already in flight in that wave
+  fail their remaining calls with `usage_exhausted` and are reported as failed.
+- [ ] Resume after the weekly reset is manual (Play). Segmentation generation
+  is metered (2026-09-17); knowledge indexing and Monday analysis remain
+  unconnected; the per-run cap remains as a safety ceiling.
+
+Test impact: new `billing-contextual-usage.test.ts` (three real-Postgres route
+tests: owner-funded settlement of every graph call with provider refs, pause on
+a spent week without a provider call, unowned/non-local refusals). Existing
+contextual route and tick suites pass (49). Worker lint and type checks pass.
+
+## Agent per-step cost-ledger integration — 2026-09-16
+
+- [x] Meter every paid agent model call as its own step under the same local
+  rehearsal gate: the orchestrator turn and both nested drafting passes each
+  reserve their live-card bound before the call and settle their reported cost
+  (`lib/billing/agent-usage.ts`; `upstream.ts` now captures the generation id).
+  Metered calls carry the 4096 output cap.
+- [x] Exhaustion stops the next step, never work already done: the run ends
+  `capped` with a `budget.exhausted` frame carrying `reason: "weekly_allowance"`,
+  a refused drafting pass returns a tool error, and staged proposals survive.
+- [x] Provider errors, transport failures, and missing cost hold the step's
+  reservation (with its generation id when known) for reconciliation. Unpriced
+  models end the run with `model_price_unavailable`; unowned projects get 403.
+- [x] Legacy per-run credit/word guards are skipped for metered runs (see the
+  enforcement-mode checkpoint); the per-run cost cap remains as a safety ceiling.
+
+Test impact: new `billing-agent-usage.test.ts` (five real-Postgres route tests:
+settled turns with provider refs, nested drafting steps, exhaustion before the
+provider, mid-run drafting refusal at exactly 100%, held/unpriced/unowned
+cases). Existing agent route, harness, upstream, tools, and command suites pass
+(52). Worker lint and type checks pass. The agent route and its upstream/draft
+modules join the billing impact mapping.
+
+## Live rate card and reservation bound — 2026-09-16
+
+- [x] Replace the fixed one-cent rehearsal reservation with a bound priced from
+  OpenRouter's live model list (`rate-card.ts`, cached ten minutes per provider):
+  prompt characters ÷ 2 as tokens plus the enforced output cap. Metered chat
+  caps `max_tokens` at 4096 server-side; classify uses its fixed 1,200.
+- [x] Refuse a model missing from the live card (`model_price_unavailable`,
+  503) before any provider call. Prices are never estimated or defaulted.
+- [x] Admission rule per the 2026-09-16 decisions: nothing starts at or past
+  100% of the weekly allowance; a bounded request may end up to 5% over.
+  Settlement records the true cost; customers only ever see 100%.
+- [x] The loopback rehearsal gate is now one of three modes; `enforce` opens
+  any provider behind an explicit flag (enforcement-mode checkpoint).
+
+Test impact: new `billing-rate-card.test.ts` (four unit tests: bound math,
+unknown model, cache TTL, malformed cards) and an overage case in the ledger
+suite (17). Chat (13), import (5), and reconcile (6) suites now script the
+model list through `helpers/rate-card.ts` with exact binary prices so reserved
+totals assert as integers. Unmetered classify and chat guard suites pass (19).
+
+## Held-usage reconciliation — 2026-09-16
+
+- [x] Persist the provider generation id (`provider_ref`) on usage requests.
+  Chat records it from JSON `id` or the first SSE chunk `id`, including on
+  missing cost, truncated streams, and client cancellation; import
+  classification inherits it. A reference never settles or releases usage.
+- [x] Reject a conflicting reference instead of rebinding a request to a
+  different generation. Migration `0098_workspace_usage_provider_ref.sql` is
+  prepared, not deployed, and replays without losing held usage.
+- [x] Add local-only maintainer endpoints under the chat rehearsal gate:
+  `GET /orgs/:orgId/billing/usage-rehearsal/held` lists held reservations and
+  `POST .../usage-rehearsal/reconcile` settles one from the provider's
+  generation record (`{ data: { id, total_cost } }`). Provider errors, id
+  mismatch, malformed cost, or a missing reference keep the reservation held.
+- [ ] Reconcile against the real OpenRouter generation endpoint once the live
+  provider gate opens; automate a sweep of held requests older than a bounded
+  age instead of manual maintainer calls.
+
+Test impact: new `billing-usage-reconcile.test.ts` (six real-Postgres route
+tests) covers held JSON and stream requests, exactly-once settlement, unreferenced
+and unavailable records, reference conflicts, gate/role/404 handling, and
+migration replay. Chat (13), import (5), ledger (16), portal/checkout (115), and
+impact/determinism (24) suites pass; worker lint and secret scan pass. The
+migration joins the billing impact list. No UI or browser behavior changes.
 
 ## Import-classification cost-ledger integration — 2026-09-16
 
@@ -41,12 +261,17 @@ classify route to the billing journey. No UI or browser behavior changes.
   `BILLING_CHAT_USAGE_REHEARSAL=true` requires `WRANGLER_LOCAL=1` and loopback
   request/provider URLs. Its one-cent reservation is for scripted local tests,
   not a validated upper bound or estimated bill for a real provider.
-- [ ] Validate server-owned real-provider cost bounds and model routing before
-  enabling actual funded-provider enforcement. Do not silently remove the gate.
-- [ ] Persist provider generation references and verify reconciliation of held
-  requests after interrupted delivery or persistence failure.
+- [x] Validate server-owned real-provider cost bounds and model routing before
+  enabling actual funded-provider enforcement. Bound now comes from the live
+  rate card (checkpoint above); routing stays server-owned. Gate unchanged.
+- [x] Persist provider generation references and verify reconciliation of held
+  requests after interrupted delivery or persistence failure. See the
+  held-usage reconciliation checkpoint above; live-provider sweep still pending.
 - [ ] Connect agent, background/contextual work, imports, and speech to the same
   ledger; complete capability checks and authoritative usage percentages.
+  Agent, import classification, and autopilot are connected (checkpoints
+  above); speech is unmetered by decision; percentages and legacy guard
+  retirement remain.
 
 Test impact: new `billing-chat-usage.test.ts` composes signed Checkout activation
 with the actual authenticated chat route, provider-shaped JSON/SSE responses, and

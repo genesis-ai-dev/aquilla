@@ -159,8 +159,14 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Local scripted-provider weekly usage verification only (chat completions and
 # import classification). Requires WRANGLER_LOCAL=1 and loopback request +
 # OPENROUTER_BASE_URL. Never enable for live providers.
-# Reserves 1 raw cent per local test request; settles reported cost, never an estimate.
+# Reserves a bound from the provider's live /models prices; settles reported cost, never an estimate.
+# Also enables the maintainer-only usage-rehearsal held/reconcile endpoints.
 # BILLING_CHAT_USAGE_REHEARSAL="false"
+# Weekly allowance metering against any provider (chat, import classification,
+# agent, autopilot). Metered calls skip the legacy credit/word guards entirely.
+# Off by default; enabling in a deployed environment is a launch decision.
+# BILLING_WEEKLY_USAGE_ENFORCE="false"
+
 # Stripe keys
 #STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
 #STRIPE_PUBLISHABLE_KEY=pk_live_1234....

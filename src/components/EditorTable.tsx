@@ -149,6 +149,9 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
+import { CellAttachmentButton } from "./CellAttachmentButton"
+import { CellAttachmentLinks } from "./cell/CellAttachmentLinks"
+import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
 import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { CellTakeBlock } from "./CellTakeBlock"
 import { fmtClock } from "./timeline/format"
@@ -579,6 +582,9 @@ const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
 const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+// AQU-777: stable identity for a cell with no attachments, so a row's
+// derived list doesn't change identity on every render.
+const EMPTY_ATTACHMENTS: readonly CellAttachmentRecord[] = []
 const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
 const EMPTY_EXTRACTED_FOOTNOTES: ExtractedFootnote[] = []
 const EMPTY_CELL_FOOTNOTE_DETAILS: CellFootnoteDetails = {
@@ -4732,6 +4738,7 @@ function EditorRow({
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
+    onOpenAttachment, attachmentsByCell, onAttachmentAdded,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
@@ -4742,6 +4749,10 @@ function EditorRow({
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
   const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // AQU-777: this cell's own attachments, read out of the file-wide map the
+  // workspace provides. EMPTY_ATTACHMENTS is a module constant, not a fresh
+  // [], so a cell with none keeps a stable identity across renders.
+  const cellAttachments = attachmentsByCell?.get(cell.id) ?? EMPTY_ATTACHMENTS
   // 2026-08-07: the timeline's pointed-at cell (media lens only — the store
   // self-clears when the timeline unmounts). Per-row subscription so a cursor
   // move re-renders exactly the two affected rows.
@@ -7068,6 +7079,15 @@ function EditorRow({
                 compact
               />
             )}
+            {/* AQU-777: attachment links, at the bottom of the cell. Links
+                rather than thumbnails — see CellAttachmentLinks for why the
+                previews live in the drawer instead of in the scroll path. */}
+            {cellAttachments.length > 0 && onOpenAttachment && (
+              <CellAttachmentLinks
+                attachments={cellAttachments}
+                onOpen={(attachmentId) => onOpenAttachment(cell.id, attachmentId)}
+              />
+            )}
             {/* AQU-664: terminology violations surface solely via the inline
                 `violation-blot-term` decoration in the editor — the amber
                 advisory band was removed so a forbidden rendering shows one
@@ -7399,6 +7419,23 @@ function EditorRow({
                     captureFootnoteAnchor()
                   }}
                   onClick={() => openAddFootnoteDialog()}
+                />
+              )}
+
+              {/* AQU-777: attach a screenshot / reference image to this cell.
+                  Sits beside the comments and history actions because it is
+                  the same kind of thing — reference material hanging off the
+                  cell, not an edit to its text. Gated on `editable` like the
+                  audio upload above it: the event floor is CONTRIBUTOR. */}
+              {editable && onAttachmentAdded && (
+                <CellAttachmentButton
+                  projectId={project.id}
+                  fileId={cell.fileId}
+                  cellId={cell.id}
+                  username={username}
+                  attachmentCount={cellAttachments.length}
+                  disabled={!editable}
+                  onAttached={onAttachmentAdded}
                 />
               )}
 

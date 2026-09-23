@@ -1619,3 +1619,72 @@ export async function emitTermReject(input: TermRejectInput): Promise<string> {
   })
   return eventId
 }
+
+// ── Cell attachments (AQU-777) ────────────────────────────────────────────
+
+export interface CellAttachmentAddInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Client-generated uuidv7 — the projection's key within the project. */
+  attachmentId: string
+  /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+  objectName: string
+  /** The user-visible file name, as picked. */
+  name: string
+  mimeType?: string
+  sizeBytes?: number
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.attachment.add`. The bytes must already be in R2 — the caller
+ * (src/lib/attachments/attach-file.ts) PUTs first and cleans the object up if
+ * this emit throws, so a projected row never points at nothing.
+ */
+export async function emitCellAttachmentAdd(input: CellAttachmentAddInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.add",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      attachmentId: input.attachmentId,
+      objectName: input.objectName,
+      name: input.name,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAttachmentRemoveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  attachmentId: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.attachment.remove` — soft-deletes the projection row. */
+export async function emitCellAttachmentRemove(
+  input: CellAttachmentRemoveInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { attachmentId: input.attachmentId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}

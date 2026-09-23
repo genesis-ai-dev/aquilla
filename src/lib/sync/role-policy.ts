@@ -73,6 +73,14 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
 
+  // AQU-777: attaching reference images to a cell is editing the cell's working
+  // context, so it sits on the CONTRIBUTOR floor alongside the other per-cell
+  // blob write (cell.audio.attach) rather than the COMMENTER one. Removal
+  // carries the same floor — the issue asks for "a user with edit access".
+  // Mirrored server-side in sync-worker/src/events/role-policy.ts.
+  "cell.attachment.add": ROLE.CONTRIBUTOR,
+  "cell.attachment.remove": ROLE.CONTRIBUTOR,
+
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
   "file.corpus.set": ROLE.CONTRIBUTOR,

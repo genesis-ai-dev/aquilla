@@ -266,6 +266,8 @@ describe('PROJECTION_TABLES', () => {
       cell_validators: true,
       cell_waivers: true,
       cell_audio: true,
+      // AQU-777: per-cell file attachments.
+      cell_attachments: true,
       comments: true,
       cell_backtranslations: true,
       assignments: true,

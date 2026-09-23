@@ -1,24 +1,26 @@
 # Row-Level Security backstop — Aquilla Postgres (AQU-289)
 
 Migration: `db/postgres/migrations/0034_rls_backstop.sql`
+(plus per-table additions in later migrations — see the table below)
 Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ---
 
 ## What is protected
 
-Eight project-scoped tables have RLS enabled:
+Nine project-scoped tables have RLS enabled:
 
-| Table | RLS policy name |
-|---|---|
-| `cells` | `rls_cells_project_access` |
-| `events` | `rls_events_project_access` |
-| `files` | `rls_files_project_access` |
-| `comments` | `rls_comments_project_access` |
-| `cell_validators` | `rls_cell_validators_project_access` |
-| `cell_audio` | `rls_cell_audio_project_access` |
-| `project_settings` | `rls_project_settings_project_access` |
-| `snapshots` | `rls_snapshots_project_access` |
+| Table | RLS policy name | Migration |
+|---|---|---|
+| `cells` | `rls_cells_project_access` | 0034 |
+| `events` | `rls_events_project_access` | 0034 |
+| `files` | `rls_files_project_access` | 0034 |
+| `comments` | `rls_comments_project_access` | 0034 |
+| `cell_validators` | `rls_cell_validators_project_access` | 0034 |
+| `cell_audio` | `rls_cell_audio_project_access` | 0034 |
+| `cell_attachments` | `rls_cell_attachments_project_access` | 0099 (AQU-777) |
+| `project_settings` | `rls_project_settings_project_access` | 0034 |
+| `snapshots` | `rls_snapshots_project_access` | 0034 |
 
 Every policy calls `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant.
 

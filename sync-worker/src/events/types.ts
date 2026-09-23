@@ -174,6 +174,12 @@ export type EventKind =
   // that only by hand. Deliberately never recomputed: recomputing would
   // silently undo every manual correction on the next import.
   | 'cell.link.set'
+  // AQU-777: per-cell file attachments (screenshots / reference images).
+  // Non-chain-mutating; contributor-level. The bytes are PUT to R2 (see
+  // sync-worker/src/cell-attachments.ts) BEFORE the event is emitted, so a
+  // projected row always points at an object that exists.
+  | 'cell.attachment.add'
+  | 'cell.attachment.remove'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -536,6 +542,24 @@ export interface EventPayloads {
   }
   'cell.audio.unvalidate': {
     audioId: string
+  }
+  // AQU-777: attach a file (primarily a screenshot) to a cell. The envelope
+  // carries fileId + cellId; everything else the projection needs to render a
+  // link without fetching the bytes rides here.
+  'cell.attachment.add': {
+    /** Client-generated uuidv7; the projection's key within the project. */
+    attachmentId: string
+    /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+    objectName: string
+    /** The user-visible file name, as picked. */
+    name: string
+    mimeType?: string
+    sizeBytes?: number
+  }
+  // Soft-delete, as comment.delete does it: the row survives with deleted_at
+  // stamped so a removal replays from the log.
+  'cell.attachment.remove': {
+    attachmentId: string
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────

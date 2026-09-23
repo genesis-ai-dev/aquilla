@@ -105,6 +105,25 @@
 > order wins; no finding has been lost, merged, or given someone else's number.
 > The real fix is scheduling — concurrent OPSEC passes should not be racing for
 > the same counter — not more renumbering.
+>
+> `docs/OPSEC-REVIEW-2026-09-23.md` is the first pass scoped to **input
+> validation & injection attacks**. OPS-35: the in-app translation agent's
+> free-form SQL tool (`auth-worker/src/lib/agent/sql-guard.ts`) let a query join
+> against the `users` table — which has no `project_id` column and no RLS
+> backstop — with no decoy or trickery required (`... CROSS JOIN users u WHERE
+> c.project_id = :project` was enough), letting any project member dump every
+> account's email/username/display_name on the platform. Fixed by banning the
+> `users` table outright in the guard, rather than trying to text-verify join
+> correctness (the same class of bug a 2026-07-29 pass already found once via a
+> decoy CTE). OPS-36: a two-way JSON merge helper
+> (`src/lib/codex-editor/merge/resolveJsonMerge.ts`, used for Codex-notebook
+> conflict resolution) let a `"__proto__"` key in either merged document repoint
+> the result's prototype; fixed by skipping `__proto__`/`constructor`/`prototype`
+> keys during the merge. That pass also documents, without fixing, a broader gap:
+> several tables the SQL guard treats as project-scoped (`assignments`,
+> `project_members`, `agent_runs`, others) are granted to `app_runtime` but carry
+> no RLS policy, unlike `cells`/`events`/`files`/etc. — recommended as a follow-up
+> migration, not a same-day fix.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

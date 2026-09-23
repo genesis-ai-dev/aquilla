@@ -90,6 +90,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.place': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
 
+  // AQU-777: per-cell file attachments. Same floor as the other per-cell blob
+  // write (cell.audio.attach) — attaching a reference image is editing the
+  // cell's working context, not commenting on it. Mirrored client-side in
+  // src/lib/sync/role-policy.ts.
+  'cell.attachment.add': ROLE.CONTRIBUTOR,
+  'cell.attachment.remove': ROLE.CONTRIBUTOR,
+
   // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.
   // The stage-4 reasoning — "pairing a subtitle line with the audio cue that
   // performs it is ordinary dubbing work" — turned out to be wrong about who

@@ -806,6 +806,36 @@ CREATE TABLE comments (
     PRIMARY KEY (project_id, comment_id)
 );
 
+-- ─────────────────────────── cell attachments ──────────────────────────
+-- AQU-777. Projection of `cell.attachment.*`; the bytes live in the same R2
+-- bucket as audio, under projects/{pid}/files/{fid}/attachments/{objectName}.
+-- See db/postgres/migrations/0099_cell_attachments.sql for the rationale.
+
+CREATE TABLE cell_attachments (
+    project_id    TEXT   NOT NULL,
+    attachment_id TEXT   NOT NULL,
+    file_id       TEXT   NOT NULL,
+    cell_id       TEXT   NOT NULL,
+    -- R2 object name within the cell's file scope ("<attachmentId>.<ext>").
+    object_name   TEXT   NOT NULL,
+    -- The user-visible file name, as picked ("chapter-3-layout.png").
+    name          TEXT   NOT NULL,
+    mime_type     TEXT,
+    size_bytes    BIGINT,
+    author_id     TEXT   NOT NULL,
+    author_label  TEXT,
+    created_at    BIGINT NOT NULL,
+    -- Soft-delete, as comments do it: the row survives so a removal is
+    -- replayable from the event log.
+    deleted_at    BIGINT,
+    event_id      TEXT   NOT NULL,
+    PRIMARY KEY (project_id, attachment_id)
+);
+
+CREATE INDEX cell_attachments_file_idx
+    ON cell_attachments (project_id, file_id, cell_id, created_at)
+    WHERE deleted_at IS NULL;
+
 -- ─────────────────────────── terminology concepts ──────────────────────
 -- AQU-1006 follow-up. Projection of `term.*` events; see
 -- db/postgres/migrations/0084_concepts.sql for the rationale.

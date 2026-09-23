@@ -21,6 +21,31 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /**
+   * AQU-777: open the attachments drawer scrolled to one attachment. Fired by
+   * an attachment link under a cell. Here rather than on the row bag for this
+   * module's whole reason: the workspace owns the drawer state and renders it
+   * outside the table, so a row only needs a stable way to fire it.
+   */
+  onOpenAttachment?: (cellId: string, attachmentId: string) => void
+  /**
+   * AQU-777: this file's attachments, by cell id. Rows read their own group
+   * out of it to render the links under the cell and count the rail's badge.
+   *
+   * ONE MAP FOR THE FILE, not a per-row array, and that is the point: a fresh
+   * array per row would fail MemoizedRow's shallow compare for every rendered
+   * row on every attach. The map identity changes only when the file's
+   * attachments actually change.
+   */
+  attachmentsByCell?: ReadonlyMap<string, readonly import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord[]>
+  /**
+   * AQU-777: an attachment just landed on this cell, with a record shaped like
+   * the server's. The workspace merges it optimistically so the link shows
+   * before the outbox flush lands.
+   */
+  onAttachmentAdded?: (
+    record: import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord,
+  ) => void
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void

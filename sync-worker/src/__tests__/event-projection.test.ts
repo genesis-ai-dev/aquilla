@@ -934,6 +934,10 @@ describe('isChainMutatingKind', () => {
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,
+    // AQU-777: an attachment hangs off the cell as reference context; it
+    // never touches the cell's own text chain.
+    'cell.attachment.add': false,
+    'cell.attachment.remove': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,

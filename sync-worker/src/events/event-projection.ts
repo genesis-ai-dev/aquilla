@@ -399,7 +399,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1719,6 +1719,70 @@ case 'cell.audio.attach': {
           .bind(event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.attachment.add': {
+      // AQU-777. The R2 object is already written by the time this lands (the
+      // client PUTs the bytes, then emits), so the row it inserts always points
+      // at something readable.
+      const p = event.payload as EventPayloads['cell.attachment.add']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            // PROJECT-SCOPED conflict target, per the AQU-1296 lesson on
+            // `comments`: a per-project id conflicted on globally means the
+            // first project to claim it owns the only row that can exist.
+            // Same-project replay stays a no-op, which is what makes a
+            // re-delivered outbox event harmless.
+            `INSERT INTO cell_attachments (
+              project_id, attachment_id, file_id, cell_id, object_name, name,
+              mime_type, size_bytes, author_id, author_label, created_at,
+              deleted_at, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(project_id, attachment_id) DO NOTHING`,
+          )
+          .bind(
+            event.projectId,
+            p.attachmentId,
+            event.fileId,
+            event.cellId,
+            p.objectName,
+            p.name,
+            p.mimeType ?? null,
+            p.sizeBytes ?? null,
+            event.author,
+            event.author,
+            event.serverTs,
+            event.id,
+          ),
+      )
+      return ['cell_attachments']
+    }
+
+    case 'cell.attachment.remove': {
+      // Soft-delete, matching `comment.delete` and `cell.audio.remove`: the row
+      // survives so the removal replays from the log and the R2 key stays
+      // discoverable for a later orphan sweep.
+      //
+      // NO author gate, deliberately — unlike comment.delete, which pairs a
+      // self floor with a higher foreign one. An attachment is shared working
+      // context for the cell, not someone's utterance: AQU-777 asks for it to
+      // be removable by "a user with edit access to the project", and a
+      // contributor who cannot clear a teammate's wrong screenshot off a cell
+      // is stuck. CONTRIBUTOR (role-policy.ts) is the whole bar.
+      const p = event.payload as EventPayloads['cell.attachment.remove']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_attachments SET deleted_at = ?
+              WHERE project_id = ? AND attachment_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.projectId, p.attachmentId),
+      )
+      return ['cell_attachments']
     }
 
     case 'cell.audio.validate':

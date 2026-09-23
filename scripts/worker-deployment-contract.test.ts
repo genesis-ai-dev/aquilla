@@ -10,10 +10,12 @@ const deploymentManifest = JSON.parse(
 ) as {
   surfaces: Record<string, {
     directory: string
+    requiredSecrets: string[]
     requiredBindings: Record<string, string>
     environments: Record<string, {
       worker: string
       routes: string[]
+      requiredSecrets?: string[]
       plainText: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
@@ -399,6 +401,47 @@ describe("worker deployment environment contract", () => {
       .not.toContain("push to staging")
     expect(readRepoFile("resource-worker", "README.md"))
       .toContain("This Worker has only production and development")
+  })
+
+  // AQU-762: dev.aquilla.app ran for weeks with no OPENROUTER_API_KEY on
+  // aquilla-dev-identity, so every AI surface 500'd and nothing said where the key
+  // was supposed to live. Secrets attach to a Worker NAME and do not copy between
+  // environments, so adding a required secret — or a whole environment — without
+  // documenting where it must be provisioned is the exact silent regression.
+  it("documents where every required Worker secret is provisioned per environment", () => {
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    const sectionStart = matrix.indexOf("## Worker secrets (per environment)")
+    const sectionEnd = matrix.indexOf("## Deployment ownership")
+    expect(sectionStart).toBeGreaterThan(-1)
+    expect(sectionEnd).toBeGreaterThan(sectionStart)
+    const secrets = matrix.slice(sectionStart, sectionEnd)
+
+    // Match each Worker's own table row, not the section as a whole — a secret named
+    // anywhere in the prose must not satisfy the environment that actually needs it.
+    const rows = secrets.split("\n").filter((line) => line.startsWith("| ") && line.endsWith(" |"))
+
+    for (const surfaceConfig of Object.values(deploymentManifest.surfaces)) {
+      for (const expected of Object.values(surfaceConfig.environments)) {
+        const row = rows.filter((line) => line.includes(`\`${expected.worker}\``))
+        expect(row, `one table row for ${expected.worker}`).toHaveLength(1)
+        expect(row[0], `${expected.worker} directory`).toContain(`\`${surfaceConfig.directory}\``)
+        const required = [...surfaceConfig.requiredSecrets, ...(expected.requiredSecrets ?? [])]
+        for (const name of required) {
+          expect(row[0], `${expected.worker} row must list ${name}`).toContain(`\`${name}\``)
+        }
+      }
+    }
+
+    // The provisioning command and the fail-closed deploy check are the two things an
+    // operator needs; neither lives anywhere else a human reads.
+    expect(secrets).toContain("wrangler secret put")
+    expect(secrets).toContain("wrangler secret list")
+    expect(secrets).toContain("missing required secret binding")
+    // No admin-console fallback exists for the AI key (routes/admin.ts tunes models and
+    // budgets only), so the docs must not imply one.
+    expect(secrets).toContain("There is no runtime fallback")
+    expect(readRepoFile("auth-worker", "src", "routes", "admin.ts"))
+      .not.toContain("OPENROUTER_API_KEY")
   })
 
   it("uses explicit environments and live checks in every local deploy command", () => {

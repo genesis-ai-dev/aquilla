@@ -20,8 +20,9 @@ function looksLikeTbx(text: string): boolean {
   return /<(martif|tbx|termEntry|conceptEntry)[\s>]/i.test(text.slice(0, 4096))
 }
 
+/** Any markup document — an XML declaration, a doctype or a bare root element. */
 function looksLikeXml(text: string): boolean {
-  return /^\s*(<\?xml[\s?]|<!DOCTYPE\s|<)/i.test(text.slice(0, 256))
+  return /^\s*</.test(text.slice(0, 256))
 }
 
 /** Which reader owns this file. Content wins; the extension breaks ties. */

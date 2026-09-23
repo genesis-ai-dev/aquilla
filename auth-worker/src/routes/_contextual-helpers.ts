@@ -12,12 +12,14 @@ type ErrorCode =
   | "not_found"
   | "permission_denied"
   | "validation_failed"
+  | "context_required"
   | "invalid_state"
   | "not_projected"
   | "run_exists"
   | "credit_cap_exceeded"
   | "not_configured"
   | "segmentation_failed"
+  | "context_required"
 
 export function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {

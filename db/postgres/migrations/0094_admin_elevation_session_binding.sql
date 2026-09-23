@@ -1,0 +1,107 @@
+-- Migration 0094: bind admin step-up elevation to a session, and stop storing
+-- the elevation code in the clear.
+--
+-- [Pen test] Auth & session mgmt weekly review, 2026-09-21 (Monday theme);
+-- findings OPS-35 and OPS-36 in docs/OPSEC-REVIEW-2026-09-21.md.
+--
+-- ── OPS-35: admin_elevations was keyed on user_id alone ──────────────────────
+--
+-- The step-up gate (middleware/platform-admin.ts requireAdminElevation) asked
+-- only "does this USER have an unexpired elevation row?". The threat it exists
+-- to stop is named in routes/admin.ts's own brute-force comment on
+-- /elevation/verify: "a caller already holding a valid (e.g. stolen)
+-- non-elevated admin JWT". Under an account-wide grant that caller was
+-- elevated the moment the real operator elevated on their own machine, for the
+-- full ELEVATION_SESSION_HOURS (6h default) — without ever seeing the emailed
+-- code. The second factor protected the account, not the session, which is the
+-- one thing a step-up factor must not do.
+--
+-- `session_key` is authMiddleware's per-credential identity (`jti:<jti>`, or
+-- `tok:<sha256 of the raw token>` for pre-`jti` tokens) — the same derivation
+-- lib/session-cache.ts already uses, so the cache and this gate cannot disagree
+-- about what "this session" means. Neither arm stores a replayable secret: a
+-- `jti` is already held in the clear in revoked_tokens, and the fallback is a
+-- hash of the token, not the token.
+--
+-- Existing rows are DELETED rather than backfilled. There is no session to
+-- attribute them to — an unbound row is precisely the vulnerable state this
+-- migration removes — and the cost is that operators elevated at deploy time
+-- re-enter a code. The table is ephemeral by construction (6h rows), so this
+-- is a one-off prompt, not data loss.
+--
+-- The primary key moves from (user_id) to (user_id, session_key) so an
+-- operator can hold elevation in two browsers at once. Collapsing to a single
+-- row per user would have made each new elevation silently de-elevate the
+-- other session, which is a worse trade than an extra row.
+--
+-- ── OPS-36: admin_elevation_codes.code was plaintext at rest ─────────────────
+--
+-- 0047 described this table as a "clone of password_reset_tokens". It cloned
+-- that table's PRE-hardening shape and never followed it through OPS-20 (0080,
+-- hash the token) or OPS-31 (0087, drop the plaintext column), leaving the
+-- second factor for cross-tenant god-mode as the last readable-credential
+-- table in the schema: a DB read (backup, Neon branch, PITR snapshot, support
+-- access) handed over a live elevation code.
+--
+-- `code_hash` holds a scrypt digest — the same helper the access-link PIN uses,
+-- chosen for the same reason. A 6-digit code lives in a 10^6 keyspace, which a
+-- fast digest (SHA-256) surrenders to an offline sweep instantly; an HMAC would
+-- rest on SECRET_KEY, which prod and dev still share (V7/SEC-1, open).
+--
+-- Two-step, mirroring 0080 -> 0087 rather than dropping `code` now, so the old
+-- worker keeps working between this migration and the deploy: it INSERTs `code`
+-- (still present, now nullable) while the new code INSERTs `code_hash` (added
+-- here). Rows written by the old code during that window simply never verify
+-- under the new code — the operator re-requests, which is ≤10 minutes of
+-- exposure to a bad UX, not a security gap.
+--
+-- ── Deploy order: MIGRATION FIRST, then the worker ───────────────────────────
+--
+-- The opposite of 0087, so it is worth stating plainly. The new code names
+-- `code_hash` and `session_key`, neither of which exists until this runs, so
+-- deploying first would 500 both elevation routes. Applying this first is safe
+-- in the other direction by construction: every column the OLD code writes is
+-- still present and writable afterwards (`code` is merely nullable, and
+-- `session_key` has the transitional DEFAULT '' below).
+--
+-- The one unavoidable effect at apply time is the DELETE of live elevations:
+-- any operator currently elevated re-enters a code. That is one prompt on an
+-- operator-only route, and it is the point of the migration rather than a
+-- side effect.
+--
+--   FOLLOW-UP (safe once the worker deploy has landed and every pre-0094 row is
+--   past its own expires_at — ELEVATION_TTL_MINUTES, 10 minutes by default):
+--     ALTER TABLE admin_elevation_codes DROP COLUMN code;
+--     ALTER TABLE admin_elevations ALTER COLUMN session_key DROP DEFAULT;
+--   and drop `code` from schema.sql in the same commit. Per 0087's reasoning,
+--   a dropped column is the only version of this that survives a restore; and
+--   dropping the default restores "NOT NULL means actually bound to a session",
+--   reconciling the migrated database with schema.sql, which carries no default.
+--
+-- Existing codes are deleted: they are plaintext, which is the thing being
+-- fixed, and they expire within 10 minutes anyway.
+--
+-- Apply by hand against Neon (same convention as prior migrations in this
+-- directory — NOT applied automatically):
+--   set -a; . ./.env; set +a
+--   npx tsx scripts/pg.ts db/postgres/migrations/0094_admin_elevation_session_binding.sql
+-- Verify: admin_elevations has a composite PK on (user_id, session_key), and
+-- admin_elevation_codes has a nullable `code` plus a `code_hash` column.
+
+-- OPS-35 — session-bound elevation.
+--
+-- `session_key` carries a transitional DEFAULT '' purely so the OLD worker's
+-- `INSERT INTO admin_elevations (user_id, elevated_until, updated_at)` does not
+-- hit a NOT NULL violation between this migration and the deploy — see the
+-- ordering note above. The new code always binds the column explicitly, and a
+-- '' row can never match a real session key, so such a row is inert under the
+-- new gate and is swept by the prune on the next verify.
+DELETE FROM admin_elevations;
+ALTER TABLE admin_elevations DROP CONSTRAINT IF EXISTS admin_elevations_pkey;
+ALTER TABLE admin_elevations ADD COLUMN IF NOT EXISTS session_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE admin_elevations ADD PRIMARY KEY (user_id, session_key);
+
+-- OPS-36 — hashed elevation codes.
+DELETE FROM admin_elevation_codes;
+ALTER TABLE admin_elevation_codes ADD COLUMN IF NOT EXISTS code_hash TEXT;
+ALTER TABLE admin_elevation_codes ALTER COLUMN code DROP NOT NULL;

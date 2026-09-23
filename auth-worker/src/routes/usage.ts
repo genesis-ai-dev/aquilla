@@ -1,6 +1,5 @@
 // Usage read endpoints — per-user and per-org rollups of AI + TTS usage.
 //
-// Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4 "Read endpoints".
 // Credits spec: docs/superpowers/specs/2026-06-13-org-credits-cost-model.md.
 //
 // Routes (mounted at /api/v1/usage in index.ts):

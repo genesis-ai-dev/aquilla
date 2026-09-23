@@ -188,6 +188,7 @@ export type ContextualRunEventKind =
   | "steering_queued"
   | "run_command"
   | "draft_reviewed"
+  | "memories_proposed"
 
 export type ContextualRunEventPhase = "reading" | "drafting" | "checking" | "staging"
 
@@ -662,6 +663,14 @@ function sanitizeEventDetails(input: AppendContextualRunEventInput): ContextualR
     case "run_command":
       details = d.command === "pause" || d.command === "stop" ? { command: d.command } : {}
       break
+    case "memories_proposed":
+      // One line per reflection, never one per note. The note text and its
+      // memory path are reviewable rows in the Memory tab, not durable
+      // activity — the count is the whole fact this event carries.
+      details = {
+        ...(safeCount(d.count) !== undefined ? { count: safeCount(d.count) } : {}),
+      }
+      break
     case "draft_reviewed": {
       const draftId = safeEventString(d.draftId)
       const cellId = safeEventString(d.cellId)
@@ -746,6 +755,11 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
     case "run_command":
       summary = details.command === "pause" ? "Pause asked for in chat" : "Stop asked for in chat"
       break
+    case "memories_proposed": {
+      const count = details.count ?? 0
+      summary = `Proposed ${count} note${count === 1 ? "" : "s"} for review`
+      break
+    }
     case "draft_reviewed":
       summary = details.outcome === "applied"
         ? "Draft applied"
@@ -1148,6 +1162,85 @@ export const parkRun = (
 /** Any active state → failed, recording the error. */
 export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
+
+/**
+ * Reflection bookkeeping (AQU-1302), deliberately kept OFF `RUN_COLS`.
+ *
+ * `reflected_at` / `reflected_done_spans` arrive with migration `0094`, which
+ * this repo applies to Neon BY HAND — so there is always a window where the
+ * code is deployed and the columns are not there yet. Every run read goes
+ * through `RUN_COLS`, so selecting them there would turn that window into a
+ * 500 on the run list and the pill: reflection is a bonus, and a bonus must
+ * never be able to break the feature it decorates. Only the reflection step
+ * reads them, through these two functions, and both fail soft.
+ */
+export interface ContextualRunReflection {
+  /** When this run last reflected. NULL (never) means the caller falls back to
+   *  the run's own `createdAt`, so a first reflection sees the whole run. */
+  reflectedAt: string | null
+  /** `doneSpans` as of that reflection. The "at least 2 passages since the
+   *  last reflection" gate is a difference against this, so one passage that
+   *  staged nine cells still counts as one passage. */
+  reflectedDoneSpans: number
+}
+
+interface ReflectionRow {
+  reflected_at: unknown
+  reflected_done_spans: number | null
+}
+
+/** Read the watermark. `null` means the bookkeeping is unavailable (migration
+ *  not applied yet), which the caller treats as "do not reflect this time" —
+ *  never as "never reflected", which would re-propose the same notes. */
+export async function getRunReflection(
+  db: AquillaDb,
+  runId: string,
+): Promise<ContextualRunReflection | null> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT reflected_at, reflected_done_spans FROM contextual_runs WHERE id = ?`,
+      )
+      .bind(runId)
+      .first<ReflectionRow>()
+    if (!row) return null
+    return {
+      reflectedAt: row.reflected_at == null ? null : toIso(row.reflected_at),
+      reflectedDoneSpans: Number(row.reflected_done_spans ?? 0),
+    }
+  } catch (err) {
+    console.warn(`[contextual] reflection bookkeeping unavailable for run ${runId}:`, err)
+    return null
+  }
+}
+
+/**
+ * Move the watermark forward. Called once a park's reflection has actually run
+ * — whether it proposed notes or (just as validly) proposed none. Leaving it
+ * where it was on a FAILED reflection is deliberate: the next park retries over
+ * the same evidence rather than losing it.
+ *
+ * `reflected_done_spans` is written from the row itself, not from a caller's
+ * snapshot, so a wave that landed between gathering the evidence and marking
+ * cannot be skipped — it is simply counted toward the NEXT reflection.
+ * Status is untouched: reflection is bookkeeping about a park, not a transition.
+ */
+export async function markRunReflected(db: AquillaDb, runId: string): Promise<boolean> {
+  try {
+    await db
+      .prepare(
+        `UPDATE contextual_runs
+            SET reflected_at = now(), reflected_done_spans = done_spans
+          WHERE id = ?`,
+      )
+      .bind(runId)
+      .run()
+    return true
+  } catch (err) {
+    console.warn(`[contextual] reflection watermark not written for run ${runId}:`, err)
+    return false
+  }
+}
 
 /** Block a live run on a decision (§4.5). `waiting` means "something left to
  *  do, but it needs a human" — distinct from `parked`, which means there is
@@ -2119,6 +2212,16 @@ export interface ProjectAutopilotFileRow {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** The span of this run's most recently staged proposal — the passage the
+   *  run got to before it parked (AQU-1301). Null when nothing is pending. */
+  currentSpanId: string | null
+  /** Human passage reference for `currentSpanId`, from the run's own event log
+   *  (no cell load: the overview is polled project-wide). Null when the run
+   *  never logged a label for that span. */
+  currentSpanLabel: string | null
+  /** Proposed drafts belonging to `currentSpanId`. The rest of
+   *  `proposedDrafts` is backlog behind it. */
+  currentSpanDrafts: number
   /** Why this file's newest run parked (AQU-1300); null on any other status. */
   parkReason: ContextualParkReason | null
 }
@@ -2132,6 +2235,10 @@ export interface ProjectAutopilotSummary {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  /** Drafts sitting in the passage each run parked on, summed across lanes.
+   *  The actionable set; `proposedDrafts - currentSpanDrafts` is the backlog
+   *  the reviewer opens on purpose rather than is handed (AQU-1301). */
+  currentSpanDrafts: number
 }
 
 /**
@@ -2166,17 +2273,52 @@ export async function getProjectAutopilotSummary(
          SELECT COALESCE(SUM(proposed), 0) AS proposed,
                 COALESCE(SUM(applied), 0) AS applied
            FROM drafts_by_run
+       ),
+       -- AQU-1301: the passage each run parked on is its most recently staged
+       -- proposal. A draft with no span in provenance buckets under '' — one
+       -- unlabelled group, never silently merged into a labelled passage.
+       parked_span AS MATERIALIZED (
+         SELECT DISTINCT ON (d.run_id)
+                d.run_id,
+                COALESCE(d.provenance ->> 'spanId', '') AS span_id
+           FROM contextual_drafts d
+          WHERE d.project_id = ? AND d.status = 'proposed'
+          ORDER BY d.run_id, d.created_at DESC, d.id DESC
+       ),
+       parked_counts AS (
+         SELECT d.run_id, COUNT(*) AS drafts
+           FROM contextual_drafts d
+           JOIN parked_span s ON s.run_id = d.run_id
+          WHERE d.project_id = ? AND d.status = 'proposed'
+            AND COALESCE(d.provenance ->> 'spanId', '') = s.span_id
+          GROUP BY d.run_id
+       ),
+       -- The human passage reference already lives in the run's event log, so
+       -- the project-wide poll never loads a file's cells to render one.
+       parked_labels AS (
+         SELECT DISTINCT ON (e.run_id)
+                e.run_id, e.span_label
+           FROM contextual_run_events e
+           JOIN parked_span s ON s.run_id = e.run_id AND s.span_id = e.span_id
+          WHERE e.project_id = ? AND e.span_label IS NOT NULL
+          ORDER BY e.run_id, e.created_at DESC, e.id DESC
        )
        SELECT n.*, COALESCE(d.proposed, 0) AS proposed,
               COALESCE(d.applied, 0) AS applied,
               COALESCE(p.proposed, 0) AS project_proposed,
-              COALESCE(p.applied, 0) AS project_applied
+              COALESCE(p.applied, 0) AS project_applied,
+              s.span_id AS current_span_id,
+              l.span_label AS current_span_label,
+              COALESCE(c.drafts, 0) AS current_span_drafts
          FROM newest n
          LEFT JOIN drafts_by_run d ON d.run_id = n.id
+         LEFT JOIN parked_span s ON s.run_id = n.id
+         LEFT JOIN parked_counts c ON c.run_id = n.id
+         LEFT JOIN parked_labels l ON l.run_id = n.id
          CROSS JOIN project_drafts p
         ORDER BY n.updated_at DESC, n.id DESC`,
     )
-    .bind(projectId, projectId)
+    .bind(projectId, projectId, projectId, projectId, projectId)
     .all<{
       id: string
       file_id: string
@@ -2193,6 +2335,9 @@ export async function getProjectAutopilotSummary(
       applied: number
       project_proposed: number
       project_applied: number
+      current_span_id: string | null
+      current_span_label: string | null
+      current_span_drafts: number
     }>()
 
   const files: ProjectAutopilotFileRow[] = results.map((r) => ({
@@ -2210,6 +2355,10 @@ export async function getProjectAutopilotSummary(
     // Summary rows bypass rowToRun, so keep the same legacy-read privacy
     // boundary here as snapshots/activity.
     lastError: sanitizeRunError(r.last_error),
+    // '' is the no-span bucket, not a span id — report it as absent.
+    currentSpanId: r.current_span_id ? r.current_span_id : null,
+    currentSpanLabel: r.current_span_label ?? null,
+    currentSpanDrafts: Number(r.current_span_drafts ?? 0),
     // AQU-1300: a project-wide start fans out one run per file, and the
     // overview is where those are seen. Without the reason every parked file
     // reads "Idle" — including the ones holding for an answer.
@@ -2227,6 +2376,7 @@ export async function getProjectAutopilotSummary(
     unitsSpent: sum((f) => f.unitsSpent),
     proposedDrafts: Number(results[0]?.project_proposed ?? 0),
     appliedDrafts: Number(results[0]?.project_applied ?? 0),
+    currentSpanDrafts: sum((f) => f.currentSpanDrafts),
   }
 }
 

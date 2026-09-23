@@ -95,6 +95,13 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # STRIPE_PUBLISHABLE_KEY="pk_test_..."
 # STRIPE_PRICE_FIELD="price_..."
 # STRIPE_PRICE_ADDON="price_..."
+# Local workspace portal rehearsal: explicit configurations with invoice history
+# and payment-method updates enabled. Native single-item catalog configurations
+# also allow immediate price changes with always_invoice proration and cancellation
+# at period end. Scope-specific product/price allowlists must disable quantity changes.
+# Requires the existing BILLING_WORKSPACE_CHECKOUT_REHEARSAL local/test-key gate.
+# STRIPE_PORTAL_PERSONAL_CONFIGURATION="bpc_..."
+# STRIPE_PORTAL_TEAM_CONFIGURATION="bpc_..."
 
 # Admin panel access. Comma-separated emails; elevation adds a re-auth step.
 # ADMIN_EMAILS=""
@@ -149,7 +156,11 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # R2 object key prefix override for agent artifacts (routes/agent-artifacts.ts).
 # R2_KEY_PREFIX=""
 
+# Local scripted-provider weekly usage verification only (chat completions and
+# import classification). Requires WRANGLER_LOCAL=1 and loopback request +
+# OPENROUTER_BASE_URL. Never enable for live providers.
+# Reserves 1 raw cent per local test request; settles reported cost, never an estimate.
+# BILLING_CHAT_USAGE_REHEARSAL="false"
 # Stripe keys
 #STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
 #STRIPE_PUBLISHABLE_KEY=pk_live_1234....
-

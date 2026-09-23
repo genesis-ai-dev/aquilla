@@ -27,7 +27,7 @@ afterEach(() => {
 const PROJECT: ProjectRow = {
   gitlab_id: 7, aquilla_id: "proj-7", name: "Seven", namespace: "ns/seven",
   org_id: 3, team_id: 4, owner_user_id: 5, last_activity_at: "2026-01-01T00:00:00Z",
-  head_sha: "abc", applied_sha: null, content_logic: 0, cast_hash: null,
+  head_sha: "abc", applied_sha: null, audio_applied_sha: null, content_logic: 0, cast_hash: null,
   status: "ok", last_error: null, project_upserted: 1, updated_at: 0,
 }
 const JOB: JobRow = {

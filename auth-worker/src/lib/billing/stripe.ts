@@ -1,21 +1,17 @@
 // Thin Stripe REST client + webhook verify. No SDK — Workers-friendly fetch
 // and @noble/hashes HMAC, same stack as password hashing.
 
-import { hmac } from "@noble/hashes/hmac"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils"
+import { hmac } from "@noble/hashes/hmac.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type { Env } from "../../types"
+import { StripeConfigError } from "./field-pricing"
+export { StripeConfigError, fieldPriceId } from "./field-pricing"
+
 import { secureCompare } from "../../utils/secure-compare"
 
 const STRIPE_API = "https://api.stripe.com/v1"
 const SIGNATURE_TOLERANCE_SEC = 300
-
-export class StripeConfigError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "StripeConfigError"
-  }
-}
 
 export function stripeConfigured(env: Env): boolean {
   return Boolean(env.STRIPE_SECRET_KEY?.trim())
@@ -27,10 +23,9 @@ export function requireStripeSecret(env: Env): string {
   return key
 }
 
-export function fieldPriceId(env: Env): string {
-  const id = env.STRIPE_PRICE_FIELD?.trim()
-  if (!id) throw new StripeConfigError("STRIPE_PRICE_FIELD is not configured")
-  return id
+
+export function checkoutEnabled(env: Env): boolean {
+  return env.BILLING_CHECKOUT_ENABLED === "true" && stripeConfigured(env)
 }
 
 export function addonPriceId(env: Env): string {
@@ -44,6 +39,7 @@ export async function stripeForm(
   method: "GET" | "POST",
   path: string,
   params: Record<string, string | number | undefined> = {},
+  idempotencyKey?: string,
 ): Promise<Record<string, unknown>> {
   const secret = requireStripeSecret(env)
   const body = new URLSearchParams()
@@ -53,8 +49,10 @@ export async function stripeForm(
   }
   const res = await fetch(`${STRIPE_API}${path}`, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${secret}`,
+      ...(method === "POST" && idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: method === "GET" ? undefined : body,

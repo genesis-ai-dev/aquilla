@@ -24,6 +24,7 @@
 //
 // Idempotent: pure recompute from current cells, safe to call any number of times.
 
+import { projectFileCountersRecomputeStmt } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
@@ -113,18 +114,11 @@ export async function handleMigrateFinalizeRequest(
   const scopeBinds = fileIds ?? []
 
   try {
-    const res = await db.prepare(
-      `UPDATE files SET
-        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = files.project_id AND file_id = files.id),
-        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND validated = 1),
-        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND side = 'target' AND TRIM(value) != ''),
-        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND side = 'target'),
-        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = files.project_id AND file_id = files.id),
-        updated_at = ?
-      WHERE project_id = ?${scopeClause}`,
-    )
-      .bind(finalizedAt, projectId, ...scopeBinds)
-      .run()
+    // One shared builder with the live projection and the rebuild — see
+    // projectFileCountersRecomputeStmt for why three copies was a hazard. The
+    // scope rides through it, so a scoped finalize lands the same counters
+    // (structural_*, ai_drafted_count) as the unscoped form.
+    const res = await projectFileCountersRecomputeStmt(db, projectId, finalizedAt, fileIds).run()
     const { results: files } = await db
       .prepare(`SELECT id FROM files WHERE project_id = ?${scopeClause}`)
       .bind(projectId, ...scopeBinds)

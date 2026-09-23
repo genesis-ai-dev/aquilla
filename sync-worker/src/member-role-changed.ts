@@ -9,9 +9,13 @@
 // Without this hook, demoting a connected write-capable member to a
 // read-only role (viewer/commenter) doesn't take effect until they
 // reconnect — they can keep holding/renewing the edit lock indefinitely
-// after the demotion. Actual content writes are unaffected (POST /events
-// re-resolves the caller's role fresh on every request), so this closes a
-// griefing/UX-integrity gap, not a data-write bypass.
+// after the demotion. This closes a griefing/UX-integrity gap on the focus
+// lock; it is not what protects content writes. [Pen test 2026-09-21]:
+// POST /events does NOT re-resolve the caller's role fresh on every
+// request — it re-checks that a grant path still exists
+// (events/membership.ts) and, since then, that the live-resolved role
+// hasn't dropped below what the token claims. Either way enforcement is
+// bounded by the token's remaining TTL (up to 15 minutes), not instant.
 //
 // Deliberately an in-place role update, not an eject: forcing a reconnect
 // for every ordinary role change (e.g. a promotion) would be unnecessary

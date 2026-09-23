@@ -59,6 +59,17 @@ export interface ProjectWideSettings {
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
   validationCount?: number
   validationCountAudio?: number
+  /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — toward its progress numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. Deliberately no stored value for it: null would be a third
+   * thing the resolver has no meaning for, so choosing the default deletes the
+   * key. Absent on the org too means they count, which is what every project
+   * did before this existed.
+   */
+  countStructuralCells?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
@@ -265,6 +276,18 @@ export interface ProjectWideSettings {
    * (pseudonymous ids). Not agent-writable (`POLICY_SETTINGS_KEYS`).
    */
   agentAuthorship?: "none"
+  /**
+   * AQU-934: per-file genre assignment — fileId → genre id from the vocabulary
+   * in `src/lib/rules/file-genre.ts`. Human-set (a model may only suggest); an
+   * entry OVERRIDES the genre derived from a scripture book code and is the
+   * ONLY way a non-scripture document gets one, so genre-scoped style rules
+   * reach every cell of a classified document. Files with no entry keep
+   * deriving from their book code, so this map stays small — bounded by file
+   * count (tens of entries), not by content, which is why it belongs in the
+   * settings blob rather than its own table. Replacing this key replaces the
+   * whole map: writers must send the full merged object.
+   */
+  fileGenres?: Record<string, string>
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -331,6 +354,16 @@ export interface ProjectSettingsResponse {
   updatedAt: string
   updatedBy: { id: number; username: string } | null
   settings: ProjectWideSettings
+  /**
+   * AQU-1083: the org default this project inherits when `settings` carries no
+   * `countStructuralCells` of its own. Null when the project has no org.
+   *
+   * It rides on THIS response rather than the project record because this is
+   * the one an open editor re-reads — on a remote change frame and on window
+   * focus — so an org-level flip reaches a workspace that is already open.
+   * Optional: a server that predates this simply omits it.
+   */
+  orgCountStructuralCells?: boolean | null
 }
 
 export type PatchResult =
@@ -410,9 +443,11 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
- * Caller must include `ifMatchVersion`; mismatched version returns
- * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
+ * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
+ * settings blob (no per-key merge) — send a complete blob. Per-key merge is
+ * only available via the `useProjectSettings` hook and the Agent API
+ * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
+ * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
  */
 export async function patchProjectSettings(

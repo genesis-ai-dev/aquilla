@@ -71,25 +71,37 @@ describe("VoiceLibraryPanel (selector)", () => {
   })
 
   it("opens the unified modal from New voice, seeded with the project engine", () => {
-    setup({ provider: "kokoro" })
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        targetLanes={["es"]}
+        settings={{ provider: "mms", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
     fireEvent.click(screen.getByRole("button", { name: /New voice/ }))
     expect(screen.getByTestId("new-voice-modal")).toBeTruthy()
-    expect(modalProps.last?.provider).toBe("kokoro")
+    expect(modalProps.last?.provider).toBe("mms")
     expect(modalProps.last?.voice).toBeNull()
+    expect(modalProps.last?.targetLanguage).toBe("en")
+    expect(modalProps.last?.targetLanes).toEqual(["es"])
   })
 
   it("labels each row with the voice's own engine, not Gemini", () => {
     setup({
       provider: "mms",
       voices: [
-        makeVoice({ id: "v-k", name: "Kiki", provider: "kokoro", voiceName: "af_heart" }),
+        makeVoice({ id: "v-k", name: "Kiki", provider: "inworld", voiceName: "Dennis" }),
         makeVoice({ id: "v-c", name: "Cloney", provider: undefined, voiceName: undefined, referenceAudioId: "ref-1.webm" }),
         // No per-voice engine → falls back to the project engine (mms).
         makeVoice({ id: "v-legacy", name: "Legacy", provider: undefined, voiceName: undefined }),
       ],
       defaultVoiceId: "v-k",
     })
-    expect(screen.getByText("Kokoro")).toBeTruthy()
+    expect(screen.getByText("Inworld")).toBeTruthy()
     expect(screen.getByText("Clone")).toBeTruthy()
     expect(screen.getByText("MMS")).toBeTruthy()
   })
@@ -117,8 +129,8 @@ describe("VoiceLibraryPanel (selector)", () => {
 
   it("still labels a voice with its own explicit provider, ignoring the project default", () => {
     const onSettingsChange = vi.fn()
-    const kokoroVoice = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
-    const settings: ProjectTtsSettings = { provider: "omnivoice", voices: [kokoroVoice] }
+    const leftoverKokoro = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
+    const settings: ProjectTtsSettings = { provider: "gemini", voices: [leftoverKokoro] }
     render(
       <VoiceLibraryPanel
         projectId="dev-project"
@@ -126,7 +138,8 @@ describe("VoiceLibraryPanel (selector)", () => {
         onSettingsChange={onSettingsChange}
       />,
     )
-    expect(screen.getByText("Kokoro")).toBeTruthy()
+    expect(screen.getByText("Inworld")).toBeTruthy()
+    expect(screen.queryByText("Kokoro")).toBeNull()
   })
 
   it("opens Edit / Make narrator / Delete from the ⋯ menu", () => {
@@ -156,6 +169,93 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(check).toBeTruthy()
     expect(more).toBeTruthy()
     expect(check!.compareDocumentPosition(more!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("badges voice names with their language when the project has multiple lanes", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        targetLanes={["es"]}
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({ id: "v-en", name: "Dennis", provider: "inworld", voiceName: "Dennis", language: "en-US" }),
+            makeVoice({ id: "v-es", name: "Diego", provider: "inworld", voiceName: "Diego", language: "es-ES" }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("en-US")).toBeTruthy()
+    expect(screen.getByText("es-ES")).toBeTruthy()
+  })
+
+  it("does not badge voice names on a single-lane project", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({ id: "v-en", name: "Dennis", provider: "inworld", voiceName: "Dennis", language: "en-US" }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Dennis")).toBeTruthy()
+    expect(screen.queryByText("en-US")).toBeNull()
+  })
+
+  it("puts the voice language in the row description", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({
+              id: "v-en",
+              name: "Dennis",
+              provider: "inworld",
+              voiceName: "Dennis",
+              language: "en-US",
+            }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+        castStats={new Map([["v-en", { assigned: 2, voiced: 0 }]])}
+      />,
+    )
+    const row = screen.getByText("Dennis").closest("[role='button']")
+    expect(row).toHaveTextContent(/Inworld/)
+    expect(row).toHaveTextContent(/English/i)
+    expect(row).toHaveTextContent(/0\/2 voiced/)
+  })
+
+  it("uses the project language on a voice that has none of its own", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="es"
+        targetLanes={["fr"]}
+        settings={{
+          provider: "inworld",
+          voices: [makeVoice({ id: "v-narrator", name: "Narrator", provider: "inworld" })],
+          defaultVoiceId: "v-narrator",
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    const row = screen.getByText("Narrator").closest("[role='button']")
+    expect(row).toHaveTextContent(/Spanish/i)
   })
 })
 

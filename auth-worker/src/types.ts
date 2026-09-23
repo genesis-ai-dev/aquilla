@@ -91,6 +91,13 @@ export interface Env {
    *  form). Must be a routed/verified destination in Cloudflare Email Routing.
    *  Defaults to joel@frontierrnd.com (routes/contact.ts). */
   CONTACT_EMAIL?: string
+  /** Self-serve newsletter signup (services/resend-audience.ts). Both are
+   *  Worker SECRETS on Joel's SEPARATE Resend account — never reuse the
+   *  transactional RESEND_API_KEY. When either is absent the signup route
+   *  degrades to request-mode (notification email only, manual add). */
+  NEWSLETTER_RESEND_API_KEY?: string
+  /** ID of the "Frontier R&D Newsletter" segment in that Resend account. */
+  NEWSLETTER_RESEND_SEGMENT_ID?: string
   BASE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome
@@ -261,6 +268,17 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_PUBLISHABLE_KEY?: string
   /** Recurring $500 / 4-week Field Plan price id (price_…). */
+  BILLING_CHECKOUT_ENABLED?: string
+  /** Local loopback + test-key only. Never enables production purchasing. */
+  BILLING_CHAT_USAGE_REHEARSAL?: string
+  BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
+  STRIPE_PRICE_CATALOG?: string
+  /** Explicit sandbox portal configurations; validated scope-specific management. */
+  STRIPE_PORTAL_PERSONAL_CONFIGURATION?: string
+  STRIPE_PORTAL_TEAM_CONFIGURATION?: string
+  STRIPE_PRICE_FIELD_MONTHLY?: string
+  STRIPE_PRICE_FIELD_ANNUAL?: string
   STRIPE_PRICE_FIELD?: string
   /** One-time $200 / 100k-word add-on price id (price_…). */
   STRIPE_PRICE_ADDON?: string
@@ -280,6 +298,13 @@ export type Variables = {
    *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
    *  re-verifying the token. */
   tokenPayload: JWTPayload
+  /** Stable identity of the *credential* this request arrived on (not of its
+   *  bearer), set by authMiddleware — `jti:<jti>`, or `tok:<sha256>` for
+   *  pre-`jti` tokens. Authorization state that must not be shared across a
+   *  user's other sessions keys off this: see `requireAdminElevation`
+   *  (OPS-35). Same derivation as the isolate session cache, so the two
+   *  cannot disagree about what "this session" means. */
+  sessionKey: string
 }
 
 /**

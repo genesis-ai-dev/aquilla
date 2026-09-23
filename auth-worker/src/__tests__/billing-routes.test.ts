@@ -5,9 +5,9 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { applyAddonPurchase, applySubscriptionSnapshot } from "../lib/billing/apply"
 import { recordWords, readWordSnapshot, wordGuard } from "../lib/billing/words"
 import { verifyStripeSignature } from "../lib/billing/stripe"
-import { hmac } from "@noble/hashes/hmac"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils"
+import { hmac } from "@noble/hashes/hmac.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 function request(path: string, init?: RequestInit): Promise<Response> {
   return Promise.resolve(app.request(path, init, env))

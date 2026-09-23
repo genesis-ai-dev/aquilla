@@ -25,6 +25,7 @@ import { LockHeldError, RunLock } from "../../src/lib/migrate/run-lock"
 // Copied from scripts/migrate-all.ts so both writers contend for the same lease.
 const DEST_BUCKET = process.env.R2_DEST_BUCKET ?? "aquilla-snapshots"
 const LOCK_KEY = process.env.MIGRATE_LOCK_KEY ?? "_migrate/audio-migrate-state.lock"
+const STATUS_KEY = "_migrate/daemon-status.json"
 const LOCK_TTL_MS = 30 * 60_000
 const LOCK_HEARTBEAT_MS = 5 * 60_000
 const lockHolder = (): string =>
@@ -77,7 +78,14 @@ async function build(config: DaemonConfig) {
     chunkMin: config.chunkMin, chunkMax: config.chunkMax,
   })
   const digest = new Digest()
-  return { db, sync, gitlab, creds, pacer, digest, scheduler: new Scheduler({ config, db, sync, gitlab, creds, pacer, log, digest }) }
+  const r2 = config.r2 ? new R2Client(config.r2) : undefined
+  const publishStatus = r2
+    ? (status: Record<string, unknown>) => {
+        void r2.putObject(DEST_BUCKET, STATUS_KEY, JSON.stringify(status))
+          .catch((e) => log(`status publish failed: ${e instanceof Error ? e.message : String(e)}`))
+      }
+    : undefined
+  return { db, sync, gitlab, creds, pacer, digest, r2, scheduler: new Scheduler({ config, db, sync, gitlab, creds, pacer, digest, r2, publishStatus, log }) }
 }
 
 function acquireLock(config: DaemonConfig): RunLock | null {
@@ -235,7 +243,7 @@ function cmdStatus(config: DaemonConfig): void {
   })
   console.log(`pacer (fresh — live pacer state is per-process): ${JSON.stringify(pacer.snapshot())}`)
   console.log(`ledger rows: ${projects.reduce((n, p) => n + db.ledgerCount(p.gitlab_id), 0)}`)
-  for (const k of ["inbox_cursor", "reconcile_hwm", "last_full_reseed", "reseed_failed_ids", "reseed_next_attempt"]) {
+  for (const k of ["inbox_cursor", "last_inbox_poll_at", "last_reconcile_at", "reconcile_hwm", "last_full_reseed", "last_audio_result", "reseed_failed_ids", "reseed_next_attempt"]) {
     console.log(`kv ${k}: ${db.kvGet(k) ?? "(unset)"}`)
   }
   const clones = dirUsage(path.join(config.home, "clones"))

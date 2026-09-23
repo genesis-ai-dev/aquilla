@@ -124,4 +124,83 @@ describe("extractPptxStrings", () => {
       blockPath: "p:sp[1]/p:txBody/a:p[2]",
     })
   })
+
+  // AQU-1124: table text used to be dropped on the floor — the walk only
+  // visited p:sp shapes, and a PowerPoint table lives in a p:graphicFrame.
+  describe("tables (AQU-1124)", () => {
+    it("extracts text from table cells", async () => {
+      const buffer = await makePptx({
+        "slide1.xml": `
+          <p:graphicFrame><a:graphic><a:graphicData><a:tbl>
+            <a:tr>
+              <a:tc><a:txBody><a:p><a:r><a:t>Book</a:t></a:r></a:p></a:txBody></a:tc>
+              <a:tc><a:txBody><a:p><a:r><a:t>Chapters</a:t></a:r></a:p></a:txBody></a:tc>
+            </a:tr>
+            <a:tr>
+              <a:tc><a:txBody><a:p><a:r><a:t>Genesis</a:t></a:r></a:p></a:txBody></a:tc>
+              <a:tc><a:txBody><a:p><a:r><a:t>50</a:t></a:r></a:p></a:txBody></a:tc>
+            </a:tr>
+          </a:tbl></a:graphicData></a:graphic></p:graphicFrame>
+        `,
+      })
+      const result = await extractPptxStrings(buffer)
+      expect(result.map((r) => r.original)).toEqual(["Book", "Chapters", "Genesis", "50"])
+      expect(result.every((r) => r.context === "Slide 1")).toBe(true)
+    })
+
+    it("gives table cells row/column source locations", async () => {
+      const buffer = await makePptx({
+        "slide1.xml": `
+          <p:graphicFrame><a:graphic><a:graphicData><a:tbl>
+            <a:tr>
+              <a:tc><a:txBody><a:p><a:r><a:t>R1C1</a:t></a:r></a:p></a:txBody></a:tc>
+              <a:tc><a:txBody><a:p><a:r><a:t>R1C2</a:t></a:r></a:p></a:txBody></a:tc>
+            </a:tr>
+          </a:tbl></a:graphicData></a:graphic></p:graphicFrame>
+        `,
+      })
+      const result = await extractPptxStrings(buffer)
+      expect(result[0].sourceLocation).toEqual({
+        file: "ppt/slides/slide1.xml",
+        blockPath: "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[1]/a:txBody/a:p[1]",
+      })
+      expect(result[1].sourceLocation).toEqual({
+        file: "ppt/slides/slide1.xml",
+        blockPath: "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[2]/a:txBody/a:p[1]",
+      })
+    })
+
+    it("interleaves table and shape text in slide order, and leaves p:sp numbering alone", async () => {
+      const buffer = await makePptx({
+        "slide1.xml": `
+          <p:sp>
+            <p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+            <p:txBody><a:p><a:r><a:t>Overview</a:t></a:r></a:p></p:txBody>
+          </p:sp>
+          <p:graphicFrame><a:graphic><a:graphicData><a:tbl>
+            <a:tr><a:tc><a:txBody><a:p><a:r><a:t>In the table</a:t></a:r></a:p></a:txBody></a:tc></a:tr>
+          </a:tbl></a:graphicData></a:graphic></p:graphicFrame>
+          <p:sp><p:txBody><a:p><a:r><a:t>After the table</a:t></a:r></a:p></p:txBody></p:sp>
+        `,
+      })
+      const result = await extractPptxStrings(buffer)
+      expect(result.map((r) => r.original)).toEqual(["Overview", "In the table", "After the table"])
+      expect(result[0].type).toBe("heading")
+      // The trailing shape is still p:sp[2] — the table does not renumber it,
+      // so locators recorded before table support keep pointing at the same
+      // paragraph.
+      expect(result[2].sourceLocation?.blockPath).toBe("p:sp[2]/p:txBody/a:p[1]")
+    })
+
+    it("ignores a graphic frame that holds no table (chart / SmartArt)", async () => {
+      const buffer = await makePptx({
+        "slide1.xml": `
+          <p:graphicFrame><a:graphic><a:graphicData/></a:graphic></p:graphicFrame>
+          <p:sp><p:txBody><a:p><a:r><a:t>Only text</a:t></a:r></a:p></p:txBody></p:sp>
+        `,
+      })
+      const result = await extractPptxStrings(buffer)
+      expect(result.map((r) => r.original)).toEqual(["Only text"])
+    })
+  })
 })

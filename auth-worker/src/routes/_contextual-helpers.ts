@@ -19,6 +19,7 @@ type ErrorCode =
   | "credit_cap_exceeded"
   | "not_configured"
   | "segmentation_failed"
+  | "context_required"
 
 export function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {

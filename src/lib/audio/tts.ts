@@ -1,10 +1,10 @@
-// Main-thread orchestrator for TTS. Kokoro stays browser-local through the
-// worker path; Gemini uses BYOK REST and returns raw PCM that we wrap in WAV.
+// Main-thread orchestrator for client TTS. Gemini uses BYOK REST and returns
+// raw PCM that we wrap in WAV. MMS stays browser-local through its worker.
+// Inworld (and leftover OmniVoice / Kokoro ids remapped onto it) is server-only.
 
 import { useSyncExternalStore } from "react"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import { requestAiModelConsent, KOKORO_MODEL, MMS_MODEL, AiModelConsentDeniedError } from "./ai-consent"
-import type { ResultMessage, ErrorMessage, ProgressMessage, SynthRequest } from "./kokoro-worker"
+import { requestAiModelConsent, MMS_MODEL, AiModelConsentDeniedError } from "./ai-consent"
 import type {
   ResultMessage as MmsResultMessage,
   ErrorMessage as MmsErrorMessage,
@@ -15,12 +15,13 @@ import { synthesizeGeminiTtsToWavBlob, type GeminiTtsContext } from "./gemini-tt
 import { floatPcmToWavBlob } from "./wav"
 import { resolveVoice } from "./voices"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
-import { getKokoroWorker, getMmsWorker, noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
+import { getMmsWorker, noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import {
+  effectiveTtsProvider,
   normalizeVoiceForProvider,
   resolveTtsProvider,
+  isServerTtsProvider,
 } from "./tts-providers"
-import { friendlyKokoroError } from "./phonemizer-browser-env"
 
 export type TtsStatus =
   | { kind: "idle" }
@@ -102,10 +103,10 @@ export async function synthesizeToWavBlob(
   const cleanText = text.trim()
   if (!cleanText) throw new Error("No text to synthesize.")
 
-  const provider = opts.projectProvider ?? opts.voice.provider ?? "gemini"
-  if (provider === "omnivoice") {
+  const provider = effectiveTtsProvider(opts.projectProvider ?? opts.voice.provider)
+  if (isServerTtsProvider(provider)) {
     throw new Error(
-      "OmniVoice runs server-side — generate from a project cell, not the local synth path.",
+      "Inworld TTS runs server-side — generate from a project cell, not the local synth path.",
     )
   }
   const voice = normalizeVoiceForProvider(opts.voice, provider, {
@@ -122,55 +123,27 @@ export async function synthesizeToWavBlob(
     })
   }
 
-  if (provider === "mms") {
-    const consented = await requestAiModelConsent(MMS_MODEL)
-    if (!consented) throw new AiModelConsentDeniedError(MMS_MODEL.id)
-    const lang = (voice.voiceName ?? "").trim()
-    if (!lang) throw new Error("Set a supported MMS language code (e.g. eng, fra, spa) on this voice before generating.")
-    const worker = await getMmsWorker()
-    const requestId = `mms-${++workerSeq}`
-    const result = await new Promise<MmsResultMessage>((resolve, reject) => {
-      const onMessage = (event: MessageEvent<MmsResultMessage | MmsErrorMessage | MmsProgressMessage>) => {
-        const m = event.data
-        if (m.requestId !== requestId) return
-        if (m.type === "progress") {
-          opts.onProgress?.({ loaded: m.loaded, total: m.total, file: m.file, status: m.status })
-          noteModelDownloading("mms", m)
-          return
-        }
-        worker.removeEventListener("message", onMessage)
-        if (m.type === "result") { noteModelDownloadSettled("mms", true); resolve(m) }
-        else { noteModelDownloadSettled("mms", false); reject(new Error(friendlyMmsError(m.message))) }
-      }
-      worker.addEventListener("message", onMessage)
-      const req: MmsSynthRequest = { type: "synth", requestId, lang, text: cleanText }
-      worker.postMessage(req)
-    })
-    return pcmToWavBlob(result.pcm, result.sampleRate)
-  }
-
-  // Kokoro fallback (default for any unknown provider).
-  const consented = await requestAiModelConsent(KOKORO_MODEL)
-  if (!consented) throw new AiModelConsentDeniedError(KOKORO_MODEL.id)
-  const worker = await getKokoroWorker()
-  const requestId = `tts-${++workerSeq}`
-  const result = await new Promise<ResultMessage>((resolve, reject) => {
-    const onMessage = (event: MessageEvent<ResultMessage | ErrorMessage | ProgressMessage>) => {
+  const consented = await requestAiModelConsent(MMS_MODEL)
+  if (!consented) throw new AiModelConsentDeniedError(MMS_MODEL.id)
+  const lang = (voice.voiceName ?? "").trim()
+  if (!lang) throw new Error("Set a supported MMS language code (e.g. eng, fra, spa) on this voice before generating.")
+  const worker = await getMmsWorker()
+  const requestId = `mms-${++workerSeq}`
+  const result = await new Promise<MmsResultMessage>((resolve, reject) => {
+    const onMessage = (event: MessageEvent<MmsResultMessage | MmsErrorMessage | MmsProgressMessage>) => {
       const m = event.data
       if (m.requestId !== requestId) return
       if (m.type === "progress") {
         opts.onProgress?.({ loaded: m.loaded, total: m.total, file: m.file, status: m.status })
-        noteModelDownloading("kokoro", m)
+        noteModelDownloading("mms", m)
         return
       }
       worker.removeEventListener("message", onMessage)
-      if (m.type === "result") { noteModelDownloadSettled("kokoro", true); resolve(m) }
-      else { noteModelDownloadSettled("kokoro", false); reject(new Error(friendlyKokoroError(m.message))) }
+      if (m.type === "result") { noteModelDownloadSettled("mms", true); resolve(m) }
+      else { noteModelDownloadSettled("mms", false); reject(new Error(friendlyMmsError(m.message))) }
     }
     worker.addEventListener("message", onMessage)
-    const req: SynthRequest = {
-      type: "synth", requestId, text: cleanText, voice: voice.voiceName, speed: opts.speed,
-    }
+    const req: MmsSynthRequest = { type: "synth", requestId, lang, text: cleanText }
     worker.postMessage(req)
   })
   return pcmToWavBlob(result.pcm, result.sampleRate)

@@ -31,6 +31,7 @@ import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
+import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -74,6 +75,7 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
@@ -152,10 +154,14 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
-      /** OmniVoice TTS Modal endpoint (infra/modal/omnivoice.py). */
-      OMNIVOICE_URL?: string
-      /** Shared secret for the OmniVoice endpoint (matches its OMNIVOICE_TOKEN). */
-      OMNIVOICE_TOKEN?: string
+      /**
+       * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
+       * See docs/INWORLD-TTS.md.
+       */
+      INWORLD_API_KEY?: string
+      INWORLD_API_BASE?: string
+      INWORLD_TTS_MODEL?: string
+      INWORLD_DEFAULT_VOICE?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -357,6 +363,8 @@ const worker = {
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
+    const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
+    if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
@@ -379,6 +387,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1233: agent-facing comment reads. Its own module (rather than another
+    // arm of read-routes) because it re-uses that file's auth/scope gate —
+    // registering it here keeps the dependency one-directional.
+    const externalCommentsResponse = await handleExternalCommentsRequest(request, env)
+    if (externalCommentsResponse) return withCors(externalCommentsResponse, request)
     // AQU-1229: Living Memory reads. Mounted after the general external reads —
     // both regexes are $-anchored so neither can shadow the other, but the
     // memory paths extend .../files/:fileId/cells, so keeping the narrower

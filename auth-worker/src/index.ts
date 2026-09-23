@@ -164,7 +164,7 @@ app.use("*", async (c, next) => {
 // Hono throws on `c.executionCtx` when there is none (vitest calls
 // app.fetch without a ctx), so resolve it defensively and fall back to
 // un-awaited fire-and-forget.
-const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+const runInBackground = (c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, task: Promise<void>) => {
   try {
     c.executionCtx.waitUntil(task)
   } catch {
@@ -340,7 +340,6 @@ app.route("/api/v1/aquifer", aquiferRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.
-// Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4.
 // /api/v1/usage/me (JWT-authed), /api/v1/usage/org/:orgId (maintainer-gated).
 app.route("/api/v1/usage", usageRoutes)
 

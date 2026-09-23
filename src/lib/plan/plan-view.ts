@@ -33,6 +33,7 @@ export const DEFAULT_PLAN_VIEW: PlanViewMode = "status"
 
 const VIEW_STORAGE_KEY = "aquilla:planView"
 const GROUPS_STORAGE_KEY_PREFIX = "aquilla:planGroups:"
+const FOLDERS_STORAGE_KEY_PREFIX = "aquilla:planFolders:"
 
 function isPlanViewMode(value: unknown): value is PlanViewMode {
   return value === "status" || value === "order"
@@ -99,5 +100,42 @@ export function toggleCollapsedGroup(
   const next = new Set(collapsed)
   if (next.has(status)) next.delete(status)
   else next.add(status)
+  return next
+}
+
+/**
+ * AQU-1278: which FOLDERS this project's reader has folded in the in-order
+ * arrangement — kept apart from the status folds, so folding Season 2 does not
+ * also fold Not started. Keys are the folder's stable identity
+ * (`PlanFolderGroup.key`), never a translated label.
+ */
+export function loadCollapsedFolders(projectId: string | null): Set<string> {
+  if (!projectId) return new Set()
+  try {
+    const raw = localStorage.getItem(`${FOLDERS_STORAGE_KEY_PREFIX}${projectId}`)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((v): v is string => typeof v === "string"))
+  } catch {
+    return new Set()
+  }
+}
+
+/** Persist the folded folders for one project. */
+export function saveCollapsedFolders(projectId: string | null, collapsed: Set<string>): void {
+  if (!projectId) return
+  try {
+    localStorage.setItem(`${FOLDERS_STORAGE_KEY_PREFIX}${projectId}`, JSON.stringify([...collapsed]))
+  } catch {
+    /* storage unavailable — preference is best-effort */
+  }
+}
+
+/** A new set with one folder's fold flipped. Pure; callers persist the result. */
+export function toggleCollapsedFolder(collapsed: Set<string>, key: string): Set<string> {
+  const next = new Set(collapsed)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
   return next
 }

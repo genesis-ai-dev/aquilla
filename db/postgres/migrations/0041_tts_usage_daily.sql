@@ -1,4 +1,4 @@
--- OmniVoice TTS usage metering (2026-06-13-omnivoice-tts-design.md §3)
+-- TTS usage metering (2026-06-13 TTS metering design §3)
 --
 -- Stores per-user, org-attributed audio-seconds generated via the TTS route.
 -- org_id = 0, user_id = 0 → global sentinel row (platform total, O(1) read).

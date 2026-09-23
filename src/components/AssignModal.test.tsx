@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AssignModal } from "./AssignModal"
+import { pickSelectOption as selectOption } from "@/test-utils/select"
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 vi.mock("@/lib/sync/assignments", () => ({
@@ -187,17 +188,12 @@ describe("project-member-only assignee picker (AQU-676)", () => {
   })
 })
 
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Under happy-dom, clicks on options don't commit a selection when the
-// select sits inside a modal Dialog — but hover-highlighting the option and
-// pressing Enter does (the keyboard path Base UI supports natively).
+// Base UI Select renders a combobox trigger; options live in a portaled popup.
+// The shared helper drives the pointer sequence Base UI requires to commit a
+// choice (see src/test-utils/select.tsx); here we additionally hold it to
+// rendering the chosen label on the trigger.
 async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  const trigger = await selectOption(triggerName, optionName)
   // Selection committed when the trigger renders the chosen label.
   await waitFor(() => {
     expect(trigger.textContent).toMatch(optionName)

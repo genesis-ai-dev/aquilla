@@ -32,12 +32,16 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
   type SpanCursor,
   type StoredSpanSeed,
 } from "../../../../db/shared/contextual-runs"
-import { raiseDecisionOnce } from "../../../../db/shared/contextual-decisions"
+import {
+  raiseDecisionOnce,
+  findOpenDecisionForRun,
+} from "../../../../db/shared/contextual-decisions"
 import {
   proposeSceneBrief,
   listSceneBriefs,
@@ -54,6 +58,7 @@ import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
+import { reflectAtPark } from "./reflect"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { formatSpanRange } from "../../../../shared/span-label"
@@ -315,6 +320,11 @@ export interface ContextualRunStateFrame {
   done: number
   total: number
   failed?: number
+  /** Why a `parked` run stopped (AQU-1300). Carried on the LIVE frame, not
+   *  left to the next poll: parking is the moment the UI has to switch from
+   *  "drafting" to "waiting for you", and a frame that says only `parked`
+   *  cannot tell that apart from "finished". Omitted on every other status. */
+  parkReason?: ContextualParkReason
 }
 
 export interface ContextualSceneFrame {
@@ -382,6 +392,18 @@ export interface ContextualDraftsFrame {
   truncated?: boolean
 }
 
+/** A park's reflection staged memory proposals for review (AQU-1302). ONE
+ *  frame per reflection, carrying only the count — the notes themselves are
+ *  reviewable rows in the Memory tab, and `failed` marks a reflection whose
+ *  model call did not come back, so a run that quietly stopped learning is
+ *  visible in its own activity rather than only in worker logs. */
+export interface ContextualMemoriesFrame {
+  type: "contextual.memories"
+  runId: string
+  count: number
+  failed?: boolean
+}
+
 export type ContextualProgressFrame =
   | ContextualRunStateFrame
   | ContextualSceneFrame
@@ -389,6 +411,7 @@ export type ContextualProgressFrame =
   | ContextualSpanStartFrame
   | ContextualPhaseFrame
   | ContextualDraftsFrame
+  | ContextualMemoriesFrame
 
 /** Frame-size guards: a draft burst must not turn one span into a megabyte of
  *  WebSocket traffic. Beyond these the client refetches the authoritative list. */
@@ -405,6 +428,7 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
+    ...(run.status === "parked" && run.parkReason ? { parkReason: run.parkReason } : {}),
   }
 }
 
@@ -478,6 +502,16 @@ export async function persistContextualProgressFrame(
           cellIds: frame.drafts.map((draft) => draft.cellId),
           truncated: frame.truncated === true,
         },
+      })
+      return
+    case "contextual.memories":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "memories_proposed",
+        status: frame.failed === true ? "failed" : "complete",
+        details: { count: frame.count },
       })
       return
     case "contextual.span":
@@ -1088,6 +1122,43 @@ async function processSpan(
 }
 
 /**
+ * Reflect once on a run that just parked, and record the result on the run's
+ * own activity (AQU-1302).
+ *
+ * Called AFTER the park transition and its state frame: the person watching
+ * sees "waiting for you" immediately and the reflection call happens behind
+ * that, so a slow model never delays the hand-back. Every failure is swallowed
+ * — a run that parked correctly must not be rewritten as a failed one because
+ * a bonus model call timed out — but it is swallowed LOUDLY, as a
+ * `memories_proposed`/failed activity line, so a run that quietly stopped
+ * learning is visible where the rest of its work is.
+ *
+ * Durable activity only, deliberately: unlike a draft, a proposal is reviewed
+ * in the Memory tab rather than in the live editor, so there is nothing for a
+ * live frame to update mid-park.
+ */
+async function reflectOnParkedRun(deps: TickDeps, run: ContextualRun): Promise<void> {
+  const record = async (count: number, failed: boolean): Promise<void> => {
+    try {
+      await persistContextualProgressFrame(
+        deps.db,
+        { projectId: run.projectId, fileId: run.fileId },
+        { type: "contextual.memories", runId: run.id, count, ...(failed ? { failed } : {}) },
+      )
+    } catch (err) {
+      console.warn(`[contextual] reflection activity append failed for run ${run.id}:`, err)
+    }
+  }
+  try {
+    const staged = await reflectAtPark({ db: deps.db, run, llm: deps.llm })
+    if (staged > 0) await record(staged, false)
+  } catch (err) {
+    console.warn(`[contextual] park reflection failed for run ${run.id}:`, err)
+    await record(0, true)
+  }
+}
+
+/**
  * Process ONE WAVE of the run — up to `concurrency` spans driven at the same
  * time — then return whether the caller's loop should continue.
  *
@@ -1175,8 +1246,44 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // A run that produced nothing at all still fails, so Play can start fresh.
     const t = run.failedSpans > 0 && run.doneSpans === 0
       ? await failRun(db, runId, run.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
     if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+
+  // ── Trust gate (AQU-1300) ────────────────────────────────────────────────
+  // There IS more work past this point, so both checks below park with
+  // `awaiting_input` — "waiting for you", never "all done".
+  //
+  // Honoured at the span edge, alongside pause/terminate, and before any model
+  // call: the whole value of a budget is that spending stops BEFORE the spend.
+  //
+  // An unanswered question wins over remaining allowance. Drafting on past it
+  // buries the question under work built on the assumption it was answered one
+  // particular way, which is worse than not drafting at all.
+  const openDecision = await findOpenDecisionForRun(db, {
+    projectId: run.projectId,
+    runId: run.id,
+  })
+  if (openDecision) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+  // `null` is unlimited (explicit "translate everything", and every run created
+  // before this shipped). Only a real, spent budget parks.
+  if (run.spanAllowance !== null && run.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
     return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
   }
 
@@ -1212,7 +1319,13 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     },
   }
 
-  const remaining = cursor.seeds.length - cursor.nextIndex
+  // The allowance caps the WAVE, not just the loop: a run with one span of
+  // budget must draft one passage, not a wave of six and then notice. This is
+  // the only place wave width and budget meet, and the budget always wins.
+  const unspent = cursor.seeds.length - cursor.nextIndex
+  const remaining = run.spanAllowance === null
+    ? unspent
+    : Math.min(unspent, run.spanAllowance)
   const width = Math.max(1, Math.min(deps.concurrency ?? waveSize(remaining), remaining))
   const wave = cursor.seeds.slice(cursor.nextIndex, cursor.nextIndex + width)
 
@@ -1267,6 +1380,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     callsUsed: reports.reduce((n, r) => n + r.callsUsed, 0),
     lastError,
     steeringCursor: new Date().toISOString(),
+    // Debit only the spans that actually ran. A blocked span produced a
+    // question rather than a passage, and the cursor rewinds it to the front of
+    // the tail — charging for it would make the user pay twice for one passage.
+    spansProcessed: completedWaveSeeds.length,
   })
 
   const lastReport = reports[reports.length - 1]
@@ -1318,8 +1435,23 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // that staged nothing still fails so retry can start a new run.
     const t = fresh.failedSpans > 0 && fresh.doneSpans === 0
       ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
     if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return result(false, t.status === "ok" ? t.run.status : fresh.status)
+  }
+  // Allowance spent with work still queued: park here rather than leaving the
+  // driver to loop once more and discover it. Same outcome, but the parked
+  // frame reaches the UI now instead of after another round-trip — and the run
+  // never reports `continueRun: true` when it has already decided to stop.
+  if (fresh?.status === "running" && fresh.spanAllowance !== null && fresh.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
     return result(false, t.status === "ok" ? t.run.status : fresh.status)
   }
   const more = fresh !== null && fresh.status === "running"

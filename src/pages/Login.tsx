@@ -159,16 +159,13 @@ export function Login() {
                     type="submit"
                     form="login-form"
                     className="w-full"
-                    disabled={isSubmitting}
+                    loading={isSubmitting}
                     aria-describedby={
                       isSubmitting && isMigrating
                         ? "login-account-setup-note"
                         : undefined
                     }
                   >
-                    {isSubmitting && (
-                      <Spinner data-icon="inline-start" aria-hidden="true" />
-                    )}
                     {isSubmitting
                       ? isMigrating
                         ? t("auth.login.submitMigrating")

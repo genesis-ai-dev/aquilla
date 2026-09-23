@@ -13,7 +13,7 @@ goal wording, and turn every verified product failure into a Linear
 Triage ticket with reproducible evidence. The suite exists to break
 releases before users do; it is advisory evidence, not a merge gate.
 
-Non-goals: replacing the cooperative smart suite, testing production,
+Non-goals: replacing the cooperative smart suite, attacking production,
 measuring Jev's own reliability, or covering gestures Jev cannot perform
 (drag, keyboard shortcuts, canvas, audio).
 
@@ -60,7 +60,7 @@ One interface, two implementations.
 
 ```ts
 interface AdversarialTarget {
-  kind: "local" | "dev"
+  kind: "local" | "dev" | "prod-canary"
   baseURL: string            // SPA origin
   identityBase: string       // auth-worker origin
   syncBase: string           // sync-worker origin
@@ -94,10 +94,11 @@ interface AdversarialTarget {
   skipped when any test produced `product_failure`, so the evidence org
   stays reproducible. Members of the second and third users are added
   to the run org at creation so multi-user attacks can log in.
-- **Guard.** `assertAdversarialTarget(env)` allows only hosts
-  `127.0.0.1` (with the existing e2e database rule) or the exact dev
-  hostnames. Any other host, including `aquilla.app`, `api.aquilla.app`,
-  and staging, throws before a browser opens. Unit-tested.
+- **Guard.** `assertAdversarialTarget(env, mode)` allows hosts
+  `127.0.0.1` (with the existing e2e database rule) and the exact dev
+  hostnames for every mode, and the production hostnames only for
+  `prod-canary` (see Launcher). Staging and any other host throw before a
+  browser opens. Unit-tested.
 - **Build identity.** DevTarget reads `<baseURL>/version.json`
   (`{sha, branch, builtAt}` written by `vite.config.ts`) once per run and
   stamps it into every evidence record and ticket. LocalTarget keeps the

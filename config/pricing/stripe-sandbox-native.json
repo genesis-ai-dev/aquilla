@@ -1,0 +1,99 @@
+{
+  "version": "2026-09-native",
+  "entitlementVersion": "2026-09-weekly",
+  "accountId": "acct_1U47kG7SR91OrWMS",
+  "verifiedAt": "2026-09-14",
+  "checkoutLayout": "single_item",
+  "bindings": [
+    {
+      "priceId": "price_1UFaJN7SR91OrWMSzEu68J2x",
+      "productId": "prod_VG6WxGbN40ZhVl",
+      "offer": "pro",
+      "interval": "month",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJO7SR91OrWMS80302i9S",
+      "productId": "prod_VG6WxGbN40ZhVl",
+      "offer": "pro",
+      "interval": "year",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+      "productId": "prod_VG6W6C2JBJgl1g",
+      "offer": "max_5x",
+      "interval": "month",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJP7SR91OrWMSn9Z6QvkP",
+      "productId": "prod_VG6W6C2JBJgl1g",
+      "offer": "max_5x",
+      "interval": "year",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJQ7SR91OrWMST7tsJqAi",
+      "productId": "prod_VG6WVL0lYU8DnM",
+      "offer": "max_20x",
+      "interval": "month",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJQ7SR91OrWMSUd3NJrvb",
+      "productId": "prod_VG6WVL0lYU8DnM",
+      "offer": "max_20x",
+      "interval": "year",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJR7SR91OrWMSYtkfZa4M",
+      "productId": "prod_VG6WUXf1fimEq2",
+      "offer": "team",
+      "interval": "month",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJR7SR91OrWMSIjsC1gbR",
+      "productId": "prod_VG6WUXf1fimEq2",
+      "offer": "team",
+      "interval": "year",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJS7SR91OrWMSmeb6WWVV",
+      "productId": "prod_VG6WUgEcQ6SPqd",
+      "offer": "team_20x",
+      "interval": "month",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    },
+    {
+      "priceId": "price_1UFaJS7SR91OrWMSyuIbTSMx",
+      "productId": "prod_VG6WUgEcQ6SPqd",
+      "offer": "team_20x",
+      "interval": "year",
+      "currency": "usd",
+      "live": false,
+      "maxQuantity": 1
+    }
+  ]
+}

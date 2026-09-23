@@ -75,7 +75,11 @@ export const org = defineNamespace({
     "org.egress.results.noteLine": "Note: {file}: {note}",
 
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
-    "org.switcher.workspaceFallback": "Workspace",
+    // AQU-1113: `org.switcher.workspaceFallback` ("Workspace") was retired —
+    // it was an orphan (translated into 6 locales, referenced by nothing; the
+    // switcher hardcoded an English "Workspace" literal instead) and it named
+    // the same unnamed-org placeholder the breadcrumb already calls
+    // "Organization". The switcher now uses org.breadcrumb.organizationFallback.
     "org.switcher.triggerAriaLabel": "Organization switcher: {org}",
     "org.switcher.searchPlaceholder": "Find an organization…",
     "org.switcher.searchAriaLabel": "Find an organization",
@@ -631,7 +635,7 @@ export const org = defineNamespace({
 
     // -- OrgCreateDialog: create-org dialog --
     "org.createDialog.title": "Create organization",
-    "org.createDialog.description": "Give your team a workspace for projects, members, and settings.",
+    "org.createDialog.description": "Give your team an organization for projects, members, and settings.",
     "org.createDialog.nameLabel": "Organization name",
     "org.createDialog.namePlaceholder": "Acme Bible Translation",
     // "Creating…" busy label → common.creating (identical text)
@@ -641,7 +645,7 @@ export const org = defineNamespace({
     // -- OrgRenameDialog: rename-org dialog --
     "org.renameDialog.title": "Rename organization",
     "org.renameDialog.description":
-      "This name is shown across the workspace — in the sidebar, settings, and member lists.",
+      "This name is shown across the organization — in the sidebar, settings, and member lists.",
     "org.renameDialog.genericError": "Couldn't rename your organization.",
 
     // -- OrgRouteGate: route guard for /orgs/:orgId/... --
@@ -834,6 +838,12 @@ export const org = defineNamespace({
     }),
     "org.assignWork.clearAllChapters": "Clear all",
     "org.assignWork.selfAssignNote": "Self-assignment is on — you can claim this work for yourself.",
+    // AQU-1308: the assignee picker must never render an empty "Select
+    // member…" when the roster fetch failed — say which failure it was.
+    "org.assignWork.rosterHiddenError":
+      "Your organization restricts who can see this project's member list, so there is no one to pick. Ask an owner or maintainer for access.",
+    "org.assignWork.rosterLoadError":
+      "Couldn’t load this project’s members, so the assignee list is empty. Close the panel and try again.",
 
     // -- AssignedToMe: assignee's open-assignments inbox --
     "org.assignedToMe.selectOrgDescription": "Assignments are scoped to a single organization.",
@@ -1092,7 +1102,7 @@ export const org = defineNamespace({
     // period) — this is the DataTable's own inline empty-state title, which
     // the source renders without one.
     "org.orgHome.projectsPanel.emptyTitle": "No projects yet",
-    "org.orgHome.organizationsPanel.sectionDescription": "Workspaces you belong to across Aquilla.",
+    "org.orgHome.organizationsPanel.sectionDescription": "Organizations you belong to across Aquilla.",
     // Distinct from org.orgHome.organizationsPanel.noOrganizationsYet ("No
     // organizations yet.", with a period) — this is the DataTable's own
     // empty-state title, which the source renders without one.
@@ -2328,6 +2338,14 @@ export const org = defineNamespace({
         description:
           "Status line above the chapter checkbox list in the Assign work panel, counting how many chapters are currently checked (zero checked means 'whole book').",
         placeholders: { count: "How many chapters are currently checked; also selects the plural form." },
+      },
+      "org.assignWork.rosterHiddenError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list was refused because the organization has restricted who may view rosters. Explains why the dropdown is empty and who to ask.",
+      },
+      "org.assignWork.rosterLoadError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list could not be fetched at all (no access, or a network/server failure). Explains why the dropdown is empty.",
       },
       "org.assignedToMe.cellsProgress": {
         description:

@@ -4,10 +4,11 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
-import { childArgs } from "./neon-target-args"
+import { childArgs, type NeonTargetCommand } from "./neon-target-args"
 
 type Target = "production" | "dev"
-type Command = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity" | "backfill-lanes" | "verify-lanes"
+// One union, owned by neon-target-args.ts, so the two files cannot drift apart.
+type Command = NeonTargetCommand
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"

@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest"
+import { audio } from "@/lib/i18n/namespaces/audio"
 import {
   DEFAULT_GEMINI_VOICE,
-  DEFAULT_KOKORO_VOICE,
+  DEFAULT_INWORLD_VOICE,
   DEFAULT_MMS_LANGUAGE,
   DEFAULT_TTS_PROVIDER,
   TTS_PROVIDER_INFOS,
   defaultVoiceNameForProvider,
+  effectiveTtsProvider,
   inferMmsLanguageCode,
+  isInworldVoiceName,
+  isLegacyKokoroVoiceName,
+  isServerTtsProvider,
   normalizeVoiceForProvider,
+  providerInfo,
 } from "./tts-providers"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -23,20 +29,18 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(geminiVoice, "gemini").voiceName).toBe("Charon")
   })
 
-  it("does not pass Gemini voice ids to Kokoro", () => {
-    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
-  })
-
-  it("does not treat a BCP-47 tag as a Kokoro voice id", () => {
-    const tagged: Voice = { ...geminiVoice, voiceName: "en-us" }
-    expect(normalizeVoiceForProvider(tagged, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
-  })
-
-  it("picks a British Kokoro voice when the target language is en-gb", () => {
-    expect(defaultVoiceNameForProvider("kokoro", { targetLanguage: "en-gb" })).toBe("bf_emma")
-    expect(
-      normalizeVoiceForProvider(geminiVoice, "kokoro", { targetLanguage: "en-GB" }).voiceName,
-    ).toBe("bf_emma")
+  it("remaps leftover Kokoro onto Inworld and drops speaker ids", () => {
+    expect(effectiveTtsProvider("kokoro")).toBe("inworld")
+    expect(isServerTtsProvider("kokoro")).toBe(true)
+    expect(providerInfo("kokoro").id).toBe("inworld")
+    expect(defaultVoiceNameForProvider("kokoro")).toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").provider).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    const leftover: Voice = { ...geminiVoice, voiceName: "af_bella" }
+    expect(normalizeVoiceForProvider(leftover, "inworld").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    expect(isLegacyKokoroVoiceName("af_bella")).toBe(true)
+    expect(isLegacyKokoroVoiceName("bf_emma")).toBe(true)
+    expect(isInworldVoiceName("af_bella")).toBe(false)
   })
 
   it("does not pass Gemini voice ids to MMS", () => {
@@ -63,49 +67,87 @@ describe("TTS provider normalization", () => {
   })
 
   it("does not pass local voice ids to Gemini", () => {
-    const kokoro: Voice = { ...geminiVoice, voiceName: "af_bella" }
-    expect(normalizeVoiceForProvider(kokoro, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
+    const leftover: Voice = { ...geminiVoice, voiceName: "af_bella" }
+    expect(normalizeVoiceForProvider(leftover, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
   })
 
-  it("defaults to omnivoice", () => {
-    expect(DEFAULT_TTS_PROVIDER).toBe("omnivoice")
+  it("defaults to inworld", () => {
+    expect(DEFAULT_TTS_PROVIDER).toBe("inworld")
   })
 
-  it("lists all four engines with cloud engines first", () => {
+  it("lists the three remaining engines with cloud engines first", () => {
     expect(TTS_PROVIDER_INFOS.map((p) => p.id)).toEqual([
-      "omnivoice", "gemini", "kokoro", "mms",
+      "inworld", "gemini", "mms",
     ])
+  })
+
+  it("describes Inworld as both TTS 2 and Flash", () => {
+    const inworld = TTS_PROVIDER_INFOS.find((p) => p.id === "inworld")
+    expect(inworld?.blurb).toMatch(/TTS 2/)
+    expect(inworld?.blurb).toMatch(/Flash/)
+    const hint = audio.keys["audio.provider.inworldHint"]
+    expect(hint).toMatch(/TTS 2 Flash/)
+    expect(hint).toMatch(/Highest uses Inworld TTS 2/)
   })
 
   it("marks only cloud engines as cloning-capable", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.supportsCloning).toBe(true)
+    expect(byId.inworld.supportsCloning).toBe(true)
     expect(byId.gemini.supportsCloning).toBe(true)
-    expect(byId.kokoro.supportsCloning).toBe(false)
     expect(byId.mms.supportsCloning).toBe(false)
   })
 
-  it("marks omnivoice as the only engine without named voices", () => {
+  it("gives every engine named voices, including Inworld", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.hasNamedVoices).toBe(false)
+    expect(byId.inworld.hasNamedVoices).toBe(true)
     expect(byId.gemini.hasNamedVoices).toBe(true)
-    expect(byId.kokoro.hasNamedVoices).toBe(true)
     expect(byId.mms.hasNamedVoices).toBe(true)
   })
 
   it("tags each engine with its run tier", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.tier).toBe("cloud")
+    expect(byId.inworld.tier).toBe("cloud")
     expect(byId.gemini.tier).toBe("cloud")
-    expect(byId.kokoro.tier).toBe("device")
     expect(byId.mms.tier).toBe("device")
   })
 
-  it("gives omnivoice no base voice name", () => {
-    expect(defaultVoiceNameForProvider("omnivoice")).toBe("")
+  it("gives inworld the Dennis stock voice by default", () => {
+    expect(defaultVoiceNameForProvider("inworld")).toBe(DEFAULT_INWORLD_VOICE)
   })
 
-  it("clears the voice name when normalizing to omnivoice", () => {
-    expect(normalizeVoiceForProvider(geminiVoice, "omnivoice").voiceName).toBe("")
+  it("normalizes Gemini names onto Dennis when switching to inworld", () => {
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").provider).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").audioQuality).toBe("highest")
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").deliveryMode).toBe("STABLE")
+  })
+
+  it("remaps persisted omnivoice ids to inworld at runtime", () => {
+    expect(effectiveTtsProvider("omnivoice")).toBe("inworld")
+    expect(effectiveTtsProvider(undefined)).toBe("inworld")
+    expect(isServerTtsProvider("omnivoice")).toBe(true)
+    expect(isServerTtsProvider("inworld")).toBe(true)
+    expect(isServerTtsProvider("gemini")).toBe(false)
+    expect(providerInfo("omnivoice").id).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "omnivoice").provider).toBe("inworld")
+    expect(defaultVoiceNameForProvider("omnivoice")).toBe(DEFAULT_INWORLD_VOICE)
+  })
+
+  it("keeps an Inworld Instant Voice Cloning id", () => {
+    const cloned: Voice = { ...geminiVoice, voiceName: "ws__narrator_20260907_120000z" }
+    expect(normalizeVoiceForProvider(cloned, "inworld").voiceName).toBe("ws__narrator_20260907_120000z")
+  })
+
+  it("keeps an Inworld Voice Design id", () => {
+    const designed: Voice = { ...geminiVoice, voiceName: "ws__design-voice-38b05df9" }
+    expect(isInworldVoiceName(designed.voiceName)).toBe(true)
+    expect(normalizeVoiceForProvider(designed, "inworld").voiceName).toBe("ws__design-voice-38b05df9")
+  })
+
+  it("accepts live catalog ids such as Alex without treating Gemini names as Inworld", () => {
+    expect(isInworldVoiceName("Alex")).toBe(true)
+    expect(isInworldVoiceName("Kore")).toBe(false)
+    expect(isInworldVoiceName("af_bella")).toBe(false)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Alex" }, "inworld").voiceName).toBe("Alex")
   })
 })

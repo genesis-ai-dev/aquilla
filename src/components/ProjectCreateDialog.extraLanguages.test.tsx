@@ -285,12 +285,21 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
-      expect(mockFetchProjectSettings).not.toHaveBeenCalled()
     })
 
+    // AQU-1250: exactly ONE settings PATCH. The old second, lanes-only PATCH
+    // replaced the whole blob and silently wiped sourceLanguage/targetLanguage,
+    // so there is no version re-fetch to make either.
     await waitFor(() => {
       expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
     })
+    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
+
+    const createOrder = mockCreateCloudProject.mock.invocationCallOrder[0]!
+    const patchOrder = mockPatchProjectSettings.mock.invocationCallOrder[0]!
+    expect(createOrder).toBeLessThan(patchOrder)
+
+    // AQU-1240: targetLanes is the COMPLETE registry — primary first, then extras.
     const [, projectId, settings, version] = mockPatchProjectSettings.mock.calls[0]!
     expect(projectId).toEqual(expect.any(String))
     expect(settings).toEqual({
@@ -348,7 +357,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })
 
-  it("PATCH failure for settings still resolves with the created project, and surfaces a non-fatal warning", async () => {
+  it("a failed settings PATCH still resolves with the created project, and surfaces a non-fatal warning", async () => {
+    // AQU-1250: the single languages+lanes PATCH fails.
     mockPatchProjectSettings.mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
 
     openDialogWithBasics()

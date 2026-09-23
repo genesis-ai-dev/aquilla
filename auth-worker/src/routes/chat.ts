@@ -1,3 +1,5 @@
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -75,7 +77,7 @@ const chatCompletionRequestSchema = z.object({
   temperature: z.number().optional().default(0.7),
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().optional(),
-  response_format: z.record(z.unknown()).optional(),
+  response_format: z.record(z.string(), z.unknown()).optional(),
   // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
   // attribution as agent.ts). Optional — project-less chat stays at org 0.
@@ -191,19 +193,49 @@ chat.post(
     // to org 0 as before. The guard uses the same org so chat respects the
     // org's caps once an admin turns enforcement on (log-only by default).
     const orgId = await resolveChatOrgId(c.env, user, request.projectId)
-    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-    if (!chatCreditCheck.ok) {
-      return c.json(
-        { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
-        429,
-      )
+    let usage: ChatUsage | undefined
+    const weekly = weeklyUsageActive(c.env, c.req.url)
+    if (weekly === 'unavailable') return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
+    if (weekly === 'on') {
+      // Unlike legacy attribution, enforced usage must never fall back to org 0.
+      if (!request.projectId || orgId <= 0) return c.json({ error: 'forbidden' }, 403)
+      const suppliedId = c.req.header('Idempotency-Key')
+      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
+        return c.json({ error: 'invalid_request_id' }, 400)
+      }
+      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
     }
-    const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!chatWordCheck.ok) {
-      return c.json(wordCapBody(chatWordCheck.reason), 429)
+    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    if (!usage) {
+      const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+      if (!chatCreditCheck.ok) {
+        return c.json(
+          { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
+          429,
+        )
+      }
+      const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!chatWordCheck.ok) {
+        return c.json(wordCapBody(chatWordCheck.reason), 429)
+      }
     }
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
+    if (usage) {
+      // Metered requests carry a server-enforced output cap so the bound holds.
+      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
+      try {
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
+          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
+        if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
+          return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
+        }
+        if (error instanceof Error && error.message === 'Model price unavailable') return c.json({ error: 'model_price_unavailable' }, 503)
+        return c.json({ error: 'usage_accounting_unavailable' }, 503)
+      }
+    }
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -213,6 +245,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
+        ...(usage ? { signal: c.req.raw.signal } : {}),
       })
       const latencyMs = Date.now() - startedAt
 
@@ -252,18 +285,22 @@ chat.post(
         // object from a streaming response without buffering it (defeats the
         // point). Record a flat 1¢ fallback estimate so the ledger always has
         // a row — this is the cheap/low-priority rail.
-        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
-        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+        if (!usage) {
+          await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
+          await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+        }
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        return new Response(upstream.body, { status: 200, headers: streamHeaders })
+        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        return new Response(body, { status: 200, headers: streamHeaders })
       }
 
       const data = (await upstream.json()) as Record<string, unknown>
+      if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
 
       // Non-streaming: extract OpenRouter usage.cost if present.
       // usage.cost is in dollars → × 100 for cents.
@@ -277,8 +314,10 @@ chat.post(
         /* ignore — use the fallback */
       }
       // Record asynchronously (graceful-degrade) — never block the response.
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      if (!usage) {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      }
 
       if (ab) {
         c.header("X-AB-Request-Id", ab.requestId)

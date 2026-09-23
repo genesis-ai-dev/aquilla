@@ -229,9 +229,14 @@ export async function exportPptx(
     }
   }
 
+  // AQU-889: DEFLATE, not JSZip's default STORE — see the same note in
+  // `docx.ts`. Slide media and theme parts make an uncompressed re-zip of a
+  // deck even more expensive than a document's.
   const blob = await zip.generateAsync({
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
   })
 
   return { blob, injected, untouched, removed, inserted, warnings }

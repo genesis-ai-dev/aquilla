@@ -23,6 +23,84 @@ export function parseCueRange(ts: string): { start: number; end: number } | null
   return { start, end }
 }
 
+/** Anything shaped like a cue's timestamp line, however malformed — the
+ *  denominator for a caller's "how many cues did the parser refuse" report.
+ *  Deliberately looser than `TIMESTAMP_VTT`: its whole job is to notice the
+ *  lines that matcher turns away. */
+const LOOSE_CUE_LINE = /^[\d:.,]+\s*-->\s*[\d:.,]+/
+
+/** A single VTT timestamp, with the hours field optional and either field
+ *  allowed to be a single digit (`1:03.209`, `01:03.209`, `0:01:03.209`). */
+const SHORT_FORM_TIMESTAMP = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\.(\d{3})$/
+
+/** Pad one timestamp to the strict `HH:MM:SS.mmm` the parser demands. Returns
+ *  the token untouched when it is already strict or isn't a timestamp at all
+ *  (cue settings like `align:start` ride along on the same line). */
+function padTimestamp(token: string): string {
+  const m = token.match(SHORT_FORM_TIMESTAMP)
+  if (!m) return token
+  const [, hours, minutes, seconds, millis] = m
+  return `${(hours ?? "00").padStart(2, "0")}:${minutes.padStart(2, "0")}:${seconds}.${millis}`
+}
+
+/** Rewrite a cue's timestamp line. `repaired` reports whether a TIMESTAMP
+ *  actually changed — not whether the line's text did, so re-spacing an
+ *  already-strict line is never miscounted as a rescue. */
+function repairTimestampLine(line: string): { text: string; repaired: boolean } {
+  const arrow = line.indexOf("-->")
+  if (arrow < 0) return { text: line, repaired: false }
+  const start = line.slice(0, arrow).trim()
+  const tail = line.slice(arrow + 3).trim()
+  // The end timestamp is the first token after the arrow; anything after it is
+  // cue settings (`align:start position:10%`), which must survive verbatim.
+  const [end = "", ...settings] = tail.split(/\s+/)
+  const paddedStart = padTimestamp(start)
+  const paddedEnd = padTimestamp(end)
+  return {
+    text: [`${paddedStart} --> ${paddedEnd}`, ...settings].join(" "),
+    repaired: paddedStart !== start || paddedEnd !== end,
+  }
+}
+
+export interface RepairedCueTimestamps {
+  /** The content with every short-form cue timestamp padded. */
+  text: string
+  /** Lines that look like a cue timestamp line, however malformed — the
+   *  denominator a caller compares its cue count against. */
+  cueLines: number
+  /** How many of those had a timestamp actually rewritten. */
+  repaired: number
+}
+
+/**
+ * Pad every short-form cue timestamp (`01:03.209 --> 01:03.667`, which WebVTT
+ * permits) to the strict `HH:MM:SS.mmm` `extractVttStrings` demands.
+ *
+ * That strictness is load-bearing for real subtitle imports, so a caller that
+ * must tolerate short-form repairs the TEXT on the way in rather than
+ * loosening the matcher. Skipping this is silent loss, not an untimed row: an
+ * unmatched timestamp line never opens a cue, so the payload lines after it
+ * are swallowed as junk and the cue disappears WITH ITS WORDS. Every consumer
+ * that aligns cues positionally then shifts each later cue onto the wrong
+ * partner, which no count downstream can detect.
+ */
+export function repairShortFormCueTimestamps(content: string): RepairedCueTimestamps {
+  let cueLines = 0
+  let repaired = 0
+  const text = content
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim()
+      if (!LOOSE_CUE_LINE.test(trimmed)) return line
+      cueLines++
+      const result = repairTimestampLine(trimmed)
+      if (result.repaired) repaired++
+      return result.text
+    })
+    .join("\n")
+  return { text, cueLines, repaired }
+}
+
 export function extractVttStrings(content: string): TranslatableString[] {
   const lines = content.split("\n")
   const results: TranslatableString[] = []

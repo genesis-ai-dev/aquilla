@@ -105,7 +105,11 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // summary branches below are POSITIONAL `UNION ALL` arms with no aliases, so a
 // column inserted anywhere but the end shifts every later value one slot to the
 // left in half of them — silently, with no SQL error, because the types line up.
-// lane_id sits beside target_lang (both named in every arm), not in that tail.
+//
+// AQU-1240's `lane_id` sits beside `target_lang` instead because it is NOT a
+// summary column: no `UNION ALL` arm carries it. Each INSERT … SELECT below
+// resolves it inline (laneIdResolveFromColSql) right after the lane column, so
+// the column list and every SELECT agree on its position by construction.
 const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,

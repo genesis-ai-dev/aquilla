@@ -9,8 +9,9 @@ describe("neon-target hands the backfill its flags", () => {
       .toEqual(["scripts/neon-backfill-progress.ts", "--missing-books"])
     expect(childArgs("backfill-activity", ["--missing-only", "--dry-run"]))
       .toEqual(["scripts/neon-backfill-activity.ts", "--missing-only", "--dry-run"])
-    expect(childArgs("backfill-lanes", ["--apply", "--project", "p1"]))
-      .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1"])
+    // AQU-1240: the lane backfill takes --apply / --project / --limit the same way.
+    expect(childArgs("backfill-lanes", ["--apply", "--project", "p1", "--limit", "5"]))
+      .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1", "--limit", "5"])
     expect(childArgs("verify-lanes", ["--require-complete"]))
       .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
   })

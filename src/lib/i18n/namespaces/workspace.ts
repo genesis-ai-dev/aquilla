@@ -67,6 +67,11 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     "workspace.staleSibling.viewInHistory": "View in history",
+    // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
+    // set, which silently switches off every term check in the editor. Say so
+    // rather than letting the editor look like a project with no terminology.
+    "workspace.terminologyUnavailableBanner":
+      "Terminology checks are unavailable — the termbase could not be loaded, so term rules are not being applied.",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
     "workspace.focusLock.editingNotice":

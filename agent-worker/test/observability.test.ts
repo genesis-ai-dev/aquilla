@@ -181,7 +181,8 @@ describe("PostHog log shipping", () => {
 
     expect(shippedMessages()).toContain("slow: GET /sessions/s1/files (6000ms)")
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe("https://us.i.posthog.com/i/v1/logs")
+    // AQU-854: telemetry ingests into PostHog EU Cloud by default.
+    expect(url).toBe("https://eu.i.posthog.com/i/v1/logs")
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer phc_test")
   })
 

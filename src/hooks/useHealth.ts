@@ -57,6 +57,28 @@ interface HealthDispatchOptions {
    * counts (cheap, non-health) are still derived.
    */
   enabled?: boolean
+  /**
+   * AQU-934 phase 3a: per-cell lint rule set. Returns the rules to check this
+   * cell with — `enabledRules` plus whichever style-library checks the
+   * applicability graph puts in force for that cell (see
+   * `buildLibraryLintResolver`). Returning `enabledRules` unchanged is the
+   * no-op, and is what the composer does by reference when nothing applies.
+   *
+   * Called ONLY on an infraction-cache miss: resolution must never ride the
+   * keystroke path (see the cache rationale below).
+   */
+  rulesForCell?: (
+    cell: HealthCell,
+    fileId: string,
+    enabledRules: TranslationRule[],
+  ) => TranslationRule[]
+  /**
+   * Changes iff the style-rule library or its applicability graph changed.
+   * Folded into `rulesSig`, so a library edit re-lints every cached cell.
+   * `NO_LIBRARY_LINT_SIGNATURE` ("") is the composer's marker for "no library
+   * rule can lint anything".
+   */
+  rulesForCellSig?: string
 }
 
 const EMPTY_HEALTH_MAP: Map<string, number> = new Map()
@@ -258,6 +280,19 @@ export function useHealth(
     byCell: Map<string, RuleCacheEntry>
   }>({ rulesSig: "", byCell: new Map() })
 
+  // AQU-934 phase 3a: the per-cell composer is rebuilt whenever the library
+  // changes, so its identity is NOT a memo dependency — `librarySig` carries
+  // the invalidation, and the ref keeps the latest callable without re-walking
+  // every cell on an unrelated caller re-render.
+  const rulesForCellRef = useRef(options.rulesForCell)
+  rulesForCellRef.current = options.rulesForCell
+  const librarySig = options.rulesForCellSig ?? ""
+  // A resolver can put library rules on a cell whose project rule set is
+  // empty, so the "no rules at all" early return below must account for it.
+  // An explicit "" sig is the composer saying nothing in the library can lint;
+  // an absent sig alongside a resolver is unknown, so assume it may.
+  const libraryMayLint = options.rulesForCell !== undefined && options.rulesForCellSig !== ""
+
   // `enabledRules` + `rulesSig` depend only on `rules`, which changes far less
   // often than `fileCells` (every keystroke rebuilds the cells map). Hoisting
   // them here keeps the JSON.stringify over potentially hundreds of terminology
@@ -265,11 +300,12 @@ export function useHealth(
   // every edit, but now reuses these stable values instead of re-serializing.
   const { enabledRules, rulesSig } = useMemo(() => {
     const enabled = rules.filter((r) => r.enabled)
+    const sig = JSON.stringify(enabled.map((r) => [r.id, r.name, r.check]))
     return {
       enabledRules: enabled,
-      rulesSig: JSON.stringify(enabled.map((r) => [r.id, r.name, r.check])),
+      rulesSig: librarySig ? `${sig}|${librarySig}` : sig,
     }
-  }, [rules])
+  }, [rules, librarySig])
 
   const infractions = useMemo(() => {
     if (!enabled) {
@@ -284,16 +320,20 @@ export function useHealth(
     let visited = 0
     const result = new Map<string, RuleInfraction[]>()
 
-    if (enabledRules.length === 0) {
+    if (enabledRules.length === 0 && !libraryMayLint) {
       infractionsCacheRef.current = { rulesSig, byCell: new Map() }
       end()
       return result
     }
 
+    const rulesForCell = rulesForCellRef.current
     for (const [fileId, cells] of fileCells) {
       for (const cell of cells) {
         visited++
         const prev = rulesChanged ? undefined : byCell.get(cell.id)
+        // Resolve the cell's rule set only on a MISS — `rulesForCell` walks the
+        // applicability graph, which is exactly the cost this cache exists to
+        // keep off the keystroke path.
         const entry = prev && prev.fileId === fileId
           && prev.status === cell.status && prev.original === cell.original
           && prev.translated === cell.translated && prev.medium === cell.medium
@@ -302,7 +342,11 @@ export function useHealth(
           : {
               fileId, status: cell.status, original: cell.original, translated: cell.translated,
               medium: cell.medium, transcription: cell.transcription, hasOwnTake: cell.hasOwnTake,
-              infractions: checkRulesForCell(cell as CellData, fileId, enabledRules),
+              infractions: checkRulesForCell(
+                cell as CellData,
+                fileId,
+                rulesForCell ? rulesForCell(cell, fileId, enabledRules) : enabledRules,
+              ),
             }
         if (entry !== prev) byCell.set(cell.id, entry)
         if (entry.infractions.length > 0) result.set(cell.id, entry.infractions)
@@ -321,7 +365,7 @@ export function useHealth(
     end()
     memMark("useHealth.checkRules")
     return result
-  }, [fileCells, enabledRules, rulesSig, enabled])
+  }, [fileCells, enabledRules, rulesSig, enabled, libraryMayLint])
 
   // File progress + open-comment counts.
   const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])

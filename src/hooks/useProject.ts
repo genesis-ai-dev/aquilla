@@ -59,6 +59,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("algorithmicChecks", settings.algorithmicChecks)
   assign("terminology", settings.terminology)
   assign("termMatching", settings.termMatching)
+  assign("fileGenres", settings.fileGenres)
   // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
   // workspace or the glosser and the alignment panel both read an empty list:
   // a confirmation then persisted server-side but never fed the BT, never

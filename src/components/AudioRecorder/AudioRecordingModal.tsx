@@ -903,7 +903,7 @@ export function AudioRecordingModal({
   // position. Our own press is `ttsBusy`, which leads so that a retry reads as
   // in-flight even while the previous failure is still in the store.
   const ttsWorking = ttsBusy || ttsStatus.kind === "loading" || ttsStatus.kind === "synthesizing"
-  // Only the local engines report bytes — OmniVoice (the default) sends no
+  // Only the local engines report bytes — Inworld (the default) sends no
   // progress at all and Gemini sends one event — so this appears exactly where
   // the wait is long enough to look like a hang.
   const ttsProgressPct =

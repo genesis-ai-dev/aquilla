@@ -114,6 +114,22 @@ export const importExport = defineNamespace({
     "importExport.sdbh.prefillingTranslations": "Pre-filling translations",
     "importExport.sdbh.fileProgress": "file {index} / {count}",
     "importExport.sdbh.cellsProgress": "{enqueued} / {total} cells",
+    "importExport.sdbh.notImported.title": "Some reference lists will not be imported",
+    "importExport.sdbh.notImported.body": plural({
+      one:
+        "{count} contextual meaning lists more than {max} verse references. Its reference list is " +
+        "too large to store on the cell, so the cell will be marked “Not imported” for that field.",
+      other:
+        "{count} contextual meanings list more than {max} verse references. Their reference lists " +
+        "are too large to store on the cells, so those cells will be marked “Not imported” for that field.",
+    }),
+    "importExport.sdbh.notImported.exportNote":
+      "The lexicon text itself imports in full. Exports rebuild from the preserved edition file, " +
+      "so the original reference data is unchanged.",
+    "importExport.sdbh.notImported.item": "{lemma} — {count} references",
+    "importExport.sdbh.notImported.more": "+{count} more",
+    "importExport.sdbh.notImported.cancel": "Cancel import",
+    "importExport.sdbh.notImported.proceed": "Import anyway",
 
     // — Biblica Study Bible Notes (IDML) panel —
     "importExport.biblica.description":
@@ -1127,6 +1143,25 @@ export const importExport = defineNamespace({
           enqueued: "Number of cells enqueued so far, already locale-formatted.",
           total: "Total cell count, already locale-formatted.",
         },
+      },
+      "importExport.sdbh.notImported.body": {
+        description:
+          "Warning shown on the SDBH panel before upload when some contextual meanings have verse-reference lists too long to store in cell metadata. The user can cancel or proceed.",
+        placeholders: {
+          count: "Number of affected contextual meanings.",
+          max: "The reference-count threshold above which a list is not imported, already locale-formatted.",
+        },
+      },
+      "importExport.sdbh.notImported.item": {
+        description: "One row in the list of affected contextual meanings under the not-imported warning.",
+        placeholders: {
+          lemma: "Hebrew headword of the affected entry — literal data, not translated.",
+          count: "How many verse references that meaning lists, already locale-formatted.",
+        },
+      },
+      "importExport.sdbh.notImported.more": {
+        description: "Trailing row when the affected-meanings list is truncated to its first few entries.",
+        placeholders: { count: "Number of additional affected meanings not listed." },
       },
       "importExport.biblica.splitSentencesLabel": {
         description:

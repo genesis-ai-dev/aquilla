@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { AdminSectionSkeleton } from "./shared"
 
 /**
  * Platform-admin "Compute / Credits" section for the AdminConsole.
@@ -172,29 +173,47 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
     [patch],
   )
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading credits…</p>
-  if (error) return <p className="text-sm text-destructive">{error}</p>
-  if (rows === null) return <p className="text-sm text-muted-foreground">No credits data available.</p>
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No orgs found.</p>
+  // AQU-942: the table is this section's known shell, so only a load that has
+  // never produced rows may replace it. Gating on `loading` unmounted the whole
+  // table on every toggle (each `patch` round-trips through `refresh`, which
+  // flips `loading` back on), and gating on `error` threw the rows we already
+  // hold away because one patch failed. After the first resolve the shell
+  // stays mounted and the error rides above it.
+  if (rows === null) {
+    if (error) return <p className="text-sm text-destructive">{error}</p>
+    if (loading) return <AdminSectionSkeleton label="Loading credits" />
+    return <p className="text-sm text-muted-foreground">No credits data available.</p>
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
-        <span className="inline-flex items-center gap-3">
-          <RailKey label="Agent" dot="bg-amber-500" />
-          <RailKey label="Chat" dot="bg-sky-500" />
-          <RailKey label="TTS" dot="bg-violet-500" />
-        </span>
-      </div>
-      <DataTable
-        columns={columns}
-        data={rows}
-        getRowId={(row) => String(row.orgId)}
-        initialSorting={[{ id: "org", desc: false }]}
-        testId="admin-credits-table"
-        rowClassName="align-top"
-      />
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No orgs found.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
+            <span className="inline-flex items-center gap-3">
+              <RailKey label="Agent" dot="bg-amber-500" />
+              <RailKey label="Chat" dot="bg-sky-500" />
+              <RailKey label="TTS" dot="bg-violet-500" />
+            </span>
+          </div>
+          <DataTable
+            columns={columns}
+            data={rows}
+            getRowId={(row) => String(row.orgId)}
+            initialSorting={[{ id: "org", desc: false }]}
+            testId="admin-credits-table"
+            rowClassName="align-top"
+          />
+        </>
+      )}
     </div>
   )
 }

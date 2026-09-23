@@ -44,8 +44,10 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_PG.prepare(
-    `INSERT INTO organizations (name, owner_user_id)
-     VALUES (?, ?) RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id, billing_scope)
+     VALUES (?, ?, 'personal')
+     ON CONFLICT (owner_user_id) WHERE billing_scope = 'personal'
+     DO UPDATE SET billing_scope = EXCLUDED.billing_scope RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()
@@ -64,7 +66,7 @@ export async function getOrCreateUserOrg(
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
   const inserted = await env.AQUILLA_PG.prepare(
-    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+    "INSERT INTO organizations (name, owner_user_id, billing_scope) VALUES (?, ?, 'team') RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
   await env.AQUILLA_PG.prepare(
@@ -2079,6 +2081,36 @@ export async function getAssignmentMinRoleForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return DEFAULT_ASSIGNMENT_MIN_ROLE
   return getAssignmentMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1308: the assign-work picker IS the roster — you cannot route work to
+ * someone you cannot name. `rosterViewMinRole` (AQU-485, default MAINTAINER
+ * 600) and `assignmentMinRole` (AQU-1037, default PROJECT_LEAD 500) are
+ * independent floors, and the assignment floor ships *below* the roster
+ * floor. So out of the box a project lead is authorized to assign work while
+ * being forbidden to read the roster the picker needs: the API gate
+ * contradicts the UI gate, the members fetch 403s with `rosterHidden`, and
+ * every partner org's Assignee dropdown renders empty.
+ *
+ * Resolve the effective project-roster floor as the LOWER of the two: anyone
+ * the org lets assign work may enumerate that project's members. An org that
+ * genuinely wants the roster hidden from its leads must raise
+ * `assignmentMinRole` to match — one coherent contract instead of two
+ * silently-conflicting defaults. Everyone below the assignment floor stays
+ * subject to `rosterViewMinRole` exactly as before, so AQU-485's
+ * safe-by-default promise for contributors/reviewers/viewers is untouched.
+ *
+ * Scoped to the per-project roster (the picker's source). The org-wide
+ * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
+ * project-scoped authority and confers no org-wide roster visibility.
+ */
+export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const [rosterFloor, assignmentFloor] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+  ])
+  return Math.min(rosterFloor, assignmentFloor)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

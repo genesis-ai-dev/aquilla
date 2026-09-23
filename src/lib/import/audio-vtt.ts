@@ -18,7 +18,9 @@
 //      junk, so the cue disappears WITH ITS WORDS. The trap here is silent
 //      loss, not an untimed row: the parser cannot emit a cue without timings
 //      at all. So short-form timestamps are padded before the text is handed
-//      over, and the repairs are counted for the import report.
+//      over — by `repairShortFormCueTimestamps`, which lives with the parser
+//      because the file-scoped target import needs the same rescue — and the
+//      repairs are counted for the import report.
 //  (b) it strips no markup. Episode 101's subtitle file carries seven `<i>`
 //      cues; on a timeline chip that renders as a literal "<i>". So residual
 //      cue tags are stripped afterwards, and a cue that was nothing but markup
@@ -32,7 +34,7 @@
 import { v7 as uuidv7 } from "uuid"
 
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
-import { extractVttStrings } from "@/lib/parsers/subtitle"
+import { extractVttStrings, repairShortFormCueTimestamps } from "@/lib/parsers/subtitle"
 import { AUDIO_CUES_ROLE, type TranslatableString } from "@/lib/parsers/types"
 import { bulkUploadSource } from "@/lib/sync/bulk-import"
 import type { LinkableCue } from "@/lib/timeline/cue-links"
@@ -57,15 +59,6 @@ export interface ParsedAudioVtt {
   report: AudioVttReport
 }
 
-/** Anything shaped like a cue's timestamp line, however malformed — the
- *  denominator for `droppedCues`. Deliberately looser than the parser's own
- *  matcher: its whole job is to notice the lines the parser refused. */
-const LOOSE_CUE_LINE = /^[\d:.,]+\s*-->\s*[\d:.,]+/
-
-/** A single timestamp, with the hours field optional and either field allowed
- *  to be a single digit (`1:03.209`, `01:03.209`, `0:01:03.209`). */
-const TIMESTAMP = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\.(\d{3})$/
-
 /**
  * Cue tags WebVTT allows inside a payload: HTML-ish spans (`<i>`, `</i>`,
  * `<c.loud>`, `<lang en>`, a mid-payload `<v Name>` — the LEADING voice tag is
@@ -73,35 +66,6 @@ const TIMESTAMP = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\.(\d{3})$/
  * timestamps (`<00:00:01.000>`).
  */
 const CUE_TAG = /<(?:\/?[a-zA-Z][^>]*|\d{1,2}:\d{2}(?::\d{2})?\.\d{3})>/g
-
-/** Pad one timestamp to the strict `HH:MM:SS.mmm` the stock parser demands.
- *  Returns the token untouched when it is already strict or isn't a timestamp
- *  at all (cue settings like `align:start` ride along on the same line). */
-function padTimestamp(token: string): string {
-  const m = token.match(TIMESTAMP)
-  if (!m) return token
-  const [, hours, minutes, seconds, millis] = m
-  return `${(hours ?? "00").padStart(2, "0")}:${minutes.padStart(2, "0")}:${seconds}.${millis}`
-}
-
-/** Rewrite a cue's timestamp line. `repaired` reports whether a TIMESTAMP
- *  actually changed — not whether the line's text did, so re-spacing an
- *  already-strict line is never miscounted as a rescue. */
-function repairTimestampLine(line: string): { text: string; repaired: boolean } {
-  const arrow = line.indexOf("-->")
-  if (arrow < 0) return { text: line, repaired: false }
-  const start = line.slice(0, arrow).trim()
-  const tail = line.slice(arrow + 3).trim()
-  // The end timestamp is the first token after the arrow; anything after it is
-  // cue settings (`align:start position:10%`), which must survive verbatim.
-  const [end = "", ...settings] = tail.split(/\s+/)
-  const paddedStart = padTimestamp(start)
-  const paddedEnd = padTimestamp(end)
-  return {
-    text: [`${paddedStart} --> ${paddedEnd}`, ...settings].join(" "),
-    repaired: paddedStart !== start || paddedEnd !== end,
-  }
-}
 
 /** Strip cue markup and flatten the payload to the one line a chip can show.
  *  `hadTags` reports the STRIPPING only — a two-line cue being joined into one
@@ -118,22 +82,15 @@ function stripCueMarkup(text: string): { text: string; hadTags: boolean } {
  * `extractVttStrings` mints.
  */
 export function parseAudioVtt(content: string): ParsedAudioVtt {
-  const lines = content.split("\n")
-  let looseCueLines = 0
-  let repairedShortForm = 0
-
-  const normalized = lines.map((line) => {
-    const trimmed = line.trim()
-    if (!LOOSE_CUE_LINE.test(trimmed)) return line
-    looseCueLines++
-    const { text, repaired } = repairTimestampLine(trimmed)
-    if (repaired) repairedShortForm++
-    return text
-  })
+  const {
+    text: normalized,
+    cueLines: looseCueLines,
+    repaired: repairedShortForm,
+  } = repairShortFormCueTimestamps(content)
 
   let strippedTagCues = 0
   const cues: TranslatableString[] = []
-  for (const cue of extractVttStrings(normalized.join("\n"))) {
+  for (const cue of extractVttStrings(normalized)) {
     const { text, hadTags } = stripCueMarkup(cue.original)
     if (hadTags) strippedTagCues++
     // A cue that was only markup has nothing to show on a chip and nothing to

@@ -343,3 +343,53 @@ describe("AssignWork — project-members-only assignee picker (AQU-676)", () => 
     expect(screen.getAllByRole("option")).toHaveLength(1)
   })
 })
+
+// ── AQU-1308: a failed roster fetch is never a silent empty picker ──────────
+// Failing closed (above) is correct, but doing it *silently* is the bug: a
+// project lead saw "Select member…" with no options, no error and no client
+// exception, and had no way to tell an empty project from a refused request.
+describe("AssignWork — the empty assignee picker explains itself (AQU-1308)", () => {
+  it("names org policy when the roster is hidden", async () => {
+    mockRoster.mockResolvedValue({ kind: "roster-hidden" })
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(
+      await screen.findByText(/restricts who can see this project's member list/i),
+    ).toBeInTheDocument()
+  })
+
+  it("reports a load failure when the members request is refused outright", async () => {
+    mockRoster.mockResolvedValue({ kind: "no-access" })
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(
+      await screen.findByText(/couldn’t load this project’s members/i),
+    ).toBeInTheDocument()
+  })
+
+  it("reports a load failure when the members request throws", async () => {
+    mockRoster.mockRejectedValue(new Error("network down"))
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(
+      await screen.findByText(/couldn’t load this project’s members/i),
+    ).toBeInTheDocument()
+  })
+
+  it("shows no roster error on the happy path", async () => {
+    rosterOk()
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await waitFor(() => expect(mockRoster).toHaveBeenCalledWith("jwt", "p1"))
+    expect(
+      screen.queryByText(/restricts who can see this project's member list/i),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/couldn’t load this project’s members/i),
+    ).not.toBeInTheDocument()
+  })
+})

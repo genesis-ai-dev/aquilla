@@ -15,6 +15,14 @@
 // object with at least one key, so an empty object renders an empty list —
 // `hasCellMetadata` (exported below) is the gate.
 
+import { Checkbox } from "@/components/ui/checkbox"
+import { useT } from "@/lib/i18n/I18nProvider"
+import {
+  displayFieldLabel,
+  setCellDisplayField,
+  useCellDisplayFields,
+} from "@/lib/store/cell-display-fields"
+
 /** True when the metadata bucket is worth showing a tab for. */
 export function hasCellMetadata(
   metadata: Record<string, unknown> | null | undefined,
@@ -162,12 +170,37 @@ function MetadataValue({ value, depth = 0 }: { value: unknown; depth?: number })
   return <JsonFallback value={value} />
 }
 
-/** Compact read-only key/value view of a cell's metadata bucket. */
-export function CellMetadataTab({ metadata }: { metadata: Record<string, unknown> }) {
+/**
+ * Compact read-only key/value view of a cell's metadata bucket.
+ *
+ * AQU-1369: with a `projectId`, every key whose value can read as a label gets
+ * a "show on cells" checkbox. It is a project-wide display setting — checking
+ * it here labels every cell in the project that carries the key, and
+ * unchecking it from any such cell clears it everywhere. Nested objects and
+ * attachments get no checkbox: they have no one-line label to show.
+ */
+export function CellMetadataTab({
+  metadata,
+  projectId,
+}: {
+  metadata: Record<string, unknown>
+  projectId?: string
+}) {
+  const t = useT()
+  const displayFields = useCellDisplayFields(projectId)
   return (
     <dl className="space-y-1.5 py-3 text-xs">
       {Object.entries(metadata).map(([key, value]) => (
         <div key={key} className="flex items-baseline gap-2">
+          {projectId && displayFieldLabel(value) != null && (
+            <Checkbox
+              className="self-center"
+              checked={displayFields.includes(key)}
+              onCheckedChange={(checked) => setCellDisplayField(projectId, key, checked === true)}
+              aria-label={t("editor.metadata.showOnCells", { key })}
+              title={t("editor.metadata.showOnCells", { key })}
+            />
+          )}
           <dt className="shrink-0 font-medium text-muted-foreground">{key}</dt>
           <dd className="min-w-0">
             <MetadataValue value={value} />

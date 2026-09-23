@@ -30,6 +30,7 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -319,6 +320,39 @@ function leaseAwareLlm(
 
 /** Run waves until the run stops continuing or the safety cap. Owns its own
  *  PG connection (env.AQUILLA_PG dies with the Response); never throws. */
+/** Build the weekly-usage admission for a run, or undefined when metering is
+ *  off. Fails the run (never runs it unmetered) when metering is on but the
+ *  run has no billing workspace, no persisted owner, or a non-local provider. */
+async function contextualUsageAdmit(
+  env: Env,
+  db: AquillaDb,
+  projectId: string,
+  runId: string,
+  notify: (frame: ContextualProgressFrame) => Promise<void>,
+): Promise<PaidCallAdmit | undefined> {
+  if (!agentUsageEnabled(env)) return undefined
+  const run = await getRun(db, runId)
+  const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = project?.org_id ?? 0
+  const userId = run?.roleSnapshot?.userId
+  if (!backgroundUsageAllowed(env) || orgId <= 0 || !userId) {
+    throw new Error(!backgroundUsageAllowed(env) ? "usage_rehearsal_unavailable" : "usage_workspace_unavailable")
+  }
+  const base = paidCallAdmit(new AgentUsageMeter(env, { orgId, userId, projectId }))
+  let paused = false
+  return async (input) => {
+    const admission = await base(input)
+    if (!admission.ok && admission.reason === "exhausted" && !paused) {
+      paused = true
+      // Stop at the span edge, keeping staged drafts reviewable; resume after reset.
+      const t = await requestPause(db, runId)
+      if (t.status === "ok") await notify(runStateFrame(t.run))
+    }
+    return admission
+  }
+}
+
 async function selfTickLoop(
   env: Env,
   projectId: string,
@@ -335,10 +369,15 @@ async function selfTickLoop(
   const meter = makeCostMeter(env, db)
   try {
     const settings = await getPlatformSettingsCached(env)
+    // AQU-837 weekly allowance: every graph call reserves before the provider
+    // and settles after. The run's persisted role snapshot funds background
+    // and sweeper resumes; exhaustion pauses the run at the next span edge.
+    const admit = await contextualUsageAdmit(env, db, projectId, runId, notify)
     const llm = makeLlmCall({
       url: resolveOpenRouterUrl(env),
       apiKey: env.OPENROUTER_API_KEY ?? "",
       models: resolveContextualModels(env, settings),
+      ...(admit ? { admit } : {}),
       ...(Number(env.CONTEXTUAL_MAX_INFLIGHT) > 0
         ? { maxInFlight: Math.floor(Number(env.CONTEXTUAL_MAX_INFLIGHT)) }
         : {}),
@@ -624,18 +663,31 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    const credit = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
-    if (!credit.ok) {
-      const { body: err, status } = errorJson(
-        "credit_cap_exceeded",
-        "Agent credit cap reached. Contact your org admin.",
-        429,
-        { reason: credit.reason },
-      )
-      return c.json(err, status)
+    // AQU-837: enforced usage never funds an unowned project from org 0, and
+    // retires the legacy guards for runs it meters.
+    if (!agentUsageEnabled(c.env)) {
+      const credit = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
+      if (!credit.ok) {
+        const { body: err, status } = errorJson(
+          "credit_cap_exceeded",
+          "Agent credit cap reached. Contact your org admin.",
+          429,
+          { reason: credit.reason },
+        )
+        return c.json(err, status)
+      }
+      const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+    } else {
+      if (!agentUsageAllowed(c.env, c.req.url)) {
+        const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
+        return c.json(err, status)
+      }
+      if (orgId <= 0) {
+        const { body: err, status } = errorJson("permission_denied", "This project has no billing workspace.", 403)
+        return c.json(err, status)
+      }
     }
-    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
@@ -1609,18 +1661,33 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    const credit = await creditGuard(db, c.env, orgId, "agent")
-    if (!credit.ok) {
-      const { body: err, status } = errorJson(
-        "credit_cap_exceeded",
-        "Agent credit cap reached. Contact your org admin.",
-        429,
-        { reason: credit.reason },
-      )
-      return c.json(err, status)
+    // AQU-837: a metered pass reserves each model call against the weekly
+    // allowance and retires the legacy guards for itself.
+    let admit: PaidCallAdmit | undefined
+    if (agentUsageEnabled(c.env)) {
+      if (!agentUsageAllowed(c.env, c.req.url)) {
+        const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
+        return c.json(err, status)
+      }
+      if (orgId <= 0) {
+        const { body: err, status } = errorJson("permission_denied", "This project has no billing workspace.", 403)
+        return c.json(err, status)
+      }
+      admit = paidCallAdmit(new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId }))
+    } else {
+      const credit = await creditGuard(db, c.env, orgId, "agent")
+      if (!credit.ok) {
+        const { body: err, status } = errorJson(
+          "credit_cap_exceeded",
+          "Agent credit cap reached. Contact your org admin.",
+          429,
+          { reason: credit.reason },
+        )
+        return c.json(err, status)
+      }
+      const words = await wordGuard(db, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
-    const words = await wordGuard(db, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     const pairs = await selectCellPairs(db, projectId, { fileId })
     if (pairs.length === 0) {
@@ -1634,6 +1701,7 @@ contextual.post(
       apiKey: c.env.OPENROUTER_API_KEY,
       models,
       signal: c.req.raw.signal,
+      ...(admit ? { admit } : {}),
       onUsage: (usage) => {
         meter.add({
           surface: "autopilot",
@@ -1660,6 +1728,16 @@ contextual.post(
         ...(note ? { note } : {}),
       })
     } catch (err) {
+      const reason = err instanceof Error ? err.message : ""
+      if (reason === "usage_exhausted") {
+        const { body, status } = errorJson("weekly_ai_allowance_exhausted",
+          "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.", 429)
+        return c.json(body, status)
+      }
+      if (reason === "usage_unpriced" || reason === "usage_unavailable") {
+        const { body, status } = errorJson("usage_accounting_unavailable", "Usage accounting is unavailable. Nothing was changed.", 503)
+        return c.json(body, status)
+      }
       console.error(`[contextual] segmentation pass failed for ${fileId}:`, err)
       const { body, status } = errorJson(
         "segmentation_failed",

@@ -43,6 +43,58 @@ profiles also run the branch guard as a Wrangler custom-build hook, covering
 accidental direct `wrangler deploy --env=production` calls. Local live deploys
 additionally require a clean worktree whose HEAD matches the current remote branch.
 
+## Worker secrets (per environment)
+
+Secrets attach to a **Worker name**, not to this repository, a branch, or a Wrangler
+profile. They are never committed, are not declared in any `wrangler.toml`, and do not
+copy between environments: provisioning a key on `aquilla-identity` leaves
+`aquilla-dev-identity` without it. Every environment must be provisioned separately,
+from that surface's directory:
+
+```bash
+# from the surface directory (auth-worker/, sync-worker/, or the repo root for web)
+printf %s "$KEY" | npx wrangler secret put <NAME> --env <production|development>
+npx wrangler secret list --env <production|development>   # names only, never values
+```
+
+Use `printf %s`, not `echo` — `echo` appends a newline and stores it as part of the
+secret, which fails as an opaque upstream `401` rather than a missing-key error.
+
+`config/cloudflare-deployments.json` is the source of truth for which secrets each
+Worker requires, and the deployers enforce it: `cloudflare-version-deploy.mjs` verifies
+the uploaded version's bindings before promoting it, so a deploy **fails closed** with
+`missing required secret binding <NAME>` rather than promoting a Worker that cannot do
+its job. Keep this section in step with that manifest — a contract test asserts it.
+
+| Surface | Directory | Worker | Secrets required on that Worker |
+| --- | --- | --- | --- |
+| Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
+| Web (development) | `.` (repo root) | `aquilla-web-development` | none |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
+| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
+| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
+
+`SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
+and sync Workers in the same environment must hold the identical value.
+
+### The AI provider key (`OPENROUTER_API_KEY`)
+
+Every AI surface in the product is served by the identity Worker and reads this one
+secret straight from that Worker's environment — chat (`routes/chat.ts`), the
+translation agent and back-translation (`routes/agent.ts`), AI drafting
+(`routes/ai-draft-internal.ts`), the contextual pipeline (`routes/contextual.ts`),
+brief summaries (`routes/ai-brief-internal.ts`), import classify/sandbox
+(`routes/import-classify.ts`, `routes/import-sandbox.ts`), knowledge indexing, and
+Monday analysis.
+
+**There is no runtime fallback.** The platform admin console
+(`PATCH /api/v2/admin/settings`) tunes model selection, allowed models, A/B split, and
+daily spend limits only — it has no field for the key. An unset key is therefore visible
+only as a `500 "OPENROUTER_API_KEY is not configured"` from each of those routes, which
+is what made the whole AI workflow unusable on `dev.aquilla.app` (AQU-762). Setting it
+on one environment does nothing for the other.
+
 ## Deployment ownership
 
 Live Aquilla deployments require an explicit human/operator action. No push to
@@ -164,6 +216,9 @@ An environment change is one atomic contract change. Update and verify all of:
    dispatch-only `deploy-workers.yml`.
 4. `config/cloudflare-deployments.json`, `cloudflare-version-deploy.mjs`, and
    `verify-worker-deployment.mjs`.
+   A new required secret, Worker, or environment must be added to the manifest, the
+   "Worker secrets" table above, and provisioned on every affected Worker name before
+   that environment is deployed.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
 6. GitHub branch protection Cloudflare check contexts and the `production`
    Environment branch policy (`main` only).

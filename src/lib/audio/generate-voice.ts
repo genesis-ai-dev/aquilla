@@ -14,7 +14,12 @@ import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
-import { resolveTtsProvider } from "./tts-providers"
+import {
+  effectiveTtsProvider,
+  isServerTtsProvider,
+  normalizeVoiceForProvider,
+  resolveTtsProvider,
+} from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -23,6 +28,8 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
+import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
+import { inworldLanguageForRequest } from "./inworld-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
@@ -70,24 +77,33 @@ export async function generateAndAttachCellVoice(
   const text = args.text.trim()
   if (!text) throw new Error("Cell has no text to synthesize")
 
-  const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  const rawVoice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
   // Resolve the effective engine: a voice with no provider falls back to the
-  // project default (now OmniVoice), which must still route server-side.
-  const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
+  // project default (Inworld), which must still route server-side. Leftover
+  // OmniVoice / Kokoro ids remap here so generate never hits a removed engine.
+  const provider = effectiveTtsProvider(
+    rawVoice.provider ?? resolveTtsProvider(args.projectTtsSettings),
+  )
+  const voice = normalizeVoiceForProvider(rawVoice, provider, {
+    targetLanguage: args.geminiContext?.targetLanguage,
+  })
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
-  // OmniVoice is server-side: the sync-worker synthesizes, stores the clip in
+  // Inworld is server-side: the sync-worker synthesizes, stores the clip in
   // R2 (native voice-cloning when a reference is set), and returns its id —
   // no client synth, no upload, no Seed-VC. Branch out entirely.
-  if (provider === "omnivoice") {
+  if (isServerTtsProvider(provider)) {
+    const language = inworldLanguageForRequest(voice, args.geminiContext?.targetLanguage)
     const result = await synthesizeCellTts(
       {
         projectId: args.projectId,
         fileId: args.fileId,
         cellId: args.cellId,
         text,
-        ...(args.geminiContext?.targetLanguage ? { language: args.geminiContext.targetLanguage } : {}),
+        ...(language ? { language } : {}),
+        ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        ...inworldSynthFieldsFromVoice(voice),
       },
       getSyncToken,
     )
@@ -259,7 +275,7 @@ export async function generateAndAttachCellVoice(
     ...(args.label ? { label: args.label } : {}),
     author: args.username,
   })
-  // Round 8: shadow-inject (see the omnivoice branch's comment).
+  // Round 8: shadow-inject (see the hosted-TTS branch's comment).
   injectOptimisticAudioAttachment(args.fileId, args.cellId, {
     audioId: objectName,
     url,

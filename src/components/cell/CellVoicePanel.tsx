@@ -30,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { resolveCastVoice } from "@/lib/audio/voices"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
@@ -220,6 +221,7 @@ export function CellVoicePanel({
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
+  const languageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   // AQU-768: resolve THIS line's active voice from the saved cast assignment
   // here in the leaf that displays it, rather than trusting a pre-resolved prop
@@ -507,6 +509,7 @@ export function CellVoicePanel({
             voices={ordered}
             active={active}
             busy={isVoicing}
+            showLanguageBadge={languageBadge}
             onPick={generateWith}
           />
         </div>

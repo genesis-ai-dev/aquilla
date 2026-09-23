@@ -40,7 +40,13 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
-      render={<InputGroupButton variant="ghost" size="icon-xs" />}
+      render={
+        <InputGroupButton
+          variant="ghost"
+          size="icon-xs"
+          className="bg-transparent text-muted-foreground shadow-none hover:bg-accent/40 hover:text-foreground aria-expanded:bg-transparent aria-pressed:bg-transparent data-popup-open:bg-transparent dark:bg-transparent dark:hover:bg-accent/40 dark:aria-expanded:bg-transparent dark:aria-pressed:bg-transparent dark:data-popup-open:bg-transparent"
+        />
+      }
       className={cn(className)}
       {...props}
     >

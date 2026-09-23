@@ -195,7 +195,19 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
-function fileCountersSql(scope: 'file' | 'project'): string {
+/** Which files the CTE gathers: one, every file in the project, or (AQU-557,
+ *  POST /migrate/finalize) the project narrowed to an `IN (…)` list of that
+ *  many ids. Bind order follows the SQL: projectId, the id(s), serverTs,
+ *  projectId. */
+type FileCountersScope = 'file' | 'project' | { fileIds: number }
+
+function fileCountersSql(scope: FileCountersScope): string {
+  const narrow =
+    scope === 'file'
+      ? ' AND f.id = ?'
+      : scope === 'project'
+        ? ''
+        : ` AND f.id IN (${Array.from({ length: scope.fileIds }, () => '?').join(', ')})`
   return `WITH counters AS (
          SELECT f.id AS file_id,
                 (SELECT COUNT(*) FROM (
@@ -235,7 +247,7 @@ function fileCountersSql(scope: 'file' | 'project'): string {
             AND s.file_id = c.file_id
             AND s.cell_id = c.cell_id
             AND s.side = 'source'
-          WHERE f.project_id = ?${scope === 'file' ? ' AND f.id = ?' : ''}
+          WHERE f.project_id = ?${narrow}
           GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,
@@ -263,22 +275,34 @@ export function fileCountersRecomputeStmt(
 }
 
 /**
- * The same counters for every file in a project, in one statement.
+ * The same counters for every file in a project, in one statement — or, with
+ * `fileIds`, for just those files (AQU-557: POST /migrate/finalize names the
+ * files a push touched so a wide project is not rescanned on every chunk).
  *
  * Used by the rebuild and by POST /migrate/finalize, which both replay a whole
  * project and defer per-event counter maintenance. Both used to carry their own
  * hand-written copy of the SQL above — and one of them had already drifted,
  * silently leaving `ai_drafted_count` behind. AQU-1083 would have made that
  * worse in a way nobody would notice: a rebuild would have quietly restored
- * headings to the totals a project had chosen to exclude. One builder, two
+ * headings to the totals a project had chosen to exclude. One builder, three
  * scopes.
+ *
+ * An empty `fileIds` list means the whole project, never "no files": a caller
+ * that computed an empty scope must not silently skip the repair, and the
+ * unscoped recompute is a superset of any scope.
  */
 export function projectFileCountersRecomputeStmt(
   db: AquillaDb,
   projectId: string,
   serverTs: number,
+  fileIds?: readonly string[] | null,
 ): AquillaStatement {
-  return db.prepare(fileCountersSql('project')).bind(projectId, serverTs, projectId)
+  if (!fileIds?.length) {
+    return db.prepare(fileCountersSql('project')).bind(projectId, serverTs, projectId)
+  }
+  return db
+    .prepare(fileCountersSql({ fileIds: fileIds.length }))
+    .bind(projectId, ...fileIds, serverTs, projectId)
 }
 
 /**

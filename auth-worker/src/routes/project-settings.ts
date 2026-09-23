@@ -61,6 +61,11 @@ import {
   updateProjectSettingsShared,
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
+import {
+  filterSettingsToVisibleLanes,
+  laneReadWallEnabled,
+  visibleLaneTags,
+} from "../../../src/lib/lanes/read-wall"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -171,8 +176,30 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  return c.json(await withOrgDefaults(c.env, projectId, response))
+  const visible = visibleLaneTags({
+    enabled: laneReadWallEnabled(c.env.LANE_READ_WALL),
+    role: role.level,
+    laneGrants: laneReadWallEnabled(c.env.LANE_READ_WALL) && role.level < ROLE.MAINTAINER
+      ? await laneGrantsFor(c.env.AQUILLA_PG, projectId, user.id)
+      : null,
+  })
+  return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible)))
 })
+
+async function laneGrantsFor(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<Array<{ lane: string; level: number }>> {
+  const rows = await db
+    .prepare(
+      `SELECT lane, role_level FROM project_member_lane_roles
+        WHERE project_id = ? AND user_id = ?`,
+    )
+    .bind(projectId, userId)
+    .all<{ lane: string; role_level: number }>()
+  return (rows.results ?? []).map((row) => ({ lane: row.lane, level: row.role_level }))
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // PUT/PATCH /api/v2/projects/:projectId/settings

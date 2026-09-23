@@ -127,8 +127,14 @@ pnpm deploy:aquilla:... (prod equivalents)
 
 ## 7. What is NOT in this rollout
 
-- **AQU-730 read/write wall** (PR3): the grant substrate ships dormant in PR1
-  (`0091`, token mint, `resolveVisibleLanes`). Wiring the wall + the grant
-  backfill + the deny-flip is a separate track; the deny-flip must come only
-  after the grant backfill populates prod, or it locks out translators.
+- **AQU-730 write wall** (the allow→deny flip on `enforceScopes`): still last.
+  The grant substrate ships in PR1. The **read** wall is now on this branch
+  but dark. Set `LANE_READ_WALL=1` on the sync worker and the auth worker
+  only after `project_member_lane_roles` is backfilled in that environment.
+  Until then every member still sees every lane. Turning it on against an
+  empty grant table hides every target lane from everyone below Maintainer.
+- **Grant backfill** is not in this branch. It has to run before the flag.
+  Below-600 members with no lane scope today must be granted every current
+  lane at their project role, or the flag locks them out. New lanes after
+  that do not auto-grant.
 - **Default-lane elimination** (`''` → tag) and rename/BLANK UX: later slices.

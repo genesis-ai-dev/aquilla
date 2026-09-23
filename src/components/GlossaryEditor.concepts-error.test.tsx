@@ -157,9 +157,33 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     )
     await screen.findByTestId("concepts-read-error")
 
+    const importBtn = screen.getByRole("button", { name: /Import/ })
+    expect(importBtn).toBeDisabled()
+    await expectTooltip(importBtn, /Project lead/i)
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/until the termbase loads/)
+  })
+
+  // AQU-872: Add term names the CONTRIBUTOR bar, since that is the role this
+  // viewer is short of for a suggestion — quoting the management floor would
+  // tell them to go get a permission they do not need.
+  it("names the contributor bar on Add term, still ahead of the failed read", async () => {
+    mockProject = {
+      id: "p1",
+      name: "P",
+      syncRole: { level: 100 },
+      termbaseEditMinRole: 500,
+    } as unknown as ProjectRecord
+    fetchConcepts.mockRejectedValue(readFailure())
+    renderWithTooltips(
+      <MemoryRouter initialEntries={["/project/p1/terminology"]}>
+        <GlossaryEditor />
+      </MemoryRouter>,
+    )
+    await screen.findByTestId("concepts-read-error")
+
     const add = screen.getByRole("button", { name: "Add term" })
     expect(add).toBeDisabled()
-    await expectTooltip(add, /Project lead/i)
+    await expectTooltip(add, /at least Contributor access/i)
     expect(screen.getByRole("tooltip").textContent).not.toMatch(/until the termbase loads/)
   })
 

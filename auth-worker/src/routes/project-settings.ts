@@ -52,10 +52,15 @@ import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import {
   getTermbaseEditMinRoleForProject,
+  getOrgCountStructuralCellsForProject,
   getLanguageEditMinRoleForProject,
 } from "../services/org-permissions"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
-import { loadProjectSettings, updateProjectSettingsShared } from "../../../db/shared/projects"
+import {
+  loadProjectSettings,
+  updateProjectSettingsShared,
+  type ProjectSettingsResponse,
+} from "../../../db/shared/projects"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -66,6 +71,19 @@ const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
 /** The termbase key — its own (org-configurable) write floor. */
 const TERMINOLOGY_KEY = "terminology"
+
+/**
+ * AQU-1083: this project's override for whether headings count toward
+ * progress. ABSENT means inherit the org's value — there is no third stored
+ * state, so "use the organization default" is expressed by deleting the key,
+ * not by writing null.
+ *
+ * Leads may set it. It decides how this project's own numbers are calculated,
+ * which is squarely the job of whoever runs the project, and it changes nothing
+ * about who may see or do anything.
+ */
+const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /**
  * AQU-1086: the project-language keys, gated by the org's configurable
@@ -122,6 +140,25 @@ export function changedSettingsKeys(
   return changed
 }
 
+/**
+ * AQU-1083: attach the org-level defaults this project inherits.
+ *
+ * Applied to EVERY settings response, the 409 body included — a client that
+ * conflicts snaps its whole state to `current`, so a body without this field
+ * would silently drop the org default and the project's control would start
+ * claiming the wrong thing about what "Organization default" means.
+ */
+async function withOrgDefaults(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  response: ProjectSettingsResponse,
+): Promise<ProjectSettingsResponse & { orgCountStructuralCells: boolean | null }> {
+  return {
+    ...response,
+    orgCountStructuralCells: await getOrgCountStructuralCellsForProject(env, projectId),
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/settings
 // ──────────────────────────────────────────────────────────────────────────
@@ -134,7 +171,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  return c.json(response)
+  return c.json(await withOrgDefaults(c.env, projectId, response))
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -188,11 +225,22 @@ projectSettings.on(
       // the pre-AQU-1086 behaviour for that case exactly.
       const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
       const changed = changedSettingsKeys(stored.settings, body.settings)
+      // Each carve-out is key-exact and carries its own floor. A write that
+      // touches anything else — even alongside a permitted key — falls through
+      // to the maintainer 403, so widening one of these can never widen access
+      // to AI config, health, languages, or the rest.
+      // terminologyOnly/languageOnly are deliberately NOT guarded by
+      // `changed.length > 0` — a no-op write (nothing changed) satisfies both
+      // vacuously, and checking terminology first below preserves the
+      // pre-AQU-1086 behaviour for that case exactly (a read-modify-write
+      // client always echoes every key it didn't touch).
       const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
       const languageOnly = changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
-      if (!terminologyOnly && !languageOnly && !autopilotOnly) {
+      const countStructuralOnly = changed.length > 0
+        && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
+      if (!terminologyOnly && !languageOnly && !autopilotOnly && !countStructuralOnly) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
@@ -230,7 +278,24 @@ projectSettings.on(
             403,
           )
         }
+      } else if (countStructuralOnly) {
+        if (role.level < COUNT_STRUCTURAL_MIN_ROLE) {
+          return c.json(
+            {
+              error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
+            },
+            403,
+          )
+        }
       }
+    }
+
+    // Boolean or absent. Absent is "inherit the org", so there is no null case
+    // to accept — writing one would store a third state the resolver does not
+    // have a meaning for.
+    const rawCountStructural = (body.settings as Record<string, unknown>)[COUNT_STRUCTURAL_KEY]
+    if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
+      return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
@@ -261,7 +326,13 @@ projectSettings.on(
     })
 
     if (result.status === "conflict") {
-      return c.json({ error: "version mismatch", current: result.current }, 409)
+      return c.json(
+        {
+          error: "version mismatch",
+          current: await withOrgDefaults(c.env, projectId, result.current),
+        },
+        409,
+      )
     }
     if (result.status === "error") {
       return c.json({ error: `write failed: ${result.message}` }, 500)
@@ -279,7 +350,7 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
-    return c.json(fresh)
+    return c.json(await withOrgDefaults(c.env, projectId, fresh))
   },
 )
 

@@ -6,10 +6,11 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeDevCommand": "npm run dev -- --port 1420 --strictPort",
+    "beforeDevCommand": "pnpm dev:vite -- --port 1420 --strictPort",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Codex",
@@ -20,6 +21,7 @@
       }
     ],
     "security": {
+      "capabilities": ["default"],
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",
@@ -27,7 +29,7 @@
         "img-src": "'self' data: blob: https:",
         "font-src": "'self' data: https://fonts.gstatic.com",
         "media-src": "'self' data: blob: https:",
-        "connect-src": "'self' https: wss:",
+        "connect-src": "'self' https: wss: http://localhost:49152",
         "worker-src": "'self' blob:",
         "object-src": "'none'",
         "base-uri": "'self'",
@@ -61,6 +63,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["codex"]
+      }
+    },
     "updater": {
       "active": true,
       "endpoints": [

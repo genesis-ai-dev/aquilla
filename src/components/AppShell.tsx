@@ -9,6 +9,7 @@ import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
+import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
 import { NavHistoryControls } from "./NavHistoryControls"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -334,8 +335,11 @@ export function AppShell({
         data-slot="app-shell-sidebar-footer"
         className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
       >
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
           <VersionTag />
+          {/* Same overflow reasoning as BetaBadge above: no room for a text
+              chip in the 40px collapsed icon rail. */}
+          {!chromeCollapsed && <ConnectivityStatusChip />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <HelpMenu compact showTour={!useDockResize} />

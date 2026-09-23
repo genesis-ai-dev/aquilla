@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, Workflow } from "lucide-react"
+import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, SlidersHorizontal, SpellCheck, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -9,6 +9,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { membersPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
+import { ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsShell } from "./OrgSettingsShell"
 
 export function OrgSettingsIndex() {
@@ -43,6 +44,15 @@ export function OrgSettingsIndex() {
           <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint="Visibility & permissions" />
           <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Field Plan" />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint="Org keys" />
+          {/* AQU-1131: rules sit beside the Knowledge Base — both are the
+              org-wide context an org should see on arrival, not something
+              buried inside one project's Living Memory. */}
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "rules")}
+            icon={SpellCheck}
+            title={t("rules.orgSettings.title")}
+            hint={t("rules.orgSettings.navHint")}
+          />
           <NavRow
             to={orgSettingsPath(activeOrgId, "knowledge")}
             icon={BookOpen}
@@ -57,6 +67,15 @@ export function OrgSettingsIndex() {
             <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title={t("editor.navTitle.members")} hint="Roles & invites" />
           )}
           <NavRow to={orgPath(activeOrgId, "/teams")} icon={NAV_PAGE_ICONS.teams} title={t("editor.navTitle.teams")} hint="Groups" />
+          {/* AQU-1083: values a project follows unless it sets its own. Here
+              rather than on Security, whose every other control is about who
+              may see or do something. */}
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "project-defaults")}
+            icon={SlidersHorizontal}
+            title={ORG_SETTINGS_SECTION_TITLES["project-defaults"]}
+            hint="Inherited by every project"
+          />
           <NavRow to={orgPath(activeOrgId, "/archived")} icon={Archive} title={t("editor.navTitle.archivedProjects")} hint="Restore" />
         </NavList>
       </div>

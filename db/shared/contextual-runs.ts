@@ -60,6 +60,36 @@ export interface RoleSnapshot {
   level: number
 }
 
+/**
+ * Why a `parked` run stopped (AQU-1300).
+ *
+ * `parked` alone cannot answer the only question the user has — is there more?
+ * `work_exhausted` means the scope is finished. `awaiting_input` means there IS
+ * more work and the run is deliberately holding until a human weighs in, either
+ * because its span allowance ran out or because a decision is open. The UI
+ * renders these very differently; collapsing them is how "waiting for you"
+ * silently reads as "all done".
+ */
+export type ContextualParkReason = "awaiting_input" | "work_exhausted"
+
+/** Spans a brand-new run may process before it parks and asks. One passage is
+ *  the whole point: the user sees what Autopilot does to their text, on their
+ *  text, before it does it hundreds of times. */
+export const DEFAULT_SPAN_ALLOWANCE = 1
+
+/** Spans granted per unit of human input (a draft reviewed, a decision
+ *  answered, a brief reviewed, a direction steered). */
+export const INPUT_GRANT_SPANS = 1
+
+/** Ceiling on allowance accumulated from incidental input. Reviewing thirty
+ *  drafts is not consent to draft thirty more passages unattended — past this,
+ *  the user takes the explicit Continue action. */
+export const INPUT_GRANT_CAP = 3
+
+/** Spans granted by an explicit Continue ("keep going"). Deliberately a batch,
+ *  not unlimited: enough to feel like progress, small enough to come back. */
+export const CONTINUE_BATCH_SPANS = 4
+
 export interface ContextualRun {
   id: string
   projectId: string
@@ -86,6 +116,14 @@ export interface ContextualRun {
    *  behind it, so the wiring needs to resolve it too (`dismissDecision` /
    *  `supersedeDecisions` in `./contextual-decisions`). */
   blockedOnDecisionId: string | null
+  /** Spans this run may still process before it parks (AQU-1300). `null` is
+   *  unlimited — the explicit "translate everything" choice — and is also what
+   *  runs created before the allowance shipped carry, so the feature cannot
+   *  retroactively truncate work already in flight. */
+  spanAllowance: number | null
+  /** Set whenever the run enters `parked`; cleared on every return to
+   *  `running`. Meaningless in any other status. */
+  parkReason: ContextualParkReason | null
   /** Where the user was looking at start — rotates the first wave's seeds. */
   anchorCellId: string | null
   /** Shared across every run one project-wide start created. */
@@ -148,7 +186,9 @@ export type ContextualRunEventKind =
   | "drafts_staged"
   | "span_outcome"
   | "steering_queued"
+  | "run_command"
   | "draft_reviewed"
+  | "memories_proposed"
 
 export type ContextualRunEventPhase = "reading" | "drafting" | "checking" | "staging"
 
@@ -196,6 +236,9 @@ export interface ContextualRunEventDetails {
   units?: number
   steeringId?: string
   steeringKind?: SteeringKind
+  /** Which run control a conversational message asked for (AQU-1299). The
+   *  message text itself is never durable — only the control it resolved to. */
+  command?: "pause" | "stop"
   draftId?: string
   cellId?: string
   outcome?: "applied" | "rejected" | "superseded"
@@ -311,10 +354,19 @@ interface RunRow {
   last_error: string | null
   steering_cursor: unknown
   blocked_on_decision_id: string | null
+  span_allowance: number | null
+  park_reason: string | null
   anchor_cell_id: string | null
   scope_group: string | null
   created_at: unknown
   updated_at: unknown
+}
+
+/** Fail closed on an unrecognized reason rather than widening the union — the
+ *  column is CHECK-constrained, so anything else is a row written by a newer
+ *  deploy and "unknown" is safer for the UI than a bad literal. */
+function parseParkReason(v: string | null): ContextualParkReason | null {
+  return v === "awaiting_input" || v === "work_exhausted" ? v : null
 }
 
 function parseCursor(v: unknown): SpanCursor | null {
@@ -343,6 +395,8 @@ function rowToRun(r: RunRow): ContextualRun {
     lastError: sanitizeRunError(r.last_error),
     steeringCursor: r.steering_cursor == null ? null : toIso(r.steering_cursor),
     blockedOnDecisionId: r.blocked_on_decision_id ?? null,
+    spanAllowance: r.span_allowance == null ? null : Number(r.span_allowance),
+    parkReason: parseParkReason(r.park_reason ?? null),
     anchorCellId: r.anchor_cell_id ?? null,
     scopeGroup: r.scope_group ?? null,
     createdAt: toIso(r.created_at),
@@ -352,8 +406,8 @@ function rowToRun(r: RunRow): ContextualRun {
 
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
-  last_error, steering_cursor, blocked_on_decision_id, anchor_cell_id, scope_group,
-  created_at, updated_at`
+  last_error, steering_cursor, blocked_on_decision_id, span_allowance, park_reason,
+  anchor_cell_id, scope_group, created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -606,6 +660,17 @@ function sanitizeEventDetails(input: AppendContextualRunEventInput): ContextualR
       }
       break
     }
+    case "run_command":
+      details = d.command === "pause" || d.command === "stop" ? { command: d.command } : {}
+      break
+    case "memories_proposed":
+      // One line per reflection, never one per note. The note text and its
+      // memory path are reviewable rows in the Memory tab, not durable
+      // activity — the count is the whole fact this event carries.
+      details = {
+        ...(safeCount(d.count) !== undefined ? { count: safeCount(d.count) } : {}),
+      }
+      break
     case "draft_reviewed": {
       const draftId = safeEventString(d.draftId)
       const cellId = safeEventString(d.cellId)
@@ -687,6 +752,14 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
     case "steering_queued":
       summary = details.steeringKind === "direction" ? "Direction queued" : "Steering queued"
       break
+    case "run_command":
+      summary = details.command === "pause" ? "Pause asked for in chat" : "Stop asked for in chat"
+      break
+    case "memories_proposed": {
+      const count = details.count ?? 0
+      summary = `Proposed ${count} note${count === 1 ? "" : "s"} for review`
+      break
+    }
     case "draft_reviewed":
       summary = details.outcome === "applied"
         ? "Draft applied"
@@ -799,6 +872,10 @@ export interface CreateRunInput {
   anchorCellId?: string | null
   /** Shared across every run one project-wide start created. */
   scopeGroup?: string | null
+  /** Spans the run may process before parking (AQU-1300). Omit for the
+   *  trust-gated default of one passage; pass `null` for the explicit
+   *  "translate the whole file/project" choice. */
+  spanAllowance?: number | null
 }
 
 export type CreateRunResult =
@@ -827,8 +904,8 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
       .prepare(
         `INSERT INTO contextual_runs
             (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
-             anchor_cell_id, scope_group)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?)
+             anchor_cell_id, scope_group, span_allowance)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?)
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -840,6 +917,13 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
         input.roleSnapshot ?? null,
         input.anchorCellId ?? null,
         input.scopeGroup ?? null,
+        // `undefined` means "caller did not choose" → the trust-gated default.
+        // An explicit `null` is the unlimited choice and must survive.
+        input.spanAllowance === undefined
+          ? DEFAULT_SPAN_ALLOWANCE
+          : input.spanAllowance === null
+            ? null
+            : Math.max(0, Math.round(input.spanAllowance)),
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1027,18 +1111,28 @@ export async function transitionRun(
   from: ContextualRunStatus[],
   to: ContextualRunStatus,
   lastError?: string,
+  parkReason?: ContextualParkReason,
 ): Promise<TransitionResult> {
   if (from.length === 0) return { status: "not_found" }
   const placeholders = from.map(() => "?").join(",")
   const safeLastError = sanitizeRunError(lastError)
+  // park_reason is owned by this one write so it can never disagree with
+  // `status`: it is stamped on the way into `parked` and cleared on the way
+  // back to `running`. Every other transition leaves it alone — a terminated
+  // or failed run keeps naming why it was last parked, the same courtesy
+  // `blocked_on_decision_id` gets above.
+  const parkReasonSql =
+    to === "parked" ? "?" : to === "running" ? "NULL" : "park_reason"
+  const parkReasonBinding = to === "parked" ? [parkReason ?? "work_exhausted"] : []
   const row = await db
     .prepare(
       `UPDATE contextual_runs
-          SET status = ?, last_error = COALESCE(?, last_error), updated_at = now()
+          SET status = ?, last_error = COALESCE(?, last_error),
+              park_reason = ${parkReasonSql}, updated_at = now()
         WHERE id = ? AND status IN (${placeholders})
         RETURNING ${RUN_COLS}`,
     )
-    .bind(to, safeLastError, runId, ...from)
+    .bind(to, safeLastError, ...parkReasonBinding, runId, ...from)
     .first<RunRow>()
   if (row) return { status: "ok", run: rowToRun(row) }
   const current = await getRun(db, runId)
@@ -1058,12 +1152,95 @@ export const resumeRun = (db: AquillaDb, runId: string) =>
 /** Any active state → terminated (hard stop; terminal). */
 export const terminateRun = (db: AquillaDb, runId: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "terminated")
-/** running → parked (spans exhausted; steering can wake it). */
-export const parkRun = (db: AquillaDb, runId: string) =>
-  transitionRun(db, runId, ["running"], "parked")
+/** running → parked. `reason` distinguishes "the scope is finished" from
+ *  "there is more, but it needs a human" (AQU-1300); steering can wake either. */
+export const parkRun = (
+  db: AquillaDb,
+  runId: string,
+  reason: ContextualParkReason = "work_exhausted",
+) => transitionRun(db, runId, ["running"], "parked", undefined, reason)
 /** Any active state → failed, recording the error. */
 export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
+
+/**
+ * Reflection bookkeeping (AQU-1302), deliberately kept OFF `RUN_COLS`.
+ *
+ * `reflected_at` / `reflected_done_spans` arrive with migration `0094`, which
+ * this repo applies to Neon BY HAND — so there is always a window where the
+ * code is deployed and the columns are not there yet. Every run read goes
+ * through `RUN_COLS`, so selecting them there would turn that window into a
+ * 500 on the run list and the pill: reflection is a bonus, and a bonus must
+ * never be able to break the feature it decorates. Only the reflection step
+ * reads them, through these two functions, and both fail soft.
+ */
+export interface ContextualRunReflection {
+  /** When this run last reflected. NULL (never) means the caller falls back to
+   *  the run's own `createdAt`, so a first reflection sees the whole run. */
+  reflectedAt: string | null
+  /** `doneSpans` as of that reflection. The "at least 2 passages since the
+   *  last reflection" gate is a difference against this, so one passage that
+   *  staged nine cells still counts as one passage. */
+  reflectedDoneSpans: number
+}
+
+interface ReflectionRow {
+  reflected_at: unknown
+  reflected_done_spans: number | null
+}
+
+/** Read the watermark. `null` means the bookkeeping is unavailable (migration
+ *  not applied yet), which the caller treats as "do not reflect this time" —
+ *  never as "never reflected", which would re-propose the same notes. */
+export async function getRunReflection(
+  db: AquillaDb,
+  runId: string,
+): Promise<ContextualRunReflection | null> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT reflected_at, reflected_done_spans FROM contextual_runs WHERE id = ?`,
+      )
+      .bind(runId)
+      .first<ReflectionRow>()
+    if (!row) return null
+    return {
+      reflectedAt: row.reflected_at == null ? null : toIso(row.reflected_at),
+      reflectedDoneSpans: Number(row.reflected_done_spans ?? 0),
+    }
+  } catch (err) {
+    console.warn(`[contextual] reflection bookkeeping unavailable for run ${runId}:`, err)
+    return null
+  }
+}
+
+/**
+ * Move the watermark forward. Called once a park's reflection has actually run
+ * — whether it proposed notes or (just as validly) proposed none. Leaving it
+ * where it was on a FAILED reflection is deliberate: the next park retries over
+ * the same evidence rather than losing it.
+ *
+ * `reflected_done_spans` is written from the row itself, not from a caller's
+ * snapshot, so a wave that landed between gathering the evidence and marking
+ * cannot be skipped — it is simply counted toward the NEXT reflection.
+ * Status is untouched: reflection is bookkeeping about a park, not a transition.
+ */
+export async function markRunReflected(db: AquillaDb, runId: string): Promise<boolean> {
+  try {
+    await db
+      .prepare(
+        `UPDATE contextual_runs
+            SET reflected_at = now(), reflected_done_spans = done_spans
+          WHERE id = ?`,
+      )
+      .bind(runId)
+      .run()
+    return true
+  } catch (err) {
+    console.warn(`[contextual] reflection watermark not written for run ${runId}:`, err)
+    return false
+  }
+}
 
 /** Block a live run on a decision (§4.5). `waiting` means "something left to
  *  do, but it needs a human" — distinct from `parked`, which means there is
@@ -1096,7 +1273,8 @@ export async function unblockRun(db: AquillaDb, runId: string): Promise<Transiti
   const row = await db
     .prepare(
       `UPDATE contextual_runs
-          SET status = 'running', blocked_on_decision_id = NULL, updated_at = now()
+          SET status = 'running', blocked_on_decision_id = NULL,
+              park_reason = NULL, updated_at = now()
         WHERE id = ? AND status = 'waiting'
         RETURNING ${RUN_COLS}`,
     )
@@ -1106,6 +1284,72 @@ export async function unblockRun(db: AquillaDb, runId: string): Promise<Transiti
   const current = await getRun(db, runId)
   if (!current) return { status: "not_found" }
   return { status: "invalid_state", current: current.status }
+}
+
+export interface GrantSpanAllowanceInput {
+  /** Spans to add. Ignored when `unlimited` is set. */
+  spans: number
+  /** Refuse to raise the allowance above this. Omit for no ceiling (the
+   *  explicit Continue action, which the user asked for deliberately). */
+  cap?: number
+  /** Lift the budget entirely — the "translate the whole file/project" choice.
+   *  Irreversible for the life of the run, by design: the user said do it all. */
+  unlimited?: boolean
+}
+
+/**
+ * Buy the run more spans (AQU-1300).
+ *
+ * The grant is a MAX, not a running total: two reviews landing in the same
+ * instant must not stack into two extra passages beyond the cap, and a grant
+ * that arrives while the run still has budget left is a no-op rather than an
+ * accumulation. `cap` is what keeps incidental input (reviewing a backlog of
+ * drafts) from silently buying an unattended run; an explicit Continue passes
+ * no cap because the user asked for that batch in so many words.
+ *
+ * An already-unlimited run is never narrowed — `span_allowance IS NULL` stays
+ * NULL — so a stray one-span grant cannot cancel "translate everything".
+ */
+export async function grantSpanAllowance(
+  db: AquillaDb,
+  runId: string,
+  input: GrantSpanAllowanceInput,
+): Promise<ContextualRun | null> {
+  if (input.unlimited) {
+    const row = await db
+      .prepare(
+        `UPDATE contextual_runs SET span_allowance = NULL, updated_at = now()
+          WHERE id = ? RETURNING ${RUN_COLS}`,
+      )
+      .bind(runId)
+      .first<RunRow>()
+    return row ? rowToRun(row) : null
+  }
+  const spans = Math.max(0, Math.round(input.spans))
+  if (spans === 0) return getRun(db, runId)
+  // COALESCE(cap, granted) makes "no cap" fall through to the raw grant.
+  const row = await db
+    .prepare(
+      `UPDATE contextual_runs
+          SET span_allowance = CASE
+                WHEN span_allowance IS NULL THEN NULL
+                ELSE GREATEST(
+                  span_allowance,
+                  LEAST(span_allowance + ?, COALESCE(?::integer, span_allowance + ?))
+                )
+              END,
+              updated_at = now()
+        WHERE id = ?
+        RETURNING ${RUN_COLS}`,
+    )
+    .bind(
+      spans,
+      input.cap == null ? null : Math.max(0, Math.round(input.cap)),
+      spans,
+      runId,
+    )
+    .first<RunRow>()
+  return row ? rowToRun(row) : null
 }
 
 /** Persist the derived seed list (first tick). Sets total_spans. */
@@ -1136,6 +1380,10 @@ export interface WaveOutcomeInput {
   callsUsed: number
   lastError?: string | null
   steeringCursor?: string
+  /** Spans the wave actually processed, debited from `span_allowance`
+   *  (AQU-1300). Defaults to done+failed. Blocked spans did no work and must
+   *  not be charged — the user paid for a passage, not for a question. */
+  spansProcessed?: number
 }
 
 /** Record a WAVE's outcome: cursor advance + counters in ONE UPDATE, so a
@@ -1159,6 +1407,12 @@ export async function recordWaveOutcome(
               calls_spent = calls_spent + ?,
               last_error = ?,
               steering_cursor = COALESCE(?::timestamptz, steering_cursor),
+              -- NULL (unlimited) stays NULL; GREATEST floors the budget at 0 so
+              -- a replayed wave can never drive it negative and wrap the gate.
+              span_allowance = CASE
+                WHEN span_allowance IS NULL THEN NULL
+                ELSE GREATEST(0, span_allowance - ?)
+              END,
               updated_at = now()
         WHERE id = ?
         RETURNING ${RUN_COLS}`,
@@ -1172,6 +1426,13 @@ export async function recordWaveOutcome(
       Math.max(0, Math.round(input.callsUsed)),
       safeLastError,
       input.steeringCursor ?? null,
+      Math.max(
+        0,
+        Math.round(
+          input.spansProcessed
+            ?? Math.max(0, input.doneCount) + Math.max(0, input.failedCount),
+        ),
+      ),
       runId,
     )
     .first<RunRow>()
@@ -1951,6 +2212,18 @@ export interface ProjectAutopilotFileRow {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** The span of this run's most recently staged proposal — the passage the
+   *  run got to before it parked (AQU-1301). Null when nothing is pending. */
+  currentSpanId: string | null
+  /** Human passage reference for `currentSpanId`, from the run's own event log
+   *  (no cell load: the overview is polled project-wide). Null when the run
+   *  never logged a label for that span. */
+  currentSpanLabel: string | null
+  /** Proposed drafts belonging to `currentSpanId`. The rest of
+   *  `proposedDrafts` is backlog behind it. */
+  currentSpanDrafts: number
+  /** Why this file's newest run parked (AQU-1300); null on any other status. */
+  parkReason: ContextualParkReason | null
 }
 
 export interface ProjectAutopilotSummary {
@@ -1962,6 +2235,10 @@ export interface ProjectAutopilotSummary {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  /** Drafts sitting in the passage each run parked on, summed across lanes.
+   *  The actionable set; `proposedDrafts - currentSpanDrafts` is the backlog
+   *  the reviewer opens on purpose rather than is handed (AQU-1301). */
+  currentSpanDrafts: number
 }
 
 /**
@@ -1979,7 +2256,7 @@ export async function getProjectAutopilotSummary(
       `WITH newest AS (
          SELECT DISTINCT ON (file_id, target_lang)
                 id, file_id, target_lang, status, done_spans, total_spans, failed_spans,
-                units_spent, last_error, updated_at
+                units_spent, last_error, park_reason, updated_at
           FROM contextual_runs
          WHERE project_id = ?
           ORDER BY file_id, target_lang, created_at DESC, id DESC
@@ -1996,17 +2273,52 @@ export async function getProjectAutopilotSummary(
          SELECT COALESCE(SUM(proposed), 0) AS proposed,
                 COALESCE(SUM(applied), 0) AS applied
            FROM drafts_by_run
+       ),
+       -- AQU-1301: the passage each run parked on is its most recently staged
+       -- proposal. A draft with no span in provenance buckets under '' — one
+       -- unlabelled group, never silently merged into a labelled passage.
+       parked_span AS MATERIALIZED (
+         SELECT DISTINCT ON (d.run_id)
+                d.run_id,
+                COALESCE(d.provenance ->> 'spanId', '') AS span_id
+           FROM contextual_drafts d
+          WHERE d.project_id = ? AND d.status = 'proposed'
+          ORDER BY d.run_id, d.created_at DESC, d.id DESC
+       ),
+       parked_counts AS (
+         SELECT d.run_id, COUNT(*) AS drafts
+           FROM contextual_drafts d
+           JOIN parked_span s ON s.run_id = d.run_id
+          WHERE d.project_id = ? AND d.status = 'proposed'
+            AND COALESCE(d.provenance ->> 'spanId', '') = s.span_id
+          GROUP BY d.run_id
+       ),
+       -- The human passage reference already lives in the run's event log, so
+       -- the project-wide poll never loads a file's cells to render one.
+       parked_labels AS (
+         SELECT DISTINCT ON (e.run_id)
+                e.run_id, e.span_label
+           FROM contextual_run_events e
+           JOIN parked_span s ON s.run_id = e.run_id AND s.span_id = e.span_id
+          WHERE e.project_id = ? AND e.span_label IS NOT NULL
+          ORDER BY e.run_id, e.created_at DESC, e.id DESC
        )
        SELECT n.*, COALESCE(d.proposed, 0) AS proposed,
               COALESCE(d.applied, 0) AS applied,
               COALESCE(p.proposed, 0) AS project_proposed,
-              COALESCE(p.applied, 0) AS project_applied
+              COALESCE(p.applied, 0) AS project_applied,
+              s.span_id AS current_span_id,
+              l.span_label AS current_span_label,
+              COALESCE(c.drafts, 0) AS current_span_drafts
          FROM newest n
          LEFT JOIN drafts_by_run d ON d.run_id = n.id
+         LEFT JOIN parked_span s ON s.run_id = n.id
+         LEFT JOIN parked_counts c ON c.run_id = n.id
+         LEFT JOIN parked_labels l ON l.run_id = n.id
          CROSS JOIN project_drafts p
         ORDER BY n.updated_at DESC, n.id DESC`,
     )
-    .bind(projectId, projectId)
+    .bind(projectId, projectId, projectId, projectId, projectId)
     .all<{
       id: string
       file_id: string
@@ -2017,11 +2329,15 @@ export async function getProjectAutopilotSummary(
       failed_spans: number
       units_spent: number
       last_error: string | null
+      park_reason: string | null
       updated_at: unknown
       proposed: number
       applied: number
       project_proposed: number
       project_applied: number
+      current_span_id: string | null
+      current_span_label: string | null
+      current_span_drafts: number
     }>()
 
   const files: ProjectAutopilotFileRow[] = results.map((r) => ({
@@ -2039,6 +2355,14 @@ export async function getProjectAutopilotSummary(
     // Summary rows bypass rowToRun, so keep the same legacy-read privacy
     // boundary here as snapshots/activity.
     lastError: sanitizeRunError(r.last_error),
+    // '' is the no-span bucket, not a span id — report it as absent.
+    currentSpanId: r.current_span_id ? r.current_span_id : null,
+    currentSpanLabel: r.current_span_label ?? null,
+    currentSpanDrafts: Number(r.current_span_drafts ?? 0),
+    // AQU-1300: a project-wide start fans out one run per file, and the
+    // overview is where those are seen. Without the reason every parked file
+    // reads "Idle" — including the ones holding for an answer.
+    parkReason: parseParkReason(r.park_reason),
   }))
 
   const sum = (pick: (f: ProjectAutopilotFileRow) => number) =>
@@ -2052,6 +2376,7 @@ export async function getProjectAutopilotSummary(
     unitsSpent: sum((f) => f.unitsSpent),
     proposedDrafts: Number(results[0]?.project_proposed ?? 0),
     appliedDrafts: Number(results[0]?.project_applied ?? 0),
+    currentSpanDrafts: sum((f) => f.currentSpanDrafts),
   }
 }
 

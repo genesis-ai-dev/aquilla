@@ -24,12 +24,12 @@ const CRED_1 = "00000000-0000-0000-0000-000000000001"
 
 async function seedCredential(
   testDb: TestDb,
-  opts: { id: string; userId: number; projectId?: string | null; orgId?: number | null },
+  opts: { id: string; userId: number; projectId?: string | null; orgId?: number | null; pii?: boolean },
 ): Promise<string> {
   const { token, tokenHash, tokenPrefix } = await mintApiToken()
   await testDb.pg.query(
-    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
-     VALUES ($1, $2, 'test', $3, $4, 'ask', $5, $6)`,
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, pii)
+     VALUES ($1, $2, 'test', $3, $4, 'ask', $5, $6, $7)`,
     [
       opts.id,
       String(opts.userId),
@@ -37,9 +37,21 @@ async function seedCredential(
       tokenHash,
       opts.orgId != null ? String(opts.orgId) : null,
       opts.projectId ?? null,
+      opts.pii === true,
     ],
   )
   return token
+}
+
+/** Set the project's agentAuthorship policy the same way AQU-1180's own tests
+ *  do (external-pii.test.ts) — through project_settings, which is what
+ *  resolveAuthorshipPolicy actually reads. */
+async function setAgentAuthorship(testDb: TestDb, projectId: string, value: string): Promise<void> {
+  await testDb.pg.query(
+    `INSERT INTO project_settings (project_id, settings) VALUES ($1, $2)
+     ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    [projectId, JSON.stringify({ agentAuthorship: value })],
+  )
 }
 
 function env(testDb: TestDb) {
@@ -475,7 +487,7 @@ describe("external Living Memory reads", () => {
       const byPath = new Map(body.data.map((e) => [e.path, e]))
       const a = byPath.get("decisions/a.md")!
       const b = byPath.get("decisions/b.md")!
-      expect(a.createdBy).toMatch(/^author_[0-9a-f]{12}$/)
+      expect(a.createdBy).toMatch(/^u_[0-9a-f]{8}$/)
       // Same person, same pseudonym within the project — so "one author wrote
       // both of these" survives pseudonymization.
       expect(b.createdBy).toBe(a.createdBy)
@@ -516,6 +528,72 @@ describe("external Living Memory reads", () => {
         )
       )!.json()) as MemoryListBody
       expect(inA.data[0].createdBy).not.toBe(inB.data[0].createdBy)
+    })
+
+    it("a credential minted with the pii grant reads real identities", async () => {
+      // Regression (2026-09-17 pen test): this route used to run its own
+      // pseudonymizer that never checked the credential's `pii` grant at all,
+      // so an OWNER-minted real-identity credential still only ever got
+      // pseudonyms here, unlike every other agent-facing read route.
+      await seedMemory(testDb, {
+        id: "11111111-1111-1111-1111-111111111111",
+        path: "decisions/a.md",
+        content: "a",
+        createdBy: "alice",
+        reviewedBy: "owner",
+      })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a", pii: true })
+
+      const body = (await (
+        await handleExternalMemoryReadRequest(
+          req("/api/v1/external/projects/proj-a/memory", token),
+          env(testDb),
+        )
+      )!.json()) as MemoryListBody
+      expect(body.data[0].createdBy).toBe("alice")
+      expect(body.data[0].reviewedBy).toBe("owner")
+    })
+
+    it("honors the project's agentAuthorship: 'none' opt-out — fields are absent, not pseudonymous", async () => {
+      // Regression (2026-09-17 pen test): this route never consulted the
+      // project's agentAuthorship setting, so a project that opted out of all
+      // agent-visible identity still got pseudonymous createdBy/reviewedBy
+      // back — the same class of gap the comments route had.
+      await setAgentAuthorship(testDb, "proj-a", "none")
+      await seedMemory(testDb, {
+        id: "11111111-1111-1111-1111-111111111111",
+        path: "decisions/a.md",
+        content: "a",
+        createdBy: "alice",
+        reviewedBy: "owner",
+      })
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+
+      const res = await handleExternalMemoryReadRequest(
+        req("/api/v1/external/projects/proj-a/memory", token),
+        env(testDb),
+      )
+      const raw = await res!.text()
+      expect(raw).not.toContain("alice")
+      expect(raw).not.toContain("owner")
+      const body = JSON.parse(raw) as MemoryListBody
+      expect(body.data[0]).not.toHaveProperty("createdBy")
+      expect(body.data[0]).not.toHaveProperty("reviewedBy")
+
+      // And it overrides even a pii credential — the project's choice wins.
+      const piiToken = await seedCredential(testDb, {
+        id: "00000000-0000-0000-0000-000000000099",
+        userId: 2,
+        projectId: "proj-a",
+        pii: true,
+      })
+      const piiBody = (await (
+        await handleExternalMemoryReadRequest(
+          req("/api/v1/external/projects/proj-a/memory", piiToken),
+          env(testDb),
+        )
+      )!.json()) as MemoryListBody
+      expect(piiBody.data[0]).not.toHaveProperty("createdBy")
     })
   })
 

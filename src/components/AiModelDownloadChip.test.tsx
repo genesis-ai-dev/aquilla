@@ -46,61 +46,54 @@ describe("AiModelDownloadChip", () => {
 
   it("keeps a finished model in the same row with a right-side check until the batch is done", () => {
     __testOnlySetStatus("whisper", downloading(58, 100))
-    __testOnlySetStatus("kokoro", downloading(100, 100))
     __testOnlySetStatus("mms", downloading(87, 100))
     renderChip()
 
     act(() => {
-      __testOnlySetStatus("kokoro", { kind: "ready" })
+      __testOnlySetStatus("whisper", { kind: "ready" })
     })
 
     expect(screen.getByText("Downloading AI models")).toBeInTheDocument()
-    expect(screen.getByText("58%")).toBeInTheDocument()
     expect(screen.getByText("87%")).toBeInTheDocument()
     expect(screen.queryByText("100%")).not.toBeInTheDocument()
-    expect(screen.getByLabelText("Kokoro ready to use")).toBeInTheDocument()
+    expect(screen.getByLabelText("Whisper ready to use")).toBeInTheDocument()
     expect(screen.queryByText("ready to use")).not.toBeInTheDocument()
 
     const whisper = screen.getByText("Whisper")
-    const kokoro = screen.getByText("Kokoro")
     const mms = screen.getByText("MMS")
-    expect(whisper.compareDocumentPosition(kokoro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(kokoro.compareDocumentPosition(mms) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(whisper.compareDocumentPosition(mms) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("does not hide a finished row after 4s while others are still downloading", () => {
     vi.useFakeTimers()
     __testOnlySetStatus("whisper", downloading(10, 100))
-    __testOnlySetStatus("kokoro", downloading(100, 100))
+    __testOnlySetStatus("mms", downloading(100, 100))
     renderChip()
 
     act(() => {
-      __testOnlySetStatus("kokoro", { kind: "ready" })
+      __testOnlySetStatus("mms", { kind: "ready" })
     })
     act(() => {
       vi.advanceTimersByTime(5000)
     })
 
-    expect(screen.getByText("Kokoro")).toBeTruthy()
-    expect(screen.getByLabelText("Kokoro ready to use")).toBeTruthy()
+    expect(screen.getByText("MMS")).toBeTruthy()
+    expect(screen.getByLabelText("MMS ready to use")).toBeTruthy()
     expect(screen.getByText("Downloading AI models")).toBeTruthy()
   })
 
   it("switches the heading once every model in the batch is ready", () => {
     __testOnlySetStatus("whisper", downloading(10, 100))
-    __testOnlySetStatus("kokoro", downloading(10, 100))
     __testOnlySetStatus("mms", downloading(10, 100))
     renderChip()
 
     act(() => {
       __testOnlySetStatus("whisper", { kind: "ready" })
-      __testOnlySetStatus("kokoro", { kind: "ready" })
       __testOnlySetStatus("mms", { kind: "ready" })
     })
 
     expect(screen.getByText("AI models ready")).toBeTruthy()
     expect(screen.getByLabelText("Whisper ready to use")).toBeTruthy()
-    expect(screen.getByLabelText("Kokoro ready to use")).toBeTruthy()
     expect(screen.getByLabelText("MMS ready to use")).toBeTruthy()
     expect(screen.queryByText("ready to use")).toBeNull()
   })

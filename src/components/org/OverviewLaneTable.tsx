@@ -334,6 +334,7 @@ export function OverviewLaneTable({
         className={ADMIN_TABLE_CLASS}
         initialSorting={[{ id: "language", desc: false }]}
         onRowClick={(l) => navigate(laneOpenTo(projectId, l.lane))}
+        rowLink={{ columnId: "language", to: (l) => laneOpenTo(projectId, l.lane) }}
         renderRowMenuItems={canManageLanes ? (l) => {
           const tagId = laneTagId(l.lane)
           return (

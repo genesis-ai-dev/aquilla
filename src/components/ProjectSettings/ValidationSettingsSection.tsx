@@ -48,6 +48,17 @@ interface Props {
   allowSelfValidation?: boolean
   /** When true, all inputs are disabled (role/offline gate). */
   disabled?: boolean
+  /**
+   * AQU-1083: the "do headings count toward progress" row, rendered as the
+   * last row of this card.
+   *
+   * A slot rather than more props, because unlike everything else here that
+   * control is NOT part of the page's draft/baseline state — it patches the
+   * shared settings blob directly (see its own note for why it has to). Taking
+   * it as a node keeps this component the pure, fully-controlled section it
+   * has always been.
+   */
+  structuralCellsRow?: ReactNode
   /** Tooltip shown on hover when disabled is true. */
   disabledTooltip?: ReactNode
   onChange: (
@@ -86,6 +97,7 @@ export function ValidationSettingsSection({
   allowSelfValidation = true,
   disabled = false,
   disabledTooltip,
+  structuralCellsRow,
   onChange,
 }: Props) {
   const t = useT()
@@ -227,6 +239,7 @@ export function ValidationSettingsSection({
           />
         </DisabledFieldTooltip>
       </SettingsRow>
+      {structuralCellsRow}
     </SettingsGroup>
   )
 }

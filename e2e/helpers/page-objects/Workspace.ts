@@ -816,9 +816,21 @@ export class Workspace {
 
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
+    await this.replaceCellMeasuringCommit(index, text)
+  }
+
+  /** `replaceCell`, returning the wall-clock milliseconds from the committing
+   * blur to the server's authoritative `/events` acknowledgement.
+   *
+   * Activation and typing are deliberately outside the measurement: the number
+   * the production timing probe (AQU-1024) asserts on is the write round-trip,
+   * not how long Playwright took to focus a cell. */
+  async replaceCellMeasuringCommit(index: number, text: string): Promise<number> {
     const target = await this.activateTargetCell(index)
     await target.fill(text)
+    const startedAt = Date.now()
     await this.commitTargetCellEdit(index, text)
+    return Date.now() - startedAt
   }
 
   async readCell(index: number): Promise<string> {
@@ -1017,20 +1029,9 @@ export class Workspace {
     await this.page.locator("aside").click()
   }
 
-  private actionRail(index: number): Locator {
-    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
-  }
-
-  /** Open the per-cell history drawer through the action rail's overflow. */
+  /** Open the per-cell "Edit history" drawer through the action overflow. */
   async openHistoryDrawer(index: number): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
-    await this.actionRail(index).getByRole("button", { name: "More actions" }).click()
-    // The overflow renders in a portal outside the cell row.
-    const button = this.page.getByRole("button", { name: "Edit history", exact: true })
-    await expect(button).toBeVisible()
+    const button = await this.openRowAction(this.cellRow(index), "Edit history")
     await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }

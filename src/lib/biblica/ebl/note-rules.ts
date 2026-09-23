@@ -171,6 +171,38 @@ export function parseEblLessonNumber(text: string): number | undefined {
   return value ? Number(value) : undefined
 }
 
+/**
+ * True for the contents page (`02_TOC:tc1`…`tc4`, and the `CONTENTS` heading).
+ * Those paragraphs are the only place this template parks a page number next to
+ * a title, either as its own character run or behind tab leaders.
+ */
+export function isEblContentsStyle(paragraphStyle: string): boolean {
+  return styleParts(paragraphStyle).groupId === "toc"
+}
+
+/**
+ * True when a structure run holds only a page number ("16", " 9"). Topic tags
+ * ("1.1") and timings ("30 min") keep their extra characters and stay.
+ */
+export function isPageNumberRun(text: string): boolean {
+  const visible = visiblePlain(text)
+  return visible.length > 0 && /^\d+$/.test(visible)
+}
+
+/**
+ * Offset where a trailing contents page number begins, when it sits in the same
+ * run as the title behind tab leaders or two-or-more spaces. A single space
+ * ("Introduction 3", "Lesson 1") is ordinary copy and is left alone.
+ *
+ * The coordinate is the concatenated slot text `sliceIdmlUnit` cuts in. Absent
+ * when the line has no such trailer.
+ */
+export function trailingPageNumberStart(text: string): number | undefined {
+  const match = /[\t\u00a0 ]{2,}\d+\s*$/.exec(text)
+  if (!match || match.index === 0) return undefined
+  return match.index
+}
+
 /** True when visible text is empty after stripping ACE markers and whitespace. */
 export function isStructuralOnlyContent(segments: readonly string[]): boolean {
   return visiblePlain(segments.join("")).length === 0

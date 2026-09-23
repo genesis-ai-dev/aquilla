@@ -1,0 +1,22 @@
+-- AQU-1278: index the REVERSE lookup on assignment_cells.
+--
+-- The table has carried exactly one index since it was created,
+-- assignment_cells_by_assignment (assignment_id) — because every read so far
+-- started from an assignment and asked "which cells?". The plan inspector's
+-- per-unit read (auth-worker getUnitAssignments) asks the opposite question,
+-- "which assignments cover this file's cells?", and joins from assignment_cells
+-- by file_id. With no index on that column that join is a sequential scan of
+-- every assigned cell in the database — and it runs each time a manager opens
+-- a unit in the plan board, which is a click, not a nightly job.
+--
+-- (file_id, cell_id) rather than (file_id) alone: the same join immediately
+-- pairs each row to `cells` on (file_id, cell_id), so carrying cell_id makes
+-- the scan index-only and keeps the leading column doing the selection work.
+-- It is not unique — one cell may belong to several assignments over time.
+--
+-- Keep this file a SINGLE statement: CONCURRENTLY cannot run in a transaction
+-- block, and the migration runner sends each file as one query. If the build
+-- fails it leaves an INVALID index — `DROP INDEX assignment_cells_by_file` and
+-- re-run.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS assignment_cells_by_file
+  ON assignment_cells(file_id, cell_id);

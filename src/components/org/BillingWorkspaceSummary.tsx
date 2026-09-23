@@ -61,7 +61,7 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           A collaborator’s personal subscription does not add capacity here.
         </p>
         {typeof data.usagePercent === 'number' && data.usageResetsAt ? (
-          <p className="text-sm text-muted-foreground" data-testid="billing-usage" role="status">
+          <p className="text-sm text-muted-foreground" data-testid="billing-usage-percent" role="status">
             {data.usagePercent}% of this week’s AI allowance used.
             Resets {new Date(data.usageResetsAt).toLocaleString()}.
           </p>

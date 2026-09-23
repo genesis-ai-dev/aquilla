@@ -56,7 +56,7 @@ describe('billing workspace API → client → settings', () => {
       usagePercent: 37, usageResetsAt: '2026-09-18T12:00:00.000Z',
     })))
     render(<BillingWorkspaceSummary jwt="jwt" orgId={7} />)
-    expect(await screen.findByTestId('billing-usage')).toHaveTextContent(
+    expect(await screen.findByTestId('billing-usage-percent')).toHaveTextContent(
       `37% of this week’s AI allowance used. Resets ${new Date('2026-09-18T12:00:00.000Z').toLocaleString()}.`)
     expect(screen.queryByText(/not available yet/)).toBeNull()
     expect(document.body.textContent).not.toMatch(/credits/)

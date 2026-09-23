@@ -1259,9 +1259,9 @@ export const editor = defineNamespace({
     "editor.tts.audioFailed": "Audio failed",
 
     // — Validation button, validator popover and its history ——————————
-    "editor.validation.notValidatedTooltip": "Not validated — click to validate",
+    "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
-    "editor.validation.unavailableTooltip": "Validation unavailable",
+    "editor.validation.unavailableTooltip": "Text validation unavailable",
     "editor.validation.noContentTooltip": "No text to validate",
     "editor.validation.ariaNoContent": "No text to validate — {ref}.",
     "editor.validation.ariaValidated":
@@ -1269,6 +1269,8 @@ export const editor = defineNamespace({
     "editor.validation.ariaValidatedByOthers":
       "Validated by others — {ref}. Click to add your validation.",
     "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
+    "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
+    "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
     "editor.validation.validatedBy": "Validated by",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
@@ -1287,6 +1289,10 @@ export const editor = defineNamespace({
       "Audio validated — {ref}. Click to remove your validation.",
     "editor.audioValidation.ariaPartlyValidated":
       "You have validated {done} of {total} takes — {ref}. Click to validate the rest.",
+    "editor.audioValidation.ariaValidatedByOthers":
+      "Audio validated by others — {ref}. Click to add your validation.",
+    "editor.audioValidation.ariaValidatedNoAction": "Audio validated — {ref}.",
+    "editor.audioValidation.validateThisTake": "Validate this take",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
     "editor.audioValidation.ariaOthersValidated": plural({
@@ -4603,6 +4609,22 @@ export const editor = defineNamespace({
           ref: "The cell's reference or fallback row number. Do not translate.",
         },
       },
+      "editor.validation.ariaNotValidatedNoAction": {
+        description:
+          "Screen-reader name when nobody has signed the cell off and the viewer cannot " +
+          "validate it (outside their files or lanes, or their role cannot).",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.validation.ariaValidatedByOthersNoAction": {
+        description:
+          "Screen-reader name when other people have validated the cell and the viewer " +
+          "cannot add a validation of their own.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
       "editor.validation.noContentTooltip": {
         description:
           "Tooltip on the faded, unclickable validation circle shown on a line that " +
@@ -4668,6 +4690,27 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the viewer's role or the project's named-validator list does " +
           "not let them validate recordings at all.",
+      },
+      "editor.audioValidation.ariaValidatedByOthers": {
+        description:
+          "Screen-reader name when enough other people have validated the line's audio " +
+          "and the viewer has not, but still may.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.ariaValidatedNoAction": {
+        description:
+          "Screen-reader name when the line's audio is fully validated by others and " +
+          "the viewer cannot add a validation of their own.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.validateThisTake": {
+        description:
+          "Button in the validation list of a line with several takes, validating just " +
+          "that one take. The word is 'validate', never 'approve'.",
       },
       "editor.audioValidation.noAudioTooltip": {
         description:

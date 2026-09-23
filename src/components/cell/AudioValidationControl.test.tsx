@@ -29,7 +29,7 @@ function draw(
   over: Partial<React.ComponentProps<typeof AudioValidationControl>> = {},
 ) {
   const onValidationChange = vi.fn().mockResolvedValue(undefined)
-  render(
+  const view = render(
     <I18nProvider>
       <AudioValidationControl
         cellRef="GEN 1:1"
@@ -42,7 +42,7 @@ function draw(
       />
     </I18nProvider>,
   )
-  return { onValidationChange }
+  return { onValidationChange, rerender: view.rerender }
 }
 
 const button = () => screen.queryByTestId("audio-validation-button")
@@ -289,10 +289,89 @@ describe("the validator list", () => {
     expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("a", false)
   })
 
-  it("says plainly when nobody has validated a take", async () => {
-    draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
+  it("says plainly when nobody has validated one of several takes", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "b", slot: "track-2" }),
+    ])
     await userEvent.hover(button()!)
     expect(await screen.findByText(/nobody has validated this take/i)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// One hover rule for text and audio (Sam, 2026-09-23)
+// ---------------------------------------------------------------------------
+
+describe("the hover matches the text control", () => {
+  // Nobody has voted: a TOOLTIP saying what a click does, and no list. This
+  // opened an empty popover, which also swallowed the tooltip.
+  it("an untouched line shows the click-to-validate tooltip, not a list", async () => {
+    draw([take({ audioId: "a" })])
+    await userEvent.hover(button()!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/audio not validated — click to validate/i)
+    expect(screen.queryByText(/validated by/i)).toBeNull()
+  })
+
+  // The why-not was unreachable before: the popover always won.
+  it("an untouched line I recorded says why I cannot validate it", async () => {
+    draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
+    await userEvent.hover(button()!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("You recorded this")
+  })
+
+  it("once somebody has voted, the hover is the Validated by list", async () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
+    await userEvent.hover(button()!)
+    expect(await screen.findByText("Validated by")).toBeInTheDocument()
+    expect(screen.getByText("bo")).toBeInTheDocument()
+    expect(screen.queryByTestId("audio-validation-blocked-note")).toBeNull()
+  })
+
+  // …and a reason I cannot join them rides at the foot of that list rather
+  // than vanishing because somebody voted first.
+  it("puts the why-not at the foot of the list", async () => {
+    draw([take({
+      audioId: "a", validatorCount: 1, validators: ["bo"],
+      canValidate: false, blockedReason: "You recorded this",
+    })], { validationRequirement: 2 })
+    await userEvent.hover(button()!)
+    expect(await screen.findByTestId("audio-validation-blocked-note")).toHaveTextContent("You recorded this")
+  })
+
+  // Every line draws once BEFORE its audio loads (the faded mic), then again
+  // with its take. React reused the faded mic's tooltip for the real button,
+  // and Base UI's hover listeners stayed on the discarded span — so in the
+  // app the tooltip never opened on hover at all.
+  it("the tooltip still opens once the take arrives after the first draw", async () => {
+    const view = draw([])
+    view.rerender(
+      <I18nProvider>
+        <AudioValidationControl
+          cellRef="GEN 1:1" takes={[take({ audioId: "a" })]} currentUsername="ana"
+          validationRequirement={1} canValidate onValidationChange={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    await userEvent.hover(button()!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/audio not validated — click to validate/i)
+  })
+
+  // Found hovering as alice: a line two others finished told her to "remove
+  // your validation" — she had none.
+  it("a line others finished never offers to remove a vote I do not have", () => {
+    draw([take({ audioId: "a", validatorCount: 2, validators: ["bo", "cy"] })], { validationRequirement: 2 })
+    expect(button()!.getAttribute("aria-label")).toMatch(/validated by others.*add your validation/i)
+    expect(button()!.getAttribute("aria-label")).not.toMatch(/remove/i)
+  })
+
+  it("a line others finished that I may not join just says validated", () => {
+    draw([take({
+      audioId: "a", validatorCount: 2, validators: ["bo", "cy"],
+      canValidate: false, blockedReason: "You recorded this",
+    })], { validationRequirement: 2 })
+    expect(button()!.getAttribute("aria-label")).toMatch(/^audio validated — /i)
+    expect(button()!.getAttribute("aria-label")).not.toMatch(/click/i)
   })
 })
 

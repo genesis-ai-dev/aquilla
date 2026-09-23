@@ -85,4 +85,33 @@ describe("TargetValidationControl", () => {
     fireEvent.click(faded)
     expect(onValidationChange).not.toHaveBeenCalled()
   })
+
+  // Sam, 2026-09-23: the same hover rule as audio. The tooltip names which
+  // half it is about, and a why-not survives somebody else voting first.
+  it("names the text half in its tooltip", async () => {
+    render(
+      <TargetValidationControl
+        cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+        validationHistory={[]} currentUsername="alice" validationRequirement={1}
+        canValidate canValidateThisCell onValidationChange={vi.fn()}
+      />,
+    )
+    fireEvent.mouseEnter(screen.getByRole("button"))
+    fireEvent.pointerEnter(screen.getByRole("button"))
+    fireEvent.focus(screen.getByRole("button"))
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Text not validated — click to validate")
+  })
+
+  it("puts the why-not at the foot of the Validated by list", async () => {
+    render(
+      <TargetValidationControl
+        cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+        validationHistory={[]} currentUsername="alice" validationRequirement={2}
+        canValidate canValidateThisCell={false} onValidationChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button"))
+    expect(await screen.findByText("Validated by")).toBeInTheDocument()
+    expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
+  })
 })

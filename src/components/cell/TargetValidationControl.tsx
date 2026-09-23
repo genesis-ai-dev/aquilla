@@ -150,8 +150,12 @@ export function TargetValidationControl({
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
   const tooltip = canValidateThisCell
-    ? "Not validated — click to validate"
-    : canValidate ? "Outside your assigned files or lanes" : "Validation unavailable"
+    ? t("editor.validation.notValidatedTooltip")
+    : canValidate ? t("editor.validation.outOfScopeTooltip") : t("editor.validation.unavailableTooltip")
+  // Why the viewer cannot add a vote, at the foot of the "Validated by" list —
+  // the same place the audio control puts it, so a blocked reason is never
+  // hidden just because somebody else voted first.
+  const blockedNote = canValidateThisCell || isSelfValidated ? null : tooltip
 
   const changeValidation = (validated: boolean) => {
     setPendingValidation({ value: validated, authoritativeAtRequest: authoritativeSelfValidated })
@@ -185,12 +189,18 @@ export function TargetValidationControl({
       type="button"
       data-showcase="cell.validation"
       aria-pressed={isSelfValidated}
+      // No "click to…" when a click would do nothing — the audio control's
+      // rule. A viewer outside the lane used to be told to click a dead button.
       aria-label={
         isSelfValidated
-          ? `Validated — ${cellRef}. Click to remove your validation.`
+          ? t("editor.validation.ariaValidated", { ref: cellRef })
           : state === "full-others" || state === "others"
-            ? `Validated by others — ${cellRef}. Click to add your validation.`
-            : `Not validated — ${cellRef}. Click to validate.`
+            ? canValidateThisCell
+              ? t("editor.validation.ariaValidatedByOthers", { ref: cellRef })
+              : t("editor.validation.ariaValidatedByOthersNoAction", { ref: cellRef })
+            : canValidateThisCell
+              ? t("editor.validation.ariaNotValidated", { ref: cellRef })
+              : t("editor.validation.ariaNotValidatedNoAction", { ref: cellRef })
       }
       onClick={(event) => {
         if (!onClick) return
@@ -206,11 +216,16 @@ export function TargetValidationControl({
       }}
       className={cn(
         "relative flex h-6 w-6 items-center justify-center rounded-lg transition-[transform,color,background-color] duration-150 ease-out",
-        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30 hover:bg-muted/80",
+        "active:scale-[0.88] aria-disabled:cursor-not-allowed aria-disabled:opacity-30 hover:bg-muted/80",
         validationColorClass,
-        (state === "none" || state === "others" || state === "full-others") && "hover:text-green-500",
+        canValidateThisCell && (state === "none" || state === "others" || state === "full-others") && "hover:text-green-500",
       )}
-      disabled={!canValidateThisCell}
+      // aria-disabled, NOT `disabled`: a disabled button fires no pointer
+      // events, so the tooltip or list explaining WHY this viewer cannot
+      // validate never opened (Sam, 2026-09-23 — the AQU-1068 trap, which the
+      // audio control beside it already avoids). A press does nothing because
+      // no handler is wired when the viewer cannot vote.
+      aria-disabled={!canValidateThisCell || undefined}
     >
       <ValidationIcon
         className="relative h-3.5 w-3.5"
@@ -224,7 +239,7 @@ export function TargetValidationControl({
     <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
       {hasContent ? (
         hasValidatorInfo ? (
-          <Popover open={popoverOpen} onOpenChange={handleOpenChange}>
+          <Popover key="list" open={popoverOpen} onOpenChange={handleOpenChange}>
             <PopoverTrigger
               openOnHover
               delay={400}
@@ -236,17 +251,17 @@ export function TargetValidationControl({
             {state !== "empty" && (
               <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
                 <ul className="space-y-0.5">
-                  <li className="mb-1 px-1 text-xs text-muted-foreground">{t("agentWorkspace.validatedBy")}</li>
+                  <li className="mb-1 px-1 text-xs text-muted-foreground">{t("editor.validation.validatedBy")}</li>
                   {displayedValidators.length === 0 ? (
-                    <li className="px-1 py-1 text-xs text-muted-foreground">{t("agentWorkspace.noActiveValidators")}</li>
+                    <li className="px-1 py-1 text-xs text-muted-foreground">{t("editor.validation.noActiveValidators")}</li>
                   ) : displayedValidators.map((validator) => (
                     <li key={validator} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                       <span className="truncate">{validator}{validator === currentUsername ? " (you)" : ""}</span>
                       {validator === currentUsername && canValidate && (
-                        <AppTooltip content={t("agentWorkspace.removeValidation")}>
+                        <AppTooltip content={t("editor.validation.removeYours")}>
                           <button
                             type="button"
-                            aria-label={t("agentWorkspace.removeValidation")}
+                            aria-label={t("editor.validation.removeYours")}
                             className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               changeValidation(false)
@@ -263,11 +278,16 @@ export function TargetValidationControl({
                 {validationHistory.length > 0 && (
                   <ValidationHistoryTimeline entries={validationHistory} currentUsername={currentUsername} />
                 )}
+                {blockedNote && (
+                  <div data-testid="validation-blocked-note" className="mt-1 border-t border-border px-1 pt-1.5 text-[11px] text-muted-foreground">
+                    {blockedNote}
+                  </div>
+                )}
               </PopoverContent>
             )}
           </Popover>
         ) : (
-          <AppTooltip content={tooltip}>
+          <AppTooltip key="tooltip" content={tooltip}>
             {renderButton(canValidateThisCell && !isSelfValidated
               ? () => changeValidation(true)
               : undefined)}
@@ -279,7 +299,10 @@ export function TargetValidationControl({
         // every row and "nothing here" looks different from "not validated
         // yet". A span, not a disabled button — it is no tab stop, and unlike a
         // disabled button it still takes the hover that explains itself.
-        <AppTooltip content={t("editor.validation.noContentTooltip")}>
+        // Keyed, like every branch here: React would otherwise reuse this
+        // tooltip for the real button when text arrives, and Base UI's hover
+        // listeners stay on the discarded span (see AudioValidationControl).
+        <AppTooltip key="unavailable" content={t("editor.validation.noContentTooltip")}>
           <span
             role="img"
             data-testid="validation-unavailable"

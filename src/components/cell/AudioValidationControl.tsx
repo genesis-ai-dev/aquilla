@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react"
+import { Fragment, useEffect, useMemo, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -189,6 +189,7 @@ export function AudioValidationControl({
    */
   const fillCapsule = state === "others"
 
+  const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
   const tooltip = mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
@@ -207,6 +208,9 @@ export function AudioValidationControl({
     0,
   )
   const clickable = mineToGive.length > 0
+  // Why the viewer cannot add a vote, for the foot of the list. Nothing when
+  // they can, or when every take already carries theirs.
+  const blockedNote = !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
   // come from `allMine`, a different question — so a line two other people
@@ -216,7 +220,14 @@ export function AudioValidationControl({
   // were reachable (adversarial review, 2026-09-22); deriving both from one
   // value is what stops a fifth.
   const ariaLabel = state === "full"
-    ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
+    // "Click to remove your validation" only when there IS one of mine on
+    // every take. A line others finished used to say it to someone who had
+    // never voted (Sam, 2026-09-23) — the text control's "by others" twin.
+    ? (allMine
+        ? t("editor.audioValidation.ariaValidated", { ref: cellRef })
+        : clickable
+          ? t("editor.audioValidation.ariaValidatedByOthers", { ref: cellRef })
+          : t("editor.audioValidation.ariaValidatedNoAction", { ref: cellRef }))
     : state === "self"
       ? (shortBy > 0
           ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
@@ -299,7 +310,7 @@ export function AudioValidationControl({
     if (variant === "inline") return null
     return (
       <div data-testid="audio-validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip content={t("editor.audioValidation.noAudioTooltip")}>
+        <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
           <span
             role="img"
             data-testid="audio-validation-unavailable"
@@ -332,11 +343,14 @@ export function AudioValidationControl({
         render={renderButton(clickable ? validateAll : undefined)}
       />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
-        {displayed.length > 1 && (
-          <div className="mb-1 px-1 text-xs text-muted-foreground">
-            {t("editor.audioValidation.takesHeading")}
-          </div>
-        )}
+        {/* Headed like the text control's list, so the two popovers read as
+            one kind of thing. Several takes get the per-take heading instead,
+            since each take below carries its own list. */}
+        <div className="mb-1 px-1 text-xs text-muted-foreground">
+          {displayed.length > 1
+            ? t("editor.audioValidation.takesHeading")
+            : t("editor.validation.validatedBy")}
+        </div>
         <ul className="space-y-1">
           {displayed.map((take) => {
             const mine = take.validators.includes(currentUsername)
@@ -396,18 +410,44 @@ export function AudioValidationControl({
                     className="mt-0.5 rounded px-1 py-0.5 text-[11px] text-green-600 hover:bg-muted/60"
                     onClick={() => change(take.audioId, true)}
                   >
-                    {t("editor.audioValidation.notValidatedTooltip")}
+                    {t("editor.audioValidation.validateThisTake")}
                   </button>
                 )}
               </li>
             )
           })}
         </ul>
+        {blockedNote && (
+          <div data-testid="audio-validation-blocked-note" className="mt-1 border-t border-border px-1 pt-1.5 text-[11px] text-muted-foreground">
+            {blockedNote}
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )
 
-  const wrapped = <AppTooltip content={tooltip}>{body}</AppTooltip>
+  // THE SAME HOVER RULE AS TEXT (Sam, 2026-09-23). Until somebody has voted
+  // there is no list worth opening, so the hover is a TOOLTIP saying what a
+  // click would do — or why it would not. From the first vote on, the hover is
+  // the "Validated by" list, and the why-not rides at its foot. This used to
+  // open the popover on every line, and a popover suppresses the tooltip
+  // around it: an untouched line said "Nobody has validated this take" where
+  // text said "click to validate", and "you recorded this" was unreachable.
+  //
+  // THE KEYS ARE LOAD-BEARING. Every line first draws before its audio has
+  // loaded, so as the faded "no audio" mic; the take arrives a moment later.
+  // Without distinct keys React reuses that tooltip for the real button, and
+  // Base UI attaches its hover listeners ONCE, to the element it first saw —
+  // the span that has just been thrown away. The real button then never opened
+  // its tooltip on hover (found in the browser, 2026-09-23: the button had no
+  // mouseenter listener at all). A key makes each shape mount its own.
+  const wrapped = hasVoterInfo
+    ? <Fragment key="list">{body}</Fragment>
+    : (
+        <AppTooltip key="tooltip" content={tooltip}>
+          {renderButton(clickable ? validateAll : undefined)}
+        </AppTooltip>
+      )
   if (variant === "inline") return wrapped
   return (
     <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">

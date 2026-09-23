@@ -1963,7 +1963,16 @@ export function ProjectWorkspace() {
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
   const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
-  const availableLanes = useMemo(() => ["", ...targetLanes], [targetLanes])
+  // AQU-1240: the `''` default lane IS the primary target language (it is
+  // *named* by `targetLanguage` and its cells carry `target_lang = ''`). Since
+  // slice 1 the registry (`targetLanes`) also LISTS the primary, so a naive
+  // `["", ...targetLanes]` renders the primary twice — a duplicate switcher row
+  // that reads as a second, redundant view of the same lane. Drop the primary
+  // from the registry side here; genuinely-extra lanes (French, …) stay.
+  const availableLanes = useMemo(
+    () => ["", ...targetLanes.filter((l) => !languagesEqual(l, project?.targetLanguage))],
+    [targetLanes, project?.targetLanguage],
+  )
   // If the active lane is no longer offered (removed from settings), fall back
   // to the default lane so the editor never points at a nonexistent lane.
   useEffect(() => {

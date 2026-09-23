@@ -2018,7 +2018,6 @@ export const ms: Catalog = {
   "autopilot.readiness.languages.unset": "Bahasa sumber atau sasaran belum ditetapkan, jadi Autopilot terpaksa mengagaknya daripada terjemahan sedia ada anda.",
   "org.breadcrumb.allOrganizations": "Semua organisasi",
   "org.breadcrumb.organizationFallback": "Organisasi",
-  "org.switcher.workspaceFallback": "Ruang Kerja",
   "org.switcher.triggerAriaLabel": "Penukar organisasi: {org}",
   "org.switcher.searchPlaceholder": "Cari organisasi…",
   "org.switcher.searchAriaLabel": "Cari organisasi",

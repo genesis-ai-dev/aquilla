@@ -61,17 +61,21 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("100%")).toBeTruthy()
   })
 
-  // AQU-538 (§3.5): a lane-pinned assignment renders a lane chip; the default
-  // lane ('') renders none.
-  it("renders a lane chip only for a lane-pinned assignment", async () => {
+  // AQU-729: every assignment says which language lane it is. The default
+  // lane ('') shows the project's target language, not a blank and not the
+  // word "default". An explicit tag still shows that tag.
+  it("shows the project's language for a default-lane assignment and the tag for an explicit one", async () => {
     mockGetMyAssignments.mockResolvedValue([
       makeAssignment({ assignmentId: "asgn-es", scopeLabel: "Genesis", targetLang: "es" }),
       makeAssignment({ assignmentId: "asgn-def", scopeLabel: "Exodus", targetLang: "" }),
     ])
-    render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
+    render(
+      <ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" defaultLaneLabel="Portuguese" />,
+    )
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
-    // The pinned lane's tag renders as a chip; there is exactly one "es".
     expect(screen.getByText("es")).toBeTruthy()
+    expect(screen.getByText("Portuguese")).toBeTruthy()
+    expect(screen.queryByText(/^default$/i)).toBeNull()
   })
 
   it("passes the whole assignment to onJumpToAssignment when a row is clicked", async () => {

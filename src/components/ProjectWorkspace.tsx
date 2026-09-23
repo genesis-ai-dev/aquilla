@@ -11440,6 +11440,7 @@ export function ProjectWorkspace() {
                     jwt={jwt}
                     onJumpToAssignment={jumpToAssignment}
                     refreshKey={assignmentsRefreshKey}
+                    defaultLaneLabel={project.targetLanguage ?? ""}
                   />
                 )}
                 {/* Contextual onboarding status — self-removes once setup

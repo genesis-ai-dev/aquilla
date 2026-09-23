@@ -121,8 +121,7 @@
             "DIARIZATION_MODAL_URL",
             "DIARIZATION_PUBLIC_BASE",
             "DIARIZATION_SHARED_SECRET",
-            "OMNIVOICE_TOKEN",
-            "OMNIVOICE_URL",
+            "INWORLD_API_KEY",
             "SEED_VC_TOKEN",
             "SEED_VC_URL"
           ],

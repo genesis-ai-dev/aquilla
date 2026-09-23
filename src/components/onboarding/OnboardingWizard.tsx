@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react"
-import { useNavigate } from "react-router-dom"
+import { billingSelectionPath, readBillingIntent } from "@/lib/billing/intent"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -46,6 +47,9 @@ const TOTAL_STEPS = 8
 export function OnboardingWizard() {
   const t = useT()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const billingIntent = readBillingIntent(searchParams)
+  const billingNext = billingIntent.kind === "paid" ? billingSelectionPath(billingIntent.selection) : null
   const { refresh: refreshOrgs } = useActiveOrg()
   const { session } = useFrontierSession()
   const [authenticatedUsername, setAuthenticatedUsername] = useState<string | null>(null)
@@ -134,13 +138,13 @@ export function OnboardingWizard() {
         reason: alreadyOnboarded ? "flag" : "has-orgs",
       })
       void refreshOrgs()
-      navigate("/")
+      navigate(billingNext ?? "/")
     } else {
       // Brand-new account with no orgs yet — continue the signup wizard.
       next()
     }
     setLoginClassificationBusy(false)
-  }, [refreshOrgs, navigate, next, t])
+  }, [refreshOrgs, navigate, next, t, billingNext])
 
   const handleSignupComplete = useCallback((authenticated: FrontierSession) => {
     setAuthenticatedUsername(authenticated.username)
@@ -160,23 +164,27 @@ export function OnboardingWizard() {
 
   const handleFinish = useCallback(() => {
     markCompletion()
-    if (createdProject) {
+    if (billingNext) {
+      navigate(billingNext)
+    } else if (createdProject) {
       navigate(`/project/${createdProject.id}/editor`, {
         state: { openSetupChecklist: true },
       })
     } else {
-      navigate("/")
+      navigate(billingNext ?? "/")
     }
-  }, [createdProject, navigate, markCompletion])
+  }, [createdProject, navigate, markCompletion, billingNext])
 
   const handleSkipProject = useCallback(() => {
     markCompletion()
-    navigate("/")
-  }, [navigate, markCompletion])
+    navigate(billingNext ?? "/")
+  }, [navigate, markCompletion, billingNext])
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label={t("onboarding.wizard.setupAriaLabel")}>
       <div className="w-full max-w-md">
+        {billingNext && <p className="mb-4 text-sm text-muted-foreground">Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.</p>}
+        {billingIntent.kind === "invalid" && <p role="alert">This plan selection is unavailable. You can finish setup and choose a plan later.</p>}
         {/* Step indicator */}
         <div
           className="mb-8 flex justify-center gap-2"

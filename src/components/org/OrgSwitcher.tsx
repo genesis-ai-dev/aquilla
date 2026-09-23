@@ -75,12 +75,17 @@ function byName(a: { name: string | null }, b: { name: string | null }) {
   return (a.name ?? "").localeCompare(b.name ?? "")
 }
 
-function memberItem(org: OrgSummary): OrgSwitcherItem {
+// AQU-1113: an unnamed org falls back to the same translated noun the
+// breadcrumb, members page and projects page already use ("Organization") —
+// not a hardcoded English "Workspace". The personal org keeps its own *name*
+// ("<username>'s workspace", minted server-side); this is only the type noun
+// shown when an org has no name at all.
+function memberItem(org: OrgSummary, fallbackName: string): OrgSwitcherItem {
   return {
     kind: "member",
     key: `member:${org.id}`,
     id: org.id,
-    label: org.name ?? "Workspace",
+    label: org.name ?? fallbackName,
     roleName: org.role.name,
     viaPlatformAdmin: org.viaPlatformAdmin,
   }
@@ -392,7 +397,7 @@ export function OrgSwitcher() {
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : viewingAllOrgs
       ? t("org.breadcrumb.allOrganizations")
-      : activeOrg?.name ?? "Workspace"
+      : activeOrg?.name ?? t("org.breadcrumb.organizationFallback")
 
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
@@ -402,12 +407,12 @@ export function OrgSwitcher() {
     for (const org of sortedOrgs) {
       if (guestIds.has(org.id)) continue
       seen.add(org.id)
-      next.push(memberItem(org))
+      next.push(memberItem(org, t("org.breadcrumb.organizationFallback")))
     }
     // Keep the selected catalog org in `items` while a search page omits it
     // (Base UI needs the value in the known set to keep the trigger label).
     if (activeOrg && !seen.has(activeOrg.id) && !guestSelected) {
-      next.push(memberItem(activeOrg))
+      next.push(memberItem(activeOrg, t("org.breadcrumb.organizationFallback")))
     }
     for (const org of sortedGuestOrgs) next.push(guestItem(org))
     return next

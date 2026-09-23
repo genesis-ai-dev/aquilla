@@ -154,6 +154,28 @@ export function buildRulesBlock(rules: PromptRule[]): string {
 }
 
 /**
+ * Render the style-rule instructions in force for the cell(s) being drafted
+ * (AQU-934). Unlike `buildRulesBlock`, which can only speak the three regex
+ * check shapes, these are natural-language rules resolved per passage from the
+ * applicability graph — so the block carries exactly the guidance that applies
+ * here, instead of every project rule on every call.
+ *
+ * Blank/duplicate instructions are dropped; empty input → "" (caller skips).
+ */
+export function buildStyleRulesBlock(instructions: string[] | undefined | null): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const raw of instructions ?? []) {
+    const instruction = raw.trim()
+    if (!instruction || seen.has(instruction)) continue
+    seen.add(instruction)
+    lines.push(`- ${instruction}`)
+  }
+  if (!lines.length) return ""
+  return "Style rules that apply to this passage (MUST follow):\n" + lines.join("\n")
+}
+
+/**
  * Render the brief's L1 summary as a labeled block for the system prompt.
  * Empty/blank input → "" (caller skips injection). The brief states the
  * project's purpose, audience, register, and constraints; it sits ABOVE the
@@ -189,6 +211,9 @@ export interface BuildPromptOptions {
   examples: { source: string; target: string }[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: PromptRule[]
+  /** Style-rule instructions resolved for this cell from the applicability
+   *  graph (AQU-934) — injected after the rules block. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended to examples. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -226,6 +251,9 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+
+  const styleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (styleBlock) sys = sys + "\n\n" + styleBlock
 
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 

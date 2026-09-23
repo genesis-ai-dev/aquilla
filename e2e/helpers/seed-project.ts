@@ -30,6 +30,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
+import { extractUsfmStrings } from "../../src/lib/parsers/usfm"
+import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
 import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
@@ -90,7 +92,7 @@ export async function readSeededFileEvents(
   return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
-/** Create a project and import a markdown fixture entirely server-side.
+/** Create a project and import a markdown or USFM fixture entirely server-side.
  * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
@@ -115,25 +117,36 @@ export async function seedProjectWithFile(
   const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE
   const fileName = path.basename(fixturePath)
-  const strings = extractMarkdownStrings(await fs.readFile(fixturePath, "utf8"))
+  const fileType = path.extname(fixturePath).toLowerCase() === ".usfm" ? "usfm" : "md"
+  const contents = await fs.readFile(fixturePath, "utf8")
+  const strings = fileType === "usfm"
+    ? extractUsfmStrings(contents).flatMap((book) => book.strings)
+    : extractMarkdownStrings(contents)
+  const normalized = normalizeTranslatableStrings(strings, { fileName, fileType })
 
   // Mirror src/lib/import.ts buildBulkCells: chain via anchorCellId, thread
   // sequenceIndex + paragraphStart, keep the parser-minted cell ids.
   let prevCellId: string | null = null
   const cells = strings.map((str, seq) => {
+    const unit = normalized.units[seq]
     const cell = {
       id: randomUUID(),
       cellId: str.id,
       anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      value: unit.sourceText,
+      ...(unit.sourceHtml ? { valueHtml: unit.sourceHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
+      ...(unit.canonicalRef ? { canonicalRef: unit.canonicalRef } : {}),
       sequenceIndex: seq,
       // useCells reads paragraphStart from `source.metadata.paragraphStart`
       // (src/hooks/useCells.ts), not the top-level field — mirror
       // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
-      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+      ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      metadata: {
+        ...str.metadata,
+        aquillaImport: aquillaImportMetadata(normalized, unit),
+        ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      },
     }
     prevCellId = str.id
     return cell
@@ -147,18 +160,27 @@ export async function seedProjectWithFile(
   const file = {
     id: randomUUID(),
     name: fileName,
-    fileType: "md",
+    fileType,
     role: "source",
-    kind: "md",
-    importFormat: "md",
+    kind: fileType,
+    importFormat: fileType,
     parserVersion: "workspace-import-v1",
   }
-  await postIdempotentJson({
-    url: `${SYNC_BASE}/import`,
-    headers: importHeaders,
-    body: { projectId, fileId, file, cells, clientTs: Date.now() },
-    operation: "bulk import",
-  })
+  // Match the route's 5,000-cell request limit. Keep the global anchor chain
+  // and sequence indexes, and create file metadata only with the first batch.
+  for (let offset = 0; offset < Math.max(1, cells.length); offset += 5_000) {
+    await postIdempotentJson({
+      url: `${SYNC_BASE}/import`,
+      headers: importHeaders,
+      body: {
+        projectId, fileId,
+        ...(offset === 0 ? { file } : {}),
+        cells: cells.slice(offset, offset + 5_000),
+        clientTs: Date.now(),
+      },
+      operation: `bulk import batch ${offset / 5_000 + 1}`,
+    })
+  }
   await postIdempotentJson({
     url: `${SYNC_BASE}/import`,
     headers: importHeaders,

@@ -5,6 +5,24 @@ import { vi } from "vitest"
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 
 describe("CellAreaPlaceholder", () => {
+  it("puts changing download progress inside the cloud-loading status and removes it on completion", () => {
+    const retry = vi.fn()
+    const { rerender } = render(<CellRowsLoadStatus loading error={false} progress={{ loaded: 52, total: 100 }} onRetryClick={retry} />)
+    const status = screen.getByRole("status", { name: "Loading file from the cloud" })
+    expect(status).toHaveTextContent("Loading file from the cloud… · 52%")
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+    expect(screen.queryByText(/Loading cell data/)).not.toBeInTheDocument()
+    rerender(<CellRowsLoadStatus loading error={false} progress={{ loaded: 99, total: 100 }} onRetryClick={retry} />)
+    expect(status).toHaveTextContent("99%")
+    rerender(<CellRowsLoadStatus loading={false} error={false} progress={{ loaded: 0, total: 100 }} onRetryClick={retry} />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("puts the percentage in the initial cloud-loading placeholder too", () => {
+    render(<CellAreaPlaceholder state={{ kind: "syncing-empty" }} progress={{ loaded: 10, total: 20 }} />)
+    expect(screen.getByRole("status", { name: "Loading file from the cloud" })).toHaveTextContent("Loading file from the cloud… · 50%")
+  })
+
   it("keeps unresolved rows inert, supports retry, and disappears when complete", () => {
     const retry = vi.fn()
     const { rerender } = render(<CellRowsLoadStatus loading error={false} onRetryClick={retry} />)

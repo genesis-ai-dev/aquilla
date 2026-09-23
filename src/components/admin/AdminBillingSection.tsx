@@ -5,6 +5,7 @@ import { DataTable } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Section } from "@/components/ui/page"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/lib/billing/plans"
 import {
@@ -182,6 +183,25 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         ),
       },
       {
+        id: "period",
+        header: "Capacity period",
+        cell: ({ row }) => (
+          <div className="text-xs text-muted-foreground" data-testid={`admin-period-${row.original.orgId}`}>
+            {row.original.periodStart || row.original.periodEnd ? (
+              <span className="flex items-center gap-1">
+                <DateTooltip value={row.original.periodStart} label="Period start" />
+                <span aria-hidden>→</span>
+                <DateTooltip value={row.original.periodEnd} label="Period end" />
+              </span>
+            ) : (
+              <span title="No billing period on record — the allowance applies to the current cycle.">
+                No period set
+              </span>
+            )}
+          </div>
+        ),
+      },
+      {
         id: "actions",
         header: "Adjust",
         cell: ({ row }) => (
@@ -252,6 +272,17 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
             data={orgs}
             getRowId={(row) => String(row.orgId)}
             initialSorting={[{ id: "org", desc: false }]}
+            searchPlaceholder="Search organizations…"
+            globalFilterFn={(row, _columnId, filterValue) => {
+              const q = String(filterValue).trim().toLowerCase()
+              if (!q) return true
+              const org = row.original
+              return (
+                (org.orgName ?? "").toLowerCase().includes(q) ||
+                `#${org.orgId}`.includes(q) ||
+                String(org.orgId).includes(q)
+              )
+            }}
             testId="admin-billing-orgs"
             rowClassName="align-top"
           />

@@ -12,14 +12,17 @@ import {
   walkAnchorChain,
 } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
-import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
+import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -51,6 +54,32 @@ function laneOf(row: CellRow): string {
   return row.targetLang ?? ""
 }
 
+/** Equality for decoded JSON data. Unsupported objects/cycles conservatively
+ * invalidate indexes; key ordering from separate HTTP responses is irrelevant.
+ */
+function sameJsonData(a: unknown, b: unknown, depth = 0): boolean {
+  if (Object.is(a, b)) return true
+  if (depth >= 64 || !a || !b || typeof a !== "object" || typeof b !== "object") return false
+  if (Object.getOwnPropertySymbols(a).length || Object.getOwnPropertySymbols(b).length) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length
+      || Object.keys(a).length !== a.length || Object.keys(b).length !== b.length) return false
+    for (let index = 0; index < a.length; index++) {
+      if (!Object.prototype.hasOwnProperty.call(a, index) || !Object.prototype.hasOwnProperty.call(b, index)
+        || !sameJsonData(a[index], b[index], depth + 1)) return false
+    }
+    return true
+  }
+  const plain = (value: object) => Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null
+  if (!plain(a) || !plain(b)) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length
+    && keys.every(key => Object.prototype.hasOwnProperty.call(right, key)
+      && sameJsonData(left[key], right[key], depth + 1))
+}
+
 export interface CellSummary {
   id: string
   fileId: string
@@ -80,6 +109,7 @@ export interface CellSummary {
   endTime?: number
   sequenceIndex?: number
   medium?: CellData["medium"]
+  transcription?: string
   selectedGeneratedVoiceAudioId?: string
   /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
   hasOwnTake?: boolean
@@ -170,6 +200,21 @@ interface RuntimeContext {
    * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
    */
   lane?: string
+  /**
+   * AQU-1083: does this project count structural cells (headings, book titles,
+   * chapter markers) toward progress? Absent ⇒ yes, which is what every
+   * project did before the setting existed.
+   *
+   * The store owns the counting RULE — what "translated" means for a cell,
+   * including the audio-only case — so it is also the right place to decide
+   * which cells the rule is applied to. The alternative was recomputing those
+   * totals in the sidebar from cell summaries, which would have re-derived
+   * "translated" by a different route and drifted from this one.
+   *
+   * Structural cells stay in `order`, in every navigation index and in the
+   * editor: excluding them from PROGRESS is not the same as hiding them.
+   */
+  countStructural?: boolean
 }
 
 interface PendingOverlay {
@@ -209,6 +254,7 @@ export class CellStore {
     auditStats: EMPTY_STATS,
     ownTakeCellIds: EMPTY_TAKES,
     lane: "",
+    countStructural: true,
   }
 
   private order: string[] = []
@@ -264,6 +310,18 @@ export class CellStore {
    *  the cursor is unverifiable and the delta path is skipped. */
   private projectEpoch: number | null = null
   private navIndex: CellNavigationEntry[] = []
+  private navigationStructureCache = new WeakMap<readonly string[], {
+    cells: MilestoneNavigationCell[]
+    derived: ReturnType<typeof deriveMilestoneNavigation>
+  }>()
+  private navigationProgressCache = new WeakMap<readonly string[], {
+    structure: ReturnType<typeof deriveMilestoneNavigation>
+    flags: Uint8Array
+    /** AQU-1083: the flags don't encode structural-ness, so a policy flip
+     *  must miss this cache even when no cell's translated/validated bit moved. */
+    countStructural: boolean
+    entries: CellNavigationEntry[]
+  }>()
   private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
   private footnoteOffsets = new Map<string, { source: number; target: number }>()
@@ -280,6 +338,7 @@ export class CellStore {
   // commit then re-derives only the cells the commit touched, instead of
   // rebuilding 30k views and summaries on every version bump.
   private viewCache = new Map<string, { version: number; view: CellViewModel }>()
+  private allViewsCache: CellViewModel[] | null = null
   private summaryCache = new Map<string, { version: number; summary: CellSummary; textPair: CellTextPair }>()
 
   /**
@@ -310,11 +369,22 @@ export class CellStore {
     const prevStats = this.ctx.auditStats
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
-    const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
+    // AQU-1083: a structural-policy flip changes which cells every derived
+    // progress number counts, so it invalidates exactly what a threshold
+    // change does — hence it rides the same branch below.
+    const nextCountStructural = next.countStructural ?? true
+    const userChanged = this.ctx.username !== next.username
+      || this.ctx.requiredValidations !== next.requiredValidations
+      || (this.ctx.countStructural ?? true) !== nextCountStructural
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
     // AQU-646: the take set arrives from the attachment hook via its own
     // setter, not from these options, so a runtime update must not blank it.
-    this.ctx = { ...next, lane: nextLane, ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds }
+    this.ctx = {
+      ...next,
+      lane: nextLane,
+      countStructural: nextCountStructural,
+      ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+    }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
       // lane. `toRows()` retains every lane's rows, so switching lane re-derives
@@ -339,14 +409,14 @@ export class CellStore {
         return
       }
       const changed = diffChangedAuditCellIds(prevStats, next.auditStats)
+      // Refetches and pending overlays may replace the Map without changing
+      // any cell. Preserve snapshots and avoid waking the whole workspace.
+      if (changed.size === 0) return
       this.bumpCells(changed)
       this.fileVersion++
-      this.rebuildDerivedIndexes()
-      if (changed.size > 0) {
-        this.emit(changed) // per-cell + list + all listeners
-      } else {
-        this.emitAll()
-      }
+      this.invalidateDerivedViews()
+      this.updateAuditProgress(prevStats, next.auditStats, changed)
+      this.emit(changed) // per-cell + list + all listeners
     }
   }
 
@@ -377,6 +447,8 @@ export class CellStore {
     this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
+    this.navigationStructureCache = new WeakMap()
+    this.navigationProgressCache = new WeakMap()
     this.viewCache = new Map()
     this.summaryCache = new Map()
     this.rebuildDerivedIndexes()
@@ -653,6 +725,7 @@ export class CellStore {
       endTime: view.endTime,
       sequenceIndex: view.sequenceIndex,
       medium: view.medium,
+      transcription: view.transcription,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
     }
@@ -865,7 +938,11 @@ export class CellStore {
   }
 
   getAllCellViews(): CellViewModel[] {
-    return this.getCellsByIds(this.order)
+    // Many workspace consumers read the same version. Resolve its cells once,
+    // but retain the public API's fresh array so sorting/splicing a caller's
+    // result cannot corrupt subsequent readers.
+    this.allViewsCache ??= this.getCellsByIds(this.order)
+    return this.allViewsCache.slice()
   }
 
   getAllSummaries(): readonly CellSummary[] {
@@ -903,6 +980,20 @@ export class CellStore {
       }
     }
 
+    // A repeated delta may arrive after the targeted acknowledgement already
+    // installed those rows. Reuse indexes only for an identical visible
+    // projection. Full loads/context changes retain their forced rebuild.
+    let indexesUnchanged = !opts.full
+      && sourceById.size === this.sourceById.size
+      && targetById.size === this.targetById.size
+    let comparisons = 0
+    const sameRow = (before: CellRow | undefined, after: CellRow | undefined): boolean => {
+      if (before === after) return true
+      // Bound comparison work for callers supplying a complete fresh clone.
+      // Beyond this, conservatively rebuild rather than deep-compare a Bible.
+      return ++comparisons <= 64 && sameJsonData(before, after)
+    }
+
     // AQU-1104: bump only the cells whose rows changed. This used to mark
     // every row as changed, so a delta refresh after each commit bumped all
     // 30k cells of a whole-Bible file, re-rendered every subscribed row, and
@@ -913,10 +1004,15 @@ export class CellStore {
     for (const id of sourceById.keys()) {
       if (this.sourceById.get(id) !== sourceById.get(id) || this.targetById.get(id) !== targetById.get(id)) {
         changedIds.add(id)
+        if (indexesUnchanged) indexesUnchanged = sameRow(this.sourceById.get(id), sourceById.get(id))
+          && sameRow(this.targetById.get(id), targetById.get(id))
       }
     }
     for (const id of targetById.keys()) {
-      if (!sourceById.has(id) && this.targetById.get(id) !== targetById.get(id)) changedIds.add(id)
+      if (!sourceById.has(id) && this.targetById.get(id) !== targetById.get(id)) {
+        changedIds.add(id)
+        if (indexesUnchanged) indexesUnchanged = sameRow(this.targetById.get(id), targetById.get(id))
+      }
     }
 
     const seen = new Set(sourceOrder)
@@ -954,7 +1050,13 @@ export class CellStore {
       if (!liveIds.has(id)) this.summaryCache.delete(id)
     }
     if (opts.maxServerSeq !== undefined) this.maxServerSeq = opts.maxServerSeq
-    this.rebuildDerivedIndexes()
+    if (indexesUnchanged && !orderChanged) {
+      this.invalidateDerivedViews()
+      // The projection can be identical while its event watermark advances.
+      if (this.fileProgressSnapshot && this.fileProgressSnapshot.revision !== (this.maxServerSeq ?? 0)) {
+        this.fileProgressSnapshot = { ...this.fileProgressSnapshot, revision: this.maxServerSeq ?? 0 }
+      }
+    } else this.rebuildDerivedIndexes()
     this.bumpCells(changedIds)
     this.fileVersion++
     this.emit(changedIds)
@@ -1004,18 +1106,30 @@ export class CellStore {
   clearConfirmedShadows(serverRows: CellRow[], fetchStartSeq: number): void {
     if (this.optimisticEdits.size === 0) return
     const changed = new Set<string>()
+    let progressUnchanged = true
+    const activeLane = this.ctx.lane ?? ""
     for (const row of serverRows) {
       if (row.side !== "target") continue
       const key = targetOverlayKey(row.cellId, laneOf(row))
       const shadow = this.optimisticEdits.get(key)
       if (shadow && shadow.seq <= fetchStartSeq && (row.value ?? "") === shadow.value) {
+        if (laneOf(row) === activeLane) {
+          // Confirmation can arrive before the fetched row is installed. Read
+          // the remaining local layers, not the incoming server value.
+          const pending = this.pendingOverlay.get(row.cellId)
+          const remainingValue = (pending?.targetLang === activeLane ? pending.value : undefined)
+            ?? this.targetById.get(row.cellId)?.value ?? ""
+          if (Boolean(shadow.value.trim()) !== Boolean(remainingValue.trim())) progressUnchanged = false
+        }
         this.optimisticEdits.delete(key)
         changed.add(row.cellId)
       }
     }
     if (changed.size > 0) {
       this.bumpCells(changed)
-      this.rebuildDerivedIndexes()
+      this.fileVersion++
+      if (progressUnchanged) this.invalidateDerivedViews()
+      else this.rebuildDerivedIndexes()
       this.emit(changed)
     }
   }
@@ -1102,11 +1216,21 @@ export class CellStore {
         eventId !== this.pendingProgressEventIds[index]
       ))
     if (changed.size === 0 && !progressChanged) return
+    const progressUnchanged = [...changed].every(cellId => {
+      const optimistic = this.optimisticEdits.get(targetOverlayKey(cellId, activeLane))?.value
+      const target = this.targetById.get(cellId)?.value ?? ""
+      const valueWith = (overlays: Map<string, PendingOverlay>) => {
+        const pending = overlays.get(cellId)
+        return optimistic ?? (pending?.targetLang === activeLane ? pending.value : undefined) ?? target
+      }
+      return Boolean(valueWith(this.pendingOverlay).trim()) === Boolean(valueWith(normalized).trim())
+    })
     this.pendingOverlay = normalized
     this.pendingProgressEventIds = uniqueProgress
     if (changed.size > 0) {
       this.bumpCells(changed)
-      this.rebuildDerivedIndexes()
+      if (progressUnchanged) this.invalidateDerivedViews()
+      else this.rebuildDerivedIndexes()
     }
     // Whole-file selectors read getAllVersion(). Any derived overlay change
     // must advance that snapshot too, even when the progress-id set happens
@@ -1162,6 +1286,20 @@ export class CellStore {
   }
 
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
+    const existing = this.targetById.get(cellId)
+    const lane = this.ctx.lane ?? ""
+    const pending = this.pendingOverlay.get(cellId)
+    const previousValue = this.optimisticEdits.get(targetOverlayKey(cellId, lane))?.value
+      ?? (pending?.targetLang === lane ? pending.value : undefined)
+      ?? existing?.value ?? ""
+    // Existing paired rows retain structure/validation. Their indexes depend
+    // only on filled status and numbered-footnote counts, not draft wording.
+    const indexesUnchanged = existing && this.sourceById.has(cellId)
+      && Boolean(previousValue.trim()) === Boolean(patch.value.trim())
+      && countNumericFootnotes(existing.value) === countNumericFootnotes(patch.value)
+    const canUpdateProgress = !this.derivedIndexesDirty && this.indexById.has(cellId)
+      && this.sourceById.has(cellId)
+      && countNumericFootnotes(existing?.value ?? "") === countNumericFootnotes(patch.value)
     const seq = ++this.writeSeq
     const targetLang = this.ctx.lane ?? ""
     this.optimisticEdits.set(targetOverlayKey(cellId, targetLang), {
@@ -1172,7 +1310,6 @@ export class CellStore {
     })
     this.freshnessFloors.set(cellId, seq)
 
-    const existing = this.targetById.get(cellId)
     if (existing) {
       this.targetById.set(cellId, {
         ...existing,
@@ -1217,7 +1354,18 @@ export class CellStore {
       }
     }
 
-    this.rebuildDerivedIndexes()
+    const target = this.targetById.get(cellId)
+    const threshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
+    const audit = this.ctx.auditStats.get(cellId)
+    const beforeValidation = validationContribution(audit, existing, threshold)
+    const afterValidation = validationContribution(audit, target, threshold)
+    const validationUnchanged = beforeValidation.endorsements === afterValidation.endorsements
+      && beforeValidation.validated === afterValidation.validated
+      && Boolean(existing?.validated) === Boolean(target?.validated)
+    const progressUpdated = canUpdateProgress && validationUnchanged
+      && this.updateTargetFilledProgress(cellId, Boolean(previousValue.trim()), Boolean(patch.value.trim()))
+    if (indexesUnchanged || progressUpdated) this.invalidateDerivedViews()
+    else this.rebuildDerivedIndexes()
     this.bumpCells([cellId])
     this.fileVersion++
     this.emit([cellId])
@@ -1563,16 +1711,49 @@ export class CellStore {
 
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
     const lane = this.ctx.lane ?? ""
+    const previousSource = this.sourceById.get(cellId)
+    const previousTarget = this.targetById.get(cellId)
+    const hadTarget = Boolean(previousTarget)
     const source = rows.find((row) => row.side === "source")
     // AQU-538: a targeted refetch can return this cell's rows across multiple
     // lanes. Only the active-lane target keys the paired view; other-lane rows
     // replace this cell's retained rows so the cache stays lane-complete. For
     // N=1 every target is lane `''`, so this is the old side-only replacement.
     const target = rows.find((row) => row.side === "target" && laneOf(row) === lane)
+    const previousOtherTargets = this.otherLaneTargetRows.filter(row => row.cellId === cellId)
+    const otherTargets = rows.filter(row => row.side === "target" && laneOf(row) !== lane)
+    // Compare complete rows, not just text/event IDs: validation and metadata
+    // can change under the same event. A repeated response has nothing to
+    // publish. Shadow removal independently advances its subscriber version.
+    if (sameJsonData(previousSource, source) && sameJsonData(previousTarget, target)
+      && sameJsonData(previousOtherTargets, otherTargets)) return
+    // Derived indexes depend on structure, validation, filled state and
+    // numbered footnotes—not event IDs, editor names, HTML or draft metadata.
+    // Compare the effective source/target fallbacks used by navigation. An
+    // optimistic target inherits source fields; its saved row need not repeat
+    // them. New inputs must be included when extending computeDerivedIndexes.
+    const indexesUnchanged = previousSource && source && previousTarget && target
+      && previousSource.anchorCellId === source.anchorCellId
+      && previousSource.value === source.value
+      && previousSource.canonicalRef === source.canonicalRef
+      && (previousTarget.canonicalRef ?? previousSource.canonicalRef) === (target.canonicalRef ?? source.canonicalRef)
+      && (previousSource.type ?? previousTarget.type) === (source.type ?? target.type)
+      && navigationStartMs(previousSource, previousTarget) === navigationStartMs(source, target)
+      && sameJsonData(previousSource.metadata ?? previousTarget.metadata ?? null, source.metadata ?? target.metadata ?? null)
+      && countNumericFootnotes(previousTarget.value) === countNumericFootnotes(target.value)
+      && (() => {
+        const pending = this.pendingOverlay.get(cellId)
+        const overlay = this.optimisticEdits.get(targetOverlayKey(cellId, lane))?.value
+          ?? (pending?.targetLang === lane ? pending.value : undefined)
+        return Boolean((overlay ?? previousTarget.value ?? "").trim())
+          === Boolean((overlay ?? target.value ?? "").trim())
+      })()
     this.otherLaneTargetRows = this.otherLaneTargetRows.filter((row) => row.cellId !== cellId)
     for (const row of rows) {
       if (row.side === "target" && laneOf(row) !== lane) this.otherLaneTargetRows.push(row)
     }
+    const anchorMoved = Boolean(source) && (!previousSource || previousSource.anchorCellId !== source?.anchorCellId)
+    const membershipChanged = Boolean(previousSource) !== Boolean(source) || hadTarget !== Boolean(target)
     if (source) {
       // AQU-1068: a targeted read appends, but position is a function of the
       // ANCHORS — so re-derive it whenever they can have changed: a row that is
@@ -1584,30 +1765,36 @@ export class CellStore {
       // full or delta read re-walked the chain. Display order hid it on
       // time-ordered files, where the lens re-sorts by clock; on a
       // sequence-ordered one it was plainly wrong.
-      const previousAnchor = this.sourceById.get(cellId)?.anchorCellId
-      const anchorMoved = !this.sourceById.has(cellId) || previousAnchor !== source.anchorCellId
       this.sourceById.set(cellId, source)
-      if (!this.sourceOrder.includes(cellId)) this.sourceOrder.push(cellId)
+      if (!previousSource) this.sourceOrder.push(cellId)
       if (anchorMoved) this.resortSourceOrderByChain()
-    } else {
+    } else if (previousSource) {
       this.sourceById.delete(cellId)
       this.sourceOrder = this.sourceOrder.filter((id) => id !== cellId)
     }
     if (target) {
       this.targetById.set(cellId, target)
-      if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
+      if (!hadTarget && !this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
     } else {
       this.targetById.delete(cellId)
       this.targetOrder = this.targetOrder.filter((id) => id !== cellId)
     }
 
-    const seen = new Set(this.sourceOrder)
-    const nextOrder = [...this.sourceOrder]
-    for (const id of this.targetOrder) if (!seen.has(id)) nextOrder.push(id)
-    if (!sameStringArray(nextOrder, this.order)) this.listVersion++
-    this.order = nextOrder
-    this.indexById = new Map(this.order.map((id, index) => [id, index]))
-    this.rebuildDerivedIndexes()
+    // Text/health acknowledgements cannot change the union's order. Avoid
+    // allocating and comparing a whole-file Set/array for each saved cell.
+    if (membershipChanged || anchorMoved || !target) {
+      const seen = new Set(this.sourceOrder)
+      const nextOrder = [...this.sourceOrder]
+      for (const id of this.targetOrder) if (!seen.has(id)) nextOrder.push(id)
+      if (!sameStringArray(nextOrder, this.order)) {
+        this.listVersion++
+        this.order = nextOrder
+        this.indexById = new Map(this.order.map((id, index) => [id, index]))
+      }
+    }
+    if (indexesUnchanged && this.updateTargetValidationProgress(cellId, previousTarget, target)) {
+      this.invalidateDerivedViews()
+    } else this.rebuildDerivedIndexes()
     this.bumpCells([cellId])
     this.fileVersion++
     this.emit([cellId])
@@ -1700,9 +1887,151 @@ export class CellStore {
    * rebuild is now deferred to the first read after the mutations settle.
    */
   private rebuildDerivedIndexes(): void {
+    this.invalidateDerivedViews()
+    this.derivedIndexesDirty = true
+  }
+
+  private invalidateDerivedViews(): void {
+    this.allViewsCache = null
     this.derivedVersion++
     this.derivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
-    this.derivedIndexesDirty = true
+  }
+
+  /** Text-only target edits change filled counts, not navigation structure.
+   * Preserve prior snapshots and copy only affected aggregate branches.
+   * Callers must retain the full rebuild for structural/footnote/validation changes.
+   */
+  private updateTargetFilledProgress(cellId: string, before: boolean, after: boolean): boolean {
+    const snapshot = this.fileProgressSnapshot
+    const source = this.sourceById.get(cellId)
+    if (this.derivedIndexesDirty || !snapshot || !source) return false
+    const delta = Number(after) - Number(before)
+    if (delta === 0) return true
+    const key = this.sectionLabelById.get(cellId)
+    const entryIndex = this.navIndex.findIndex(entry => entry.key === key)
+    const entry = this.navIndex[entryIndex]
+    if (!entry) return false
+    const position = entry.cellIds.indexOf(cellId)
+    if (position < 0) return false
+    const subsectionIndex = Math.floor(position / MILESTONE_SUBSECTION_SIZE)
+    const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
+    this.fileProgressSnapshot = {
+      ...snapshot,
+      file: { ...snapshot.file, filledCount: snapshot.file.filledCount + delta },
+      sections: snapshot.sections.map(counts => counts.key === section
+        ? { ...counts, filledCount: counts.filledCount + delta } : counts),
+    }
+    // Navigation treats an audio take as translated even with empty text.
+    if (!this.ctx.ownTakeCellIds?.has(cellId)) {
+      this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
+        ...item,
+        translated: item.translated + delta,
+        subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
+          ? { ...subsection, translated: subsection.translated + delta } : subsection),
+      } : item)
+      this.navigationProgressCache.delete(this.order)
+    }
+    return true
+  }
+
+  /** A saved target can add/remove endorsements without changing structure
+   * or filled state. Match the distinct file-progress and navigation rules:
+   * file totals prefer audit validators, navigation uses the projected flag.
+   */
+  private updateTargetValidationProgress(cellId: string, previous: CellRow, next: CellRow): boolean {
+    const snapshot = this.fileProgressSnapshot
+    const source = this.sourceById.get(cellId)
+    if (this.derivedIndexesDirty || !snapshot || !source) return false
+    const audit = this.ctx.auditStats.get(cellId)
+    const before = validationContribution(audit, previous, snapshot.validationCount)
+    const after = validationContribution(audit, next, snapshot.validationCount)
+    const validatedDelta = Number(after.validated) - Number(before.validated)
+    const levels = snapshot.file.validationLevels.map((_, i) =>
+      Number(after.endorsements >= i + 1) - Number(before.endorsements >= i + 1))
+    const navigationDelta = Number(Boolean(next.validated)) - Number(Boolean(previous.validated))
+    if (validatedDelta === 0 && levels.every(delta => delta === 0) && navigationDelta === 0) return true
+    const key = this.sectionLabelById.get(cellId)
+    const entryIndex = this.navIndex.findIndex(entry => entry.key === key)
+    const entry = this.navIndex[entryIndex]
+    if (!entry) return false
+    const position = entry.cellIds.indexOf(cellId)
+    if (position < 0) return false
+    const subsectionIndex = Math.floor(position / MILESTONE_SUBSECTION_SIZE)
+    if (validatedDelta !== 0 || levels.some(delta => delta !== 0)) {
+      const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
+      const update = <T extends ProgressCounts>(counts: T): T => ({
+        ...counts,
+        validatedCount: counts.validatedCount + validatedDelta,
+        validationLevels: counts.validationLevels.map((value, i) => value + levels[i]),
+      })
+      this.fileProgressSnapshot = {
+        ...snapshot,
+        file: update(snapshot.file),
+        sections: snapshot.sections.map(counts => counts.key === section ? update(counts) : counts),
+      }
+    }
+    if (navigationDelta !== 0) {
+      this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
+        ...item,
+        validated: item.validated + navigationDelta,
+        subsections: item.subsections.map((subsection, index) => index === subsectionIndex
+          ? { ...subsection, validated: subsection.validated + navigationDelta } : subsection),
+      } : item)
+      this.navigationProgressCache.delete(this.order)
+    }
+    return true
+  }
+
+  /** Audit changes affect validation counts, not ordering, text or footnotes.
+   * Apply deltas to an already-current projection. If another mutation left
+   * it dirty, its normal rebuild will read the latest audit map instead.
+   */
+  private updateAuditProgress(
+    previous: ReadonlyMap<string, CellAuditStats>,
+    next: ReadonlyMap<string, CellAuditStats>,
+    changed: ReadonlySet<string>,
+  ): void {
+    const snapshot = this.fileProgressSnapshot
+    if (this.derivedIndexesDirty || !snapshot) return
+    const threshold = snapshot.validationCount
+    const deltas = new Map<string, { validated: number; levels: number[] }>()
+    const add = (key: string, before: ReturnType<typeof validationContribution>, after: ReturnType<typeof validationContribution>) => {
+      let delta = deltas.get(key)
+      if (!delta) {
+        delta = { validated: 0, levels: new Array<number>(threshold).fill(0) }
+        deltas.set(key, delta)
+      }
+      delta.validated += Number(after.validated) - Number(before.validated)
+      for (let level = 1; level <= threshold; level++) {
+        delta.levels[level - 1] += Number(after.endorsements >= level) - Number(before.endorsements >= level)
+      }
+    }
+    for (const id of changed) {
+      const source = this.sourceById.get(id)
+      if (!source) continue
+      const target = this.targetById.get(id)
+      const before = validationContribution(previous.get(id), target, threshold)
+      const after = validationContribution(next.get(id), target, threshold)
+      if (before.endorsements === after.endorsements && before.validated === after.validated) continue
+      add("", before, after)
+      const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
+      if (section) add(section, before, after)
+    }
+    if (deltas.size === 0) return
+    const apply = <T extends ProgressCounts>(counts: T, key: string): T => {
+      const delta = deltas.get(key)
+      if (!delta) return counts
+      return {
+        ...counts,
+        validatedCount: counts.validatedCount + delta.validated,
+        validationLevels: counts.validationLevels.map((count, i) => count + delta.levels[i]),
+      }
+    }
+    this.fileProgressSnapshot = {
+      ...snapshot,
+      file: apply(snapshot.file, ""),
+      sections: snapshot.sections.map(section => apply(section, section.key)),
+    }
   }
 
   private ensureDerivedIndexes(): void {
@@ -1741,21 +2070,23 @@ export class CellStore {
       const canonical = target?.canonicalRef ?? source?.canonicalRef ?? null
       const section = navigation.milestoneByCellId.get(id)?.key ?? ""
 
-      if (source) {
+      // AQU-1083: a structural cell is still a cell — it stays in `order`, in
+      // the editor and in the navigation index. It just is not a unit of
+      // PROGRESS when the project says so, so it is skipped here and nowhere
+      // else. This snapshot is the local overlay the sidebar paints while an
+      // edit is in flight; without the same rule the file bar would jump to
+      // the unsubtracted total on every keystroke and settle back after.
+      if (source && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
         const audit = this.ctx.auditStats.get(id)
-        const endorsements = audit
-          ? audit.activeValidators.length
-          : Math.max(0, target?.endorsementCount ?? 0)
+        const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
+        const authoritative = audit !== undefined || target?.endorsementCount !== undefined
+        const validated = authoritative ? endorsements >= progressThreshold : Boolean(target?.validated)
         const activeLane = this.ctx.lane ?? ""
         const pending = this.pendingOverlay.get(id)
         const targetValue = this.optimisticEdits.get(targetOverlayKey(id, activeLane))?.value
           ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ''
-        const hasAuthoritativeEndorsements = audit !== undefined || target?.endorsementCount !== undefined
-        const validated = hasAuthoritativeEndorsements
-          ? endorsements >= progressThreshold
-          : Boolean(target?.validated)
         addProgress(fileProgress, targetValue.trim().length > 0, endorsements, validated)
         const progressSection = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ''
         if (progressSection) {
@@ -1769,11 +2100,18 @@ export class CellStore {
       }
 
       const scopeKey = footnoteScopeKey(this.ctx.fileId ?? "", canonical, section)
-      const counts = countsByScope.get(scopeKey) ?? { source: 0, target: 0 }
-      footnoteOffsets.set(id, { source: counts.source, target: counts.target })
-      counts.source += countNumericFootnotes(source?.value ?? "")
-      counts.target += countNumericFootnotes(target?.value ?? "")
-      countsByScope.set(scopeKey, counts)
+      const counts = countsByScope.get(scopeKey)
+      // Missing offsets already mean zero to readers. Most cells do not
+      // follow a numbered footnote, so avoid allocating an entry for each.
+      if (counts) footnoteOffsets.set(id, { ...counts })
+      const sourceNotes = countNumericFootnotes(source?.value ?? "")
+      const targetNotes = countNumericFootnotes(target?.value ?? "")
+      if (sourceNotes || targetNotes) {
+        countsByScope.set(scopeKey, {
+          source: (counts?.source ?? 0) + sourceNotes,
+          target: (counts?.target ?? 0) + targetNotes,
+        })
+      }
     }
     this.navIndex = navigation.entries
     this.fileProgressSnapshot = this.ctx.fileId && this.sourceOrder.length > 0
@@ -1792,6 +2130,41 @@ export class CellStore {
     this.footnoteOffsets = footnoteOffsets
   }
 
+  /** Health and target-text edits change progress, not milestone assignments.
+   * Check the actual navigation inputs before doing the multi-pass grouping.
+   * Arrays can be mutated by structural edits, so identity alone is not enough.
+   */
+  private getNavigationStructure(ids: readonly string[]): ReturnType<typeof deriveMilestoneNavigation> {
+    const cached = this.navigationStructureCache.get(ids)
+    if (cached && cached.cells.length === ids.length && ids.every((id, index) => {
+      const previous = cached.cells[index]
+      const source = this.sourceById.get(id)
+      const target = this.targetById.get(id)
+      const startMs = navigationStartMs(source, target)
+      return previous.id === id
+        && previous.original === (source?.value ?? target?.value ?? "")
+        && previous.type === (source?.type ?? target?.type ?? null)
+        && previous.canonicalRef === (target?.canonicalRef ?? source?.canonicalRef ?? null)
+        && previous.startMs === startMs
+        && previous.metadata === (source?.metadata ?? target?.metadata ?? null)
+    })) return cached.derived
+    const cells = ids.map((id): MilestoneNavigationCell => {
+      const source = this.sourceById.get(id)
+      const target = this.targetById.get(id)
+      return {
+        id,
+        original: source?.value ?? target?.value ?? "",
+        type: source?.type ?? target?.type ?? null,
+        canonicalRef: target?.canonicalRef ?? source?.canonicalRef ?? null,
+        startMs: navigationStartMs(source, target),
+        metadata: source?.metadata ?? target?.metadata ?? null,
+      }
+    })
+    const derived = deriveMilestoneNavigation(cells)
+    this.navigationStructureCache.set(ids, { cells, derived })
+    return derived
+  }
+
   private buildNavigationIndex(ids: readonly string[]): {
     entries: CellNavigationEntry[]
     milestoneByCellId: ReadonlyMap<string, {
@@ -1801,54 +2174,68 @@ export class CellStore {
       shortLabel: string
     }>
   } {
-    const derived = deriveMilestoneNavigation(ids.map((id) => {
-      const source = this.sourceById.get(id)
-      const target = this.targetById.get(id)
-      return {
-        id,
-        original: source?.value ?? target?.value ?? "",
-        type: source?.type ?? target?.type ?? null,
-        canonicalRef: target?.canonicalRef ?? source?.canonicalRef ?? null,
-        ...(typeof source?.startMs === "number"
-          ? { startMs: source.startMs }
-          : typeof target?.startMs === "number"
-            ? { startMs: target.startMs }
-            : {}),
-        metadata: source?.metadata ?? target?.metadata ?? null,
-      }
-    }))
+    const derived = this.getNavigationStructure(ids)
+    const cached = this.navigationProgressCache.get(ids)
+    const flags = new Uint8Array(ids.length)
+    const countStructural = this.ctx.countStructural !== false
+    let unchanged = cached?.structure === derived
+      && cached.countStructural === countStructural
+      && cached.flags.length === ids.length
+    const activeLane = this.ctx.lane ?? ""
+    for (let index = 0; index < ids.length; index++) {
+      const cellId = ids[index]
+      const target = this.targetById.get(cellId)
+      const pending = this.pendingOverlay.get(cellId)
+      const targetValue = this.optimisticEdits.get(targetOverlayKey(cellId, activeLane))?.value
+        ?? (pending?.targetLang === activeLane ? pending.value : undefined)
+        ?? target?.value
+        ?? ""
+      // Navigation counts an audio take as translated, and uses the projected
+      // validation flag. Keep these semantics distinct from file progress.
+      flags[index] = (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId) ? 1 : 0)
+        | (target?.validated ? 2 : 0)
+      if (cached?.flags[index] !== flags[index]) unchanged = false
+    }
+    if (unchanged && cached) return { entries: cached.entries, milestoneByCellId: derived.milestoneByCellId }
+
     const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
     const progressFor = (cellIds: readonly string[]) => {
       let translated = 0
       let validated = 0
+      let total = 0
       for (const cellId of cellIds) {
-        const target = this.targetById.get(cellId)
-        const activeLane = this.ctx.lane ?? ""
-        const pending = this.pendingOverlay.get(cellId)
-        const targetValue = this.optimisticEdits.get(targetOverlayKey(cellId, activeLane))?.value
-          ?? (pending?.targetLang === activeLane ? pending.value : undefined)
-          ?? target?.value
-          ?? ""
-        // AQU-646: a dub with no text is translated work too — same rule the
-        // status bar and file progress follow via applyOwnTake.
-        if (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId)) translated += 1
-        if (target?.validated) validated += 1
+        // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
+        // still draws a square for a heading, and jumping to the chapter still
+        // lands on it. Only the fraction beside the chapter name changes.
+        if (this.ctx.countStructural === false
+          && isStructuralCell(this.sourceById.get(cellId)?.type)) continue
+        total += 1
+        const index = displayIndexByCellId.get(cellId)
+        const value = index === undefined ? 0 : flags[index]
+        if (value & 1) translated++
+        if (value & 2) validated++
       }
-      return { translated, validated, total: cellIds.length }
+      return { translated, validated, total }
     }
     const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
-      const progress = progressFor(group.cellIds)
+      // AQU-1083: `total` is summed from the subsections rather than read off
+      // `group.cellIds.length` because progressFor may skip structural cells.
+      const progress = { translated: 0, validated: 0, total: 0 }
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
         const firstCellId = cellIds[0]
+        const counts = progressFor(cellIds)
+        progress.translated += counts.translated
+        progress.validated += counts.validated
+        progress.total += counts.total
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,
           label: `${offset + 1}–${offset + cellIds.length}`,
           firstCellId,
           firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
           cellIds,
-          ...progressFor(cellIds),
+          ...counts,
         })
       }
       return {
@@ -1863,10 +2250,12 @@ export class CellStore {
         subsections,
       }
     })
+    this.navigationProgressCache.set(ids, { structure: derived, flags, countStructural, entries })
     return { entries, milestoneByCellId: derived.milestoneByCellId }
   }
 
   private bumpCells(ids: Iterable<string>): void {
+    this.allViewsCache = null
     for (const id of ids) {
       this.cellVersionById.set(id, ++this.versionCounter)
     }
@@ -1910,6 +2299,8 @@ export interface UseActiveCellStoreOptions {
    * lanes are already loaded, so no refetch is needed).
    */
   lane?: string
+  /** AQU-1083: does this project count headings toward progress? Default yes. */
+  countStructural?: boolean
 }
 
 export interface UseActiveCellStoreResult {
@@ -1927,6 +2318,7 @@ export interface UseActiveCellStoreResult {
     cellId: string,
     patch: { startMs?: number; endMs?: number; metadata?: Record<string, number | null> },
   ) => void
+  loadProgress: { loaded: number; total: number | null } | null
   isLoading: boolean
   isError: boolean
 }
@@ -1941,6 +2333,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     getToken,
     enabled = true,
     lane = "",
+    countStructural = true,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // Debug handle for the console and e2e probes. Published from an effect
@@ -1952,6 +2345,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(window as any).__cellStore = store
   }, [store])
+  const [loadProgress, setLoadProgress] = useState<UseActiveCellStoreResult["loadProgress"]>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
@@ -1971,19 +2365,26 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // Bounded retry after a delta/full fetch failure; fenced by generation.
   const fetchRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fetchRetryAttemptsRef = useRef(0)
+  // Tauri offline read branch — this hook, not useCells.ts, is the ACTUAL
+  // workspace cell list (AQU-538 comment at its ProjectWorkspace.tsx call
+  // site). `store` here shadows the module's own `CellStore` local below, so
+  // this holds the LiveStore instance under a distinct name throughout.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStoreRef = useRef(offlineStore)
 
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
   tokenFetcherRef.current = getToken
+  offlineStoreRef.current = offlineStore
 
   useEffect(() => {
     // AQU-538: `lane` flows through here; setRuntime re-partitions the loaded
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
-  }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural })
+  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under
@@ -2009,6 +2410,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     if (!isEnabled || !pid || !fid) {
       store.reset(pid, fid)
+      setLoadProgress(null)
       setIsLoading(false)
       setIsError(false)
       return
@@ -2025,9 +2427,42 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       return
     }
     const gen = ++generationRef.current
+    setLoadProgress(null)
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+
+    // Tauri offline branch: an offline-ready project's cells live in the
+    // local LiveStore `cells` table (kept live-synced by the Phase 3 sync
+    // adapter), so a read is a synchronous local SQLite query — none of the
+    // IDB cache / `?since=` delta / paginated-stream machinery below applies.
+    // `resolveOfflineStore` returns null for every web request and for a
+    // Tauri request whose project isn't fully downloaded, so this is a pure
+    // no-op for the unchanged HTTP path. Still routes through
+    // `clearConfirmedShadows`/`mergeProtectedRows` — the same guards the
+    // online soft-refetch path uses below — because a local optimistic edit
+    // can still be ahead of whatever's currently materialized in the `cells`
+    // table (its outbox event may not have flushed into LiveStore yet).
+    const offlineStoreLive = resolveOfflineStore(offlineStoreRef.current, pid)
+    if (offlineStoreLive) {
+      try {
+        const startSeq = store.getWriteSeq()
+        const rows = readOfflineFileCells(offlineStoreLive, pid, fid)
+        if (generationRef.current !== gen) return
+        store.clearConfirmedShadows(rows, startSeq)
+        const { rows: kept } = store.mergeProtectedRows(rows, startSeq)
+        store.replaceRows(kept, { full: true })
+        store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
+        fetchRetryAttemptsRef.current = 0
+        setIsError(false)
+        setIsLoading(false)
+      } finally {
+        if (generationRef.current === gen) inFlightRef.current = false
+      }
+      return
+    }
+
     let usedCache = false
 
     if (!soft) {
@@ -2156,7 +2591,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
 
-      await streamFileCells(pid, fid, token, pushRows, undefined, trackStreamMeta(), undefined, true)
+      let loaded = 0
+      let total: number | null = null
+      const track = trackStreamMeta()
+      setLoadProgress({ loaded, total })
+      await streamFileCells(pid, fid, token, (rows) => {
+        if (generationRef.current !== gen) return false
+        // Count source and target entries together, matching the worker total.
+        loaded += rows.length
+        setLoadProgress({ loaded, total })
+        return pushRows(rows)
+      }, undefined, (meta) => {
+        track(meta)
+        total = typeof meta.total === "number" && Number.isFinite(meta.total) ? meta.total : null
+      }, undefined, true)
       if (generationRef.current !== gen) return
 
       let discardedProtected = false
@@ -2208,6 +2656,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     } finally {
       if (paintTimer) clearTimeout(paintTimer)
       if (generationRef.current === gen) {
+        setLoadProgress(null)
         inFlightRef.current = false
         if (pendingSoftRefetchRef.current) {
           pendingSoftRefetchRef.current = false
@@ -2306,6 +2755,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [enabled, fileId, lane, projectId, store])
 
+  // Tauri offline reactivity: doFetch()/revalidateCell() only re-read the
+  // local `cells` table when something calls them (mount, focus regain, a
+  // known local write). The Phase 3 sync adapter can also write into that
+  // table on its own — an incoming remote commit, or this device's own
+  // queued write finally materializing — with nothing else in this hook to
+  // notice. This subscription closes that gap for an offline-ready project.
+  useEffect(() => {
+    const readyStore = resolveOfflineStore(offlineStore, projectId)
+    if (!enabled || !readyStore || !projectId || !fileId) return
+    return subscribeToOfflineFileCells(readyStore, projectId, fileId, () => { void doFetch(true) })
+  }, [projectId, fileId, enabled, offlineStore, doFetch])
+
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
     if (fetchRetryTimerRef.current) clearTimeout(fetchRetryTimerRef.current)
@@ -2341,8 +2802,23 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     const isEnabled = enabledRef.current
+    if (!isEnabled || !pid || !fid) return
+
+    // Tauri offline branch: a LiveStore read for this one cellId is
+    // synchronous, so this skips fetchCellsByIds and the in-flight/retry
+    // bookkeeping built around its async network call entirely.
+    const offlineStoreLive = resolveOfflineStore(offlineStoreRef.current, pid)
+    if (offlineStoreLive) {
+      const startSeq = store.getWriteSeq()
+      const rows = readOfflineFileCells(offlineStoreLive, pid, fid).filter((r) => r.cellId === cellId)
+      store.clearConfirmedShadows(rows, startSeq)
+      store.replaceRowsForCell(cellId, rows)
+      refreshCellsCacheFromStore()
+      return
+    }
+
     const tokenFetcher = tokenFetcherRef.current
-    if (!isEnabled || !pid || !fid || !tokenFetcher) return
+    if (!tokenFetcher) return
     if (cellFetchInFlightRef.current.has(cellId)) {
       cellRevalidateDirtyRef.current.add(cellId)
       return
@@ -2445,7 +2921,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, loadProgress, isLoading, isError }
 }
 
 /**
@@ -2574,6 +3050,17 @@ function symmetricChangedKeys<T>(
   return changed
 }
 
+function navigationStartMs(source: CellRow | undefined, target: CellRow | undefined): number | undefined {
+  return typeof source?.startMs === "number" ? source.startMs
+    : typeof target?.startMs === "number" ? target.startMs : undefined
+}
+
+function validationContribution(audit: CellAuditStats | undefined, target: CellRow | undefined, threshold: number) {
+  const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
+  const authoritative = audit !== undefined || target?.endorsementCount !== undefined
+  return { endorsements, validated: authoritative ? endorsements >= threshold : Boolean(target?.validated) }
+}
+
 function sectionLabelFromCanonical(ref: string): string {
   const colonIdx = ref.indexOf(":")
   return (colonIdx >= 0 ? ref.slice(0, colonIdx) : ref).trim()
@@ -2605,6 +3092,7 @@ function parseFootnoteChapterScope(value: string): string | null {
 }
 
 function countNumericFootnotes(text: string): number {
+  if (!text.includes("\\f")) return 0
   return extractUsfmFootnotes(text).filter((footnote) => {
     const caller = footnote.caller.trim()
     return caller === "" || caller === "+" || caller === "-" || /^\d+$/.test(caller)

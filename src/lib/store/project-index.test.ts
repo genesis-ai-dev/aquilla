@@ -320,13 +320,13 @@ describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
   })
 
   it("AQU-701: server-synced ttsSettings keys win, device-only apiKey still survives", () => {
-    const server = makeProject({ id: "s5", ttsSettings: { provider: "kokoro" as const } })
+    const server = makeProject({ id: "s5", ttsSettings: { provider: "mms" as const } })
     const local = {
       ...server,
       ttsSettings: { provider: "gemini" as const, apiKey: "AIzaLocalKey1234567890123" },
     }
     const merged = mergeServerProjectWithLocalCache(server, local)
-    expect(merged.ttsSettings?.provider).toBe("kokoro")
+    expect(merged.ttsSettings?.provider).toBe("mms")
     expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
   })
 })

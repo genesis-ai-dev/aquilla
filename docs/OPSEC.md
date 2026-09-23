@@ -97,6 +97,25 @@
 > to `pii.ts`'s shared `resolveAuthorshipPolicy`/`mapAuthor` instead of
 > reimplementing identity scrubbing locally.
 >
+> `docs/OPSEC-REVIEW-2026-09-21.md` returns to **auth & session management** (Monday
+> slot) and deliberately hunts surface no prior pass had ever read, by resolving
+> every route mount's guard and cross-referencing it against the whole review
+> series. That found the admin console's **step-up elevation** gate — the emailed
+> 6-digit "sudo" factor in front of cross-tenant god-mode — with zero mentions
+> anywhere in the series. OPS-35: the elevated session was keyed on `user_id`
+> alone, so it belonged to the *account* rather than to the credential that
+> redeemed the code; the stolen-but-non-elevated admin JWT that `/elevation/verify`'s
+> own brute-force comment describes became elevated for free the moment the real
+> operator elevated, with cross-tenant reads plus the billing/settings writes
+> mounted behind the same gate. Elevation is now bound to `(user_id, session_key)`,
+> reusing the per-token key `lib/session-cache.ts` already derives. OPS-36: the
+> elevation codes were stored in plaintext — migration 0047 built the table as a
+> "clone of password_reset_tokens" but cloned its *pre-hardening* shape and never
+> followed it through OPS-20 (0080) or OPS-31 (0087), leaving the last
+> readable-credential table in the schema outside the invite tables. Now a scrypt
+> digest (0094), with the plaintext column retired nullable and a `DROP COLUMN`
+> follow-up recorded.
+>
 > **Numbering note:** OPS-n is assigned at write time, and three passes have now
 > run concurrently on separate branches, so the numbers are *not* in date order.
 > The 09-07 pass originally claimed OPS-27/OPS-28, was renumbered to
@@ -135,7 +154,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
 | D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |

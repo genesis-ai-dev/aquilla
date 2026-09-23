@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
   importDisplayLabel,
   parseScriptureReference,
   verseLabelFromCanonical,
+  verseRangeLabel,
 } from "./scripture-reference"
 
 describe("scripture references", () => {
@@ -196,5 +197,32 @@ describe("scripture references", () => {
 
     // Front matter/paratext stay unnumbered; content is gap-free from 1.
     expect(labels).toEqual([null, null, null, "1", null, "2"])
+  })
+})
+
+
+describe("navigation verse ranges", () => {
+  it.each([
+    [], [null], ["GEN 1"], ["GEN 1:1"],
+    [null, "heading", "GEN 1:2a", "GEN 1:4-6", null],
+    ["GEN 1:7", "GEN 1:3", "GEN 1:1"],
+    ["GEN 1:1", "GEN 1:1"],
+    ["GEN 1:h:1", "GEN 1:2", "non-verse"],
+  ])("preserves the full-scan result for refs %j", (...refs) => {
+    const labels = refs.map(verseLabelFromCanonical).filter(Boolean)
+    const first = labels[0]
+    const last = labels[labels.length - 1]
+    const expected = first && last ? (first === last ? first : `${first}–${last}`) : null
+    const ids = refs.map((_, index) => String(index))
+    expect(verseRangeLabel(ids, id => refs[Number(id)])).toBe(expected)
+  })
+
+  it("reads only two cells for a large all-verse chapter", () => {
+    const ids = Array.from({ length: 31_215 }, (_, index) => String(index + 1))
+    const read = vi.fn((id: string) => `GEN 1:${id}`)
+    expect(verseRangeLabel(ids, read)).toBe("1–31215")
+    expect(read.mock.calls).toEqual([["1"], ["31215"]])
+    // Read fresh boundaries on every call; no stale text/lane/order cache.
+    expect(verseRangeLabel([...ids].reverse(), read)).toBe("31215–1")
   })
 })

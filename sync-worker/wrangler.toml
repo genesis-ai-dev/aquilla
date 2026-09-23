@@ -118,6 +118,13 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   strict auth (reject all WS connections without a valid sync-token JWT)
 #   — the intended prod default. If you need to disable auth in prod for
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
+#
+#   INWORLD_API_KEY is the hosted TTS 2 Flash / Instant Voice Cloning secret
+#   (AQU-1189). Local: sync-worker/.dev.vars. Deployed:
+#     npx wrangler secret put INWORLD_API_KEY --env development
+#     npx wrangler secret put INWORLD_API_KEY --env production
+#   Paste the Portal key as-is (the worker prefixes `Basic `). Never put this
+#   in VITE_* or the SPA. See docs/INWORLD-TTS.md.
 
 [observability]
 enabled = true

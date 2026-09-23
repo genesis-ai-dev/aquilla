@@ -353,3 +353,22 @@ describe("complete-row streaming (AQU-1328)", () => {
     expect(onPage.mock.lastCall?.[1]).toBe(true)
   })
 })
+
+describe("adaptive cell pages", () => {
+  it.each([false, true])("keeps a small first page, grows follow-up pages and forwards every total and watermark (paired=%s)", async (paired) => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("a")], nextCursor: "offset500", total: 2501, maxServerSeq: 1, completeRows: paired }))
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("b")], nextCursor: "offset2500", total: 2501, maxServerSeq: 2, completeRows: paired }))
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("c")], nextCursor: null, total: 2501, maxServerSeq: 2, completeRows: paired }))
+    vi.stubGlobal("fetch", fetcher)
+    const metas: unknown[] = []
+    const ids: string[] = []
+    await streamFileCells("p", "f", "token", (rows) => { ids.push(...rows.map(r => r.cellId)) }, paired ? undefined : "source", m => { metas.push(m) }, undefined, paired)
+    const urls = fetcher.mock.calls.map(([url]) => new URL(url))
+    expect(urls.map(u => u.searchParams.get("paired"))).toEqual(Array(3).fill(paired ? "1" : null))
+    expect(urls.map(u => u.searchParams.get("limit"))).toEqual(["500", "2000", "2000"])
+    expect(urls.map(u => u.searchParams.get("cursor"))).toEqual([null, "offset500", "offset2500"])
+    expect(ids).toEqual(["a", "b", "c"])
+    expect(metas).toEqual([1, 2, 2].map(maxServerSeq => ({ maxServerSeq, projectEpoch: undefined, total: 2501 })))
+  })
+})

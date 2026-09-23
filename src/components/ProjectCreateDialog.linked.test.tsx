@@ -35,7 +35,17 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
 vi.mock("@/lib/sync/project-settings", () => ({
-  patchProjectSettings: vi.fn().mockResolvedValue(undefined),
+  PROJECT_SETTINGS_VERSION_INITIAL: 0,
+  fetchProjectSettings: vi.fn(),
+  patchProjectSettings: vi.fn().mockResolvedValue({
+    kind: "ok",
+    value: {
+      version: 1,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: { id: 1, username: "wendi" },
+      settings: {},
+    },
+  }),
 }))
 vi.mock("@/lib/sync/archive", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/archive")>()

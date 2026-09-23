@@ -350,3 +350,23 @@ describe("I4: cache hygiene", () => {
     expect(result.current.isError).toBe(false)
   })
 })
+
+it("counts both source and target entries in paired progress and clears it on completion", async () => {
+  const gate = deferred<void>()
+  const pairs = Array.from({ length: 10 }, (_, i) => [row(String(i), "source", "source"), row(String(i), "target", "target")]).flat()
+  streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side, onMeta, _lane, paired) => {
+    expect(side).toBeUndefined()
+    expect(paired).toBe(true)
+    onMeta?.({ total: 20, maxServerSeq: 1, projectEpoch: 1 })
+    await onPage(pairs, false)
+    await gate.promise
+    await onPage([], true)
+  })
+  const { result } = renderStore()
+  await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 20, total: 20 }))
+  expect(new Set(result.current.store.toRows().map(r => r.cellId)).size).toBe(10)
+  await act(async () => { gate.resolve(); await gate.promise })
+  await waitFor(() => expect(result.current.loadProgress).toBeNull())
+  expect(result.current.isLoading).toBe(false)
+  expect(result.current.store.toRows()).toHaveLength(20)
+})

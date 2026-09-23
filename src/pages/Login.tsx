@@ -13,6 +13,7 @@ import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError, isJwtExpired } from "@/lib/frontier/auth"
+import { onboardingForBillingNext } from "@/lib/billing/intent"
 import { safeLoginNext } from "@/lib/navigation/login-path"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { isFieldInvalid } from "@/lib/forms/field-state"
@@ -158,16 +159,13 @@ export function Login() {
                     type="submit"
                     form="login-form"
                     className="w-full"
-                    disabled={isSubmitting}
+                    loading={isSubmitting}
                     aria-describedby={
                       isSubmitting && isMigrating
                         ? "login-account-setup-note"
                         : undefined
                     }
                   >
-                    {isSubmitting && (
-                      <Spinner data-icon="inline-start" aria-hidden="true" />
-                    )}
                     {isSubmitting
                       ? isMigrating
                         ? t("auth.login.submitMigrating")
@@ -195,7 +193,7 @@ export function Login() {
           <p className="text-center text-sm text-muted-foreground">
             {t("auth.login.newHerePrefix")}{" "}
             <a
-              href="/onboarding"
+              href={onboardingForBillingNext(next)}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
               {t("auth.login.createAccountLink")}

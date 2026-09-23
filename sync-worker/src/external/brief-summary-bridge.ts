@@ -20,7 +20,16 @@ export interface BriefSummaryBridgeEnv {
 export type BriefSummaryFailureCode = 'not_configured' | 'rate_limited' | 'permission_denied' | 'job_failed'
 
 export type BriefSummaryResult =
-  | { ok: true; summary: string; model: string }
+  | {
+      ok: true
+      summary: string
+      model: string
+      /** The render exceeded `BRIEF_L1_MAX_CHARS` and was clipped, so some of
+       *  the brief's sections are NOT represented in what the copilot reads
+       *  (AQU-1323). Absent on an auth-worker older than the flag → `false`;
+       *  that under-reports truncation rather than inventing it. */
+      truncated: boolean
+    }
   | { ok: false; code: BriefSummaryFailureCode; message: string }
 
 export async function renderBriefSummary(
@@ -81,7 +90,7 @@ export async function renderBriefSummary(
     return { ok: false, code: 'job_failed', message: body.message ?? `brief summary render failed (${res.status})` }
   }
 
-  let body: { summary?: unknown; model?: unknown }
+  let body: { summary?: unknown; model?: unknown; truncated?: unknown }
   try {
     body = (await res.json()) as typeof body
   } catch {
@@ -94,5 +103,6 @@ export async function renderBriefSummary(
     ok: true,
     summary: body.summary,
     model: typeof body.model === 'string' && body.model !== '' ? body.model : 'unknown',
+    truncated: body.truncated === true,
   }
 }

@@ -42,6 +42,7 @@ import type { PlanImportCommand } from './commands'
 import type {
   ExternalEnv,
   PlannedEventIds,
+  ProjectSetupBriefDetails,
   ProjectSetupPlan,
   ProjectSetupReceipt,
   ProjectSetupStep,
@@ -56,13 +57,28 @@ import { loosensPolicy } from '../../../db/shared/policy-direction'
 import {
   applyBriefL1Summary,
   applyBriefPatch,
+  assembleBriefL2Markdown,
   BRIEF_SETTINGS_KEY,
   emptyBriefRecord,
+  isBriefL1Stale,
   readBriefFromSettings,
 } from '../../../db/shared/brief'
 
 /** A step either applies (optionally reporting facts) or fails with a reason. */
 type StepOutcome = { ok: true; fileId?: string } | { ok: false; error: string }
+
+/**
+ * What the brief step's best-effort L1 render actually did (AQU-1323). A failed
+ * render still lets the step apply — the sections landed — but it must never
+ * again be *silent*: `briefReachesCopilot` is computed from this, not from the
+ * mere presence of some (possibly days-old) summary.
+ *
+ * `sectionsWrittenAt` is the merge timestamp stamped into the brief record, so
+ * the freshness test is a comparison against the write this very commit made.
+ */
+type BriefRenderOutcome =
+  | { ok: true; sectionsWrittenAt: string; renderedAt: string; chars: number; truncated: boolean }
+  | { ok: false; sectionsWrittenAt: string; reason: string }
 
 interface StepContext {
   request: Request
@@ -76,6 +92,9 @@ interface StepContext {
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined
   /** Accumulated across steps and reported on the verification receipt. */
   policyKeysNotApplied: string[]
+  /** Set by the brief step; null when this plan carried no brief block, or when
+   *  a resumed commit skipped an already-applied brief step. */
+  briefRender: BriefRenderOutcome | null
 }
 
 /**
@@ -125,6 +144,7 @@ export async function commitProjectSetup(
     confirmationId: gate.confirmationId,
     ctx,
     policyKeysNotApplied: [],
+    briefRender: null,
   }
 
   for (const current of plan.steps) {
@@ -224,10 +244,12 @@ async function applyPolicyStep(step: StepContext, ops: PatchSettingsOp[]): Promi
 
 /**
  * Merge the brief patch into the LIVE brief record and write it back, then
- * best-effort render the L1 so the brief actually reaches the copilot (the L1
- * is the only part prompt-preview injects). A failed render is NOT a step
- * failure — the sections landed, and `briefReachesCopilot` on the verification
- * receipt tells the operator the truth either way.
+ * render the L1 so the brief actually reaches the copilot (the L1 is the only
+ * part prompt-preview injects). A failed render is NOT a step failure — the
+ * sections landed, and unwinding them would be worse — but it is RECORDED:
+ * `briefReachesCopilot` is computed from `step.briefRender`, so the composite
+ * command's central promise ("the brief reaches the AI without a human clicking
+ * regenerate") is asserted on the receipt rather than assumed (AQU-1323).
  */
 async function applyBriefStep(step: StepContext): Promise<StepOutcome> {
   const projectId = step.cs.projectId
@@ -243,16 +265,48 @@ async function applyBriefStep(step: StepContext): Promise<StepOutcome> {
   )
   if (!written.ok) return { ok: false, error: written.error }
 
+  // A hand-edited record can carry sections with no assembled L2; summarize the
+  // assembly rather than sending the renderer an empty document (the same
+  // fallback RegenerateBriefSummary applies).
   const rendered = await renderBriefSummary(step.env, {
     projectId,
     userId: step.cred.userId,
-    l2Markdown: next.l2Markdown,
+    l2Markdown: next.l2Markdown.trim() || assembleBriefL2Markdown(next),
   })
-  if (rendered.ok) {
-    const withL1 = applyBriefL1Summary(next, rendered.summary, rendered.model, new Date().toISOString())
-    await writeSettingsOps(
-      step.db, projectId, [{ key: BRIEF_SETTINGS_KEY, value: withL1 }], step.cred.userId,
-    )
+  if (!rendered.ok) {
+    step.briefRender = {
+      ok: false,
+      sectionsWrittenAt: now,
+      reason:
+        `the L1 summary was not re-rendered (${rendered.code}: ${rendered.message}) — ` +
+        'the brief sections are committed but the copilot still reads the previous summary; ' +
+        'run RegenerateBriefSummary',
+    }
+    return { ok: true }
+  }
+
+  const renderedAt = new Date().toISOString()
+  const withL1 = applyBriefL1Summary(next, rendered.summary, rendered.model, renderedAt)
+  const stored = await writeSettingsOps(
+    step.db, projectId, [{ key: BRIEF_SETTINGS_KEY, value: withL1 }], step.cred.userId,
+  )
+  if (!stored.ok) {
+    step.briefRender = {
+      ok: false,
+      sectionsWrittenAt: now,
+      reason:
+        `the L1 summary rendered but could not be stored (${stored.error}) — ` +
+        'the copilot still reads the previous summary; run RegenerateBriefSummary',
+    }
+    return { ok: true }
+  }
+
+  step.briefRender = {
+    ok: true,
+    sectionsWrittenAt: now,
+    renderedAt,
+    chars: rendered.summary.length,
+    truncated: rendered.truncated,
   }
   return { ok: true }
 }
@@ -438,30 +492,105 @@ async function buildVerification(
     })
   }
 
+  const brief = await verifyBriefReachesCopilot(step, plan, files, live.settings)
+
   return {
     settingsVersion: live.version,
     members,
     files,
-    briefReachesCopilot: await briefReachesCopilot(step, files, live.settings),
+    briefReachesCopilot: brief.reaches,
+    ...(brief.details ? { briefDetails: brief.details } : {}),
     policyKeysNotApplied: [...step.policyKeysNotApplied],
   }
 }
 
 /**
- * Does the brief actually reach the copilot? Answered the only honest way: run
- * the real prompt-preview builder on the first source cell of the first file
- * this plan created and look at `parts.brief`. With no file to stand on, fall
- * back to the same thing prompt-preview reads — a non-empty L1 summary.
+ * Does the brief actually reach the copilot?
+ *
+ * Two questions, and AQU-1323 is what happens when you only ask the second:
+ *
+ *   1. Is the summary the copilot reads the one THIS PLAN wrote? A plan that
+ *      commits sections and then fails to re-render the L1 leaves the copilot
+ *      reading whatever was there before — so the freshness check comes first,
+ *      and it is answered from the step's own render outcome, never from the
+ *      stored summary being non-empty. Reporting `true` there is worse than
+ *      reporting nothing: an agent reading the receipt stops checking.
+ *   2. Is it actually injected? Answered the only honest way — run the real
+ *      prompt-preview builder on the first source cell of the first file this
+ *      plan created and look at `parts.brief`. With no file to stand on, fall
+ *      back to what prompt-preview reads: a non-empty L1 summary.
  */
-async function briefReachesCopilot(
+async function verifyBriefReachesCopilot(
   step: StepContext,
+  plan: ProjectSetupPlan,
   files: ProjectSetupVerification['files'],
   settings: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<{ reaches: boolean; details?: ProjectSetupBriefDetails }> {
   const brief = readBriefFromSettings(settings)
+  const l1GeneratedAt = brief?.l1GeneratedAt ?? null
+  const briefStep = plan.steps.find((s) => s.kind === 'brief')
+
+  // ── 1. freshness ─────────────────────────────────────────────────────────
+  if (briefStep && briefStep.status === 'applied') {
+    const render = step.briefRender
+    if (!render) {
+      // A resumed commit skipped an already-applied brief step, so this run has
+      // no render outcome of its own. Fall back to the stored record's own
+      // staleness marker rather than claiming a freshness we cannot attest.
+      if (brief && isBriefL1Stale(brief)) {
+        return {
+          reaches: false,
+          details: {
+            reason:
+              'the L1 summary predates the brief sections — it was not re-rendered when they landed; ' +
+              'run RegenerateBriefSummary',
+            l1GeneratedAt,
+          },
+        }
+      }
+    } else if (!render.ok) {
+      return { reaches: false, details: { reason: render.reason, l1GeneratedAt } }
+    } else if (l1GeneratedAt === null || l1GeneratedAt < render.sectionsWrittenAt) {
+      // The render reported success but the stored summary does not carry it —
+      // another writer landed on the brief key after this step.
+      return {
+        reaches: false,
+        details: {
+          reason:
+            'the L1 summary this plan rendered is not the one now stored — the brief was ' +
+            'rewritten after this step; run RegenerateBriefSummary',
+          l1GeneratedAt,
+        },
+      }
+    }
+  }
+
+  const truncated = step.briefRender?.ok === true && step.briefRender.truncated
+  const caveat: ProjectSetupBriefDetails = {
+    ...(truncated
+      ? {
+          truncated: true,
+          reason:
+            'the rendered summary hit the 1600-character cap and was clipped — some committed ' +
+            'brief sections are not in what the copilot reads',
+        }
+      : {}),
+    l1GeneratedAt,
+  }
+
+  // ── 2. injection ─────────────────────────────────────────────────────────
   const l1 = (brief?.l1Summary ?? '').trim()
+  const notInjected = (reason: string): { reaches: boolean; details: ProjectSetupBriefDetails } => ({
+    reaches: false,
+    details: { ...caveat, reason },
+  })
+
   const first = files[0]
-  if (!first) return l1 !== ''
+  if (!first || l1 === '') {
+    return l1 !== ''
+      ? { reaches: true, details: caveat }
+      : notInjected('the brief has no L1 summary, so prompt-preview injects no brief block')
+  }
 
   const cell = await step.db
     .prepare(
@@ -471,7 +600,7 @@ async function briefReachesCopilot(
     )
     .bind(step.cs.projectId, first.fileId)
     .first<{ cell_id: string }>()
-  if (!cell) return l1 !== ''
+  if (!cell) return { reaches: true, details: caveat }
 
   const preview = await buildPromptPreview(step.db, {
     projectId: step.cs.projectId,
@@ -479,5 +608,8 @@ async function briefReachesCopilot(
     targetLang: typeof settings.targetLanguage === 'string' ? settings.targetLanguage : '',
     fileId: first.fileId,
   })
-  return preview.ok ? preview.body.parts.brief.trim() !== '' : l1 !== ''
+  if (!preview.ok) return { reaches: true, details: caveat }
+  return preview.body.parts.brief.trim() !== ''
+    ? { reaches: true, details: caveat }
+    : notInjected('prompt-preview renders no brief block on the first imported cell')
 }

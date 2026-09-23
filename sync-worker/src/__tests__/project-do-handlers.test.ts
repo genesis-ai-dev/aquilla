@@ -12,6 +12,7 @@ import {
   resolveConnId,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
+  sweepOrphanedPresence,
   unpackBroadcastBody,
   type LockState,
   type PresenceState,
@@ -725,6 +726,58 @@ describe("sweepExpiredLeases", () => {
       t: "presence.diff",
       user: { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 5_000 },
     })
+  })
+})
+
+describe("sweepOrphanedPresence (AQU-1374)", () => {
+  /** One person, one tab, reconnecting under a fresh connId each time. */
+  const sixSilentReconnects = () =>
+    new Map<string, PresenceState>(
+      ["conn-1", "conn-2", "conn-3", "conn-4", "conn-5", "conn-6"].map((connId) => [
+        connId,
+        { connId, userId: "fatimah", currentFileId: "file-1", viewingCell: "cell-1", ts: 1 },
+      ]),
+    )
+
+  it("collapses a user's abandoned rows down to the one live socket", () => {
+    const r = sweepOrphanedPresence(sixSilentReconnects(), new Set(["conn-6"]))
+    expect([...r.presence.keys()]).toEqual(["conn-6"])
+    expect(r.emit).toEqual([
+      { t: "presence.left", userId: "fatimah", connId: "conn-1" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-2" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-3" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-4" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-5" },
+    ])
+  })
+
+  it("keeps every row that still has a live socket, idle or not", () => {
+    // No heartbeat exists on the client (presence.update is sent on change
+    // only), so a stale `ts` must never be grounds for eviction.
+    const presence = new Map<string, PresenceState>([
+      ["tab-a", { connId: "tab-a", userId: "alice", ts: 1 }],
+      ["tab-b", { connId: "tab-b", userId: "alice", ts: 1 }],
+      ["bob-1", { connId: "bob-1", userId: "bob", focusedCell: "cell-1", ts: 1 }],
+    ])
+    const r = sweepOrphanedPresence(presence, new Set(["tab-a", "tab-b", "bob-1"]))
+    expect(r.emit).toEqual([])
+    expect(r.presence).toEqual(presence)
+  })
+
+  it("drops one tab's orphan without disturbing the user's other live tab", () => {
+    const presence = new Map<string, PresenceState>([
+      ["tab-a", { connId: "tab-a", userId: "alice", viewingCell: "cell-1", ts: 1 }],
+      ["tab-b", { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 1 }],
+    ])
+    const r = sweepOrphanedPresence(presence, new Set(["tab-b"]))
+    expect([...r.presence.keys()]).toEqual(["tab-b"])
+    expect(r.emit).toEqual([{ t: "presence.left", userId: "alice", connId: "tab-a" }])
+  })
+
+  it("does not mutate the map it was given", () => {
+    const presence = sixSilentReconnects()
+    sweepOrphanedPresence(presence, new Set(["conn-6"]))
+    expect(presence.size).toBe(6)
   })
 })
 

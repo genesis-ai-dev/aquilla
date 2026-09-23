@@ -15,6 +15,11 @@ from urllib.parse import urlsplit
 from webhook import REPO, REPO_ID, STATE, database
 
 CODE = Path("/opt/aquilla-qa")
+JOBS = Path("/var/lib/aquilla-qa-jobs")
+# How long a job interrupted mid-report may hold the queue while its report is
+# retried. Past this, the queue matters more than the report: a runner that
+# looks healthy while testing nothing is the worse failure.
+REPORT_GRACE = 900
 CONFIG = Path("/etc/aquilla-qa/runner.json")
 NETWORK = "aquilla-qa"
 SHA = re.compile(r"[a-f0-9]{40}")
@@ -158,7 +163,7 @@ def execute(config, job):
         raise ValueError("Invalid trusted harness")
     harness = "aquilla-qa-harness:" + harness_sha
     prefix = f"aquilla-qa-{job_id}-"
-    directory = Path("/var/lib/aquilla-qa-jobs") / str(job_id)
+    directory = JOBS / str(job_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     source = directory / "source.tar"
     suite, status, artifact_url = None, "failure", None
@@ -254,30 +259,50 @@ def execute(config, job):
             raise ReportPending() from error
 
 
+def drain_interrupted(config, job):
+    """Deliver an interrupted job's report, then release the queue.
+
+    A job stays 'interrupted' only while its report is still worth retrying.
+    Once the grace window closes it becomes terminal, so one undeliverable
+    report cannot stop every later PR from being tested.
+    """
+    job_id, pr, sha, interrupted_at = job
+    cleanup_containers(f"aquilla-qa-{job_id}-")
+    try:
+        outbox_path = JOBS / str(job_id) / "report.json"
+        outbox = json.loads(outbox_path.read_text()) if outbox_path.exists() else {}
+        report(config, pr, sha, "finished", **outbox)
+        status = "completed" if outbox.get("status") == "success" else "failed"
+    except Exception as error:
+        print("Interrupted report:", type(error).__name__, flush=True)
+        if time.time() - interrupted_at <= REPORT_GRACE:
+            return None
+        # Fail loud: no report reached the PR, and we are giving up on it.
+        print(f"Job {job_id} abandoned undelivered after {REPORT_GRACE}s", flush=True)
+        status = "report-failed"
+    with database() as db:
+        db.execute("UPDATE jobs SET status=?,updated=? WHERE id=?", (status, time.time(), job_id))
+    return status
+
+
 def main():
     os.umask(0o007)
     STATE.mkdir(parents=True, exist_ok=True)
     # Interrupted jobs get an inconclusive report; they do not silently retry to green.
     with database() as db:
-        db.execute("UPDATE jobs SET status='interrupted' WHERE status='running'")
+        # Stamp the interruption so the grace window below starts now, not at
+        # whatever time the job was last touched before the process died.
+        db.execute("UPDATE jobs SET status='interrupted',updated=? WHERE status='running'", (time.time(),))
     while True:
         config = json.loads(CONFIG.read_text())
         with database() as db:
-            interrupted = db.execute("SELECT id,pr,sha FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
+            interrupted = db.execute(
+                "SELECT id,pr,sha,updated FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
             job = db.execute("SELECT id,pr,sha FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if job and not interrupted:
                 db.execute("UPDATE jobs SET status='running',updated=? WHERE id=?", (time.time(), job[0]))
         if interrupted:
-            cleanup_containers(f"aquilla-qa-{interrupted[0]}-")
-            try:
-                outbox_path = Path("/var/lib/aquilla-qa-jobs") / str(interrupted[0]) / "report.json"
-                outbox = json.loads(outbox_path.read_text()) if outbox_path.exists() else {}
-                report(config, interrupted[1], interrupted[2], "finished", **outbox)
-                status = "completed" if outbox.get("status") == "success" else "failed"
-                with database() as db:
-                    db.execute("UPDATE jobs SET status=?,updated=? WHERE id=?", (status, time.time(), interrupted[0]))
-            except Exception as error:
-                print("Interrupted report:", type(error).__name__, flush=True)
+            drain_interrupted(config, interrupted)
             time.sleep(5)
             continue
         if not job:
@@ -293,7 +318,7 @@ def main():
         with database() as db:
             db.execute("UPDATE jobs SET status=?,updated=? WHERE id=?", (status, time.time(), job[0]))
         print(f"Job {job[0]} {status}", flush=True)
-        for root in (Path("/var/lib/aquilla-qa-jobs"), Path("/var/lib/aquilla-qa-evidence")):
+        for root in (JOBS, Path("/var/lib/aquilla-qa-evidence")):
             if root.exists():
                 children = sorted((child for child in root.iterdir() if child.is_dir()),
                                   key=lambda child: child.stat().st_mtime, reverse=True)

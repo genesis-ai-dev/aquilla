@@ -273,4 +273,26 @@ describe("file progress resource", () => {
     await waitFor(() => expect(hook.result.current.progress?.revision).toBe(2))
     hook.unmount()
   })
+
+  // AQU-350: the Files dock panel is unmounted on every tab switch, so each
+  // switch used to fire one conditional GET per expanded file.
+  it("serves a remount from the live record instead of refetching fresh progress", async () => {
+    const getToken = async () => "token"
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(progress("remount-file", 1), '"remount"'))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const first = renderHook(() => useFileProgressResource("remount-project", "remount-file", getToken))
+    await waitFor(() => expect(first.result.current.progress?.file.filledCount).toBe(1))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    first.unmount()
+
+    const second = renderHook(() => useFileProgressResource("remount-project", "remount-file", getToken))
+    expect(second.result.current.progress?.file.filledCount).toBe(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // An explicit invalidation still refetches — the gate is freshness, not a mute.
+    act(() => invalidateFileProgress("remount-project", "remount-file"))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    second.unmount()
+  })
 })

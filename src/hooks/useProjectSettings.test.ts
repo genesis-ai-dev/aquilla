@@ -6,6 +6,7 @@ import {
   describePatchFailure,
   broadcastProjectSettingsUpdated,
   type PatchOutcome,
+  isCountStructuralOnlyPatch,
 } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
 
@@ -944,5 +945,27 @@ describe("useProjectSettings — same-tab propagation after a write (AQU-979)", 
     // Give any errant refresh a chance to fire before asserting it did not.
     await new Promise((r) => setTimeout(r, 0))
     expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-1083 — the client's own role floor has to agree with the server's, or a
+// project lead gets a control that silently does nothing.
+describe("isCountStructuralOnlyPatch (AQU-1083)", () => {
+  it("recognises a patch that only sets the override", () => {
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: false })).toBe(true)
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: true })).toBe(true)
+  })
+
+  it("recognises clearing the override, which is how 'inherit' is stored", () => {
+    // The key present and undefined: JSON drops it, so the stored blob loses
+    // the override entirely. That is a lead-level write, not a maintainer one.
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: undefined })).toBe(true)
+  })
+
+  it("refuses a patch that carries anything else", () => {
+    // Same fail-safe as the terminology carve-out: bundling another key must
+    // fall back to the maintainer floor rather than ride this one through.
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: false, sourceLanguage: "fr" })).toBe(false)
+    expect(isCountStructuralOnlyPatch({})).toBe(false)
   })
 })

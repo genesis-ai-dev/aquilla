@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
+import { buildIdentity } from "../build"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { runJev, JEV_REVISION, type AgentRun } from "../driver"
@@ -37,12 +36,10 @@ for (const condition of ["normal", "immediate-departure", "delayed-network"] as 
     }))
     const output = testInfo.outputPath("evidence.json")
     mkdirSync(path.dirname(output), { recursive: true })
-    const build = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    const dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
-    const trackedDiffHash = createHash("sha256").update(execFileSync("git", ["diff", "HEAD"])).digest("hex")
+    const { build, dirty, trackedDiffHash, harnessBuild } = buildIdentity()
     const save = () => writeFileSync(output, JSON.stringify({
       schemaVersion: 1, journey: "edit-durability", condition,
-      build, dirty, trackedDiffHash,
+      build, dirty, trackedDiffHash, harnessBuild,
       jevRevision: JEV_REVISION, runId: fixture.runId,
       projectId: seeded.projectId, fileId: seeded.fileId,
       goal, contract, inputObserved, departureApplied, agent, outcome, diagnostics,

@@ -98,6 +98,10 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import {
+  restoreMayPark, stepPendingScroll,
+  type PendingCellScroll, type PendingScrollAttempt,
+} from "./pending-cell-scroll"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
@@ -111,6 +115,7 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  buildGlosserSeeds,
   nextPaintGate,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
@@ -260,6 +265,7 @@ import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/determin
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
+import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
@@ -332,6 +338,7 @@ import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/syn
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -380,7 +387,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useConcepts } from "@/hooks/useConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
-import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
+import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
@@ -492,7 +499,6 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 /** Trailing throttle for row-selection presence (`viewingCell`). */
 const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
-
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
   for (const [key, value] of a) {
@@ -557,7 +563,13 @@ export function ProjectWorkspace() {
   // navigation (or an AQU-646 media→text trace, which also flashes). Set by
   // the restore effect / deep-link / switchLens; consumed by the effect that
   // fires when `cells` are available AND the text editor is mounted.
-  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
+  //
+  // AQU-1278 widened the entry from `{ cellId, flash }` — the shape, the
+  // parking precedence and the give-up rules all live in
+  // `pending-cell-scroll.ts`, where they are tested; these refs only carry
+  // the state between renders.
+  const pendingCellScrollRef = useRef<PendingCellScroll | null>(null)
+  const pendingCellScrollTryRef = useRef<PendingScrollAttempt | null>(null)
   /** Mirrors currentUsername (computed much further down). */
   const currentUsernameRef = useRef<string>("local")
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
@@ -579,6 +591,18 @@ export function ProjectWorkspace() {
     roleLevel: serverRoleLevel,
     settingsFetched,
   } = useProject(projectId!)
+  // AQU-1083: the effective policy for this project — its own answer, else its
+  // org's, else count them. Both legs come from the settings hook, which is
+  // the one thing here that re-reads on a remote change frame and on window
+  // focus; an org-level flip therefore reaches this workspace without a
+  // reload. The footer below is the only progress surface that counts cells
+  // itself, and the sidebar's chapter tiles need the value to know when their
+  // cached snapshot is stale — every other surface reads a number the server
+  // already resolved this against.
+  const countStructuralCells =
+    projectSettings?.settings?.countStructuralCells
+    ?? projectSettings?.orgCountStructuralCells
+    ?? true
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -916,8 +940,30 @@ export function ProjectWorkspace() {
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
-    if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
-      pendingCellScrollRef.current = { cellId: savedLoc.cellId, flash: false }
+    //
+    // AQU-1278: …unless a `?cellId=` deep link has already parked one. Both
+    // write the same ref, and declaration order does NOT settle who wins:
+    // effects only run top-down on the MOUNT pass, and this effect re-runs
+    // every time its asynchronously-resolving deps (`project`, `fileIds`,
+    // `projectFiles`) settle — routinely several commits after the deep-link
+    // effect below has already parked. Without this guard the user's remembered
+    // position quietly replaced the cell a "go to the first unvalidated cell"
+    // link had asked for, and the link appeared to land on a random row. The
+    // link is an explicit request; this restore is a convenience, so the link
+    // wins. (It can also not be re-checked from the URL here: when the routed
+    // file isn't in the project yet we redirect to `/editor`, which drops the
+    // query string — the ref is the only surviving record of the intent.)
+    if (
+      savedLoc?.cellId &&
+      savedLoc.fileId === nextFileId &&
+      restoreMayPark(pendingCellScrollRef.current)
+    ) {
+      pendingCellScrollRef.current = {
+        cellId: savedLoc.cellId,
+        flash: false,
+        fileId: nextFileId,
+        source: "restore",
+      }
     }
     const target = `/project/${projectId}/editor/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
@@ -986,10 +1032,27 @@ export function ProjectWorkspace() {
 
   // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
   // the scroll-restore effect (below) can consume it once cells are loaded.
+  //
+  // AQU-1278 added `&flash=1` (see `editorCellHref`). The flag exists because
+  // this used to hard-code `flash: false` for every caller: the plan board's
+  // "go to the first outstanding cell" link scrolled the row into view with
+  // NOTHING marking which row it was, which from the user's chair is
+  // indistinguishable from a link that did nothing at all. Comments links stay
+  // unflashed — they arrive from a thread that already names the cell — so the
+  // flash is opt-in per link rather than switched on for everybody here.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
-    if (cellId) pendingCellScrollRef.current = { cellId, flash: false }
-  }, [searchParams])
+    if (!cellId) return
+    pendingCellScrollRef.current = {
+      cellId,
+      flash: searchParams.get("flash") === "1",
+      // The link names its file in the path; parking it lets the consumer drop
+      // this entry if the user ends up somewhere else (a link to a file this
+      // project doesn't have gets redirected away before it can ever land).
+      fileId: routeFileId ?? null,
+      source: "link",
+    }
+  }, [searchParams, routeFileId])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
@@ -1000,8 +1063,10 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  // FRO-308: left dock active tab (null = collapsed rail only)
-  const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // FRO-308: left dock active tab (null = collapsed rail only). Last real tab
+  // is restored from localStorage per project so reload returns to Files /
+  // Voices / Agent / Search instead of always landing on Files.
+  const [dockTab, setDockTab] = usePersistedDockTab(projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
   // sheet opens onto the files list instead of a 40px icon strip.
@@ -1226,7 +1291,17 @@ export function ProjectWorkspace() {
   // `editorProject` below folds these concepts onto the record it hands the
   // editor. `refreshConcepts` runs after each term.* write acks so blots track
   // the termbase without a reload.
-  const { concepts: localConcepts, refresh: refreshConcepts } = useConcepts({
+  //
+  // AQU-1340: `error`/`isLoading` are read too. `editorProject` can only carry
+  // the concepts themselves, so a failed read would otherwise reach the editor
+  // and the in-workspace glossary as `terminology: []` — indistinguishable from
+  // a project that has no terminology, with every term check silently off.
+  const {
+    concepts: localConcepts,
+    isLoading: conceptsLoading,
+    error: conceptsError,
+    refresh: refreshConcepts,
+  } = useConcepts({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
     tokenReady: !!frontierSession?.jwt,
@@ -1387,6 +1462,7 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
+    countStructural: countStructuralCells,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
@@ -1529,6 +1605,10 @@ export function ProjectWorkspace() {
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, BacktranslationRecord>
     terminology: ProjectRecord["terminology"] | undefined
+    // AQU-207: confirmed/invalidated interlinear alignments seed the glosser
+    // too, so they belong in the cache key — otherwise a confirmation hands
+    // back the stale pre-confirmation glosser.
+    alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     glosser: Glosser
   } | null>(null)
   const alignmentModelCacheRef = useRef<{
@@ -1763,6 +1843,7 @@ export function ProjectWorkspace() {
     project?.ttsSettings,
     cellSummaries,
     (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+    project?.targetLanguage,
   )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
@@ -5107,12 +5188,14 @@ export function ProjectWorkspace() {
     // AQU-1006 follow-up: from the concepts projection, not the retired
     // `project.terminology` settings key.
     const terminology = localConcepts
+    const alignmentSeeds = project?.alignmentSeeds
     const cached = glosserCacheRef.current
     if (
       cached &&
       cached.corpusCells === corpusCells &&
       cached.backtranslationCache === backtranslationCache &&
-      cached.terminology === terminology
+      cached.terminology === terminology &&
+      cached.alignmentSeeds === alignmentSeeds
     ) {
       return cached.glosser
     }
@@ -5120,45 +5203,23 @@ export function ProjectWorkspace() {
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    // High-weight seeds from previous user-corrected BTs stored in the cache.
-    // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
-    // future glosses reflect the reviewer's intent.
-    const seeds: BtSeed[] = []
-    const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
-    for (const record of backtranslationCache.values()) {
-      const cell = corpusByCellId.get(record.cellId)
-      if (!cell?.translated) continue
-      if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
-        continue
-      }
-      seeds.push({
-        source: record.btText,
-        target: record.forText || cell.translated,
-        weight: record.polished === false ? 5 : 2,
-      })
-    }
-    // Seed from project termbase: active concepts feed preferred/admitted/forbidden
-    // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of localConcepts) {
-      if (concept.status !== "active") continue
-      for (const rendering of concept.renderings) {
-        const weight =
-          rendering.status === "preferred" ? 3 :
-          rendering.status === "admitted" ? 1 :
-          -3 // forbidden
-        seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
-      }
-    }
+    const seeds = buildGlosserSeeds({
+      corpusCells,
+      backtranslationCache,
+      terminology,
+      alignmentSeeds,
+    })
     const g = buildGlosser(pairs, seeds)
     memMark(`glosser.build(${pairs.length}p)`)
     glosserCacheRef.current = {
       corpusCells,
       backtranslationCache,
       terminology,
+      alignmentSeeds,
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, localConcepts])
+  }, [corpusCells, backtranslationCache, localConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -5556,6 +5617,15 @@ export function ProjectWorkspace() {
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
   // 2a). openCommentCount (file-level) is still health-derived.
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount } = health
+  // AQU-1083: useHealth counts every cell of the open file; the footer must
+  // show the policy-resolved number or it contradicts the sidebar bar for the
+  // same file. Subtracted here, not inside useHealth, so the health hook stays
+  // ignorant of cell types.
+  const statusBarProgress = useMemo(() => {
+    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
+    if (!live) return EMPTY_STATUS_PROGRESS
+    return applyStructuralPolicy(live, cellSummaries, countStructuralCells)
+  }, [activeFileId, cellSummaries, countStructuralCells, liveFileProgress])
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -5667,9 +5737,14 @@ export function ProjectWorkspace() {
         getSummary,
         health: (cellId) => effectiveHealthMap.get(cellId),
         hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083: draw a heading as "not counted" rather than as work left
+        // to do. The chapter's fraction already excludes it — the store does
+        // that — so this only chooses the colour and what it announces.
+        isExcluded: (cellId) =>
+          !countStructuralCells && isStructuralCell(getSummary(cellId)?.type),
       })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -5788,12 +5863,18 @@ export function ProjectWorkspace() {
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
       } else if (timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
-        // no edit-focus change.
-        pendingCellScrollRef.current = { cellId: timelineSelectedCellIdRef.current, flash: true }
+        // no edit-focus change. The trace is always within the open file (the
+        // lens switch doesn't navigate), so it parks against `activeFileId`.
+        pendingCellScrollRef.current = {
+          cellId: timelineSelectedCellIdRef.current,
+          flash: true,
+          fileId: activeFileId,
+          source: "trace",
+        }
       }
     }
     setLens(next)
-  }, [lens, setLens, activeFile, cellStore])
+  }, [lens, setLens, activeFile, activeFileId, cellStore])
 
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -5942,13 +6023,44 @@ export function ProjectWorkspace() {
   // mounts (the ref attaches during commit, before effects run — same pass);
   // the id-based scroll also fixes the store-vs-display index mismatch on
   // time-ordered files.
+  //
+  // AQU-1278: this park can now GIVE UP, which it previously could not.
+  // `scrollToCellId` returns false for an id the open file doesn't have — a
+  // cell deleted since the link was written, a remembered position in a file
+  // that has since been re-imported, a plan-board link to a file the redirect
+  // above swapped out — and the old body only cleared the ref on success. So
+  // one stale id re-ran this scroll on EVERY cell-store version bump for the
+  // rest of the session (a version bump is one committed keystroke), and it
+  // followed the user into other files, where it would hijack their scroll
+  // position the moment an unrelated file happened to contain a matching id.
+  // Two exits now: the attempt budget, and leaving the file it was parked for.
   useEffect(() => {
     const pending = pendingCellScrollRef.current
     if (!pending) return
     if (readAtVersion(cellStoreVersion, () => cellStore.getCellCount()) === 0) return
-    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: pending.flash }) ?? false
-    if (ok) pendingCellScrollRef.current = null
-  }, [cellStore, cellStoreVersion, lens])
+    const editor = editorRef.current
+    // No text editor mounted (media lens). Wait for it rather than spending an
+    // attempt — that wait IS the AQU-646 media→text trace's mechanism.
+    if (!editor) return
+
+    const giveUp = () => {
+      pendingCellScrollRef.current = null
+      pendingCellScrollTryRef.current = null
+    }
+    // The decision — arrival, departure, the budget, and whether scrolling
+    // now would hijack a file this cell was never parked for — is
+    // `stepPendingScroll`'s, and tested there. This effect only executes it.
+    const step = stepPendingScroll(pending, pendingCellScrollTryRef.current, activeFileId)
+    if (step.kind === "give-up") {
+      giveUp()
+      return
+    }
+    pendingCellScrollTryRef.current = step.attempt
+    const ok = step.kind === "try"
+      ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
+      : false
+    if (ok || step.last) giveUp()
+  }, [activeFileId, cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -11192,6 +11304,7 @@ export function ProjectWorkspace() {
                   deferSectionProgress={!editorFirstPaint}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
+                  countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
                   targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
@@ -11427,6 +11540,27 @@ export function ProjectWorkspace() {
             )}
             {/* FRO-296: offline banner — shown when browser reports no connectivity. */}
             <OfflineBanner />
+            {/* AQU-1340: a failed concepts read compiles to an empty terminology
+                rule set, so term blots and violations silently stop appearing.
+                Say it out loud rather than letting the editor look like a
+                project with no terminology. The glossary surface carries its own
+                error state, so this doesn't double up there. */}
+            {conceptsError && centerSurface !== "terminology" && (
+              <div
+                role="alert"
+                data-testid="terminology-unavailable-banner"
+                className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+              >
+                <span>{t("workspace.terminologyUnavailableBanner")}</span>
+                <button
+                  type="button"
+                  onClick={() => void refreshConcepts()}
+                  className="rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
+                >
+                  {t("common.retry")}
+                </button>
+              </div>
+            )}
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
@@ -11573,6 +11707,12 @@ export function ProjectWorkspace() {
                 // and never a term that was created through the event log.
                 project={editorProject ?? project}
                 patchSettings={patchSettings}
+                // AQU-1340: the record can only carry the terms, so the read's
+                // status travels beside it — otherwise this path renders a
+                // failed read as an empty termbase.
+                conceptsError={conceptsError}
+                conceptsLoading={conceptsLoading}
+                refreshConcepts={refreshConcepts}
               />
             </Suspense>
           </div>
@@ -12474,7 +12614,7 @@ export function ProjectWorkspace() {
             const fileStats = showFileStats ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                progress={activeFileId ? liveFileProgress.get(activeFileId) ?? EMPTY_STATUS_PROGRESS : EMPTY_STATUS_PROGRESS}
+                progress={statusBarProgress}
                 getHealthByCell={getStatusBarHealth}
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
@@ -12805,6 +12945,8 @@ export function ProjectWorkspace() {
           fileId={activeFileId}
           session={frontierSession ?? null}
           targetLanguage={project.targetLanguage}
+          targetLanes={project.targetLanes}
+          archivedLanes={project.archivedLanes}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
         />

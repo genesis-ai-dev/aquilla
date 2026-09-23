@@ -1,6 +1,6 @@
 /**
- * Just Kokoro must start that model's download. Enable all was the only
- * path that prefetched, so a dialog-close race left "Just Kokoro" as a
+ * Just Whisper must start that model's download. Enable all was the only
+ * path that prefetched, so a dialog-close race left "Just Whisper" as a
  * silent no-op until the user enabled everything (and often reloaded).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -9,7 +9,8 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   clearStoredConsent,
-  KOKORO_MODEL,
+  MMS_MODEL,
+  WHISPER_MODEL,
   requestAiModelConsent,
 } from "@/lib/audio/ai-consent"
 import type { PrefetchOptions } from "@/lib/audio/prefetch"
@@ -42,43 +43,43 @@ afterEach(() => {
 })
 
 describe("AiModelConsentDialog", () => {
-  it("Just Kokoro grants consent and prefetches only Kokoro", async () => {
+  it("Just Whisper grants consent and prefetches only Whisper", async () => {
     renderDialog()
-    const granted = requestAiModelConsent(KOKORO_MODEL)
+    const granted = requestAiModelConsent(WHISPER_MODEL)
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /just kokoro/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /just whisper/i })).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /just kokoro/i }))
+    fireEvent.click(screen.getByRole("button", { name: /just whisper/i }))
 
     await expect(granted).resolves.toBe(true)
     expect(prefetchAiModels).toHaveBeenCalledWith(
-      expect.objectContaining({ models: ["kokoro"] }),
+      expect.objectContaining({ models: ["whisper"] }),
     )
     expect(prefetchAiModels.mock.calls.some((c) => {
       const models = c[0]?.models ?? []
-      return models.includes("whisper") || models.includes("mms")
+      return models.includes("mms")
     })).toBe(false)
   })
 
-  it("Just Kokoro on pointer-down grants before a dismiss can race", async () => {
+  it("Just Whisper on pointer-down grants before a dismiss can race", async () => {
     renderDialog()
-    const granted = requestAiModelConsent(KOKORO_MODEL)
+    const granted = requestAiModelConsent(WHISPER_MODEL)
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /just kokoro/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /just whisper/i })).toBeTruthy()
     })
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: /just kokoro/i }))
+    fireEvent.pointerDown(screen.getByRole("button", { name: /just whisper/i }))
 
     await expect(granted).resolves.toBe(true)
     expect(prefetchAiModels).toHaveBeenCalledWith(
-      expect.objectContaining({ models: ["kokoro"] }),
+      expect.objectContaining({ models: ["whisper"] }),
     )
   })
 
-  it("Enable all local models grants consent and prefetches Kokoro first", async () => {
+  it("Enable all local models grants consent and prefetches the pending model first", async () => {
     renderDialog()
-    const granted = requestAiModelConsent(KOKORO_MODEL)
+    const granted = requestAiModelConsent(MMS_MODEL)
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /enable all local models/i })).toBeTruthy()
     })
@@ -90,13 +91,13 @@ describe("AiModelConsentDialog", () => {
       expect(prefetchAiModels).toHaveBeenCalled()
     })
     expect(prefetchAiModels.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ models: ["kokoro"] }),
+      expect.objectContaining({ models: ["mms"] }),
     )
   })
 
   it("Cancel denies consent and does not prefetch", async () => {
     renderDialog()
-    const granted = requestAiModelConsent(KOKORO_MODEL)
+    const granted = requestAiModelConsent(WHISPER_MODEL)
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy()
     })
@@ -107,19 +108,19 @@ describe("AiModelConsentDialog", () => {
     expect(prefetchAiModels).not.toHaveBeenCalled()
   })
 
-  it("a dialog close after Just Kokoro cannot un-grant consent", async () => {
+  it("a dialog close after Just Whisper cannot un-grant consent", async () => {
     renderDialog()
-    const granted = requestAiModelConsent(KOKORO_MODEL)
+    const granted = requestAiModelConsent(WHISPER_MODEL)
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /just kokoro/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /just whisper/i })).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /just kokoro/i }))
+    fireEvent.click(screen.getByRole("button", { name: /just whisper/i }))
     await expect(granted).resolves.toBe(true)
 
     await act(async () => {
       fireEvent.keyDown(document, { key: "Escape" })
     })
-    await expect(requestAiModelConsent(KOKORO_MODEL)).resolves.toBe(true)
+    await expect(requestAiModelConsent(WHISPER_MODEL)).resolves.toBe(true)
   })
 })

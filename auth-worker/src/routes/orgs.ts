@@ -2,11 +2,11 @@
 // `cloudflare/src/routes/orgs.ts`. Personal-org lazy-create, members CRUD,
 // member-project listing, and pending-invite listing.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
-import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform-admin"
 import { ROLE, type Env } from "../types"
 import {
   addGroupMember,
@@ -739,6 +739,41 @@ type OrgGrantOutcome =
   | { ok: true; userId: number; username: string; role: number }
   | { ok: false; username: string; code: string; message: string }
 
+// [Pen test] Authorization & access control (2026-09-22): getEffectiveOrgRole
+// folds the ADMIN_EMAILS allowlist in as an unconditional owner (700) on
+// EVERY org, including ones the caller has never joined — correct for reads
+// (support/oversight, see platform-admin-access.test.ts) but this org's
+// member-management routes WRITE governance: POST added/upgraded an arbitrary
+// target to real, persistent OWNER membership in any org on the platform, and
+// DELETE could strip any org's real owners, with only a plain session cookie
+// and no step-up check. A hijacked admin-email session (no MFA required here)
+// could silently plant a durable backdoor owner in any org, invisible once
+// the compromised session itself is revoked. The external Agent-API surface
+// already excludes platform-admin from org-membership commands for exactly
+// this reason (org-members-engine.ts: "confers no cross-tenant governance
+// authority") — this closes the same gap on the browser-session path by
+// requiring the same step-up elevation `/api/v2/admin/*` already demands,
+// but ONLY on the platform-admin branch. A genuine owner (role_level >= 700
+// in org_members) is unaffected — no elevation, no extra request.
+async function requireGenuineOwnerOrElevatedAdmin(
+  c: Context<AuthHonoEnv>,
+  orgId: number,
+): Promise<Response | null> {
+  const user = c.get("user")
+  const membership = await getOrgMemberRole(c.env, orgId, user.id)
+  if ((membership ?? 0) >= 700) return null
+  if (!isPlatformAdminEmail(c.env, user.email)) {
+    return c.json({ error: "only org owners can manage membership" }, 403)
+  }
+  if (!(await hasActiveElevation(c))) {
+    return c.json(
+      { error: "elevation required to manage membership on an org you do not belong to" },
+      403,
+    )
+  }
+  return null
+}
+
 /**
  * Evaluate + apply a single org-member grant. Checks are per target so a batch
  * never rolls the valid grants back on one bad entry. Owner-only is enforced by
@@ -784,10 +819,8 @@ orgs.post(
     const orgId = parseInt(c.req.param("orgId"), 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-    const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-    if (callerRole == null || callerRole < 700) {
-      return c.json({ error: "only org owners can add members" }, 403)
-    }
+    const denied = await requireGenuineOwnerOrElevatedAdmin(c, orgId)
+    if (denied) return denied
 
     const body = c.req.valid("json")
 
@@ -1062,10 +1095,8 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "invalid id" }, 400)
   }
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < 700) {
-    return c.json({ error: "only org owners can remove members" }, 403)
-  }
+  const denied = await requireGenuineOwnerOrElevatedAdmin(c, orgId)
+  if (denied) return denied
   if (targetUserId === user.id) {
     return c.json({ error: "owner cannot remove self" }, 400)
   }

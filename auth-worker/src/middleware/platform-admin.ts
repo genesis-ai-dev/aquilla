@@ -71,11 +71,33 @@ export const requirePlatformAdmin = async (
 }
 
 /**
- * Step-up "sudo" gate. Requires a currently-valid elevated session (granted by
- * POST /api/v2/admin/elevation/verify, see routes/admin.ts) before reaching the
- * console's data/config routes. Mounted AFTER the bootstrap routes (/me,
- * /elevation/request, /elevation/verify) so those stay reachable to establish
- * elevation.
+ * Whether the current request carries an active step-up elevation (granted by
+ * POST /api/v2/admin/elevation/verify, see routes/admin.ts) — or elevation
+ * isn't required in this environment at all (see adminElevationRequired), in
+ * which case every platform admin counts as elevated.
+ *
+ * Extracted from requireAdminElevation so a handler outside `/admin/*` can
+ * ask the same question imperatively — e.g. a governance WRITE reached only
+ * via the platform-admin fallback (not genuine membership) on an org-scoped
+ * route. Those routes stay open (no elevation) for a genuine owner; this is
+ * for the platform-admin-only branch.
+ */
+export const hasActiveElevation = async (c: Context<AuthHonoEnv>): Promise<boolean> => {
+  if (!adminElevationRequired(c.env)) return true
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare(
+    `SELECT 1 AS ok FROM admin_elevations WHERE user_id = ? AND elevated_until > now()`,
+  )
+    .bind(user.id)
+    .first<{ ok: number }>()
+  return row != null
+}
+
+/**
+ * Step-up "sudo" gate. Requires a currently-valid elevated session before
+ * reaching the console's data/config routes. Mounted AFTER the bootstrap
+ * routes (/me, /elevation/request, /elevation/verify) so those stay reachable
+ * to establish elevation.
  *
  * No-op when elevation isn't required (see adminElevationRequired) — so local/dev
  * and the existing admin-route tests are unaffected.
@@ -84,17 +106,7 @@ export const requireAdminElevation = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  if (!adminElevationRequired(c.env)) {
-    await next()
-    return
-  }
-  const user = c.get("user")
-  const row = await c.env.AQUILLA_PG.prepare(
-    `SELECT 1 AS ok FROM admin_elevations WHERE user_id = ? AND elevated_until > now()`,
-  )
-    .bind(user.id)
-    .first<{ ok: number }>()
-  if (!row) {
+  if (!(await hasActiveElevation(c))) {
     return c.json({ error: "elevation required" }, 403)
   }
   await next()

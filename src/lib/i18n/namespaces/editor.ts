@@ -1490,6 +1490,7 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
+    "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
 
@@ -5545,6 +5546,16 @@ export const editor = defineNamespace({
           "Name of the expansion tab showing extra untranslated columns that came in " +
           "with the import (reference codes, quotes, tags, attached images). A noun.",
         maxLength: 18,
+      },
+      "editor.metadata.showOnCells": {
+        description:
+          "Tooltip and screen-reader name of the checkbox beside one field in a cell's " +
+          "Metadata tab. Checking it shows that field's value as a small label on every " +
+          "cell in the project that has the field. {key} is the field name as imported " +
+          "(e.g. \"Field\"), shown verbatim — do not translate it.",
+        placeholders: {
+          key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
+        },
       },
       "editor.issues.none": {
         description:

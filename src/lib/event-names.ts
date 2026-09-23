@@ -88,3 +88,12 @@ export const INVITE_REDEEMED = "invite redeemed"
  * returned an irrecoverable 403 (quarantineOutboxEvents).
  */
 export const OUTBOX_QUARANTINED = "outbox record quarantined"
+
+// ── TTS provider cutover (AQU-1189) ───────────────────────────────────────
+
+/**
+ * Legacy OmniVoice project settings were rewritten onto Inworld and persisted.
+ * Fired once per project open that actually writes (localStorage + server
+ * mirror), not on the runtime remap that still covers unread copies.
+ */
+export const OMNIVOICE_VOICES_MIGRATED = "omnivoice voices migrated"

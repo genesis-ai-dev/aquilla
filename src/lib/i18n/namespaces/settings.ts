@@ -94,7 +94,7 @@ export const settings = defineNamespace({
 
     // ── LocalLlmSection (Preferences → Offline AI provider, Tauri desktop app only) ──
     // Deliberately NOT named "Local LLM" in the UI — sits right next to "Local models"
-    // (Whisper/Kokoro/MMS voice models, an unrelated on-device speech feature) in the same
+    // (Whisper/MMS voice models, an unrelated on-device speech feature) in the same
     // nav group, and the two names read as siblings when they aren't. This is a text-
     // generation endpoint used only when offline; that's a voice/transcription cache used
     // always. The description below repeats the distinction since a user landing straight on
@@ -216,7 +216,7 @@ export const settings = defineNamespace({
     "settings.monday.callback.connecting": "Connecting to Monday.com…",
 
     // ── OrgSettingsIdentity ──
-    "settings.orgIdentity.nameDescription": "Shown across the workspace.",
+    "settings.orgIdentity.nameDescription": "Shown across the organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
 

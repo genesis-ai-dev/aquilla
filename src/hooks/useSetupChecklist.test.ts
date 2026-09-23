@@ -11,32 +11,35 @@ const ready = { kind: "ready" } as const
 const idle = { kind: "idle" } as const
 
 describe("deriveAiModelsReady", () => {
-  // AQU-701 follow-up: Whisper/Kokoro caches are device-global, so their mere
+  // AQU-701 follow-up: Whisper/MMS caches are device-global, so their mere
   // presence must not flip a project's voice step green — that left the step
   // permanently complete and made the skip link look like it did nothing.
   it("AQU-701: device-cached models alone do NOT complete the step (no explicit provider)", () => {
-    expect(deriveAiModelsReady(undefined, { kokoro: ready, mms: ready })).toBe(false)
-    expect(deriveAiModelsReady({}, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady(undefined, { mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({}, { mms: ready })).toBe(false)
   })
 
-  it("kokoro: explicit choice + cached model completes; a missing cache does not", () => {
-    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: ready, mms: idle })).toBe(true)
-    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: idle, mms: idle })).toBe(false)
+  it("leftover kokoro choice completes as hosted Inworld — no local cache required", () => {
+    expect(deriveAiModelsReady({ provider: "kokoro" }, { mms: idle })).toBe(true)
   })
 
-  it("mms: explicit choice + cached model completes; the kokoro cache doesn't count", () => {
-    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: idle, mms: ready })).toBe(true)
-    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: ready, mms: idle })).toBe(false)
+  it("mms: explicit choice + cached model completes", () => {
+    expect(deriveAiModelsReady({ provider: "mms" }, { mms: ready })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "mms" }, { mms: idle })).toBe(false)
   })
 
   it("gemini: completes on a saved key, never on local caches", () => {
-    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "AIzaExampleKey123456789012" }, { kokoro: idle, mms: idle })).toBe(true)
-    expect(deriveAiModelsReady({ provider: "gemini" }, { kokoro: ready, mms: ready })).toBe(false)
-    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "   " }, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "AIzaExampleKey123456789012" }, { mms: idle })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "gemini" }, { mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "   " }, { mms: ready })).toBe(false)
   })
 
-  it("hosted omnivoice: the explicit choice alone completes — no download or key needed", () => {
-    expect(deriveAiModelsReady({ provider: "omnivoice" }, { kokoro: idle, mms: idle })).toBe(true)
+  it("hosted inworld: the explicit choice alone completes — no download or key needed", () => {
+    expect(deriveAiModelsReady({ provider: "inworld" }, { mms: idle })).toBe(true)
+  })
+
+  it("legacy omnivoice choice still completes the hosted step", () => {
+    expect(deriveAiModelsReady({ provider: "omnivoice" }, { mms: idle })).toBe(true)
   })
 })
 

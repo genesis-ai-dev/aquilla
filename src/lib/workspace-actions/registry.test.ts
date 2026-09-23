@@ -158,6 +158,53 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
   })
 })
 
+// AQU-481: the source-import action was the one primary entry with no role gate
+// (`isAvailable: () => true`), so a VIEWER got the full Import type-picker with
+// every importer clickable. Source import emits `file.create`, whose server
+// floor is PROJECT_LEAD (500) — the server always refused, making this an
+// affordance-honesty bug rather than a security hole. These guard the floor.
+describe("AQU-481: source import gated at the file.create floor", () => {
+  const importNew = workspaceActions.find((a) => a.id === "import-new")!
+
+  function ctxWithRole(roleLevel: number | null, overrides: Partial<WorkspaceActionContext> = {}) {
+    const projectWithRole: ProjectRecord = roleLevel === null
+      ? project
+      : { ...project, syncRole: { level: roleLevel, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } }
+    return ctx({ project: projectWithRole, ...overrides })
+  }
+
+  it("refuses the import action for a VIEWER (100) — the reported repro", () => {
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER))).toBe(false)
+    // …and with a file open, which is the "More actions" half of the repro.
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER, { activeFileId: "f1" }))).toBe(false)
+  })
+
+  it("refuses every role below PROJECT_LEAD (500)", () => {
+    for (const level of [ROLE.VIEWER, ROLE.COMMENTER, ROLE.REVIEWER, ROLE.CONTRIBUTOR]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(false)
+    }
+  })
+
+  it("allows PROJECT_LEAD (500) and above", () => {
+    for (const level of [ROLE.PROJECT_LEAD, ROLE.MAINTAINER, ROLE.OWNER]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(true)
+    }
+  })
+
+  it("fails open for a local project with no resolved syncRole", () => {
+    // No server floor to enforce against — a local/unsynced project must keep
+    // importing, same convention as canPerform and the AQU-365 actions above.
+    expect(importNew.isAvailable(ctxWithRole(null))).toBe(true)
+  })
+
+  it("no longer offers import as the default action to a viewer with no file open", () => {
+    // getDefaultAction only ever picks from getVisibleActions, so the gate above
+    // is what keeps a viewer's primary CTA off a dialog the server refuses.
+    const visible = getVisibleActions(workspaceActions, ctxWithRole(ROLE.VIEWER))
+    expect(visible.map((a) => a.id)).not.toContain("import-new")
+  })
+})
+
 describe("AQU-503: target import is discoverable by wording", () => {
   const importIntoFile = workspaceActions.find((a) => a.id === "import-into-file")!
 

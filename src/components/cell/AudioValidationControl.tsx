@@ -289,15 +289,28 @@ export function AudioValidationControl({
     </button>
   )
 
-  // A line with nothing recorded draws NOTHING — the same rule as text, where
-  // a cell with no text has no validation control either. (Sam, 2026-09-21,
-  // after a placeholder mic was tried and rejected: there is nothing to
-  // validate, so there is nothing to show.) The gutter slot survives so the
-  // column keeps its width.
+  // A line with nothing recorded draws a FADED mic in the gutter (Sam,
+  // 2026-09-23, reversing the empty slot of 09-21): both gutter columns read
+  // full on every row, and "nothing to validate" looks different from "not
+  // validated yet". A span, not a disabled button — no tab stop, and it still
+  // takes the hover that says why. Inline surfaces (the take block, the chips)
+  // only ever mount beside a take, so there it is still nothing.
   if (state === "empty") {
-    return variant === "inline"
-      ? null
-      : <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1" />
+    if (variant === "inline") return null
+    return (
+      <div data-testid="audio-validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+        <AppTooltip content={t("editor.audioValidation.noAudioTooltip")}>
+          <span
+            role="img"
+            data-testid="audio-validation-unavailable"
+            aria-label={t("editor.audioValidation.ariaNoAudio", { ref: cellRef })}
+            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+          >
+            <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </span>
+        </AppTooltip>
+      </div>
+    )
   }
 
   const body = (

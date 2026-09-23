@@ -1262,6 +1262,8 @@ export const editor = defineNamespace({
     "editor.validation.notValidatedTooltip": "Not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
     "editor.validation.unavailableTooltip": "Validation unavailable",
+    "editor.validation.noContentTooltip": "No text to validate",
+    "editor.validation.ariaNoContent": "No text to validate — {ref}.",
     "editor.validation.ariaValidated":
       "Validated — {ref}. Click to remove your validation.",
     "editor.validation.ariaValidatedByOthers":
@@ -1278,6 +1280,8 @@ export const editor = defineNamespace({
     "editor.audioValidation.notValidatedTooltip": "Audio not validated — click to validate",
     "editor.audioValidation.outOfScopeTooltip": "Outside your assigned files",
     "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
+    "editor.audioValidation.noAudioTooltip": "No audio to validate",
+    "editor.audioValidation.ariaNoAudio": "No audio to validate — {ref}.",
     "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
     "editor.audioValidation.ariaValidated":
       "Audio validated — {ref}. Click to remove your validation.",
@@ -4598,6 +4602,18 @@ export const editor = defineNamespace({
           ref: "The cell's reference or fallback row number. Do not translate.",
         },
       },
+      "editor.validation.noContentTooltip": {
+        description:
+          "Tooltip on the faded, unclickable validation circle shown on a line that " +
+          "has no translated text, so there is nothing to validate. Not an error.",
+      },
+      "editor.validation.ariaNoContent": {
+        description:
+          "Screen-reader label for the faded validation circle on a line with no text.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
       "editor.validation.validatedBy": {
         description:
           "Heading of the popover listing the people who have signed this " +
@@ -4651,6 +4667,19 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the viewer's role or the project's named-validator list does " +
           "not let them validate recordings at all.",
+      },
+      "editor.audioValidation.noAudioTooltip": {
+        description:
+          "Tooltip on the faded, unclickable microphone shown on a line that has no " +
+          "recording yet, so there is nothing to validate. Not an error.",
+      },
+      "editor.audioValidation.ariaNoAudio": {
+        description:
+          "Screen-reader label for the faded microphone on a line with no recording. " +
+          "{ref} is the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
       },
       "editor.audioValidation.ownRecordingTooltip": {
         description:

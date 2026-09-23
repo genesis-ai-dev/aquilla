@@ -123,26 +123,26 @@ function renderTable() {
 const rowOf = async (target: string) => (await screen.findByText(target)).closest("[data-grid-row]") as HTMLElement
 
 describe("EditorTable — audio validation across the whole gutter", () => {
-  it("draws a control on the line with a recording and nothing on the line without", async () => {
+  it("draws a control on the line with a recording and a faded mic on the line without", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     renderTable()
     const withTake = await rowOf("bonjour cell-1")
     const without = await rowOf("bonjour cell-2")
     expect(within(withTake).getByTestId("audio-validation-button")).toBeInTheDocument()
+    expect(within(withTake).queryByTestId("audio-validation-unavailable")).toBeNull()
     expect(within(without).queryByTestId("audio-validation-button")).toBeNull()
-    expect(within(without).queryByTestId("audio-validation-empty")).toBeNull()
+    expect(within(without).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
   })
 
   // No switch, no setting, no project-level gate (Sam, 2026-09-21). A file
-  // with no audio at all still draws nothing — not because anything gates it,
-  // but because every line is empty and the control draws an empty slot for
-  // an empty line. That is the same rule as the first test, seen from the
-  // other end.
-  it("draws no button anywhere when the file has no audio at all", async () => {
+  // with no audio at all has no live mic anywhere — every line draws the
+  // faded one instead (Sam, 2026-09-23), so the column is still full.
+  it("draws only faded mics when the file has no audio at all", async () => {
     audioState.byCellId = new Map()
     renderTable()
     await screen.findByText("bonjour cell-1")
     expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+    expect(screen.getAllByTestId("audio-validation-unavailable")).toHaveLength(2)
   })
 })
 
@@ -169,9 +169,11 @@ describe("EditorTable — a line with only audio", () => {
     const audioOnly = Array.from(document.querySelectorAll<HTMLElement>("[data-grid-row]"))
       .find((r) => !r.textContent?.includes("bonjour cell-2"))!
     expect(audioOnly).toBeDefined()
-    // Its text gutter slot is empty; its audio slot is not.
+    // Its text gutter holds only the faded circle — no button to press; its
+    // audio slot is live.
     const textGutter = audioOnly.querySelector('[data-testid="validation-gutter"]')
     expect(textGutter?.querySelector("button")).toBeNull()
+    expect(textGutter?.querySelector('[data-testid="validation-unavailable"]')).not.toBeNull()
     expect(within(audioOnly).getByTestId("audio-validation-button")).toBeInTheDocument()
   })
 })

@@ -273,7 +273,23 @@ export function TargetValidationControl({
               : undefined)}
           </AppTooltip>
         )
-      ) : null}
+      ) : (
+        // Nothing to validate: a line with no text. Drawn FADED rather than
+        // left blank (Sam, 2026-09-23), so both gutter columns read full on
+        // every row and "nothing here" looks different from "not validated
+        // yet". A span, not a disabled button — it is no tab stop, and unlike a
+        // disabled button it still takes the hover that explains itself.
+        <AppTooltip content={t("editor.validation.noContentTooltip")}>
+          <span
+            role="img"
+            data-testid="validation-unavailable"
+            aria-label={t("editor.validation.ariaNoContent", { ref: cellRef })}
+            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+          >
+            <Circle className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </span>
+        </AppTooltip>
+      )}
     </div>
   )
 }

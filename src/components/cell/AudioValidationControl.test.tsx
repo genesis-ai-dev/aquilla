@@ -81,14 +81,17 @@ describe("takeState / lineState", () => {
 // ── What the line draws ───────────────────────────────────────────────────
 
 describe("the readout", () => {
-  // Same rule as text: a cell with nothing to validate has no control. (A
-  // placeholder mic was tried on 2026-09-21 and rejected.)
-  it("draws nothing at all on a line with no recording", () => {
+  // Sam, 2026-09-23: a line with nothing recorded draws a FADED mic that
+  // does nothing, so the gutter column is full on every row. (Replaces the
+  // empty slot of 2026-09-21.) Not a button: no tab stop, no click.
+  it("draws a faded, unclickable mic on a line with no recording", () => {
     draw([])
     expect(button()).toBeNull()
-    expect(screen.queryByTestId("audio-validation-empty")).toBeNull()
-    // The gutter slot survives so the column keeps its width.
-    expect(screen.getByTestId("audio-validation-gutter")).toBeEmptyDOMElement()
+    const faded = screen.getByTestId("audio-validation-unavailable")
+    expect(faded.tagName).toBe("SPAN")
+    expect(faded).toHaveAccessibleName(/no audio to validate/i)
+    expect(faded.className).toContain("opacity-40")
+    expect(faded.querySelector("svg")).not.toBeNull()
   })
 
   it("draws nothing inline for a line with no recording", () => {

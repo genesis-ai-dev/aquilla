@@ -23,13 +23,17 @@ function commit(
   }
 }
 
-function attach(id: string, audioId: string, opts: { serverTs?: number } = {}): CellHistoryEvent {
+function attach(
+  id: string,
+  audioId: string,
+  opts: { serverTs?: number; author?: string } = {},
+): CellHistoryEvent {
   seq += 1
   return {
     id,
     parentId: null,
     kind: "cell.audio.attach",
-    author: "u1",
+    author: opts.author ?? "u1",
     clientTs: 1000 + seq,
     serverTs: opts.serverTs ?? 1000 + seq,
     serverSeq: seq,
@@ -160,6 +164,33 @@ describe("resolveRecordingTextDrift", () => {
     const events = [commit("c1", "In the beginning"), attach("a1", "take-1", { serverTs: 1720000000000 })]
 
     expect(resolveRecordingTextDrift(events, "take-1")?.recordedAt).toBe(1720000000000)
+  })
+
+  // AQU-1372 — "by whom", the other half of the provenance question.
+  it("carries the attach author as the take's maker", () => {
+    const events = [
+      commit("c1", "In the beginning"),
+      attach("a1", "take-1", { author: "mariette" }),
+    ]
+
+    expect(resolveRecordingTextDrift(events, "take-1")?.recordedBy).toBe("mariette")
+  })
+
+  it("attributes a take to its FIRST attach's author, not the timings re-attach's", () => {
+    // Same reason the DATE comes off the first attach: the Whisper timings
+    // re-attach is written by whoever/whatever finished the transcription, and
+    // crediting it would name that account as the person who made the
+    // recording. `recordedAt` and `recordedBy` must always describe ONE event.
+    const events = [
+      commit("c1", "In the beginning"),
+      attach("a1", "take-1", { author: "mariette", serverTs: 1720000000000 }),
+      attach("a2", "take-1", { author: "transcriber", serverTs: 1720000000800 }),
+    ]
+
+    const drift = resolveRecordingTextDrift(events, "take-1")
+
+    expect(drift?.recordedBy).toBe("mariette")
+    expect(drift?.recordedAt).toBe(1720000000000)
   })
 
   it("resolves against history returned newest-first", () => {

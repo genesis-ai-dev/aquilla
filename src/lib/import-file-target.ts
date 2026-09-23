@@ -19,7 +19,12 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
-import { parseCueRange, extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
+import {
+  parseCueRange,
+  extractVttStrings,
+  extractSrtStrings,
+  repairShortFormCueTimestamps,
+} from "./parsers/subtitle"
 import { extractSbvStrings } from "./parsers/sbv"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
@@ -371,7 +376,13 @@ function decodeSubtitleEntities(text: string): string {
  *  to cue N → cell N otherwise — see `matchTargetRowsByOrder`. Entity-decoded
  *  so `&nbsp;` and similar don't appear literally in the imported translation. */
 export function vttToTargetRows(raw: string): TargetRow[] {
-  const cues = extractVttStrings(raw)
+  // Short-form timestamps are padded first. The parser demands strict
+  // `HH:MM:SS.mmm`, and a cue it refuses does not arrive untimed — the payload
+  // lines after the unmatched timestamp are swallowed and the cue disappears
+  // with its words. Positional matching then shifts every later cue onto the
+  // wrong cell, which nothing downstream can detect and nobody spots on a
+  // 500-row review screen.
+  const cues = extractVttStrings(repairShortFormCueTimestamps(raw).text)
   return cues.map((cue) => ({
     ref: cue.context,
     text: decodeSubtitleEntities(cue.original).trim(),

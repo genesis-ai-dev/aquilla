@@ -226,6 +226,42 @@ describe('GET progress dual-read', () => {
     expect(body.file.totalCount).toBe(3)
     expect(body.file.filledCount).toBe(1)
   })
+
+  it('first-open pairs each source with its lane target by lane_id, falling back to target_lang', async () => {
+    // AQU-1278's first-open read joined the target row on a raw
+    // `t.target_lang = ?`. Once backfill has stamped lane_id, a target whose
+    // legacy tag disagrees with the lane's would look untranslated and the
+    // plan board would deep-link to a verse that is already done.
+    const { db } = await makeTestDb({
+      files: [{ id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event' }],
+      lanes: [esLane],
+      cells: [
+        cell({ cell_id: 's1', side: 'source', event_id: 'es1', value: 'src1', canonical_ref: 'GEN 1:1', sequence_index: 1 }),
+        // Filled in the es lane by lane_id only — target_lang disagrees.
+        cell({
+          cell_id: 's1', side: 'target', event_id: 'et1', value: 'by-id',
+          target_lang: 'xx', lane_id: ES_LANE, sequence_index: 1,
+        }),
+        cell({ cell_id: 's2', side: 'source', event_id: 'es2', value: 'src2', canonical_ref: 'GEN 1:2', sequence_index: 2 }),
+        // Filled by target_lang while lane_id is still NULL (pre-backfill).
+        cell({
+          cell_id: 's2', side: 'target', event_id: 'et2', value: 'by-tag',
+          target_lang: 'es', lane_id: null, sequence_index: 2,
+        }),
+        cell({ cell_id: 's3', side: 'source', event_id: 'es3', value: 'src3', canonical_ref: 'GEN 1:3', sequence_index: 3 }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const res = (await handleProgressReadRequest(
+      new Request(
+        `https://w/api/v1/projects/${PROJECT}/files/${FILE}/progress/first-open?unit=GEN&kind=untranslated&lane=es`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ fileId: FILE, unit: 'GEN', kind: 'untranslated', cellId: 's3' })
+  })
 })
 
 describe('buildUsfmExportPlan dual-read', () => {

@@ -415,12 +415,14 @@ export async function readFirstOpenCell(
         `${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed`)
     }
   }
+  // AQU-1240 slice 7: the lane join dual-reads (lane_id once backfilled,
+  // target_lang while it is still NULL) like every other hot read here.
   const targetJoin = wantsText
     ? `LEFT JOIN cells t
          ON t.project_id = s.project_id AND t.file_id = s.file_id
-        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?`
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND ${targetLaneDualReadSql('t')}`
     : ''
-  if (wantsText) binds.push(lane)
+  if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
   if (unit) binds.push(unit, `${unit} %`)
 

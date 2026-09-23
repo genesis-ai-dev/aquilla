@@ -7,7 +7,7 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
   clearUserProviderOverride,
@@ -1005,6 +1005,51 @@ describe("selectApprovedExamples", () => {
 
     expect(selected).toEqual([{ cellId: "long", source: longSource, target: "full target" }])
     expect(selected[0].source.endsWith("ending")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-153: retrieval hits are only examples once they are real pairs
+// ---------------------------------------------------------------------------
+
+describe("retainTranslationPairs (AQU-153)", () => {
+  it("drops source-side hits that carry no translation", () => {
+    const retained = retainTranslationPairs([
+      { cellId: "paired", source: "In the beginning", target: "Au commencement" },
+      { cellId: "untranslated", source: "God created the heavens", target: "" },
+      { cellId: "whitespace", source: "And the earth was formless", target: "   " },
+    ])
+
+    expect(retained.map((pair) => pair.cellId)).toEqual(["paired"])
+  })
+
+  it("reports zero examples for a project where nothing has been translated yet", () => {
+    // The walkthrough symptom: every retrieval hit is a source cell with no
+    // target, so the count the editor shows must be 0, not the hit count.
+    const hits = [
+      { cellId: "c1", source: "In the beginning", target: "" },
+      { cellId: "c2", source: "God created the heavens", target: "" },
+      { cellId: "c3", source: "And the earth was formless", target: "" },
+      { cellId: "c4", source: "Darkness was over the deep", target: "" },
+      { cellId: "c5", source: "And God said", target: "" },
+    ]
+
+    expect(retainTranslationPairs(hits)).toHaveLength(0)
+    expect(selectApprovedExamples(hits, [], DEFAULT_APPROVED_EXAMPLE_COUNT)).toHaveLength(0)
+  })
+
+  it("keeps a hit whose source is blank out of the pool as well", () => {
+    expect(retainTranslationPairs([{ cellId: "no-source", source: "  ", target: "Au commencement" }])).toEqual([])
+  })
+
+  it("preserves retrieval order and the hit payload of the pairs it keeps", () => {
+    const hits = [
+      { cellId: "a", source: "one", target: "un", score: 0.9 },
+      { cellId: "b", source: "two", target: "", score: 0.8 },
+      { cellId: "c", source: "three", target: "trois", score: 0.7 },
+    ]
+
+    expect(retainTranslationPairs(hits)).toEqual([hits[0], hits[2]])
   })
 })
 

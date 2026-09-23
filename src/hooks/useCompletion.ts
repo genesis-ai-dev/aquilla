@@ -44,7 +44,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -286,7 +286,12 @@ export function useCompletion(
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
     let found: ScoredPair[] = []
     try {
-      found = await search(sourceText, topK, cell.id)
+      // AQU-153: branching search ranks SOURCE cells, so an untranslated cell
+      // is a valid hit but not an example. Drop the unpaired hits here, at the
+      // retrieval boundary, so the evidence panel's count and the prompt pool
+      // both mean "real source→target pairs" rather than trusting whatever
+      // filter the retriever was asked for.
+      found = retainTranslationPairs(await search(sourceText, topK, cell.id))
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -602,11 +607,16 @@ export function useCompletion(
           break
         }
 
-        const flatExamples: ScoredPair[] = passages.flatMap((p) =>
-          p.cells.filter((c) => c.hit).map((c) => ({
-            cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
-            score: 1, matchedTokens: [], coverageWeight: 1,
-          }))
+        // AQU-153: same pair requirement as the single path — a passage hit
+        // whose target is still empty is not an example, so it must not swell
+        // the per-cell example count the editor shows.
+        const flatExamples: ScoredPair[] = retainTranslationPairs(
+          passages.flatMap((p) =>
+            p.cells.filter((c) => c.hit).map((c) => ({
+              cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
+              score: 1, matchedTokens: [], coverageWeight: 1,
+            }))
+          )
         )
         const llmAuthor = modelName
         for (const c of chunk) {

@@ -72,6 +72,24 @@ function normalizedExampleSource(source: string): string {
 }
 
 /**
+ * AQU-153: a retrieval hit only becomes a translation example once it carries
+ * a real source→target pair. Branching search ranks SOURCE cells, so an
+ * untranslated cell is a legitimate hit — it is just not an example, because
+ * there is nothing for the model to imitate. Callers that count or display
+ * "examples" run their hits through here so the number they report is the
+ * number of actual pairs, never the raw source-side hit count. (Without it, a
+ * brand-new project with nothing translated still claimed "5 examples used.")
+ *
+ * `selectApprovedExamples` applies the same rule to the prompt pool; this is
+ * the same invariant for the evidence surfaces, so the two cannot drift.
+ */
+export function retainTranslationPairs<T extends { source: string; target: string }>(
+  hits: readonly T[],
+): T[] {
+  return hits.filter((hit) => hit.source.trim() !== "" && hit.target.trim() !== "")
+}
+
+/**
  * Merge canonical retrieval with the local approved-cell fallback into one
  * bounded prompt pool. Retrieved examples win; local cells only fill unused
  * slots. Examples already present in the live request or immediate discourse

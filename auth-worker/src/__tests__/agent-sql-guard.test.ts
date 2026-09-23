@@ -171,9 +171,14 @@ describe("guardSql — rejects", () => {
   // completely unscoped rows from a table with no RLS backstop (`users`,
   // including password_hash — see the next test).
   it("rejects a decoy CTE used to fake project scoping for an unrelated table", () => {
+    // `users` is now double-protected: BANNED_TABLES rejects it outright
+    // (2026-09-23 fix, below), which fires before the CTE-reachability check
+    // this test was originally written to exercise would even run. The next
+    // test covers the same decoy-CTE shape against a table that isn't banned
+    // outright (`agent_runs`), so the scoping-bypass coverage isn't lost.
     reject(
       "WITH _x AS (SELECT project_id FROM cells WHERE project_id = :project) SELECT id, username FROM users",
-      /project_id = :project/,
+      /table "users" is not allowed/,
     )
   })
 
@@ -190,12 +195,33 @@ describe("guardSql — rejects", () => {
       /password_hash.*not allowed/,
     )
   })
+
+  // AQU pen-test finding, 2026-09-23: `users` has no project_id column and no
+  // RLS backstop (db/postgres/migrations/0034 doesn't cover it), so the
+  // whole-query ":project appears somewhere" check did nothing to scope a
+  // join against it — this exact query used to pass guardSql and, run for
+  // real, returned every account's email on the platform, not just members
+  // of the caller's project. Verified against the pre-fix guard before this
+  // test was written.
+  it("rejects the users table outright, even correctly scoped elsewhere in the query", () => {
+    reject(
+      "SELECT c.cell_id, u.email, u.username FROM cells c CROSS JOIN users u WHERE c.project_id = :project",
+      /table "users" is not allowed/,
+    )
+  })
+
+  it("rejects users referenced via a correctly-scoped join, not just a cross join", () => {
+    reject(
+      "SELECT u.email FROM project_members pm JOIN users u ON u.id = pm.user_id WHERE pm.project_id = :project",
+      /table "users" is not allowed/,
+    )
+  })
 })
 
 describe("guardSql — reachable-CTE scoping still allows legitimate shapes", () => {
   it("allows a referenced CTE whose own body filters by an aliased project_id (assignments cookbook shape)", () => {
     const r = guard(
-      "WITH members AS (SELECT u.id, u.username FROM project_members pm JOIN users u ON u.id = pm.user_id WHERE pm.project_id = :project) SELECT * FROM members",
+      "WITH members AS (SELECT pm.user_id, pm.role_level FROM project_members pm WHERE pm.project_id = :project) SELECT * FROM members",
     )
     expect(r.ok).toBe(true)
   })
@@ -260,5 +286,22 @@ describe("runGuardedSql — execution against Postgres", () => {
     )
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.rows[0]?.uid).toBe(String(vars.userId))
+  })
+
+  // AQU pen-test finding, 2026-09-23: vars.projectId is embedded directly
+  // into `SET LOCAL app.project_id = '<id>'` (SET LOCAL can't take a bind
+  // parameter). In practice it only ever reaches here already validated by
+  // resolveProjectRole()'s parameterized lookup, but this function
+  // re-validates rather than trusts it — the same GUC-injection shape
+  // PostgresDb.withUser() already guards for app.user_id.
+  it("rejects a malformed projectId rather than interpolate it unvalidated", async () => {
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT cell_id FROM cells WHERE project_id = :project",
+      { ...vars, projectId: "not-a-uuid'; --" },
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/projectId/)
   })
 })

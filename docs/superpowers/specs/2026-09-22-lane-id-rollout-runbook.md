@@ -134,7 +134,7 @@ pnpm deploy:aquilla:... (prod equivalents)
   Until then every member still sees every lane. Turning it on against an
   empty grant table hides every target lane from everyone below Maintainer.
 - **Grant backfill** is not in this branch. It has to run before the flag.
-  Below-600 members with no lane scope today must be granted every current
-  lane at their project role, or the flag locks them out. New lanes after
-  that do not auto-grant.
+  A grant row stores `lanes.id`. The product shows `lanes.name`, which may
+  be the same text as the language. One row is one lane. A language match
+  does not grant a second lane. New lanes after the backfill do not auto-grant.
 - **Default-lane elimination** (`''` → tag) and rename/BLANK UX: later slices.

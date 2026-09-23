@@ -6,24 +6,24 @@
  * after `project_member_lane_roles` has been backfilled in that environment:
  * below Maintainer, no grant means no target lane.
  *
- * A grant below Viewer (100) does not reveal a lane. Maintainer (600) and
+ * A grant is a lane id. The screen shows that lane's name, which may be the
+ * language. A grant below Viewer (100) does not reveal a lane. Maintainer (600) and
  * platform operators see every lane. Source text is not a lane and is never
  * hidden by these rules.
  */
-
-import { languagesEqual } from "../language-normalize"
 
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
 /** Maintainer. At and above this role, every lane is visible. */
 const MAINTAINER = 600
 
+/** `lane` is `lanes.id`, never a language name or code. */
 export interface LaneGrant {
   lane: string
   level: number
 }
 
-/** null = every lane. A set is the exact set of granted tags (may be empty). */
+/** null = every lane. A set is granted lane ids (may be empty). */
 export type VisibleLaneTags = ReadonlySet<string> | null
 
 export function laneReadWallEnabled(flag: string | undefined): boolean {
@@ -56,47 +56,24 @@ export interface LaneIdentity {
 }
 
 /**
- * A grant matches a lane by its tag or its name (`es` ≡ Spanish). An empty
- * grant matches only the empty-tag lane, never a named language.
+ * The lane a caller asked for by its legacy tag or its display name.
+ * `''` is only the empty-tag lane. A string that hits two lanes hits neither
+ * decision here — the caller must see `length === 1` before allowing it.
+ * Language codes do not fan out: "es" does not match a lane named Spanish
+ * unless that lane's tag or name is exactly "es".
  */
-export function laneMatchesGrant(lane: LaneIdentity, grant: string): boolean {
-  const tag = lane.legacyTag ?? ""
-  if (grant === "") return tag === ""
-  if (tag !== "" && languagesEqual(grant, tag)) return true
-  return lane.name.trim() !== "" && languagesEqual(grant, lane.name)
+export function lanesForRequestedTag(lanes: readonly LaneIdentity[], tag: string): LaneIdentity[] {
+  return lanes.filter((lane) => {
+    const legacy = lane.legacyTag ?? ""
+    if (tag === "") return legacy === ""
+    return legacy === tag || lane.name === tag
+  })
 }
 
-/**
- * One grant reveals one lane. A grant that matches two lanes reveals neither
- * of them — a maintainer has to separate those lanes. Two explicit grants
- * still reveal two lanes, one each.
- */
-export function uniqueLaneIdsForGrants(lanes: readonly LaneIdentity[], grants: Iterable<string>): string[] {
-  const ids: string[] = []
-  const seen = new Set<string>()
-  for (const grant of grants) {
-    const matches = lanes.filter((lane) => laneMatchesGrant(lane, grant))
-    if (matches.length !== 1) continue
-    const id = matches[0]!.id
-    if (seen.has(id)) continue
-    seen.add(id)
-    ids.push(id)
-  }
-  return ids
-}
-
-/**
- * Whether a requested lane tag is in the visible set. `es` and `Spanish`
- * match. The empty default-lane tag matches only an empty grant — the lane's
- * display name is checked separately, against the `lanes` row.
- */
-export function laneTagAllowed(visible: VisibleLaneTags, tag: string): boolean {
+/** True when `laneId` is one of the granted ids. */
+export function laneTagAllowed(visible: VisibleLaneTags, laneId: string): boolean {
   if (visible === null) return true
-  for (const grant of visible) {
-    if (grant === tag) return true
-    if (grant !== "" && tag !== "" && languagesEqual(grant, tag)) return true
-  }
-  return false
+  return visible.has(laneId)
 }
 
 /** Stable ETag / cache suffix. Empty when the caller is unrestricted. */
@@ -107,45 +84,39 @@ export function visibilityCacheToken(visible: VisibleLaneTags): string {
 }
 
 /**
- * Labels a grant may show. A grant that matches two different labels shows
- * neither, so `Spanish` and `es` side by side are not both revealed.
+ * Display strings for the granted lanes: each lane's name, and its legacy
+ * tag when that tag is non-empty. Ids are never returned. A lane named
+ * "Yoruba Team" does not contribute the label "Yoruba".
  */
-function uniqueLabelsForGrants(labels: readonly string[], grants: Iterable<string>): Set<string> {
-  const distinct = [...new Set(labels.filter((label) => label !== ""))]
+export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds: ReadonlySet<string>): Set<string> {
   const kept = new Set<string>()
-  for (const grant of grants) {
-    if (grant === "") continue
-    const matches = distinct.filter((label) => label === grant || languagesEqual(grant, label))
-    if (matches.length === 1) kept.add(matches[0]!)
+  for (const lane of lanes) {
+    if (!grantedIds.has(lane.id)) continue
+    if (lane.name.trim() !== "") kept.add(lane.name)
+    const legacy = lane.legacyTag ?? ""
+    if (legacy !== "") kept.add(legacy)
   }
   return kept
 }
 
 /**
- * Drop lane names the caller was not granted. `visible === null` returns the
- * response unchanged. An ungranted `targetLanguage` is blanked because that
- * string is the default lane's name.
+ * Drop lane labels the caller was not granted. `visible === null` returns the
+ * response unchanged. `lanes` maps those ids to the names the UI shows.
  */
 export function filterSettingsToVisibleLanes<T extends { settings: Record<string, unknown> }>(
   response: T,
   visible: VisibleLaneTags,
+  lanes: readonly LaneIdentity[] = [],
 ): T {
   if (visible === null) return response
+  const kept = labelsForGrantedLanes(lanes, visible)
   const settings: Record<string, unknown> = { ...response.settings }
-  const primary = settings.targetLanguage
-  const labels: string[] = []
-  if (typeof primary === "string" && primary.trim() !== "") labels.push(primary)
-  for (const key of ["targetLanes", "archivedLanes"] as const) {
-    const value = settings[key]
-    if (!Array.isArray(value)) continue
-    for (const lane of value) if (typeof lane === "string") labels.push(lane)
-  }
-  const kept = uniqueLabelsForGrants(labels, visible)
   for (const key of ["targetLanes", "archivedLanes"] as const) {
     const value = settings[key]
     if (!Array.isArray(value)) continue
     settings[key] = value.filter((lane) => typeof lane === "string" && kept.has(lane))
   }
+  const primary = settings.targetLanguage
   if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
     settings.targetLanguage = ""
   }

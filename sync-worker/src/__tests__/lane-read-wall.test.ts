@@ -34,7 +34,7 @@ describe("AQU-730 read wall", () => {
       projectId: PROJECT,
       fileId: FILE,
       role: 400,
-      laneGrants: [{ lane: "Spanish", level: 400 }],
+      laneGrants: [{ lane: ES, level: 400 }],
     })
     const walled = (await handleCellsReadRequest(
       new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
@@ -44,8 +44,7 @@ describe("AQU-730 read wall", () => {
     ))!
     expect(walled.status).toBe(200)
     const walledBody = (await walled.json()) as { cells: Array<{ value: string }> }
-    // Two lanes share Spanish, so this one grant opens neither of them.
-    expect(walledBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
+    expect(walledBody.cells.map((c) => c.value).sort()).toEqual(["hola", "source-text"])
 
     const maintainer = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 600 })
     const all = (await handleCellsReadRequest(
@@ -79,6 +78,7 @@ describe("AQU-730 read wall", () => {
       envWith(db, true),
     ))!
     const byCodeBody = (await byCode.json()) as { cells: Array<{ value: string }> }
+    // A language code is not a grant. The id is.
     expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
   })
 
@@ -108,7 +108,7 @@ describe("AQU-730 read wall", () => {
       projectId: PROJECT,
       fileId: FILE,
       role: 400,
-      laneGrants: [{ lane: "es", level: 100 }],
+      laneGrants: [{ lane: DEFAULT, level: 100 }],
     })
     const res = (await handleProgressReadRequest(
       new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/progress?lane=fr`, {

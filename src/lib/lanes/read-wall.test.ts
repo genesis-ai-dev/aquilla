@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest"
 import { languageSurfaceForms } from "../language-normalize"
 import {
   filterSettingsToVisibleLanes,
+  labelsForGrantedLanes,
   laneReadWallEnabled,
   laneTagAllowed,
-  uniqueLaneIdsForGrants,
+  lanesForRequestedTag,
   visibilityCacheToken,
   visibleLaneTags,
 } from "./read-wall"
@@ -37,15 +38,14 @@ describe("lane read wall", () => {
       enabled: true,
       role: 400,
       laneGrants: [
-        { lane: "es", level: 50 },
-        { lane: "fr", level: 100 },
+        { lane: "lane-es", level: 50 },
+        { lane: "lane-fr", level: 100 },
       ],
     })
-    expect(visible).toEqual(new Set(["fr"]))
-    expect(laneTagAllowed(visible, "fr")).toBe(true)
-    expect(laneTagAllowed(visible, "French")).toBe(true)
-    expect(laneTagAllowed(visible, "es")).toBe(false)
-    expect(laneTagAllowed(visible, "")).toBe(false)
+    expect(visible).toEqual(new Set(["lane-fr"]))
+    expect(laneTagAllowed(visible, "lane-fr")).toBe(true)
+    expect(laneTagAllowed(visible, "fr")).toBe(false)
+    expect(laneTagAllowed(visible, "French")).toBe(false)
   })
 
   it("puts the visible set in the cache token and leaves unrestricted callers unmarked", () => {
@@ -53,22 +53,30 @@ describe("lane read wall", () => {
     expect(visibilityCacheToken(new Set(["fr", "es"]))).toBe(":vis:es.fr")
   })
 
-  it("gives one grant one lane, and none when two lanes share the language", () => {
+  it("resolves a request by tag or name, and does not fan out by language", () => {
     const lanes = [
       { id: "es", name: "Spanish", legacyTag: "es" },
       { id: "def", name: "Spanish", legacyTag: "" },
-      { id: "fr", name: "French", legacyTag: "fr" },
+      { id: "team", name: "Yoruba Team", legacyTag: "yo" },
     ]
-    expect(uniqueLaneIdsForGrants(lanes, ["es"])).toEqual([])
-    expect(uniqueLaneIdsForGrants(lanes, ["fr"])).toEqual(["fr"])
-    expect(uniqueLaneIdsForGrants(lanes.filter((lane) => lane.id !== "es"), ["es"])).toEqual(["def"])
-    expect(uniqueLaneIdsForGrants(lanes, ["es", "fr"])).toEqual(["fr"])
+    expect(lanesForRequestedTag(lanes, "es").map((lane) => lane.id)).toEqual(["es"])
+    expect(lanesForRequestedTag(lanes, "").map((lane) => lane.id)).toEqual(["def"])
+    expect(lanesForRequestedTag(lanes, "Spanish").map((lane) => lane.id).sort()).toEqual(["def", "es"])
+    expect(lanesForRequestedTag(lanes, "Yoruba Team").map((lane) => lane.id)).toEqual(["team"])
+    expect(lanesForRequestedTag(lanes, "Yoruba")).toEqual([])
+    expect(labelsForGrantedLanes(lanes, new Set(["team"]))).toEqual(new Set(["Yoruba Team", "yo"]))
   })
 
-  it("filters the settings registry and blanks an ungranted primary language", () => {
+  it("filters the settings registry to the granted lane's name", () => {
+    const lanes = [
+      { id: "es", name: "Spanish", legacyTag: "es" },
+      { id: "fr", name: "French", legacyTag: "fr" },
+      { id: "team", name: "Yoruba Team", legacyTag: "yo" },
+    ]
     const filtered = filterSettingsToVisibleLanes(
       { settings: { targetLanguage: "Spanish", targetLanes: ["Spanish", "French"], archivedLanes: ["French"] } },
       new Set(["es"]),
+      lanes,
     )
     expect(filtered.settings.targetLanes).toEqual(["Spanish"])
     expect(filtered.settings.archivedLanes).toEqual([])
@@ -77,15 +85,17 @@ describe("lane read wall", () => {
     const hidden = filterSettingsToVisibleLanes(
       { settings: { targetLanguage: "Spanish", targetLanes: ["French"] } },
       new Set(["fr"]),
+      lanes,
     )
     expect(hidden.settings.targetLanguage).toBe("")
     expect(hidden.settings.targetLanes).toEqual(["French"])
 
-    const ambiguous = filterSettingsToVisibleLanes(
-      { settings: { targetLanguage: "Spanish", targetLanes: ["es", "French"] } },
-      new Set(["es"]),
+    const named = filterSettingsToVisibleLanes(
+      { settings: { targetLanguage: "Yoruba", targetLanes: ["Yoruba", "Yoruba Team"] } },
+      new Set(["team"]),
+      lanes,
     )
-    expect(ambiguous.settings.targetLanguage).toBe("")
-    expect(ambiguous.settings.targetLanes).toEqual([])
+    expect(named.settings.targetLanguage).toBe("")
+    expect(named.settings.targetLanes).toEqual(["Yoruba Team"])
   })
 })

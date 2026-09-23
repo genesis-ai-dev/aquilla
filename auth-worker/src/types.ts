@@ -401,8 +401,8 @@ export interface SyncTokenClaims {
    * gates target-side writes + validate/unvalidate against these scopes.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
-  /** AQU-730: additive per-lane role grants. ABSENT = no grants. Each entry
-   *  grants access to `lane` at `level`. */
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. Each entry grants that lane at `level`. */
   laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number

@@ -1,16 +1,14 @@
 /**
  * AQU-730: SQL for the read wall. See src/lib/lanes/read-wall.ts.
  *
- * A grant resolves to one lane. `es` sees the single lane named Spanish.
- * If two lanes share that language, the grant sees neither of them — we do
- * not hand one grant two lanes. Source rows are always kept.
+ * A grant is a lane id. The caller sees that lane's rows and no other target
+ * lane, even when another lane shares its language. Source rows are always kept.
  */
 
 import type { SyncTokenClaims } from "../auth"
 import {
-  laneMatchesGrant,
   laneReadWallEnabled,
-  uniqueLaneIdsForGrants,
+  lanesForRequestedTag,
   visibleLaneTags,
   type LaneIdentity,
   type VisibleLaneTags,
@@ -35,13 +33,12 @@ async function targetLanes(db: AquillaDb, projectId: string): Promise<LaneIdenti
  * Maintainer / platform). An empty list means no target lane.
  */
 export async function grantedLaneIds(
-  db: AquillaDb,
-  projectId: string,
+  _db: AquillaDb,
+  _projectId: string,
   visible: VisibleLaneTags,
 ): Promise<readonly string[] | null> {
   if (visible === null) return null
-  if (visible.size === 0) return []
-  return uniqueLaneIdsForGrants(await targetLanes(db, projectId), visible)
+  return [...visible]
 }
 
 /**
@@ -56,12 +53,10 @@ export async function canReadRequestedLane(
   lane: string,
 ): Promise<boolean> {
   if (visible === null) return true
-  const lanes = await targetLanes(db, projectId)
-  const granted = visible.size === 0 ? [] : uniqueLaneIdsForGrants(lanes, visible)
-  if (granted.length === 0) return false
-  const matches = lanes.filter((row) => laneMatchesGrant(row, lane))
+  if (visible.size === 0) return false
+  const matches = lanesForRequestedTag(await targetLanes(db, projectId), lane)
   if (matches.length !== 1) return false
-  return granted.includes(matches[0]!.id)
+  return visible.has(matches[0]!.id)
 }
 
 export function visibleLanesForRead(

@@ -63,6 +63,7 @@ import {
 } from "../../../db/shared/projects"
 import {
   filterSettingsToVisibleLanes,
+  type LaneIdentity,
   laneReadWallEnabled,
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
@@ -176,15 +177,28 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+  const wallOn = laneReadWallEnabled(c.env.LANE_READ_WALL)
   const visible = visibleLaneTags({
-    enabled: laneReadWallEnabled(c.env.LANE_READ_WALL),
+    enabled: wallOn,
     role: role.level,
-    laneGrants: laneReadWallEnabled(c.env.LANE_READ_WALL) && role.level < ROLE.MAINTAINER
+    laneGrants: wallOn && role.level < ROLE.MAINTAINER
       ? await laneGrantsFor(c.env.AQUILLA_PG, projectId, user.id)
       : null,
   })
-  return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible)))
+  const lanes = visible === null ? [] : await targetLaneIdentities(c.env.AQUILLA_PG, projectId)
+  return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible, lanes)))
 })
+
+async function targetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
+  const rows = await db
+    .prepare(
+      `SELECT id, name, legacy_tag FROM lanes
+        WHERE project_id = ? AND role = 'target'`,
+    )
+    .bind(projectId)
+    .all<{ id: string; name: string; legacy_tag: string | null }>()
+  return (rows.results ?? []).map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
+}
 
 async function laneGrantsFor(
   db: AquillaDb,

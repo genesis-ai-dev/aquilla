@@ -39,7 +39,6 @@ export const audio = defineNamespace({
     "audio.newVoice.designPresetGroupLabel": "Voice design presets",
     "audio.newVoice.designPresetAgent": "Agent",
     "audio.newVoice.designPresetNarrator": "Narrator",
-    "audio.newVoice.designPresetCompanion": "Companion",
     "audio.newVoice.designPresetInstructor": "Instructor",
     "audio.newVoice.designPresetPirate": "Pirate",
     "audio.newVoice.designStructuredLabel": "Voice profile",
@@ -656,9 +655,9 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.designPresetGroupLabel": {
         description:
-          "Accessible group label (not visible text) for the five starting-point " +
-          "chips under the Voice Design prompt (Agent, Narrator, Companion, " +
-          "Instructor, Pirate), read by screen readers.",
+          "Accessible group label (not visible text) for the four starting-point " +
+          "chips under the Voice Design prompt (Agent, Narrator, Instructor, " +
+          "Pirate), read by screen readers.",
       },
       "audio.newVoice.designPresetAgent": {
         description:
@@ -672,13 +671,6 @@ export const audio = defineNamespace({
           "Chip under the Voice Design prompt that fills a calm narration voice. " +
           "Short noun for that starting style, not the project's default-narrator " +
           "badge (audio.narrator). The English prompt it inserts is not this string.",
-        maxLength: 14,
-      },
-      "audio.newVoice.designPresetCompanion": {
-        description:
-          "Chip under the Voice Design prompt that fills a bright, energetic " +
-          "companion voice. Short noun. The English prompt it inserts is not this " +
-          "string — only the chip label is translated.",
         maxLength: 14,
       },
       "audio.newVoice.designPresetInstructor": {

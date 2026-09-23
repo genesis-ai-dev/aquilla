@@ -126,6 +126,16 @@ describe("Inworld structured voice profile", () => {
 })
 
 describe("Inworld Voice Design presets", () => {
+  it("does not offer the Companion starting-point chip (AQU-1378)", () => {
+    expect([...INWORLD_DESIGN_PRESET_IDS]).toEqual([
+      "agent",
+      "narrator",
+      "instructor",
+      "pirate",
+    ])
+    expect([...INWORLD_DESIGN_PRESET_IDS]).not.toContain("companion")
+  })
+
   it("keeps every preset inside the prompt budget and ready to generate", () => {
     for (const id of INWORLD_DESIGN_PRESET_IDS) {
       const freeform = inworldDesignPresetPrompt(id, "freeform")

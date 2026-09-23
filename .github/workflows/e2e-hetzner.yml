@@ -10,6 +10,12 @@ name: E2E (Hetzner)
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Test suite (smart is a live-model, advisory run)
+        type: choice
+        default: smoke
+        options: [smoke, smart, smart-qualify, smart-audit]
 
 concurrency:
   group: e2e-hetzner
@@ -38,10 +44,47 @@ jobs:
         run: pnpm exec playwright install chromium
 
       - name: Smoke e2e
+        if: inputs.suite == 'smoke'
         run: pnpm test:e2e:smoke
 
+      - name: Install pinned Jev
+        if: startsWith(inputs.suite, 'smart')
+        run: |
+          python3 -m venv "$RUNNER_TEMP/smart-tools"
+          "$RUNNER_TEMP/smart-tools/bin/pip" install uv==0.9.9
+          "$RUNNER_TEMP/smart-tools/bin/uv" sync --project smart-tests --frozen
+
+      - name: Smart test qualification
+        if: inputs.suite == 'smart-qualify'
+        run: pnpm test:smart:qualify
+
+      - name: Jev DOM audit
+        if: inputs.suite == 'smart-audit'
+        run: pnpm test:smart:audit
+
+      - name: Live Jev journeys
+        if: inputs.suite == 'smart'
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          TEXT_MODEL_API_KEY: ${{ secrets.TEXT_MODEL_API_KEY }}
+          TYPESAFE_URL: ${{ vars.TYPESAFE_URL || 'https://openrouter.ai/api/alpha/decisions' }}
+          TYPESAFE_MODEL: ${{ vars.TYPESAFE_MODEL || 'typesafe/jev-1.13' }}
+          TEXT_MODEL: ${{ vars.TEXT_MODEL || 'inception/mercury-2.5' }}
+          TEXT_MODEL_BASE_URL: ${{ vars.TEXT_MODEL_BASE_URL || 'https://openrouter.ai/api/v1' }}
+          TEXT_MODEL_REASONING: ${{ vars.TEXT_MODEL_REASONING || 'none' }}
+        run: pnpm test:smart
+
+      - name: Upload smart test evidence (including passes)
+        if: always() && startsWith(inputs.suite, 'smart')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: smart-testing-${{ github.run_id }}
+          path: smart-tests/results/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload e2e logs on failure
-        if: failure()
+        if: failure() && inputs.suite == 'smoke'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-logs-${{ github.run_id }}

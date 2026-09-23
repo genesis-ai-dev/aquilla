@@ -26,83 +26,28 @@
 //
 // ── Identity ────────────────────────────────────────────────────────────────
 // Comment authors are people, and everything this API returns lands in whatever
-// AI console holds the token. So author identity is pseudonymous BY DEFAULT
-// here: `author` is a stable per-project opaque id (`u_3f9ab21c`), never a
-// username, unless the credential was explicitly minted to see real identities.
-//
-// The pseudonym scheme (HMAC-SHA256(SYNC_SECRET_KEY, `${projectId} ${author}`),
-// first 8 hex, `u_` prefix) is deliberately identical to the one AQU-1180 is
-// landing in external/pii.ts, so the ids agree across surfaces and this module
-// collapses into a `mapAuthor()` call once that lands — see the note on
-// `resolveIdentityMode` below.
+// AI console holds the token. Identity handling is delegated entirely to
+// `external/pii.ts` (AQU-1180): pseudonymous by default (a stable per-project
+// opaque id, `u_3f9ab21c`), real usernames only for a credential minted `pii:
+// true`, and the field dropped ENTIRELY when the project itself has opted out
+// via `agentAuthorship: 'none'` — the project's choice always wins over the
+// credential's, per pii.ts's documented invariant. This route used to carry a
+// second, hand-rolled copy of the pseudonym scheme that only ever consulted
+// the credential flag, so a project's `'none'` opt-out was silently ignored
+// here even though every other read route already honoured it (found in the
+// 2026-09-17 pen test).
 
 import { isAgentAuthoredLabel } from "../events/comment-authorship"
-import type { ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { handleCommentsReadRequest, type CommentRowOut } from "../events/comments-read-route"
 import { externalError } from "./errors"
 import { mintInternalToken } from "./read-routes"
 import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
+import { resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 
 const COMMENTS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/comments$/
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
-
-/** How much of the HMAC a pseudonym keeps. 8 hex = 32 bits: two translators on
- *  one project colliding into a single identity is negligible, where the 4-char
- *  form collides at even odds around 300 distinct authors. Matches AQU-1180. */
-const PSEUDONYM_HEX = 8
-
-/** Author strings that name a machine rather than a person — nothing to hide,
- *  and far more useful to an agent passed through than hashed. */
-const NON_HUMAN_AUTHORS = new Set(["importer", "system", "agent"])
-
-/**
- * Whether this credential may see real identities.
- *
- * The `pii` grant is minted on the credential by AQU-1180 (owner-only, default
- * off). That column is not on `main` yet, so the flag is read optionally: a
- * credential without it is pseudonymous, which is the safe direction. When
- * AQU-1180 lands this becomes a call to `resolveAuthorshipPolicy()` from
- * external/pii.ts (which additionally honours a project's `agentAuthorship:
- * none` opt-out by dropping author fields entirely) — the default behaviour
- * here does not change when it does.
- */
-export function resolveIdentityMode(cred: ApiCredentialContext & { pii?: boolean }): "real" | "pseudonymous" {
-  return cred.pii === true ? "real" : "pseudonymous"
-}
-
-/** Hex of an HMAC-SHA256 over `message`, keyed by the worker secret. */
-async function hmacHex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  )
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message))
-  let hex = ""
-  for (const b of new Uint8Array(sig)) hex += b.toString(16).padStart(2, "0")
-  return hex
-}
-
-/**
- * Stable per-project pseudonym for one author string.
- *
- * Keyed by the worker secret so it cannot be reversed with a username
- * dictionary, and salted by the project so the same translator is a DIFFERENT
- * id in each project — two agents comparing notes across projects cannot
- * re-identify anyone by intersecting the ids they hold.
- */
-export async function commentAuthorPseudonym(
-  secret: string,
-  projectId: string,
-  author: string,
-): Promise<string> {
-  const digest = await hmacHex(secret, `${projectId} ${author}`)
-  return `u_${digest.slice(0, PSEUDONYM_HEX)}`
-}
 
 /** One comment as the Agent API reports it. */
 export interface ExternalCommentOut {
@@ -117,8 +62,9 @@ export interface ExternalCommentOut {
   body: string
   resolved: boolean
   /** Pseudonymous per-project id by default; the real username on a `pii`
-   *  credential. Machine authors ("importer") pass through either way. */
-  author: string
+   *  credential; ABSENT entirely when the project has set `agentAuthorship:
+   *  'none'`. Machine authors ("importer") pass through under every policy. */
+  author: string | undefined
   /** True when the comment was posted through the Agent API rather than typed
    *  by its author — so an agent can tell its own prior replies from a human's. */
   viaAgent: boolean
@@ -134,29 +80,10 @@ export interface ExternalCommentOut {
  *
  * `authorLabel` never reaches the caller: it is a display string that carries
  * the human's name AND (for agent-posted comments) the marker suffix. The
- * marker is reported as the boolean `viaAgent`; the name is reduced to
- * `author` under the identity mode.
+ * marker is reported as the boolean `viaAgent`; `author` is scrubbed by the
+ * caller via `scrubAuthorField` once every row has been mapped.
  */
-async function toExternal(
-  row: CommentRowOut,
-  mode: "real" | "pseudonymous",
-  secret: string,
-  projectId: string,
-  pseudonyms: Map<string, string>,
-): Promise<ExternalCommentOut> {
-  let author = row.authorId
-  if (mode === "pseudonymous" && author !== "" && !NON_HUMAN_AUTHORS.has(author)) {
-    // One HMAC per distinct author per page, not one per row: a 200-comment
-    // thread written by two people costs two hashes.
-    const cached = pseudonyms.get(author)
-    if (cached !== undefined) {
-      author = cached
-    } else {
-      const pseudonym = await commentAuthorPseudonym(secret, projectId, author)
-      pseudonyms.set(row.authorId, pseudonym)
-      author = pseudonym
-    }
-  }
+function toExternal(row: CommentRowOut): ExternalCommentOut {
   return {
     commentId: row.commentId,
     scopeKind: row.scopeKind,
@@ -166,7 +93,7 @@ async function toExternal(
     parentCommentId: row.parentCommentId,
     body: row.body,
     resolved: row.resolved,
-    author,
+    author: row.authorId,
     viaAgent: isAgentAuthoredLabel(row.authorLabel),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -221,13 +148,14 @@ async function handleExternalComments(
   }
 
   const body = (await internalRes.json()) as { comments: CommentRowOut[]; nextCursor: string | null }
-  const mode = resolveIdentityMode(authed.ctx.credential)
-  const secret = env.SYNC_SECRET_KEY as string
-  const pseudonyms = new Map<string, string>()
-  const data: ExternalCommentOut[] = []
-  for (const row of body.comments) {
-    data.push(await toExternal(row, mode, secret, projectId, pseudonyms))
-  }
+  const policy = await resolveAuthorshipPolicy(db, authed.ctx.credential, projectId)
+  const data = (await scrubAuthorField(
+    body.comments.map(toExternal),
+    "author",
+    policy,
+    env.SYNC_SECRET_KEY,
+    projectId,
+  )) as ExternalCommentOut[]
   return Response.json({ data, nextCursor: body.nextCursor })
 }
 

@@ -230,6 +230,32 @@ describe("steering", () => {
       runId: RUN.runId,
     })
   })
+
+  it("reports a plain direction as a direction", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ steering: { id: "s1" } }, 201))
+    const result = await sendContextualSteering(RUN.runId, "Prefer shorter sentences")
+    expect(result).toMatchObject({ intent: "direction", applied: false })
+  })
+
+  it("surfaces the server's run-command verdict (AQU-1299)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "stop", applied: true }))
+    const result = await sendContextualSteering(RUN.runId, "stop")
+    expect(result).toMatchObject({ intent: "stop", applied: true })
+  })
+
+  it("reports an unapplied command without treating it as a failure", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "pause", applied: false }))
+    await expect(sendContextualSteering(RUN.runId, "hold on")).resolves.toMatchObject({
+      intent: "pause",
+      applied: false,
+    })
+  })
 })
 
 describe("project Autopilot observability", () => {

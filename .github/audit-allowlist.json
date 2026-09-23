@@ -16,7 +16,7 @@
       "ghsa": "GHSA-23hp-3jrh-7fpw",
       "module": "tar",
       "severity": "critical",
-      "reason": "Node-only transitive dep. Reaches the tree solely via @huggingface/transformers and kokoro-js -> onnxruntime-node, and those two packages are imported only from browser Web Workers (src/lib/audio/whisper-worker.ts, mms-worker.ts, kokoro-worker.ts). Vite resolves the browser target (onnxruntime-web); the Node target is never bundled, never deployed to a Cloudflare Worker, and never parses an archive at runtime. Exposure is limited to a developer's node_modules at install time.",
+      "reason": "Node-only transitive dep. Reaches the tree solely via @huggingface/transformers -> onnxruntime-node, and that package is imported only from browser Web Workers (src/lib/audio/whisper-worker.ts, mms-worker.ts). Vite resolves the browser target (onnxruntime-web); the Node target is never bundled, never deployed to a Cloudflare Worker, and never parses an archive at runtime. Exposure is limited to a developer's node_modules at install time.",
       "addedOn": "2026-08-11",
       "reviewBy": "2026-11-11"
     },

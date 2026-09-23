@@ -146,6 +146,14 @@ export const rules = defineNamespace({
       other: "{count} issues",
     }),
 
+    // ── Org rules as a top-level Settings section (AQU-1131) ────────────────
+    // "Rules" is the settled term — Paratext's "checks" and "standards" were
+    // both considered and dropped.
+    "rules.orgSettings.title": "Rules",
+    "rules.orgSettings.navHint": "Org-wide translation rules",
+    "rules.orgSettings.description":
+      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
+
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
     "rules.promotion.requested": "Requested ✓",
@@ -250,6 +258,8 @@ export const rules = defineNamespace({
     "rules.editor.mode.required": "Required",
     "rules.editor.mode.match": "Must match",
     "rules.editor.sideLabel": "Side",
+    "rules.editor.sideTargetOnlyNote":
+      "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
     "rules.editor.lane.allLanes": "All lanes",
     "rules.editor.lane.defaultLane": "Default lane",
@@ -384,6 +394,10 @@ export const rules = defineNamespace({
 
     // ── RulesPage.tsx (standalone rules page) ────────────────────────────────
     "rules.loadingLabel": "Loading rules",
+    // AQU-1340: without this the list just omits every terminology rule, so it
+    // disagrees with what the editor enforces and gives no hint why.
+    "rules.terminologyUnavailableNotice":
+      "Terminology rules could not be loaded, so they are missing from this list.",
     "rules.page.heading": "Translation Rules",
     "rules.page.corpusLoadErrorPrefix": "Couldn't load the complete project corpus: {message}",
     "rules.page.readOnlySuffix": "Changes made here won't be saved.",

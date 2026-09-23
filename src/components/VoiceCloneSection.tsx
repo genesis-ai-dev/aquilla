@@ -333,6 +333,10 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       audio.onerror = () => { setState("error") }
       setState("playing")
       await audio.play()
+      if (audioRef.current !== audio) {
+        audio.pause()
+        return
+      }
     } catch {
       setState("error")
     }

@@ -14,7 +14,7 @@
 // WAV — a size regression, never a broken clip.
 //
 // Scope note (deliberate): only the CLIENT-synthesized branch compresses.
-// OmniVoice and Seed-VC clone conversion write their clips server-side — that
+// Inworld TTS and Seed-VC clone conversion write their clips server-side — that
 // format is the sync-worker/Modal's decision and stays WAV for now (flagged
 // for the storage-format discussion with Matthew).
 

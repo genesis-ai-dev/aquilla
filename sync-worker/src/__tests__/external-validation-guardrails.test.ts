@@ -119,17 +119,25 @@ async function seedTargetCommit(
        ON CONFLICT (id) DO NOTHING`,
       [userId, author, `${author}@x.com`],
     )
-    await tdb.pg.query(
-      `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, $2, $3)
-       ON CONFLICT DO NOTHING`,
-      [PROJECT, userId, role],
-    )
   }
   const resolvedUserId =
     userId ??
     (
       await tdb.pg.query<{ id: number }>(`SELECT id FROM users WHERE username = $1`, [author])
     ).rows[0].id
+  // [Pen test 2026-09-21] The forged token below claims `role`, so the live
+  // project_members row must actually grant at least that much — otherwise
+  // the write perimeter's live-role re-check (events/membership.ts) sees a
+  // real membership row sitting below what the token claims and correctly
+  // treats it as a stale/downgraded token, 403ing the seed. Upsert rather
+  // than insert-if-missing so a custom `author` who already has a lower-role
+  // row (e.g. seeded via memberToken() for a later step in the same test)
+  // gets bumped to match what this call's token asserts.
+  await tdb.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, $2, $3)
+     ON CONFLICT (project_id, user_id) DO UPDATE SET role_level = EXCLUDED.role_level`,
+    [PROJECT, resolvedUserId, role],
+  )
   const tok = await makeTestToken(SECRET, {
     projectId: PROJECT,
     fileId: FILE,
@@ -366,7 +374,13 @@ describe('AQU-1184 — explicit cell lists only', () => {
 
     expect(res.status).toBe(200)
     // Counts still there, and the validation line is still marked testimony…
-    expect(body.summary.events).toContainEqual({ kind: 'cell.validate', count: 2, testimony: true })
+    // AQU-1310: summary.events includes emitKindEffectLabel.
+    expect(body.summary.events).toContainEqual({
+      kind: 'cell.validate',
+      count: 2,
+      testimony: true,
+      label: 'Mark 2 translations as validated — recorded under your name',
+    })
     // …but a count alone is not an approvable plan: each cell is named with its text.
     expect(body.summary.testimony).toEqual([
       { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', text: 'En el principio', truncated: false },

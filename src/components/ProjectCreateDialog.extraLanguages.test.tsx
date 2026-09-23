@@ -1,7 +1,9 @@
 // AQU-538 "creation fix" (spec §5 / QA-AQU538-LANES.md "UX gaps" #1): the
 // self-contained shape's target field is a single Combobox chips input.
 // Type → Enter → pill; first pill is targetLanguage, the rest become
-// settings.targetLanes via a follow-up PATCH. Source-only and linked-target
+// settings.targetLanes in the SAME create settings PATCH (AQU-1250 — the HTTP
+// PATCH handler replaces the whole blob, so a second lanes-only write wiped the
+// languages). Source-only and linked-target
 // shapes stay single-field — see ProjectCreateDialog.linked.test.tsx /
 // ProjectCreateDialog.addAsLane.test.tsx.
 
@@ -173,7 +175,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.queryByTestId("create-extra-lang-chip-es")).toBeNull()
   })
 
-  it("submit with 2 extras: creates the project, then PATCHes settings with both lanes using the fetched version", async () => {
+  it("submit with 2 extras: creates the project, then PATCHes languages AND both lanes in ONE version-0 write", async () => {
     openDialogWithBasics({ name: "Multilingual Episode 1", source: "English", target: "French" })
     addExtraLanguage("es")
     addExtraLanguage("pt-BR")
@@ -182,31 +184,27 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
-      expect(mockFetchProjectSettings).toHaveBeenCalledTimes(1)
     })
 
-    // create → fetch(for version) → PATCH targetLanes, in that order.
-    const createOrder = mockCreateCloudProject.mock.invocationCallOrder[0]!
-    const fetchOrder = mockFetchProjectSettings.mock.invocationCallOrder[0]!
-    expect(createOrder).toBeLessThan(fetchOrder)
-
-    const [, projectId] = mockFetchProjectSettings.mock.calls[0]!
-    expect(projectId).toEqual(expect.any(String))
-
-    // Two PATCH calls: the existing sourceLanguage/targetLanguage seed write
-    // (version 0, untouched by this slice), then the targetLanes write using
-    // the version returned by fetchProjectSettings (2, from the mock above).
+    // AQU-1250: exactly ONE settings PATCH. The old second, lanes-only PATCH
+    // replaced the whole blob and silently wiped sourceLanguage/targetLanguage,
+    // so there is no version re-fetch to make either.
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(2)
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
     })
-    const lanesCall = mockPatchProjectSettings.mock.calls.find(
-      (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
-    )
-    expect(lanesCall).toBeTruthy()
-    const [, lanesProjectId, lanesSettings, lanesVersion] = lanesCall!
-    expect(lanesProjectId).toEqual(projectId)
-    expect(lanesSettings).toEqual({ targetLanes: ["es", "pt-BR"] })
-    expect(lanesVersion).toBe(2)
+    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
+
+    const createOrder = mockCreateCloudProject.mock.invocationCallOrder[0]!
+    const patchOrder = mockPatchProjectSettings.mock.invocationCallOrder[0]!
+    expect(createOrder).toBeLessThan(patchOrder)
+
+    const [, , settings, version] = mockPatchProjectSettings.mock.calls[0]!
+    expect(settings).toEqual({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetLanes: ["es", "pt-BR"],
+    })
+    expect(version).toBe(0)
 
     expect(mockCreateProject).toHaveBeenCalledTimes(1)
   })
@@ -251,20 +249,9 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })
 
-  it("PATCH failure for targetLanes still resolves with the created project, and surfaces a non-fatal warning", async () => {
-    // First PATCH (seed sourceLanguage/targetLanguage) succeeds; second
-    // (targetLanes) fails.
-    mockPatchProjectSettings
-      .mockResolvedValueOnce({
-        kind: "ok",
-        value: {
-          version: 1,
-          updatedAt: "2026-07-13T00:00:00.000Z",
-          updatedBy: { id: 1, username: "wendi" },
-          settings: {},
-        },
-      })
-      .mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
+  it("a failed settings PATCH still resolves with the created project, and surfaces a non-fatal warning", async () => {
+    // AQU-1250: the single languages+lanes PATCH fails.
+    mockPatchProjectSettings.mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
 
     openDialogWithBasics()
     addExtraLanguage("es")

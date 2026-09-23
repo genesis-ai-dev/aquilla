@@ -2,6 +2,9 @@
 // has no cells yet. Mirrors the EditorTable's grid columns so there's no
 // layout shift when real rows arrive.
 
+import { CellLoadingProgress } from "./CellLoadingProgress"
+import type { UseActiveCellStoreResult } from "@/hooks/useActiveCellStore"
+
 import { CloudOff, FileText, FolderOpen, RefreshCw, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
@@ -18,6 +21,7 @@ const GRID_COLS = "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 interface CellAreaPlaceholderProps {
   state: CellAreaState
   fileName?: string
+  progress?: UseActiveCellStoreResult["loadProgress"]
   /** True when the project has no files at all (not just none selected). */
   hasFiles?: boolean
   /** AQU-149: true once the file list has been fetched from the server.
@@ -32,6 +36,7 @@ interface CellAreaPlaceholderProps {
 
 export function CellAreaPlaceholder({
   state,
+  progress,
   fileName,
   hasFiles,
   filesLoaded,
@@ -52,21 +57,52 @@ export function CellAreaPlaceholder({
   if (state.kind === "load-error") {
     return <LoadError fileName={fileName} onRetryClick={onRetryClick} />
   }
-  return <SkeletonRows />
+  return <SkeletonRows progress={progress} />
+}
+
+/** Remains visible below usable rows until the rest of the file is known. */
+export function CellRowsLoadStatus({
+  loading,
+  progress,
+  error,
+  onRetryClick,
+}: {
+  loading: boolean
+  progress?: UseActiveCellStoreResult["loadProgress"]
+  error: boolean
+  onRetryClick: () => void
+}) {
+  const t = useT()
+  if (!loading && !error) return null
+  return (
+    <div className="shrink-0 border-t" data-testid="cell-rows-load-status">
+      {loading ? (
+        <LoadingTemplate label={t("editor.file.loadingFromCloud")} statusDetail={<CellLoadingProgress progress={progress ?? null} />}>
+          <div className={`grid ${GRID_COLS} gap-3 px-4 py-3`}>
+            <Skeleton className="h-10 w-10" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </LoadingTemplate>
+      ) : <LoadError onRetryClick={onRetryClick} compact />}
+    </div>
+  )
 }
 
 function LoadError({
   fileName,
   onRetryClick,
+  compact,
 }: {
   fileName?: string
   onRetryClick?: () => void
+  compact?: boolean
 }) {
   const t = useT()
   return (
     <EmptyState
       variant="inline"
-      className="h-full p-8"
+      className={compact ? "p-4" : "h-full p-8"}
       icon={CloudOff}
       title={
         fileName
@@ -86,7 +122,7 @@ function LoadError({
   )
 }
 
-function SkeletonRows() {
+function SkeletonRows({ progress }: { progress?: UseActiveCellStoreResult["loadProgress"] }) {
   const t = useT()
   // AQU-819: this state is a plain read — the cells projection is being
   // fetched, or the socket hasn't finished connecting yet. Nothing is being
@@ -95,6 +131,7 @@ function SkeletonRows() {
   return (
     <LoadingTemplate
       label={t("editor.file.loadingFromCloud")}
+      statusDetail={<CellLoadingProgress progress={progress ?? null} />}
       className="h-full min-h-64"
       templateClassName="min-h-64"
       data-testid="cell-area-loading"

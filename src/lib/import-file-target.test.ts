@@ -3,8 +3,11 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  subtitleToTargetRows,
   vttToTargetRows,
+  toFileTargetCells,
   type FileTargetCellRef,
+  type FileTargetCellSource,
   type TargetRow,
 } from "./import-file-target"
 
@@ -110,6 +113,28 @@ describe("matchTargetRowsByOrder", () => {
     )
     expect(result.matched).toHaveLength(3)
     expect(result.orphans).toEqual([{ ref: "Row 4", text: "overflow" }])
+  })
+
+  it("AQU-1144: labels the row with the incoming row's own ref when it carries one", () => {
+    const result = matchTargetRowsByOrder(
+      [
+        { ref: "00:00:01,000 --> 00:00:04,000", text: "cue one" },
+        { ref: "00:00:05,000 --> 00:00:07,000", text: "cue two" },
+      ],
+      cells,
+    )
+    // A cue row's timecode wins over the matched cell's canonicalRef — the
+    // cell's ref is meaningless for cue files and absent for most of them.
+    expect(result.matched.map((m) => m.ref)).toEqual([
+      "00:00:01,000 --> 00:00:04,000",
+      "00:00:05,000 --> 00:00:07,000",
+    ])
+  })
+
+  it("AQU-1144: rows with no ref still fall back to the cell ref then the row number", () => {
+    const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], cells)
+    // Spreadsheet-by-order rows carry no ref, so their labels are unchanged.
+    expect(result.matched.map((m) => m.ref)).toEqual(["GEN 1:1", "Row 2"])
   })
 })
 
@@ -288,6 +313,199 @@ describe("usfmToTargetRows", () => {
     // aligned with source cells imported under the same setting.
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
+  })
+})
+
+describe("subtitleToTargetRows (AQU-1144)", () => {
+  const srt = [
+    "1",
+    "00:00:01,000 --> 00:00:04,000",
+    "Bilong wanem yu kam?",
+    "",
+    "2",
+    "00:00:05,500 --> 00:00:08,250",
+    "Mi kam long lukim yu,",
+    "na long harim tok bilong yu.",
+    "",
+    "3",
+    "00:00:09,000 --> 00:00:11,000",
+    "Orait.",
+    "",
+  ].join("\n")
+
+  it("extracts one row per SRT cue, labelled with the cue's timecode range", () => {
+    const rows = subtitleToTargetRows(srt, "srt")
+    expect(rows).toEqual([
+      { ref: "00:00:01,000 --> 00:00:04,000", text: "Bilong wanem yu kam?", startMs: 1000, endMs: 4000 },
+      {
+        ref: "00:00:05,500 --> 00:00:08,250",
+        text: "Mi kam long lukim yu,\nna long harim tok bilong yu.",
+        startMs: 5500,
+        endMs: 8250,
+      },
+      { ref: "00:00:09,000 --> 00:00:11,000", text: "Orait.", startMs: 9000, endMs: 11000 },
+    ])
+  })
+
+  it("never leaks SRT numeric cue counters or blank separators into the text", () => {
+    const rows = subtitleToTargetRows(srt, "srt")
+    for (const row of rows) {
+      expect(row.text).not.toMatch(/^\d+$/m)
+      expect(row.text.trim()).toBe(row.text)
+    }
+  })
+
+  it("extracts one row per SBV cue, labelled with the cue's timecode line", () => {
+    const sbv = [
+      "0:00:01.000,0:00:04.000",
+      "Bilong wanem yu kam?",
+      "",
+      "0:00:05.500,0:00:08.250",
+      "Mi kam long lukim yu,",
+      "na long harim tok bilong yu.",
+      "",
+    ].join("\n")
+    expect(subtitleToTargetRows(sbv, "sbv")).toEqual([
+      { ref: "0:00:01.000,0:00:04.000", text: "Bilong wanem yu kam?", startMs: 1000, endMs: 4000 },
+      {
+        ref: "0:00:05.500,0:00:08.250",
+        text: "Mi kam long lukim yu,\nna long harim tok bilong yu.",
+        startMs: 5500,
+        endMs: 8250,
+      },
+    ])
+  })
+
+  it("SBV cues align by timecode overlap (AQU-1143) — their label has no `-->` to recover timings from", () => {
+    // Source grid has three cues; the incoming SBV drops the middle one. Raw
+    // order would put "three" on c2.
+    const sbv = [
+      "0:00:01.000,0:00:01.800",
+      "one",
+      "",
+      "0:00:03.000,0:00:03.800",
+      "three",
+      "",
+    ].join("\n")
+    const timedCells: FileTargetCellRef[] = [
+      cell({ cellId: "c1", startMs: 1000, endMs: 1800 }),
+      cell({ cellId: "c2", startMs: 2000, endMs: 2800 }),
+      cell({ cellId: "c3", startMs: 3000, endMs: 3800 }),
+    ]
+    const result = matchTargetRowsByOrder(subtitleToTargetRows(sbv, "sbv"), timedCells)
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref])).toEqual([
+      ["c1", "one", "0:00:01.000,0:00:01.800"],
+      ["c3", "three", "0:00:03.000,0:00:03.800"],
+    ])
+    expect(result.unmatchedSourceCount).toBe(1)
+  })
+
+  it("returns no rows for a file with no parseable cues, so the panel can say so", () => {
+    expect(subtitleToTargetRows("not a subtitle file at all\n", "srt")).toEqual([])
+    expect(subtitleToTargetRows("not a subtitle file at all\n", "sbv")).toEqual([])
+  })
+
+  it("feeds matchTargetRowsByOrder so cue N lands on cell N with its timecode label", () => {
+    const cells: FileTargetCellRef[] = [
+      cell({ cellId: "c1" }),
+      cell({ cellId: "c2" }),
+      cell({ cellId: "c3", translated: "already translated", targetEventId: "tgt-evt-c3" }),
+    ]
+    const result = matchTargetRowsByOrder(subtitleToTargetRows(srt, "srt"), cells)
+    expect(result.matched.map((m) => [m.cellId, m.ref])).toEqual([
+      ["c1", "00:00:01,000 --> 00:00:04,000"],
+      ["c2", "00:00:05,500 --> 00:00:08,250"],
+      ["c3", "00:00:09,000 --> 00:00:11,000"],
+    ])
+    // A cell that already holds a translation is a conflict, so the panel
+    // leaves it unticked rather than silently overwriting it.
+    expect(result.matched[2].hasConflict).toBe(true)
+    expect(result.unmatchedSourceCount).toBe(0)
+  })
+})
+
+// The editor hands cells over with cue timings in SECONDS; every matcher input
+// is milliseconds. Passing the seconds through unconverted made a subtitle
+// target import match 0 rows on a real cue file (PR #530 QA walk).
+describe("toFileTargetCells", () => {
+  /** Editor cell summaries for a four-cue file, timed as the cell view times
+   *  them — fractional seconds. */
+  const summaries: FileTargetCellSource[] = [
+    { id: "c1", fileId: "f1", original: "one", group: "uuid-1", startTime: 1, endTime: 3 },
+    { id: "c2", fileId: "f1", original: "two", group: "uuid-2", startTime: 3.5, endTime: 5.5 },
+    { id: "c3", fileId: "f1", original: "three", group: "uuid-3", startTime: 6, endTime: 8 },
+    { id: "c4", fileId: "f1", original: "four", group: "uuid-4", startTime: 8.5, endTime: 10 },
+  ]
+
+  it("converts cue timings from seconds to integer milliseconds", () => {
+    expect(toFileTargetCells(summaries).map((c) => [c.startMs, c.endMs])).toEqual([
+      [1000, 3000],
+      [3500, 5500],
+      [6000, 8000],
+      [8500, 10000],
+    ])
+  })
+
+  it("carries the fields the matchers and the review screen read", () => {
+    const [first] = toFileTargetCells([
+      { ...summaries[0], translated: "uno", targetEventId: "t1", sourceEventId: "s1" },
+    ])
+    expect(first).toEqual({
+      cellId: "c1",
+      fileId: "f1",
+      targetEventId: "t1",
+      sourceEventId: "s1",
+      translated: "uno",
+      canonicalRef: "uuid-1",
+      original: "one",
+      startMs: 1000,
+      endMs: 3000,
+    })
+  })
+
+  it("leaves untimed cells untimed, so they keep order matching", () => {
+    const [untimed] = toFileTargetCells([{ id: "v1", fileId: "f1", original: "In the beginning", group: "GEN 1:1" }])
+    expect(untimed.startMs).toBeUndefined()
+    expect(untimed.endMs).toBeUndefined()
+    expect(untimed.translated).toBe("")
+  })
+
+  const srt = [
+    "1", "00:00:01,000 --> 00:00:03,000", "wan", "",
+    "2", "00:00:03,500 --> 00:00:05,500", "tu", "",
+    "3", "00:00:06,000 --> 00:00:08,000", "tri", "",
+    "4", "00:00:08,500 --> 00:00:10,000", "foa", "",
+  ].join("\n")
+  const sbv = [
+    "0:00:01.000,0:00:03.000", "wan", "",
+    "0:00:03.500,0:00:05.500", "tu", "",
+    "0:00:06.000,0:00:08.000", "tri", "",
+    "0:00:08.500,0:00:10.000", "foa", "",
+  ].join("\n")
+  const vtt = [
+    "WEBVTT", "",
+    "00:00:01.000 --> 00:00:03.000", "wan", "",
+    "00:00:03.500 --> 00:00:05.500", "tu", "",
+    "00:00:06.000 --> 00:00:08.000", "tri", "",
+    "00:00:08.500 --> 00:00:10.000", "foa", "",
+  ].join("\n")
+
+  it.each([
+    ["srt", () => subtitleToTargetRows(srt, "srt")],
+    ["sbv", () => subtitleToTargetRows(sbv, "sbv")],
+    ["vtt", () => vttToTargetRows(vtt)],
+  ])("a translated .%s of the same episode matches every cue of the open file", (_ext, rows) => {
+    const result = matchTargetRowsByOrder(rows(), toFileTargetCells(summaries))
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "wan"],
+      ["c2", "tu"],
+      ["c3", "tri"],
+      ["c4", "foa"],
+    ])
+    expect(result.orphans).toHaveLength(0)
+    expect(result.unmatchedSourceCount).toBe(0)
   })
 })
 

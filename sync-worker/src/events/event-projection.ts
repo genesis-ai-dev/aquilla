@@ -171,42 +171,72 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * AQU-1083 adds the structural_* trio: the same cell/filled/approved counts
+ * restricted to cells whose SOURCE row is a heading or paratext. Membership is
+ * a property of the source row, but filled and approved count TARGET rows whose
+ * own type is null, so every row resolves its type through the paired source
+ * via idx_cells_pair_lookup. They are maintained unconditionally — no counter
+ * here knows anything about the setting — so a reader that excludes structural
+ * cells subtracts, and the policy can be toggled without reprojecting.
+ *
+ * Driven FROM `files` rather than from `cells` so a file whose cells have all
+ * been deleted is still reset to zero. The per-project form relied on that.
+ *
  * cell_count deliberately avoids COUNT(DISTINCT cell_id): that sorts the whole
  * row set (value included, ~170 B/row) and spilled to disk on every
  * 30K+-cell file under prod's 4 MB work_mem (4.6 GB temp over 8.6 days).
  * GROUP BY cell_id over cells_pkey (project_id, file_id, cell_id, …) is an
  * ordered Index Only Scan + Group — no sort at any work_mem. Guarded by
- * __tests__/hot-query-plans.test.ts.
+ * __tests__/hot-query-plans.test.ts. The structural cell count needs no
+ * DISTINCT at all: a cell has exactly one source row, so counting structural
+ * SOURCE rows is the distinct count.
  *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
-export function fileCountersRecomputeStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-  serverTs: number,
-): AquillaStatement {
-  return db
-    .prepare(
-      `WITH counters AS (
-         SELECT (SELECT COUNT(*) FROM (
+function fileCountersSql(scope: 'file' | 'project'): string {
+  return `WITH counters AS (
+         SELECT f.id AS file_id,
+                (SELECT COUNT(*) FROM (
                    SELECT 1 FROM cells
-                    WHERE project_id = ? AND file_id = ?
+                    WHERE project_id = f.project_id AND file_id = f.id
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
-                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+                COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND TRIM(value) != ''
+                  WHERE c.side = 'target' AND TRIM(c.value) != ''
                 )::integer AS filled_count,
-                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
-                MAX(last_edit_at) AS last_edit_at,
+                COALESCE(SUM(c.word_count) FILTER (WHERE c.side = 'target'), 0)::integer AS word_count,
+                MAX(c.last_edit_at) AS last_edit_at,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND ai_drafted = 1
-                )::integer AS ai_drafted_count
-           FROM cells
-          WHERE project_id = ? AND file_id = ?
+                  WHERE c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS ai_drafted_count,
+                COUNT(*) FILTER (
+                  WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+                )::integer AS structural_cell_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND TRIM(c.value) != ''
+                )::integer AS structural_filled_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext') AND c.validated = 1
+                )::integer AS structural_approved_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS structural_ai_drafted_count
+           FROM files f
+           LEFT JOIN cells c
+             ON c.project_id = f.project_id
+            AND c.file_id = f.id
+           LEFT JOIN cells s
+             ON s.project_id = c.project_id
+            AND s.file_id = c.file_id
+            AND s.cell_id = c.cell_id
+            AND s.side = 'source'
+          WHERE f.project_id = ?${scope === 'file' ? ' AND f.id = ?' : ''}
+          GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,
          approved_count = counters.approved_count,
@@ -214,16 +244,41 @@ export function fileCountersRecomputeStmt(
          word_count = counters.word_count,
          last_edit_at = counters.last_edit_at,
          ai_drafted_count = counters.ai_drafted_count,
+         structural_cell_count = counters.structural_cell_count,
+         structural_filled_count = counters.structural_filled_count,
+         structural_approved_count = counters.structural_approved_count,
+         structural_ai_drafted_count = counters.structural_ai_drafted_count,
          updated_at = ?
         FROM counters
-       WHERE files.id = ? AND files.project_id = ?`,
-    )
-    .bind(
-      projectId, fileId,
-      projectId, fileId,
-      serverTs,
-      fileId, projectId,
-    )
+       WHERE files.id = counters.file_id AND files.project_id = ?`
+}
+
+export function fileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  serverTs: number,
+): AquillaStatement {
+  return db.prepare(fileCountersSql('file')).bind(projectId, fileId, serverTs, projectId)
+}
+
+/**
+ * The same counters for every file in a project, in one statement.
+ *
+ * Used by the rebuild and by POST /migrate/finalize, which both replay a whole
+ * project and defer per-event counter maintenance. Both used to carry their own
+ * hand-written copy of the SQL above — and one of them had already drifted,
+ * silently leaving `ai_drafted_count` behind. AQU-1083 would have made that
+ * worse in a way nobody would notice: a rebuild would have quietly restored
+ * headings to the totals a project had chosen to exclude. One builder, two
+ * scopes.
+ */
+export function projectFileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  serverTs: number,
+): AquillaStatement {
+  return db.prepare(fileCountersSql('project')).bind(projectId, serverTs, projectId)
 }
 
 /**
@@ -1819,8 +1874,8 @@ case 'cell.audio.attach': {
             // is an idempotent no-op rather than a duplicate concept.
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
-              status, case_sensitive, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?, ?, ?, NULL)
+              status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -1831,6 +1886,7 @@ case 'cell.audio.attach': {
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.author,
             event.serverTs,
             event.serverTs,
@@ -1855,6 +1911,7 @@ case 'cell.audio.attach': {
                renderings     = COALESCE(?::text::jsonb, renderings),
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
+               match_options  = COALESCE(?::text::jsonb, match_options),
                updated_at     = ?
              WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
           )
@@ -1863,6 +1920,7 @@ case 'cell.audio.attach': {
             p.renderings === undefined ? null : JSON.stringify(p.renderings),
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.serverTs,
             p.conceptId,
             event.projectId,
@@ -1945,12 +2003,20 @@ case 'cell.audio.attach': {
             // AQU-692: created_for_translated stores the target-text snapshot
             // captured on the client at thread-creation time. Null for replies,
             // non-cell scopes, and legacy events that predate the field.
+            //
+            // AQU-1296: the conflict target is the PROJECT-SCOPED key. Comment
+            // ids collide across projects (the importer leaves
+            // `payload.commentId` as the raw legacy id), and conflicting on
+            // `comment_id` alone meant the first project to claim an id owned
+            // the only row that could exist — every later project's insert was
+            // dropped in silence. Same-project replay is still a no-op, which
+            // is what the deterministic commentCreateEventId design relies on.
             `INSERT INTO comments (
               comment_id, project_id, scope_kind, file_id, cell_id,
               parent_comment_id, body, resolved, author_id, author_label,
               created_at, updated_at, deleted_at, created_for_translated
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
-            ON CONFLICT(comment_id) DO NOTHING`,
+            ON CONFLICT(project_id, comment_id) DO NOTHING`,
           )
           .bind(
             p.commentId,
@@ -1976,24 +2042,28 @@ case 'cell.audio.attach': {
       // Maintainer+ foreign path: author_id check dropped so they can edit
       //   any comment. The route layer has already rejected the event if the
       //   caller is not the author AND does not have maintainer(600)+ role.
+      //
+      // AQU-1296: `project_id` is part of the match on BOTH paths. Comment ids
+      // are only unique within a project, so matching on `comment_id` alone let
+      // an edit in project A rewrite project B's same-id row.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId, event.author),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -2004,24 +2074,25 @@ case 'cell.audio.attach': {
       // Soft-delete: preserve the row so threads remain navigable.
       // Body cleared; deleted_at set. UI renders "[deleted]".
       // Maintainer+ foreign path: author_id check dropped (same logic as edit).
+      // AQU-1296: project-scoped on both paths, as comment.edit above.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId, event.author),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -2039,13 +2110,17 @@ case 'cell.audio.attach': {
       //   caller is not the comment author and is below that floor. The
       //   projection logic is the same either way (no author filter on resolve
       //   — ownership was already enforced upstream).
+      //
+      // AQU-1296: project-scoped — resolving a thread in project A must not
+      // flip project B's same-id thread.
       stmts.push(
         db
           .prepare(
             `UPDATE comments SET resolved = ?, updated_at = ?
-             WHERE comment_id = ? AND parent_comment_id IS NULL AND deleted_at IS NULL`,
+             WHERE project_id = ? AND comment_id = ?
+               AND parent_comment_id IS NULL AND deleted_at IS NULL`,
           )
-          .bind(p.resolved ? 1 : 0, event.serverTs, p.commentId),
+          .bind(p.resolved ? 1 : 0, event.serverTs, event.projectId, p.commentId),
       )
       return ['comments']
     }

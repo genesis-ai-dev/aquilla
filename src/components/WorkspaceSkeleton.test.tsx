@@ -1,11 +1,11 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 
-describe("WorkspaceSkeleton", () => {
-  it("shows a workspace-shaped template with one explicit loading status", () => {
-    render(<WorkspaceSkeleton />)
+describe("WorkspaceMainSkeleton", () => {
+  it("shows a cell-table template with one explicit loading status", () => {
+    render(<WorkspaceMainSkeleton />)
 
     const status = screen.getByRole("status", { name: "Loading project" })
     expect(status).toHaveAttribute("aria-busy", "true")

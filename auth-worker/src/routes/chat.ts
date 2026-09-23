@@ -75,7 +75,7 @@ const chatCompletionRequestSchema = z.object({
   temperature: z.number().optional().default(0.7),
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().optional(),
-  response_format: z.record(z.unknown()).optional(),
+  response_format: z.record(z.string(), z.unknown()).optional(),
   // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
   // attribution as agent.ts). Optional — project-less chat stays at org 0.

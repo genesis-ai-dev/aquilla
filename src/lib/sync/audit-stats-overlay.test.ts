@@ -130,6 +130,25 @@ const baseStats = (overrides: Partial<CellAuditStats> = {}): CellAuditStats => (
 })
 
 describe("applyOutboxOverlay", () => {
+  it("shares untouched book entries and isolates repeated edits to the touched cell", () => {
+    const base = new Map(Array.from({ length: 31_215 }, (_, i) => {
+      const cellId = `c${i}`
+      return [cellId, baseStats({ cellId })] as const
+    }))
+    const before = base.get("c1")!
+    Object.freeze(before.activeValidators)
+    Object.freeze(before.waivers)
+    Object.freeze(before)
+    const out = applyOutboxOverlay({ base, pending: [
+      rec(commit("edit", "c1", "alice", 1100), 1100),
+      rec(validate("approval", "c1", "alice", "edit", 1200), 1200),
+    ] })
+    expect(out.get("c1")?.activeValidators).toEqual(["alice"])
+    expect(before.activeValidators).toEqual(["carol"])
+    expect(out.get("c1")?.editCount).toBe(2)
+    expect([...base].filter(([id, stats]) => out.get(id) !== stats).map(([id]) => id)).toEqual(["c1"])
+    expect(out.get("c1")?.waivers).not.toBe(before.waivers)
+  })
   it("returns the base unchanged when pending is empty", () => {
     const base = new Map([["c1", baseStats()]])
     const out = applyOutboxOverlay({ base, pending: [] })

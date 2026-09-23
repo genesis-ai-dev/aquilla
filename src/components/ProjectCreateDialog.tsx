@@ -96,9 +96,9 @@ const MAX_EXTRA_LANGUAGE_LENGTH = 64
 /**
  * AQU-538 creation fix (spec §5): the self-contained shape's target field
  * becomes multi-entry — first/primary stays the project's targetLanguage,
- * the rest land in settings.targetLanes via a follow-up PATCH after create.
- * That PATCH is best-effort: the project itself is already created and
- * should not be rolled back if it fails.
+ * the rest land in settings.targetLanes in the same settings PATCH as the
+ * languages. That write is best-effort: the project itself is already
+ * created and should not be rolled back if it fails.
  */
 const EXTRA_LANGUAGES_WARNING =
   "Project created; adding extra languages failed — add them in Settings → Languages."
@@ -115,7 +115,7 @@ const projectSchema = z
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
     // Self-contained shape only (spec §5): extras beyond the primary target,
-    // applied as settings.targetLanes after create. Ignored for other shapes.
+    // applied as settings.targetLanes in the create settings PATCH.
     extraLanguages: z.array(z.string()),
     shape: z.enum(["self-contained", "source-only", "linked-target"]),
     upstreamProjectId: optionalString,
@@ -200,13 +200,26 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
       try {
         await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
+
+        // One atomic settings write at version 0. The HTTP PATCH handler
+        // replaces the whole blob (no per-key merge), so languages and lanes
+        // must travel together — a second PATCH with only targetLanes would
+        // silently wipe sourceLanguage/targetLanguage (AQU-1250).
         try {
-          await patchProjectSettings(jwt, project.id, {
-            sourceLanguage: project.sourceLanguage,
-            targetLanguage: project.targetLanguage,
-          }, 0)
+          const result = await patchProjectSettings(
+            jwt,
+            project.id,
+            {
+              sourceLanguage: project.sourceLanguage,
+              targetLanguage: project.targetLanguage,
+              ...(extrasToApply.length > 0 ? { targetLanes: extrasToApply } : {}),
+            },
+            PROJECT_SETTINGS_VERSION_INITIAL,
+          )
+          if (result.kind !== "ok") extraLanguagesFailed = true
         } catch (err) {
           console.warn("[project-create] settings write failed (non-fatal):", err)
+          extraLanguagesFailed = true
         }
 
         if (value.shape === "linked-target" && value.upstreamProjectId) {
@@ -217,26 +230,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           })
           if (linkResult.seeded === false && value.linkMode === "live") {
             await triggerLinkSync(jwt, project.id)
-          }
-        }
-
-        if (extrasToApply.length > 0) {
-          // Best-effort: fetch the fresh settings version (the row may have
-          // just been created above, or the seed write may have failed and
-          // left it absent — either way we need the CURRENT version, not a
-          // hardcoded 0). A failure here never rolls back the project.
-          try {
-            const current = await fetchProjectSettings(jwt, project.id)
-            const result = await patchProjectSettings(
-              jwt,
-              project.id,
-              { targetLanes: extrasToApply },
-              current?.version ?? PROJECT_SETTINGS_VERSION_INITIAL,
-            )
-            if (result.kind !== "ok") extraLanguagesFailed = true
-          } catch (err) {
-            console.warn("[project-create] extra languages write failed (non-fatal):", err)
-            extraLanguagesFailed = true
           }
         }
       } catch (err) {
@@ -804,9 +797,9 @@ function AddAsLaneRecommendation({
 /**
  * AQU-538 creation fix (spec §5): one chips field for all target languages on
  * the self-contained shape. Type → Enter commits a pill; the first pill is
- * the project's targetLanguage and the rest become settings.targetLanes after
- * create. An uncommitted draft still counts as the primary (so create works
- * without Enter).
+ * the project's targetLanguage and the rest become settings.targetLanes in the
+ * same create settings PATCH. An uncommitted draft still counts as the primary
+ * (so create works without Enter).
  *
  * Freeform tags (any label) stay the contract. This field is NOT a Base-UI
  * Combobox: its controlled inputValue/value dance cleared the draft on Enter

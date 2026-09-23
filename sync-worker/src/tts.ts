@@ -1,12 +1,12 @@
-// OmniVoice TTS proxy: synthesize spoken audio for translated cells.
+// Hosted TTS proxy: synthesize spoken audio for translated cells via Inworld
+// TTS 2 Flash (AQU-1189).
 //
 // Mirrors voice-convert.ts in auth, R2 layout, and error-handling patterns.
-// The browser never talks to Modal directly — it can't hold the Modal secret.
+// The browser never talks to Inworld directly — it can't hold the API key.
 // This worker verifies the sync-token, pre-checks the user's daily seconds
-// budget, calls the OmniVoice Modal endpoint, writes the WAV to R2 as a
-// cell-audio object, records the actual seconds consumed, and returns an
-// audioId the client can attach to the cell or pass to /voice/convert as
-// sourceAudioId (use case 3).
+// budget, calls Inworld, writes the WAV to R2 as a cell-audio object, records
+// the actual seconds consumed, and returns an audioId the client can attach
+// to the cell or pass to /voice/convert as sourceAudioId (use case 3).
 //
 // Auth: sync-token JWT scoped to (projectId, fileId) via verifyTokenForFile,
 //       identical to /audio and /voice/convert.
@@ -15,29 +15,49 @@
 //           tts_usage_daily (see tts-budget.ts + migration 0041).
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
-import { verifyTokenForFile } from "./auth"
+import { listInworldSupportedLanguages } from "./inworld-supported-languages"
+import { verifyTokenForFile, verifyTokenForProject } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
 import { recordCredit } from "./credits"
+import {
+  INWORLD_DESIGN_PROMPT_MAX,
+  INWORLD_DESIGN_PROMPT_MIN,
+  INWORLD_MAX_TEXT_CHARS,
+  cloneInworldVoice,
+  designInworldVoice,
+  listInworldVoices,
+  parseInworldDesignPromptMode,
+  publishInworldVoice,
+  synthesizeInworldSpeech,
+  type InworldTtsConfig,
+} from "./inworld-tts"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
 
 // [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
 // seconds cap is log-only unless TTS_BUDGET_ENFORCE is set, which it isn't in
 // any deployed environment — over-cap requests are logged but never blocked.
-// That left this GPU-backed synthesis call with no volumetric control: a
+// That left this hosted synthesis call with no volumetric control: a
 // scripted flood just runs. Per-user sliding-window cap, same primitive/window
 // as the external Agent API's per-credential throttles — wide enough that a
 // real batch-narration session (many short clips in one sitting) never trips
-// it, tight enough to blunt a flood against the shared Modal endpoint.
+// it, tight enough to blunt a flood against the shared Inworld endpoint.
 const TTS_MAX_PER_USER_PER_WINDOW = 200
 
 export interface TtsEnv {
   SNAPSHOTS: R2Bucket
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
-  /** OmniVoice Modal endpoint, e.g. https://<acct>--omnivoice-web.modal.run */
-  OMNIVOICE_URL?: string
-  /** Shared secret matching the Modal `omnivoice-auth` secret's OMNIVOICE_TOKEN. */
-  OMNIVOICE_TOKEN?: string
+  /**
+   * Inworld Portal API key (base64 key:secret). Worker sends
+   * `Authorization: Basic $INWORLD_API_KEY`. See docs/INWORLD-TTS.md.
+   */
+  INWORLD_API_KEY?: string
+  /** Override Inworld API origin. Default https://api.inworld.ai */
+  INWORLD_API_BASE?: string
+  /** Override model id when audioQuality is omitted. Default inworld-tts-2 */
+  INWORLD_TTS_MODEL?: string
+  /** Stock voice when the request has no voiceId and no clone. Default Dennis. */
+  INWORLD_DEFAULT_VOICE?: string
   /** Per-user daily audio-seconds cap (default 36000 = 10 h while sizing). */
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   /** "true" → enforce the cap with 429; anything else → log-only. */
@@ -58,12 +78,32 @@ export interface TtsEnv {
 }
 
 const TTS_PATH = "/api/v1/voice/tts"
+const TTS_VOICES_PATH = "/api/v1/voice/tts/voices"
+const TTS_SUPPORTED_LANGUAGES_PATH = "/api/v1/voice/tts/supported-languages"
+const TTS_DESIGN_PATH = "/api/v1/voice/tts/design"
+const TTS_PUBLISH_PATH = "/api/v1/voice/tts/publish"
+
+function inworldConfig(env: TtsEnv): InworldTtsConfig | null {
+  const apiKey = env.INWORLD_API_KEY?.trim()
+  if (!apiKey) return null
+  return {
+    apiKey,
+    ...(env.INWORLD_API_BASE ? { apiBase: env.INWORLD_API_BASE } : {}),
+    ...(env.INWORLD_TTS_MODEL ? { modelId: env.INWORLD_TTS_MODEL } : {}),
+    ...(env.INWORLD_DEFAULT_VOICE ? { defaultVoiceId: env.INWORLD_DEFAULT_VOICE } : {}),
+  }
+}
+
+function inworldCloneCacheKey(env: TtsEnv, projectId: string, referenceAudioId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}.inworld.json`
+}
 
 /**
  * POST /api/v1/voice/tts
  *
  * JSON body:
- *   { projectId, fileId, cellId?, text, referenceAudioId?, language? }
+ *   { projectId, fileId, cellId?, text, voiceId?, referenceAudioId?, language?,
+ *     speakingRate?, deliveryMode?, audioQuality? }
  *
  * Returns { audioId, durationSeconds } on success.
  * Returns null when the path/method doesn't match (dispatcher falls through).
@@ -73,11 +113,24 @@ export async function handleTtsRequest(
   env: TtsEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url)
+  if (url.pathname === TTS_VOICES_PATH) {
+    return handleListTtsVoices(request, env, url)
+  }
+  if (url.pathname === TTS_SUPPORTED_LANGUAGES_PATH) {
+    return handleListSupportedLanguages(request, env, url)
+  }
+  if (url.pathname === TTS_DESIGN_PATH) {
+    return handleDesignTtsVoice(request, env)
+  }
+  if (url.pathname === TTS_PUBLISH_PATH) {
+    return handlePublishTtsVoice(request, env)
+  }
   if (url.pathname !== TTS_PATH) return null
   if (request.method !== "POST") {
     return new Response("method not allowed", { status: 405 })
   }
-  if (!env.OMNIVOICE_URL || !env.OMNIVOICE_TOKEN) {
+  const config = inworldConfig(env)
+  if (!config) {
     return new Response("TTS not configured", { status: 503 })
   }
   if (!env.AQUILLA_PG) {
@@ -90,8 +143,12 @@ export async function handleTtsRequest(
     fileId?: string
     cellId?: string
     text?: string
+    voiceId?: string
     referenceAudioId?: string
     language?: string
+    speakingRate?: unknown
+    deliveryMode?: unknown
+    audioQuality?: unknown
   }
   try {
     body = await request.json()
@@ -99,7 +156,7 @@ export async function handleTtsRequest(
     return new Response("expected JSON body", { status: 400 })
   }
 
-  const { projectId, fileId, text, referenceAudioId, language } = body
+  const { projectId, fileId, text, voiceId, referenceAudioId, language, speakingRate, deliveryMode, audioQuality } = body
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
   }
@@ -109,14 +166,16 @@ export async function handleTtsRequest(
   if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
     return new Response("invalid projectId or fileId", { status: 400 })
   }
-  // Bound text size — an authenticated caller could otherwise exhaust the GPU
-  // request timeout with a multi-MB payload.
-  if (text.length > 10_000) {
-    return new Response("text too long (max 10000 chars)", { status: 400 })
+  // Bound text size — Inworld's sync synthesize endpoint caps at 2000 chars.
+  if (text.length > INWORLD_MAX_TEXT_CHARS) {
+    return new Response(`text too long (max ${INWORLD_MAX_TEXT_CHARS} chars)`, { status: 400 })
   }
   // Sanitize the reference id before it becomes part of an R2 key.
   if (referenceAudioId !== undefined && !/^[\w.-]+$/.test(referenceAudioId)) {
     return new Response("invalid referenceAudioId", { status: 400 })
+  }
+  if (voiceId !== undefined && (voiceId.length > 200 || /[\r\n]/.test(voiceId))) {
+    return new Response("invalid voiceId", { status: 400 })
   }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio.
@@ -134,7 +193,6 @@ export async function handleTtsRequest(
   const userId = verified.claims.userId
 
   // Resolve org_id from the project row. Mirrors export-floor.ts pattern.
-  // (sync-worker/src/events/export-floor.ts line 37)
   const db = env.AQUILLA_PG
 
   // Volumetric floor: unlike runTtsGuard below, this actually blocks (see
@@ -159,63 +217,67 @@ export async function handleTtsRequest(
     return Response.json(guard.body, { status: guard.status })
   }
 
-  // Optionally resolve a reference clip for voice cloning.
-  let referenceBytes: ArrayBuffer | undefined
-  let referenceType = "audio/wav"
+  let inworldVoiceId = voiceId?.trim() || undefined
+
+  // Optionally resolve a reference clip and clone it once (cached in R2).
+  // A clone always wins over a stock voiceId — that's the zero-shot path.
   if (referenceAudioId) {
-    // Reference clips live project-scoped at the same path voice-convert uses.
-    const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
-    const refObj = await env.SNAPSHOTS.get(refKey)
-    if (!refObj) return new Response("reference audio not found", { status: 404 })
-    referenceBytes = await refObj.arrayBuffer()
-    referenceType = refObj.httpMetadata?.contentType || referenceType
+    const cacheKey = inworldCloneCacheKey(env, projectId, referenceAudioId)
+    let clonedVoiceId: string | undefined
+    const cached = await env.SNAPSHOTS.get(cacheKey)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(await cached.text()) as { voiceId?: string }
+        if (parsed.voiceId) clonedVoiceId = parsed.voiceId
+      } catch {
+        // Corrupt sidecar — re-clone below.
+      }
+    }
+    if (!clonedVoiceId) {
+      const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
+      const refObj = await env.SNAPSHOTS.get(refKey)
+      if (!refObj) return new Response("reference audio not found", { status: 404 })
+      const referenceBytes = await refObj.arrayBuffer()
+      try {
+        clonedVoiceId = await cloneInworldVoice(config, {
+          displayName: referenceAudioId,
+          audioBytes: referenceBytes,
+          language,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return new Response(message, { status: 502 })
+      }
+      await env.SNAPSHOTS.put(cacheKey, JSON.stringify({ voiceId: clonedVoiceId }), {
+        httpMetadata: { contentType: "application/json" },
+      })
+    }
+    inworldVoiceId = clonedVoiceId
   }
 
-  // Call OmniVoice on Modal.
-  const modalBody = new FormData()
-  modalBody.append("text", text)
-  if (language) modalBody.append("language", language)
-  if (referenceBytes) {
-    modalBody.append(
-      "voice_ref",
-      new Blob([referenceBytes], { type: referenceType }),
-      "reference",
-    )
-  }
-
-  let modalRes: Response
+  let wavBytes: ArrayBuffer
+  let durationSeconds: number
   try {
-    modalRes = await fetch(`${env.OMNIVOICE_URL}/synthesize`, {
-      method: "POST",
-      headers: { "X-Auth-Token": env.OMNIVOICE_TOKEN },
-      body: modalBody,
+    const synth = await synthesizeInworldSpeech(config, {
+      text,
+      voiceId: inworldVoiceId,
+      language,
+      speakingRate,
+      deliveryMode,
+      audioQuality,
     })
+    wavBytes = synth.wavBytes
+    durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0
   } catch (err) {
     console.error("[tts] upstream unreachable:", err)
-    return new Response("TTS upstream unreachable", { status: 502 })
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
   }
-  if (!modalRes.ok) {
-    const detail = await modalRes.text().catch(() => "")
-    return new Response(`TTS failed (${modalRes.status}): ${detail}`.trim(), { status: 502 })
-  }
-
-  const wavBytes = await modalRes.arrayBuffer()
-
-  // Parse the duration header (the metering unit). Guard against a malformed
-  // or absent value: Number("NaN"/"inf"/junk) or a negative would corrupt the
-  // audio_seconds counter (a NaN SUM permanently defeats the daily cap). Clamp
-  // to a finite, non-negative number.
-  const durationHeader = modalRes.headers.get("X-Audio-Duration-Seconds")
-  const parsedDuration = Number(durationHeader)
-  const durationSeconds =
-    durationHeader && Number.isFinite(parsedDuration) ? Math.max(0, parsedDuration) : 0
-  if (!durationHeader || !Number.isFinite(parsedDuration)) {
-    // Our own omnivoice.py always sets this header; a miss means a Modal
-    // contract/version drift. Metering can't account for this clip — surface it
-    // loudly (the spend control silently under-counts otherwise).
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     console.warn(
-      `[tts] missing/invalid X-Audio-Duration-Seconds (got ${JSON.stringify(durationHeader)}) — recording 0s for user ${userId} org ${orgId}`,
+      `[tts] Inworld clip had no parseable duration — recording 0s for user ${userId} org ${orgId}`,
     )
+    durationSeconds = 0
   }
 
   // Write WAV to R2 as a cell-audio object (same layout as voice-convert).
@@ -247,4 +309,210 @@ export async function handleTtsRequest(
     objectName,
     url: `frontier-audio://${objectName}`,
   })
+}
+
+/**
+ * GET /api/v1/voice/tts/supported-languages?projectId=
+ *
+ * Inworld Voice Design catalog (family + accent). Auth is a project-scoped
+ * sync token. The browser never calls Inworld directly.
+ */
+async function handleListSupportedLanguages(
+  request: Request,
+  env: TtsEnv,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  const config = inworldConfig(env)
+  if (!config) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+  const projectId = url.searchParams.get("projectId")?.trim() ?? ""
+  if (!projectId || !isPathSafeId(projectId)) {
+    return new Response("missing or invalid projectId", { status: 400 })
+  }
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+  const verified = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  try {
+    const languages = await listInworldSupportedLanguages(config)
+    return Response.json({ languages })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
+  }
+}
+
+/**
+ * GET /api/v1/voice/tts/voices?projectId=&language=en&language=es
+ *     GET /api/v1/voice/tts/voices?projectId=&all=1
+ *
+ * Returns Inworld SYSTEM voices whose primary language matches any of the
+ * project's target-language lanes. `all=1` skips the language filter.
+ * Auth is a project-scoped sync token.
+ */
+async function handleListTtsVoices(
+  request: Request,
+  env: TtsEnv,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  const config = inworldConfig(env)
+  if (!config) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+  const projectId = url.searchParams.get("projectId")?.trim() ?? ""
+  if (!projectId || !isPathSafeId(projectId)) {
+    return new Response("missing or invalid projectId", { status: 400 })
+  }
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+  const verified = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  const languages = [
+    ...url.searchParams.getAll("language"),
+    ...(url.searchParams.get("languages")?.split(",") ?? []),
+  ].map((v) => v.trim()).filter(Boolean)
+  const allSystem = url.searchParams.get("all") === "1"
+
+  try {
+    const voices = await listInworldVoices(config, languages, { allSystem })
+    return Response.json({ voices })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
+  }
+}
+
+function bearerToken(request: Request): string | null {
+  const header = request.headers.get("Authorization") ?? ""
+  return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+}
+
+/**
+ * POST /api/v1/voice/tts/design
+ *
+ * JSON body: { projectId, designPrompt, designPromptMode?, previewText?, language?, numberOfSamples? }
+ * Returns { previewVoices: [{ voiceId, previewText, previewAudio }] }.
+ * Preview audio is base64 — not written to R2.
+ */
+async function handleDesignTtsVoice(request: Request, env: TtsEnv): Promise<Response> {
+  if (request.method !== "POST") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  const config = inworldConfig(env)
+  if (!config) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+
+  let body: {
+    projectId?: string
+    designPrompt?: string
+    designPromptMode?: string
+    previewText?: string
+    language?: string
+    numberOfSamples?: unknown
+  }
+  try {
+    body = await request.json()
+  } catch {
+    return new Response("expected JSON body", { status: 400 })
+  }
+
+  const projectId = body.projectId?.trim() ?? ""
+  if (!projectId || !isPathSafeId(projectId)) {
+    return new Response("missing or invalid projectId", { status: 400 })
+  }
+  const designPrompt = body.designPrompt?.trim() ?? ""
+  if (designPrompt.length < INWORLD_DESIGN_PROMPT_MIN || designPrompt.length > INWORLD_DESIGN_PROMPT_MAX) {
+    return new Response(
+      `design prompt must be ${INWORLD_DESIGN_PROMPT_MIN}–${INWORLD_DESIGN_PROMPT_MAX} characters`,
+      { status: 400 },
+    )
+  }
+
+  const verified = await verifyTokenForProject(bearerToken(request), projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  try {
+    const designPromptMode = parseInworldDesignPromptMode(body.designPromptMode)
+    const previewVoices = await designInworldVoice(config, {
+      designPrompt,
+      ...(body.previewText !== undefined ? { previewText: body.previewText } : {}),
+      ...(body.language !== undefined ? { language: body.language } : {}),
+      ...(body.numberOfSamples !== undefined ? { numberOfSamples: Number(body.numberOfSamples) } : {}),
+      ...(designPromptMode ? { designPromptMode } : {}),
+    })
+    return Response.json({ previewVoices })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
+  }
+}
+
+/**
+ * POST /api/v1/voice/tts/publish
+ *
+ * JSON body: { projectId, voiceId, displayName?, description? }
+ * Returns { voiceId } of the published library voice.
+ */
+async function handlePublishTtsVoice(request: Request, env: TtsEnv): Promise<Response> {
+  if (request.method !== "POST") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  const config = inworldConfig(env)
+  if (!config) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+
+  let body: {
+    projectId?: string
+    voiceId?: string
+    displayName?: string
+    description?: string
+  }
+  try {
+    body = await request.json()
+  } catch {
+    return new Response("expected JSON body", { status: 400 })
+  }
+
+  const projectId = body.projectId?.trim() ?? ""
+  const voiceId = body.voiceId?.trim() ?? ""
+  if (!projectId || !isPathSafeId(projectId)) {
+    return new Response("missing or invalid projectId", { status: 400 })
+  }
+  if (!voiceId || voiceId.length > 200 || /[\r\n/?#]/.test(voiceId)) {
+    return new Response("invalid voiceId", { status: 400 })
+  }
+
+  const verified = await verifyTokenForProject(bearerToken(request), projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  try {
+    const publishedId = await publishInworldVoice(config, {
+      voiceId,
+      displayName: body.displayName?.trim() || "Designed voice",
+      ...(body.description !== undefined ? { description: body.description } : {}),
+    })
+    return Response.json({ voiceId: publishedId })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
+  }
 }

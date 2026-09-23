@@ -17,6 +17,7 @@
 import {
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react"
 import {
@@ -32,12 +33,13 @@ import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { DockTab } from "@/lib/dock-tab"
+
+export type { DockTab }
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type DockTab = "files" | "agent" | "search" | "voices"
 
 export interface LeftDockProps {
   /** Slot rendered when "files" tab is active */
@@ -175,6 +177,8 @@ export function LeftDock({
   const [internalTab, setInternalTab] = useState<DockTab | null>("files")
 
   const activeTab = controlledTab !== undefined ? controlledTab : internalTab
+  const lastOpenTabRef = useRef<DockTab>(activeTab ?? "files")
+  if (activeTab) lastOpenTabRef.current = activeTab
   const setActiveTab = useCallback(
     (t: DockTab | null) => {
       if (onActiveTabChange) {
@@ -218,7 +222,7 @@ export function LeftDock({
         variant="ghost"
         size="icon-sm"
         aria-label={t("nav.dock.expandSidebar")}
-        onClick={() => setActiveTab("files")}
+        onClick={() => setActiveTab(lastOpenTabRef.current)}
         className="mt-3"
       >
         <PanelLeftOpen className="h-3.5 w-3.5" />

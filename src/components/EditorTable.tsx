@@ -7,9 +7,9 @@ import {
   type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react"
 import {
-  Check, AlertTriangle, AlertCircle,
+  Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Pilcrow,
   PilcrowRight,
@@ -42,8 +42,9 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
-import { deriveParagraphs } from "@/lib/parsers/paragraphs"
+import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
+import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
@@ -57,12 +58,14 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
-import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
+import { createScopedRibbonCache } from "@/lib/health/scoped-ribbon"
 import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
+import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
+import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
   type BacktranslationActionSource,
@@ -73,6 +76,7 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -85,6 +89,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
+import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
@@ -151,11 +156,12 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
   importDisplayLabel,
-  verseLabelFromCanonical,
+  verseRangeLabel,
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
@@ -179,6 +185,7 @@ import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -506,8 +513,8 @@ function SynthStatusBadge({
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
       error.category === "sign-in-required" ||
-      error.category === "omnivoice-not-configured" ||
-      error.category === "omnivoice-failed" ||
+      error.category === "hosted-tts-not-configured" ||
+      error.category === "hosted-tts-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
       error.category === "gemini-failed" ||
@@ -839,6 +846,9 @@ interface EditorTableProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -912,7 +922,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -1314,24 +1324,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // instead of a progress ring, while keeping the three evidence stages
   // separate so validated 100s never inflate nearby automatic estimates.
   //
-  // AQU-1104: inputs are cached per cell on the store's per-cell version, so a
-  // commit re-derives only the cells it touched instead of every view in the
-  // file. The smoothing pass itself still runs over the whole list; it is a
-  // few arithmetic operations per cell.
-  // The cache is keyed to the store instance: per-cell versions are only
-  // comparable within one store, so a new store gets a fresh cache.
-  const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
+  // Derive only scopes requested by rendered rows. Neighboring scopes are
+  // included in full so seam blending exactly matches whole-file smoothing.
+  // A new store gets a fresh cache; each version gets fresh readers while
+  // unchanged points retain identity for row memoization.
+  const ribbonInputCache = useMemo(() => createScopedRibbonCache(), [cellStore])
+  const ribbonIndexById = useMemo(() => new Map(displayCellIds.map((id, index) => [id, index])), [displayCellIds])
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const healthRibbonByCellId = useMemo(() =>
     !healthCalculationsEnabled ? EMPTY_RIBBON :
-    readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
+    readAtVersion(cellStoreVersion, () => ribbonInputCache.read<CellData>(displayCellIds, ribbonIndexById, {
       getCellVersion: cellStore.getCellVersion,
       getCell: (id) => cellStore.getCellView(id),
       sourceText: effectiveSourceText,
       health: (id) => healthMap.get(id),
       examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
     })),
-  [cellStore, cellStoreVersion, displayCellIds, examples, healthCalculationsEnabled, healthMap, ribbonInputCache])
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthCalculationsEnabled, healthMap, ribbonInputCache, ribbonIndexById])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
@@ -1884,14 +1893,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const milestoneNavigationItems = useMemo<MilestoneNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {
       return milestoneNavigation.map((entry) => {
-        const verseLabels = entry.cellIds
-          .map((cellId) => verseLabelFromCanonical(cellStore.getCellView(cellId)?.group))
-          .filter((label): label is string => Boolean(label))
-        const firstVerse = verseLabels[0] ?? null
-        const lastVerse = verseLabels[verseLabels.length - 1] ?? null
-        const range = firstVerse && lastVerse
-          ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
-          : null
+        const range = verseRangeLabel(entry.cellIds, (cellId) => cellStore.getCellView(cellId)?.group)
         const unitName = entry.kind === "time-range" ? "segment" : "cell"
         const description = entry.kind === "story" && range
           ? `Frames ${range}`
@@ -1928,106 +1930,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
 
-  // AQU-610: sequential (non-scripture) numbering counts only *numbered*
-  // (non-paratext) cells, so the count starts at 1 at the first real content
-  // cell and stays gap-free even when front matter, introductions, or other
-  // paratextual cells sit before/among the content. Scripture files number by
-  // canonical verse ref and don't consult this map.
-  // AQU-1146: per-cell "does this cell get a sequential number" is a
-  // structural fact (type + import metadata) that never changes on an
-  // ordinary target edit — cache it per cell, keyed by the store's per-cell
-  // version (same idiom as `ribbonInputCache` in ribbon-inputs.ts), so a
-  // commit that touches a handful of cells re-derives only those cells
-  // instead of re-resolving every cell view in the file. The ordinal count
-  // itself is still one cheap linear pass — only the `getCellView` +
-  // metadata check is skipped for unchanged cells.
-  const sequentialEntryCacheRef = useRef<Map<string, { version: number; isNumbered: boolean }>>(new Map())
-  const sequentialNumberByCellId = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => {
-      const cache = sequentialEntryCacheRef.current
-      const nextCache = new Map<string, { version: number; isNumbered: boolean }>()
-      const map = new Map<string, number>()
-      let ordinal = 0
-      for (const id of fileCellIds) {
-        const version = cellStore.getCellVersion(id)
-        let entry = cache.get(id)
-        if (!entry || entry.version !== version) {
-          const view = cellStore.getCellView(id)
-          const isNumbered = view != null
-            && view.type !== "paratext"
-            && view.type !== "heading"
-            && importDisplayLabel(view.metadata) !== null
-          entry = { version, isNumbered }
-        }
-        nextCache.set(id, entry)
-        if (entry.isNumbered) map.set(id, ++ordinal)
-      }
-      sequentialEntryCacheRef.current = nextCache
-      return map
-    }),
-  [cellStore, cellStoreVersion, fileCellIds])
-
-  // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
-  // info, keyed by the group's start cell id — drives the "Draft paragraph"
-  // rail button's visibility/label/dialog copy and its in-flight guard. Only
-  // start cells (the only ones the button can render on) need an entry, but
-  // deriveParagraphs needs the full ordered per-file cell list to find file/
-  // paragraph boundaries, so this walks fileCellIds once, same idiom as
-  // sequentialNumberByCellId above. Legacy imports (no paragraphStart flags
-  // anywhere) still produce one group per file — harmless, since the rail
-  // button is separately gated on `cell.paragraphStart === true`, which never
-  // holds for those cells.
-  //
-  // `draftableCount` excludes already-validated cells (the same `status ===
-  // "validated"` signal completeParagraph's skip logic uses — kept
-  // consistent so the dialog's "N of M" copy never lies) — see AQU
-  // (coordinator adjudication) review of the original "Draft this paragraph?
-  // N cells…" copy, which used the full group size even when some cells
-  // were validated and would be skipped.
-  //
-  // `memberIds` is every cell id in the group (including the start cell
-  // itself) — used ONLY by MemoizedRow to derive a per-row `groupInFlight`
-  // boolean from the `completing` map (any member cell mid-draft ⇒ the
-  // button disables/pulses, and a click can't re-fire while a previous
-  // click's fan-out is still running).
-  // AQU-1146: same per-cell version cache idiom as sequentialNumberByCellId
-  // above. `fileId`/`paragraphStart` are structural (import-time) facts;
-  // `validated` changes on an ordinary commit but is cheap to carry in the
-  // same cached entry, which also means the draftable-count pass below reads
-  // it from the cache instead of calling `getCellView` a second time per
-  // group member.
-  const paragraphEntryCacheRef = useRef<
-    Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>
-  >(new Map())
-  const paragraphGroupInfoByCellId = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => {
-      const cache = paragraphEntryCacheRef.current
-      const nextCache = new Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>()
-      const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
-      for (const id of fileCellIds) {
-        const version = cellStore.getCellVersion(id)
-        let entry = cache.get(id)
-        if (!entry || entry.version !== version) {
-          const view = cellStore.getCellView(id)
-          if (!view) continue
-          entry = { version, fileId: view.fileId, paragraphStart: view.paragraphStart, validated: view.status === "validated" }
-        }
-        nextCache.set(id, entry)
-        orderedCells.push({ id, fileId: entry.fileId, paragraphStart: entry.paragraphStart })
-      }
-      paragraphEntryCacheRef.current = nextCache
-      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
-      for (const group of deriveParagraphs(orderedCells)) {
-        if (group.length <= 1) continue
-        let draftableCount = 0
-        for (const id of group) {
-          if (!nextCache.get(id)?.validated) draftableCount++
-        }
-        map.set(group[0], { size: group.length, draftableCount, memberIds: group })
-      }
-      return map
-    }),
-  [cellStore, cellStoreVersion, fileCellIds])
+  // Numbering and paragraph groups depend on structure/validation, not save
+  // timestamps or ordinary text edits. One version scan serves both caches;
+  // unchanged inputs retain their maps instead of rebuilding the whole file.
+  const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const { sequentialNumberByCellId, paragraphGroupInfoByCellId } = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => structureCache.read(fileCellIds, cellStore)),
+  [cellStore, cellStoreVersion, fileCellIds, structureCache])
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
@@ -2355,7 +2264,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // file and go through EditorActionsContext instead; a fresh closure
           // per row would re-render every rendered row on every store bump,
           // which is the whole-file churn round 6 went into removing.
-          const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore)
+          const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore, isTimeOrdered && hasTiming(cell))
           return (
       <div
         data-cell-id={cell.id}
@@ -2488,7 +2397,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+          canApproveConcept={canApproveConcept}
+          onSetUpAffixes={onSetUpAffixes}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2911,51 +2821,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  * two surfaces asking the same question does not make them the same control.
  */
 /**
- * AQU-1068 item 5: the room a line has, for the timestamps form.
- *
- * Read off the rows on either side IN DISPLAY ORDER, which is what the person
- * typing is looking at — on a time-ordered file the lens has already sorted by
- * the clock, so the neighbour above really is the line before.
- *
- * A missing neighbour is `null`, not 0: the first line may start at the top of
- * the file and the last may run as long as it likes, and a 0 would clamp both
- * to nothing. A neighbour with no timings of its own is also null — an untimed
- * row bounds nothing, which is exactly the mixed file `untimedInTimeLens`
- * draws with a dashed edge.
- */
-function timestampNeighbours(
-  index: number,
-  displayCellIds: readonly string[],
-  cellStore: CellStore,
-): { prevStartSec: number | null; nextStartSec: number | null } {
-  // Their STARTS, because the start is the only thing bounded: a line may
-  // overlap its neighbours as far as it likes, but the order of the starts is
-  // what the media lens and every timed export sort on.
-  //
-  // Walks OUTWARD past rows with no timing of their own. A timed file can hold
-  // untimed rows (the dashed edge `untimedInTimeLens` draws) and one of those
-  // bounds nothing, so stopping at the first would invent a limit where there
-  // is none. The scan ends at the first timed row, which is its neighbour in
-  // all but a file that is almost entirely untimed — and there the popover is
-  // not offered at all.
-  const startOf = (id: string | undefined): number | null => {
-    if (!id) return null
-    // Seconds already — `startTime` on the view is what the whole timeline
-    // works in; the milliseconds live on the row underneath.
-    const sec = cellStore.getCellView(id)?.startTime
-    return typeof sec === "number" ? sec : null
-  }
-  const scan = (step: -1 | 1): number | null => {
-    for (let at = index + step; at >= 0 && at < displayCellIds.length; at += step) {
-      const sec = startOf(displayCellIds[at])
-      if (sec !== null) return sec
-    }
-    return null
-  }
-  return { prevStartSec: scan(-1), nextStartSec: scan(1) }
-}
-
-/**
  * AQU-1068 item 5: what the "Edit timestamps" entry needs.
  *
  * The bounds are the NEIGHBOURS' edges, passed in rather than looked up, so
@@ -3240,10 +3105,12 @@ function CellSourceMenu({
               onClick={(e) => e.stopPropagation()}
               className={cn(
                 // AQU-1134: the term action rail pops up over this corner and
-                // used to render BEHIND it. The rail sits at z-20, so the
-                // menu's own button has to stay below that — it was z-10 as
-                // the pencil and stays there.
-                "absolute end-1 top-1 z-10 flex size-6 shrink-0 items-center justify-center rounded-md",
+                // must render in FRONT of it. Both layers are owned by
+                // source-cell-layers.ts — don't hand-edit this one, the bug
+                // was the two being equal (z-10 each), which handed the
+                // painting order to DOM order and put this button on top.
+                "absolute end-1 top-1 flex size-6 shrink-0 items-center justify-center rounded-md",
+                SOURCE_CELL_MENU_Z,
                 "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
                 // Present but quiet until the row is reached for, exactly as
                 // the pencil was. `open` pins it so the trigger does not fade
@@ -3546,6 +3413,9 @@ interface MemoizedRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3623,7 +3493,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3785,6 +3655,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
         canApproveConcept={canApproveConcept}
+        onSetUpAffixes={onSetUpAffixes}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3965,6 +3836,9 @@ interface EditorRowProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
+  /** AQU-1271: open project settings at the terminology section so the user can
+   *  configure the prefixes/suffixes the add-popover's matcher offers. */
+  onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4737,6 +4611,76 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
   )
 }
 
+// ---------------------------------------------------------------------------
+// SourceTagChips — small read-only chips from the extensible
+// `cell.metadata.tags` bucket (a flat list of labels). Importers that know a
+// cell's category — the SDBH lexicon's headword / "Contextual meaning" / Gloss
+// tags (AQU-793) — put it here so the reader sees it on the row itself instead
+// of opening the metadata drawer. Non-array or empty values render nothing.
+// ---------------------------------------------------------------------------
+function SourceTagChips({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const tags = (metadata as { tags?: unknown } | null | undefined)?.tags
+  if (!Array.isArray(tags)) return null
+  const labels = tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="source-tag-chips" className="flex shrink-0 items-center gap-1">
+      {labels.map((tag, i) => (
+        <span
+          key={`${tag}-${i}`}
+          dir="auto"
+          className="rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {tag}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MetadataFieldLabels — AQU-1369. The metadata keys the project switched on
+// from a cell's Metadata tab ("show on cells"), rendered as small labels on
+// every row that carries the key. Rows without the key, or whose value has no
+// one-line label (nested objects), render nothing for it.
+// ---------------------------------------------------------------------------
+function MetadataFieldLabels({
+  projectId,
+  metadata,
+}: {
+  projectId: string
+  metadata?: Record<string, unknown> | null
+}) {
+  const fields = useCellDisplayFields(projectId)
+  if (!metadata || fields.length === 0) return null
+  const labels = fields.flatMap((key) => {
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) return []
+    const text = displayFieldLabel(metadata[key])
+    return text == null ? [] : [{ key, text }]
+  })
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="metadata-field-labels" className="flex shrink-0 items-center gap-1">
+      {labels.map(({ key, text }) => (
+        <span
+          key={key}
+          dir="auto"
+          title={`${key}: ${text}`}
+          data-metadata-key={key}
+          className="max-w-[12rem] truncate rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {text}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Stable stand-in when the table is rendered without a token minter (tests,
+ *  local-only projects): a read that cannot authenticate simply returns nothing.
+ *  Module-scope so it never re-triggers a row's read effect. */
+const NO_TOKEN = () => Promise.resolve(null)
+
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
@@ -4758,12 +4702,13 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
   getAlignmentModel,
+  getTokenForFile,
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
@@ -4785,6 +4730,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
@@ -5582,6 +5528,12 @@ function EditorRow({
     // lives inside this source cell, so its mouseup bubbles here after focus
     // has already collapsed the browser selection (AQU-1006 / AQU-260).
     if (!text) return
+    // The context line (reference, cell label, tag chips, metadata field
+    // labels — AQU-1369) is chrome, not source text: selecting any of it must
+    // not offer "Ask AI" / "Add to terminology".
+    const anchor = sel?.anchorNode
+    const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
+    if (anchorEl?.closest("[data-selection-ignore]")) return
     capturedSelectionRef.current = text
     setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
@@ -5998,10 +5950,7 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking =
-    castGutter &&
-    cell.type !== "paratext" &&
-    cell.type !== "heading"
+  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -6011,6 +5960,7 @@ function EditorRow({
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+  const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
@@ -6057,6 +6007,19 @@ function EditorRow({
     if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
   }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
+
+  // AQU-462: original-language morphology for the Macula Hebrew/Greek source
+  // behind this row. Gated on the same open-alignment condition as the model
+  // above — a Macula book holds tens of thousands of morph rows, so this is a
+  // read for the row a translator is looking at, never for the file. Files with
+  // no morphology answer with an empty list and the strip stays hidden.
+  const { words: originalWords } = useCellMorph({
+    enabled: btAlignmentOpen && expanded && expansionTab === "backtranslation",
+    projectId: project.id,
+    fileId: cell.fileId ?? null,
+    cellId: cell.id,
+    getTokenForFile: getTokenForFile ?? NO_TOKEN,
+  })
 
   // Edit history is reached via the single History control on the cell action
   // rail (opens the full HistoryDrawer). The audit trail lives in the
@@ -6309,13 +6272,12 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // FRO-297: Accessible label for the target editor textbox.
-  // Format: "<ref> — <state>" so screen readers announce context on focus.
-  // Uses cell.context (the canonical reference like "GEN 1:1") when available,
-  // falls back to globalReferences[0], then rowIndex+1.
-  const cellRef = cell.context?.trim()
-    || cell.globalReferences?.[0]?.trim()
-    || `row ${rowIndex + 1}`
+  // Human references help people and DOM agents identify a cell. Importers
+  // also store opaque UUIDs as canonical refs; those carry no useful context.
+  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
+    .map((value) => value?.trim())
+    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
       cellRef={cellRef}
@@ -6331,11 +6293,14 @@ function EditorRow({
     />
   )
   const cellStateLabel =
-    cell.status === "validated" ? "validated" :
-    cell.status === "empty" ? "empty" :
-    cell.activeValidators.includes(username) ? "self-validated" :
-    "unvalidated"
-  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+    cell.status === "validated" ? t("editor.state.validated") :
+    cell.status === "empty" ? t("editor.state.empty") :
+    cell.activeValidators.includes(username) ? t("editor.state.selfValidated") :
+    t("editor.state.unvalidated")
+  const sourceExcerpt = cell.original.replace(/\s+/g, " ").trim().slice(0, 120)
+  const editorAriaLabel = sourceExcerpt
+    ? t("editor.row.translationAria", { ref: cellRef, source: sourceExcerpt, state: cellStateLabel })
+    : t("editor.row.editorAria", { ref: cellRef, state: cellStateLabel })
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -6472,6 +6437,7 @@ function EditorRow({
                     castName={gutterCastName}
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
+                    showLanguageBadge={gutterLanguageBadge}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
                     onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
                   />
@@ -6653,7 +6619,10 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
-        canApproveConcept={canApproveConcept}
+                canApproveConcept={canApproveConcept}
+                cellStore={previewCellStore}
+                termMatching={project.termMatching}
+                onSetUpAffixes={onSetUpAffixes}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
@@ -6689,7 +6658,7 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               {/* AQU-646: the character, on the SOURCE side too (Sam,
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
@@ -6721,6 +6690,8 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              <SourceTagChips metadata={cell.metadata} />
+              <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -6739,11 +6710,41 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml
-                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
-                idmlStyleCatalog={idmlStyleCatalog}
-                idmlParagraphStyleId={idmlParagraphStyleId}
-              />
+              // AQU-1135: a formatted source cell renders as sanitized HTML, so
+              // it cannot host the per-match TermLookupPopover triggers the
+              // plain-text path builds. It gets the highlights as decorated
+              // markup instead, and the click is delegated here — the same
+              // `.term-chip-host[data-source-term]` contract TranslatedEditor
+              // uses for the target lane, landing on the same popover.
+              <div
+                onClick={(event) => {
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+              >
+                <SanitizedRichHtml
+                  html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                  idmlStyleCatalog={idmlStyleCatalog}
+                  idmlParagraphStyleId={idmlParagraphStyleId}
+                  concepts={terminologyConcepts}
+                />
+              </div>
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6886,6 +6887,7 @@ function EditorRow({
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
                     terminologyConcepts={terminologyConcepts}
+                    termMatching={project.termMatching}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -6915,7 +6917,7 @@ function EditorRow({
                         : null)
                     }}
                     onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
+                      if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
                       requestTargetEdit()
@@ -7157,7 +7159,7 @@ function EditorRow({
               overflowOpen={railOverflowOpen}
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
-              overflowLabel={t("editor.rail.moreActions")}
+              overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
               // AQU-200: AI-generate is the one action that stays a direct
               // button. Validate is the other always-visible action, and it
               // already lives in the row's left gutter — it is not moved.
@@ -7496,6 +7498,7 @@ function EditorRow({
                   onAlignmentOpenChange={setBtAlignmentOpen}
                   alignmentModel={alignmentModelForExpansion}
                   showAlignment={Boolean(getAlignmentModel)}
+                  originalWords={originalWords}
                   onBacktranslate={onBacktranslate}
                   onSaveBacktranslation={onSaveBacktranslation}
                   onAlignmentSeedChange={onAlignmentSeedChange}
@@ -7681,68 +7684,15 @@ function EditorRow({
                   : undefined,
               disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
               renderContent: () => (
-                <div className="flex flex-col gap-1.5">
-                  {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      {t("editor.issues.none")}
-                    </p>
-                  ) : (
-                    <>
-                      {cellInfractions.map((inf) => {
-                        const rule = ruleMap.get(inf.ruleId)
-                        const isMajor = rule?.severity === "major"
-                        const Icon = isMajor ? AlertTriangle : AlertCircle
-                        return (
-                          <button
-                            key={inf.ruleId}
-                            type="button"
-                            onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
-                          >
-                            <Icon
-                              className={cn(
-                                "mt-0.5 h-3 w-3 shrink-0",
-                                isMajor ? "text-red-500" : "text-amber-500",
-                              )}
-                            />
-                            <span className="flex-1">
-                              <span className="font-medium text-foreground">
-                                {rule ? translateRuleName(rule, t) : inf.ruleId}
-                              </span>
-                              <span className="ms-1 text-muted-foreground">
-                                — {formatInfractionReason(inf, t)}
-                              </span>
-                            </span>
-                            <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
-                          </button>
-                        )
-                      })}
-                      {waivedInfractions.length > 0 && (
-                        <>
-                          <div className="mt-2 px-1 text-xs text-muted-foreground">
-                            {t("editor.issues.waived")}
-                          </div>
-                          {waivedInfractions.map((inf) => {
-                            const rule = ruleMap.get(inf.ruleId)
-                            return (
-                              <button
-                                key={`waived-${inf.ruleId}`}
-                                type="button"
-                                onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
-                              >
-                                <Check className="mt-0.5 h-3 w-3 shrink-0" />
-                                <span className="flex-1">
-                                  {rule ? translateRuleName(rule, t) : inf.ruleId}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
+                <CellIssuesTab
+                  activeInfractions={cellInfractions}
+                  waivedInfractions={waivedInfractions}
+                  ruleMap={ruleMap}
+                  editable={editable}
+                  onOpenRule={setOpenRuleId}
+                  onWaive={handleWaive}
+                  onUnwaive={handleUnwaive}
+                />
               ),
             },
             // Metadata — untranslated import columns (DCS TSV supportReference/
@@ -7754,7 +7704,12 @@ function EditorRow({
                     value: "metadata",
                     icon: <Braces className="h-3 w-3" />,
                     label: t("editor.expansion.metadata"),
-                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                    renderContent: () => (
+                      <CellMetadataTab
+                        metadata={cell.metadata as Record<string, unknown>}
+                        projectId={project.id}
+                      />
+                    ),
                   },
                 ]
               : []),

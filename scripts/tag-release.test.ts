@@ -19,7 +19,7 @@ describe("tag-release.sh", () => {
     return r.stdout.trim()
   }
   const run = (cwd = work) =>
-    spawnSync("bash", [SCRIPT], { cwd, encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })
+    spawnSync("bash", [SCRIPT], { cwd, encoding: "utf8", env: { ...process.env } })
   const commit = (msg: string) => git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-qm", msg)
   const originTags = () => git(origin, "tag", "--list").split("\n").filter(Boolean).sort()
 
@@ -79,5 +79,19 @@ describe("tag-release.sh", () => {
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain("release/YYYY/MM/DD")
     expect(originTags()).toEqual([])
+  })
+
+  it("includes preview URL and metadata in the annotated tag message", () => {
+    const result = run()
+    expect(result.status).toBe(0)
+    const tagMessage = git(work, "tag", "-l", "--format=%(contents)", "2026.09.23.00")
+    expect(tagMessage).toContain("Production release 2026.09.23.00")
+    expect(tagMessage).toContain("Release branch: release/2026/09/23")
+    expect(tagMessage).toContain("Deployed commit:")
+    expect(tagMessage).toContain("Commit URL: https://github.com/genesis-ai-dev/aquilla/commit/")
+    expect(tagMessage).toContain("Checks URL: https://github.com/genesis-ai-dev/aquilla/commit/")
+    expect(tagMessage).toContain("Preview URL:")
+    // The preview URL should contain the deterministic alias for the branch
+    expect(tagMessage).toMatch(/Preview URL:.*ci-release-2026-09-23-[a-f0-9]{8}.*aquilla-web-preview.*workers\.dev/)
   })
 })

@@ -1006,25 +1006,19 @@ export const importExport = defineNamespace({
       one: "{count} conflict",
       other: "{count} conflicts",
     }),
-    "importExport.review.contestedWarning": plural({
-      one: "{count} row competed with another cue for the same line and was left unticked. " +
-        "Open Contested on it to compare and swap.",
-      other: "{count} rows competed with another cue for the same line and were left " +
-        "unticked. Open Contested on a row to compare and swap.",
-    }),
     "importExport.review.contestedToggleHint": "Compare with the other cue that fits this line",
     "importExport.review.deselectAll": "Deselect all",
+    "importExport.review.frameRateAdjusted": plural({
+      one: "Frame rate adjusted (lines up {count} more)",
+      other: "Frame rate adjusted (lines up {count} more)",
+    }),
     "importExport.review.importCellCount": plural({
       one: "Import {count} cell",
       other: "Import {count} cells",
     }),
-    "importExport.review.looseFitWarning": "Many cues only partly overlap the lines they were paired with. The file may be " +
-      "offset in time, or cut into different lines than this one. Check the pairings " +
-      "before importing.",
+    "importExport.review.looseFitWarning": "Many cues only partly overlap their lines. Check the pairings.",
     "importExport.review.matchedCount": "{count} matched",
-    "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
-      "order. Check the source text next to each row to confirm alignment " +
-      "before importing.",
+    "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
@@ -1037,12 +1031,6 @@ export const importExport = defineNamespace({
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
     "importExport.review.rowSharedTimingPill": "Same timing",
     "importExport.review.rowTimingDiffers": "Timing differs",
-    "importExport.review.sharedTimingWarning": plural({
-      one: "{count} row has exactly the same timing as another cue, so only file order " +
-        "decided its line. It was left unticked.",
-      other: "{count} rows have exactly the same timing as another cue, so only file order " +
-        "decided their lines. They were left unticked.",
-    }),
     "importExport.review.showAll": "All {count}",
     "importExport.review.showFilterAriaLabel": "Which rows to show",
     "importExport.review.showToCheck": "To check {count}",
@@ -1053,27 +1041,21 @@ export const importExport = defineNamespace({
     "importExport.review.swap": "Swap",
     "importExport.review.swapHint": "Put this cue on this line instead",
     "importExport.review.matching": "Matching lines…",
-    "importExport.review.offsetAlsoRateNamed": "This also adjusts them from {fromFps} to {toFps} frames per second.",
-    "importExport.review.offsetAlsoRateUnnamed": "This also stretches them by {percent}.",
     "importExport.review.offsetEarlier": plural({
-      one: "Shift the uploaded file's timings {amount} earlier, which lines up {count} more line.",
-      other: "Shift the uploaded file's timings {amount} earlier, which lines up {count} more lines.",
+      one: "Shift timings {amount} earlier (lines up {count} more)",
+      other: "Shift timings {amount} earlier (lines up {count} more)",
+    }),
+    "importExport.review.offsetEarlierWithRate": plural({
+      one: "Shift timings {amount} earlier and adjust frame rate (lines up {count} more)",
+      other: "Shift timings {amount} earlier and adjust frame rate (lines up {count} more)",
     }),
     "importExport.review.offsetLater": plural({
-      one: "Shift the uploaded file's timings {amount} later, which lines up {count} more line.",
-      other: "Shift the uploaded file's timings {amount} later, which lines up {count} more lines.",
+      one: "Shift timings {amount} later (lines up {count} more)",
+      other: "Shift timings {amount} later (lines up {count} more)",
     }),
-    "importExport.review.timebaseNamed": plural({
-      one: "Timings in the uploaded file were adjusted from {fromFps} to {toFps} frames per " +
-        "second, which lined up {count} more line.",
-      other: "Timings in the uploaded file were adjusted from {fromFps} to {toFps} frames per " +
-        "second, which lined up {count} more lines.",
-    }),
-    "importExport.review.timebaseUnnamed": plural({
-      one: "Timings in the uploaded file were adjusted by {percent}, which lined up {count} " +
-        "more line.",
-      other: "Timings in the uploaded file were adjusted by {percent}, which lined up {count} " +
-        "more lines.",
+    "importExport.review.offsetLaterWithRate": plural({
+      one: "Shift timings {amount} later and adjust frame rate (lines up {count} more)",
+      other: "Shift timings {amount} later and adjust frame rate (lines up {count} more)",
     }),
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
@@ -2811,19 +2793,6 @@ export const importExport = defineNamespace({
           count: "Number of pairings that would overwrite existing translated text.",
         },
       },
-      "importExport.review.contestedWarning": {
-        description:
-          "Amber warning above the match-review list. Some cues from the uploaded " +
-          "subtitle file lay mostly on the same line of the open file as another cue, " +
-          "so one of them ended up on a different line or none. From timing alone " +
-          "either could be the right one, so those rows were left unticked. Each has " +
-          "a \"Contested\" pill that opens a comparison with the other cue and a Swap " +
-          "button; \"Contested\" here must be the same word as on that pill " +
-          "(importExport.review.rowContestedPill).",
-        placeholders: {
-          count: "Number of review rows involved in such a contest.",
-        },
-      },
       "importExport.review.contestedToggleHint": {
         description:
           "Tooltip on the \"Contested\" pill of a match-review row. Clicking the pill " +
@@ -2837,6 +2806,16 @@ export const importExport = defineNamespace({
           "everything is already ticked, so the two should read as a matched pair " +
           "of opposite imperative commands.",
       },
+      "importExport.review.frameRateAdjusted": {
+        description:
+          "Grey note above the match-review list: the uploaded subtitle file was made " +
+          "at a different video frame rate than the open file, so its timings were " +
+          "rescaled before pairing. The number is how many more lines lined up as a " +
+          "result. Keep it short.",
+        placeholders: {
+          count: "How many more lines lined up after the adjustment.",
+        },
+      },
       "importExport.review.importCellCount": {
         description:
           "Primary button in the footer of the match-review step, which saves the " +
@@ -2849,11 +2828,9 @@ export const importExport = defineNamespace({
       },
       "importExport.review.looseFitWarning": {
         description:
-          "Amber warning above the match-review list, shown when a large share of the " +
-          "pairings between uploaded subtitle cues and the open file's lines barely " +
-          "overlap in time. Usually the uploaded file's timings are shifted, or its " +
-          "translator split the dialogue into different lines. Asks the user to check " +
-          "the pairings before saving anything.",
+          "Amber warning above the match-review list: many uploaded cues only partly " +
+          "overlap the lines they were paired with, as when the file is offset in time " +
+          "or cut into different lines than the open file. Two short sentences.",
       },
       "importExport.review.matchedCount": {
         description:
@@ -2867,12 +2844,10 @@ export const importExport = defineNamespace({
       },
       "importExport.review.orderMatchWarning": {
         description:
-          "Amber warning above the match-review list, shown when no reference " +
-          "identifying each line was available — either the user did not nominate " +
-          "a spreadsheet column holding one, or the uploaded format (a subtitle " +
-          "file) has none. It explains that rows were therefore paired top to " +
-          "bottom by position, which is easy to get wrong, and asks the user to " +
-          "eyeball the original text shown beside each row before committing.",
+          "Amber warning above the match-review list when rows were paired with lines " +
+          "by position (row 1 to line 1, row 2 to line 2) because neither side had a " +
+          "reference or timings to go by. Asks the user to check each row's source " +
+          "text, shown beside it. Two short sentences.",
       },
       "importExport.review.reasonBackwardsTimecode": {
         description:
@@ -2957,16 +2932,6 @@ export const importExport = defineNamespace({
           "has exactly the same start and end time as another uploaded cue, as when " +
           "two people speak at once. Two words at most.",
       },
-      "importExport.review.sharedTimingWarning": {
-        description:
-          "Amber warning above the match-review list. Some uploaded cues share an " +
-          "identical time range, as when two people speak at once, so timing could " +
-          "not tell them apart and their order in the file decided which line each " +
-          "went to. Those rows were left unticked for the user to check.",
-        placeholders: {
-          count: "Number of review rows sharing an identical time range with another cue.",
-        },
-      },
       "importExport.review.showAll": {
         description:
           "First option of a two-way switch above the match-review list: show every " +
@@ -3018,71 +2983,56 @@ export const importExport = defineNamespace({
           "review list appears. Also read out by screen readers while the list " +
           "re-pairs after the shift tickbox changes. Short, ends with an ellipsis.",
       },
-      "importExport.review.offsetAlsoRateNamed": {
-        description:
-          "Second sentence of the tickbox label that offers to shift the uploaded " +
-          "subtitle file's timings: the same correction also rescales its timings " +
-          "from one video frame rate to another. \"Them\" is the file's timings.",
-        placeholders: {
-          fromFps: "Frame rate the uploaded file's timings were authored at, e.g. \"25\". Keep as is.",
-          toFps: "Frame rate the timings are moved onto, e.g. \"23.976\". Keep as is.",
-        },
-      },
-      "importExport.review.offsetAlsoRateUnnamed": {
-        description:
-          "Second sentence of the tickbox label that offers to shift the uploaded " +
-          "subtitle file's timings: the same correction also stretches or shrinks " +
-          "them by a small percentage, to undo a frame-rate mismatch whose exact " +
-          "rates can't be named. \"Them\" is the file's timings.",
-        placeholders: {
-          percent: "Signed percentage the timings are scaled by, e.g. \"+0.1%\".",
-        },
-      },
       "importExport.review.offsetEarlier": {
         description:
           "Label of a tickbox above the match-review list. Every timing in the " +
           "uploaded subtitle file is late by the same amount, so moving them all " +
-          "earlier pairs far more cues with the right line. Ticked, the pairing below " +
-          "uses the shifted timings; unticked, it uses them as delivered. Only the " +
-          "pairing changes: the open file's own timings are never altered.",
+          "earlier pairs far more cues with the right line. Ticked, the pairing " +
+          "below uses the corrected timings; unticked, it uses them as delivered. Only " +
+          "the pairing changes: the open file's own timings are never altered. Keep it short.",
         placeholders: {
           amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
-          count: "How many more lines are paired closely with the shift applied.",
+          count: "How many more lines pair closely with the correction applied.",
+        },
+      },
+      "importExport.review.offsetEarlierWithRate": {
+        description:
+          "Label of a tickbox above the match-review list. Every timing in the " +
+          "uploaded subtitle file is late by the same amount, so moving them all " +
+          "earlier pairs far more cues with the right line. The same correction also " +
+          "rescales the file's timings from one video frame rate to another " +
+          "(\"adjust frame rate\"). Ticked, the pairing " +
+          "below uses the corrected timings; unticked, it uses them as delivered. Only " +
+          "the pairing changes: the open file's own timings are never altered. Keep it short.",
+        placeholders: {
+          amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
+          count: "How many more lines pair closely with the correction applied.",
         },
       },
       "importExport.review.offsetLater": {
         description:
           "Label of a tickbox above the match-review list. Every timing in the " +
           "uploaded subtitle file is early by the same amount, so moving them all " +
-          "later pairs far more cues with the right line. Ticked, the pairing below " +
-          "uses the shifted timings; unticked, it uses them as delivered. Only the " +
-          "pairing changes: the open file's own timings are never altered.",
+          "later pairs far more cues with the right line. Ticked, the pairing " +
+          "below uses the corrected timings; unticked, it uses them as delivered. Only " +
+          "the pairing changes: the open file's own timings are never altered. Keep it short.",
         placeholders: {
           amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
-          count: "How many more lines are paired closely with the shift applied.",
+          count: "How many more lines pair closely with the correction applied.",
         },
       },
-      "importExport.review.timebaseNamed": {
+      "importExport.review.offsetLaterWithRate": {
         description:
-          "Note above the match-review list: the uploaded subtitle file was authored " +
-          "at a different video frame rate than the open file, so every one of its " +
-          "timings was rescaled before pairing. Names both frame rates and how many " +
-          "more lines lined up as a result.",
+          "Label of a tickbox above the match-review list. Every timing in the " +
+          "uploaded subtitle file is early by the same amount, so moving them all " +
+          "later pairs far more cues with the right line. The same correction also " +
+          "rescales the file's timings from one video frame rate to another " +
+          "(\"adjust frame rate\"). Ticked, the pairing " +
+          "below uses the corrected timings; unticked, it uses them as delivered. Only " +
+          "the pairing changes: the open file's own timings are never altered. Keep it short.",
         placeholders: {
-          fromFps: "Frame rate the uploaded file's timings were authored at, e.g. \"25\". Keep as is.",
-          toFps: "Frame rate the timings were moved onto, e.g. \"23.976\". Keep as is.",
-          count: "How many more lines lined up after the adjustment.",
-        },
-      },
-      "importExport.review.timebaseUnnamed": {
-        description:
-          "Note above the match-review list: every timing in the uploaded subtitle " +
-          "file was stretched or shrunk by a small percentage before pairing, to undo " +
-          "a frame-rate mismatch whose exact rates can't be named. Says by how much " +
-          "and how many more lines lined up as a result.",
-        placeholders: {
-          percent: "Signed percentage the timings were scaled by, e.g. \"+0.1%\".",
-          count: "How many more lines lined up after the adjustment.",
+          amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
+          count: "How many more lines pair closely with the correction applied.",
         },
       },
       "importExport.review.title": {

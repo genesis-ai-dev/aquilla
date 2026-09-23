@@ -251,7 +251,7 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
     // Positional matching triggers the order-match warning.
-    expect(screen.getByText(/matched .* in order/i)).toBeInTheDocument()
+    expect(screen.getByText(/Matched in order, not by reference or timing/)).toBeInTheDocument()
     // Rows are labelled by the cue's timecode, never by an internal UUID.
     expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
     expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
@@ -331,7 +331,7 @@ describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
     expect(screen.getByText("00:00:05,500 --> 00:00:08,250")).toBeInTheDocument()
     // Positional matching is lossy if the cue count drifts, so the user must be
     // warned to eyeball alignment before importing.
-    expect(screen.getByText(/matched to cells in order/i)).toBeInTheDocument()
+    expect(screen.getByText(/Matched in order, not by reference or timing/)).toBeInTheDocument()
   })
 
   it("reaches the review step for a .sbv file, labelled by cue timecode", async () => {
@@ -495,8 +495,10 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(screen.getAllByText("Same timing")).toHaveLength(2)
     expect(rowOf("PETER")).toHaveTextContent("Same timing")
     expect(screen.getByText("Already there")).toBeInTheDocument()
-    expect(screen.getByText(/2 rows competed with another cue for the same line and were left unticked\. Open Contested on a row to compare and swap\./)).toBeInTheDocument()
-    expect(screen.getByText(/2 rows have exactly the same timing as another cue/)).toBeInTheDocument()
+    // No sentence explains them: the "To check" switch and the pills do.
+    expect(screen.queryByText(/competed with another cue/)).toBeNull()
+    expect(screen.queryByText(/exactly the same timing/)).toBeNull()
+    expect(screen.getByRole("tab", { name: "To check 4" })).toBeInTheDocument()
     // "Select all" never ticks a row whose text is already there.
     fireEvent.click(screen.getByText(/select all/i))
     expect(checkboxFor("same words").checked).toBe(false)
@@ -600,7 +602,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       fireEvent.click(within(rowOf(before)).getByRole("button", { name: "Swap" }))
       expect(cueOn(10)).toBe(other)
 
-      const box = () => screen.getByLabelText(/Shift the uploaded file's timings/)
+      const box = () => screen.getByLabelText(/Shift timings/)
       fireEvent.click(box())
       await waitFor(() => expect(box()).toBeEnabled())
       expect(cueOn(10)).toBe(other)
@@ -667,6 +669,12 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     fireEvent.click(screen.getByRole("tab", { name: "To check 1" }))
     expect([...document.querySelectorAll("[data-review-cell]")].map((el) => el.getAttribute("data-review-cell"))).toEqual(["line-1"])
 
+    // Every row needing a decision still shows the switch — it is the signal.
+    cleanup()
+    renderPanel({ cells: [line(1, 10000, 10800, "old one"), line(2, 20000, 20800, "old two")] })
+    await selectFile(makeFile(vtt([[10000, 10800, "new one"], [20000, 20800, "new two"]]), "episode.vtt"))
+    expect(await screen.findByRole("tab", { name: "To check 2" })).toBeInTheDocument()
+
     cleanup()
     renderPanel({ cells: four })
     await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
@@ -717,7 +725,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       renderPanel({ cells: episodeLines })
       await selectFile(makeFile(shifted(2000), "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      const box = screen.getByLabelText(/Shift the uploaded file's timings 2 seconds earlier, which lines up \d+ more lines\./)
+      const box = screen.getByLabelText(/^Shift timings 2 seconds earlier \(lines up \d+ more\)$/)
       expect(box).toBeChecked()
       expect(onOwnLine()).toBe(30)
       expect(screen.queryByText(/partly overlap/)).not.toBeInTheDocument()
@@ -727,7 +735,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       renderPanel({ cells: episodeLines })
       await selectFile(makeFile(shifted(2000), "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      const box = () => screen.getByLabelText(/Shift the uploaded file's timings/)
+      const box = () => screen.getByLabelText(/Shift timings/)
       fireEvent.click(box())
       // The box flips at once and the list turns to placeholders while it re-matches.
       expect(box()).not.toBeChecked()
@@ -746,18 +754,18 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     it("reads a broadcast hour as a timecode, and a shift the other way as later", async () => {
       renderPanel({ cells: episodeLines })
       await selectFile(makeFile(shifted(3_600_000), "episode.vtt"))
-      expect(await screen.findByLabelText(/timings 1:00:00 earlier/)).toBeChecked()
+      expect(await screen.findByLabelText(/^Shift timings 1:00:00 earlier \(lines up \d+ more\)$/)).toBeChecked()
       cleanup()
       renderPanel({ cells: episodeLines.map((c) => ({ ...c, startMs: c.startMs + 5000, endMs: c.endMs + 5000 })) })
       await selectFile(makeFile(shifted(0), "episode.vtt"))
-      expect(await screen.findByLabelText(/timings 5 seconds later/)).toBeChecked()
+      expect(await screen.findByLabelText(/^Shift timings 5 seconds later \(lines up \d+ more\)$/)).toBeChecked()
     })
 
     it("offers nothing on a file that already lines up", async () => {
       renderPanel({ cells: episodeLines })
       await selectFile(makeFile(shifted(0), "episode.vtt"))
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-      expect(screen.queryByLabelText(/Shift the uploaded file's timings/)).not.toBeInTheDocument()
+      expect(screen.queryByLabelText(/Shift timings/)).not.toBeInTheDocument()
     })
   })
 
@@ -822,7 +830,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       "episode.vtt",
     ))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    expect(screen.getByText(/adjusted from 25 to 23\.976 frames per second/)).toBeInTheDocument()
+    expect(screen.getByText(/^Frame rate adjusted \(lines up \d+ more\)$/)).toBeInTheDocument()
     expect(screen.getByText("30 matched")).toBeInTheDocument()
   })
 })

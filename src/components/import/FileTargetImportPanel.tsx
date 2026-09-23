@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatCount, formatNumber, formatPercent } from "@/lib/i18n/format"
+import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -838,8 +838,6 @@ export function FileTargetImportPanel({
     const shownSelectable = shown.filter((m) => !m.alreadyThere)
     const allShownSelected =
       shownSelectable.length > 0 && shownSelectable.every((m) => selectedCellIds.has(m.cellId))
-    const contestedRows = matched.filter((m) => m.flag === "contested").length
-    const sharedTimingRows = matched.filter((m) => m.flag === "sharedTiming").length
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
     const unplaced = orphans.length - brokenTimecodes
     // AQU-1143: a ref-less match that aligned by cue timecode is not the
@@ -855,42 +853,27 @@ export function FileTargetImportPanel({
             ? t("importExport.review.reasonNoLineInReach")
             : null
     // A whole-file shift is offered as a tickbox (ticked when the matcher
-    // applied it); the frame-rate note stands alone only for a stretch without
-    // a shift, since the tickbox's label names any stretch that comes with it.
+    // applied it), its label folding in any frame-rate change that comes with
+    // it; the frame-rate note stands alone only for a stretch without a shift.
+    // Neither names the rates or the percentage: what a person needs is that
+    // it happened and how much it helped (Sam, 09-23).
     const { offsetCorrection } = matchResult
     const offsetApplied = (timebase?.offsetMs ?? 0) !== 0
     const offsetLabel = offsetCorrection
-      ? [
-          t(offsetCorrection.offsetMs < 0 ? "importExport.review.offsetEarlier" : "importExport.review.offsetLater", {
+      ? t(
+          offsetCorrection.offsetMs < 0
+            ? offsetCorrection.scale === 1 ? "importExport.review.offsetEarlier" : "importExport.review.offsetEarlierWithRate"
+            : offsetCorrection.scale === 1 ? "importExport.review.offsetLater" : "importExport.review.offsetLaterWithRate",
+          {
             amount: formatShift(offsetCorrection.offsetMs, locale),
             count: formatCount(offsetCorrection.closeAfter - offsetCorrection.closeBefore, locale),
-          }),
-          offsetCorrection.scale === 1
-            ? null
-            : offsetCorrection.fromFps && offsetCorrection.toFps
-              ? t("importExport.review.offsetAlsoRateNamed", {
-                  fromFps: offsetCorrection.fromFps,
-                  toFps: offsetCorrection.toFps,
-                })
-              : t("importExport.review.offsetAlsoRateUnnamed", {
-                  percent: formatPercent(offsetCorrection.scale - 1, locale, {
-                    maximumFractionDigits: 1,
-                    signDisplay: "always",
-                  }),
-                }),
-        ].filter(Boolean).join(" ")
+          },
+        )
       : null
     const timebaseNote = timebase && timebase.offsetMs === 0
-      ? timebase.fromFps && timebase.toFps
-        ? t("importExport.review.timebaseNamed", {
-            fromFps: timebase.fromFps,
-            toFps: timebase.toFps,
-            count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
-          })
-        : t("importExport.review.timebaseUnnamed", {
-            percent: formatPercent(timebase.scale - 1, locale, { maximumFractionDigits: 1, signDisplay: "always" }),
-            count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
-          })
+      ? t("importExport.review.frameRateAdjusted", {
+          count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
+        })
       : null
 
     // Flip the box at once, show skeleton rows, and re-match from the
@@ -965,16 +948,6 @@ export function FileTargetImportPanel({
               {t("importExport.review.orderMatchWarning")}
             </p>
           )}
-          {contestedRows > 0 && (
-            <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.contestedWarning", { count: formatCount(contestedRows, locale) })}
-            </p>
-          )}
-          {sharedTimingRows > 0 && (
-            <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.sharedTimingWarning", { count: formatCount(sharedTimingRows, locale) })}
-            </p>
-          )}
           {looseFit && (
             <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
           )}
@@ -1027,7 +1000,9 @@ export function FileTargetImportPanel({
           )}
         </div>
 
-        {toCheck.length > 0 && toCheck.length < matched.length && (
+        {/* The one signal that rows need a decision (their pills say which):
+            shown whenever any do, even if that is every row. */}
+        {toCheck.length > 0 && (
           <SegmentTabs
             className="shrink-0"
             aria-label={t("importExport.review.showFilterAriaLabel")}

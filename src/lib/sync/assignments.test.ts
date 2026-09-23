@@ -141,10 +141,21 @@ describe("createAssignment", () => {
       jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
       scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
     })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "default",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "Swahili",
+    })
 
     expect(bodies[0].targetLang).toBe("es")
     expect("targetLang" in bodies[1]).toBe(false)
     expect("targetLang" in bodies[2]).toBe(false)
+    // AQU-729: the word "default" is not a lane. It stores as the default lane.
+    expect("targetLang" in bodies[3]).toBe(false)
+    expect(bodies[4].targetLang).toBe("Swahili")
   })
 
   it("throws AssignmentEmitError when the server rejects (e.g. role too low → 403)", async () => {

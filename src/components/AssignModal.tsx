@@ -71,6 +71,12 @@ import {
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi, canSubmitAssignment } from "@/lib/sync/role-policy"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import {
+  DEFAULT_LANE_SELECT_VALUE,
+  isDefaultLaneValue,
+  laneTagForAssignment,
+  selectValueForLane,
+} from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -201,7 +207,7 @@ export function AssignModal({
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
-  const [selectedLane, setSelectedLane] = useState<string>(defaultLane)
+  const [selectedLane, setSelectedLane] = useState<string>(() => selectValueForLane(defaultLane))
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [availableChapters, setAvailableChapters] = useState<string[]>([])
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set())
@@ -228,7 +234,7 @@ export function AssignModal({
           ? String(effectiveCallerUserId)
           : "",
       )
-      setSelectedLane(defaultLane)
+      setSelectedLane(selectValueForLane(defaultLane))
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
       setAvailableChapters([])
@@ -293,16 +299,18 @@ export function AssignModal({
   // lane. Only rendered (length > 1) when the project actually has extra lanes,
   // keeping N=1 projects byte-identical to the pre-lane flow.
   const laneItems = useMemo(() => {
-    const extra = targetLanes ?? []
+    // A lane literally named "default" is not a lane this product can store.
+    const extra = (targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
     if (extra.length === 0) return [] as { value: string; label: string }[]
-    // AQU-728: the '' lane IS a real language — the project's own default
-    // target language. Label it with that language's name (e.g. "Portuguese")
-    // so every lane, including the default, is listed by name and preselecting
-    // the launching default lane reads as the language, not "default". Only
-    // fall back to the generic label when the default language is unknown.
+    // AQU-728 / AQU-729: the '' lane IS a real language — the project's own
+    // default target language. Label it with that language's name (e.g.
+    // "Portuguese"). The option value is a sentinel, not '': Base UI treats
+    // '' as "nothing selected", which is what made this control read as
+    // "default". The sentinel is mapped back to the default lane on submit
+    // and is never stored.
     const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
     return [
-      { value: "", label: defaultLabel },
+      { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
       ...extra.map((lane) => ({ value: lane, label: lane })),
     ]
   }, [targetLanes, defaultLaneLabel, t])
@@ -413,7 +421,7 @@ export function AssignModal({
           author,
           assigneeUserId: member.userId,
           entries,
-          targetLang: selectedLane || undefined,
+          targetLang: laneTagForAssignment(selectedLane),
           deadline,
           note: note.trim() || null,
         })
@@ -484,7 +492,7 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
-        targetLang: selectedLane || undefined,
+        targetLang: laneTagForAssignment(selectedLane),
         deadline,
         note: note.trim() || null,
       })
@@ -596,7 +604,7 @@ export function AssignModal({
               <Select
                 items={laneItems}
                 value={selectedLane}
-                onValueChange={(v) => setSelectedLane(v ?? "")}
+                onValueChange={(v) => setSelectedLane(selectValueForLane(v))}
               >
                 <SelectTrigger id="assign-modal-lane">
                   <SelectValue />

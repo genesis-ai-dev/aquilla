@@ -531,8 +531,52 @@ describe("lane select (AQU-538)", () => {
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    // The label is cosmetic: the default lane still routes to the default (no tag).
+    // The label is the project's language. The stored lane is the default
+    // lane — never the word "default", the sentinel, or the display name.
+    const targetLang = mockCreate.mock.calls[0][0].targetLang
+    expect(targetLang).toBeUndefined()
+    expect(targetLang).not.toBe("default")
+    expect(targetLang).not.toBe("Portuguese")
+    expect(targetLang).not.toBe("__default__")
+  })
+
+  it("does not persist a preselected lane named default; the label stays the project's language", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "default"]}
+        defaultLane="default"
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/portuguese/i)
+    expect(laneTrigger.textContent).not.toMatch(/default/i)
+    fireEvent.click(laneTrigger)
+    expect(await screen.findByRole("option", { name: /portuguese/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /^default$/i })).toBeNull()
+    fireEvent.click(laneTrigger)
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
+  })
+
+  it("still submits an explicit language after the dialog opens on the project's language", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "World English"]}
+        defaultLane=""
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    await pickSelectOption(/language lane/i, /swahili/i)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("Swahili")
   })
 
   it("falls back to 'Default language' when defaultLaneLabel is unknown/empty", () => {

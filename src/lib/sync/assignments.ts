@@ -11,6 +11,7 @@ import { FRONTIER_BASE } from "../frontier/auth"
 import { fetchWithTimeout } from "../frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
+import { laneTagForAssignment } from "./assignment-lane"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
@@ -319,6 +320,10 @@ export interface CreateAssignmentArgs {
  */
 export async function createAssignment(args: CreateAssignmentArgs): Promise<string> {
   const assignmentId = uuidv7()
+  // AQU-538 / AQU-729: omit the lane on the wire for the default lane.
+  // '', a missing value, and the word "default" are that lane — the product
+  // cannot store a lane named "default". An explicit tag is kept.
+  const targetLang = laneTagForAssignment(args.targetLang)
   const event = buildRawEvent({
     kind: "assignment.create",
     projectId: args.projectId,
@@ -331,8 +336,7 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       scope: args.scope,
       scopeLabel: args.scopeLabel,
       assigneeUserId: args.assigneeUserId,
-      // AQU-538: omit the lane on the wire when it's the default ('').
-      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      ...(targetLang ? { targetLang } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
     },

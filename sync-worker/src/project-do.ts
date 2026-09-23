@@ -33,6 +33,7 @@ import {
   resolveConnId,
   stripPresenceDraft,
   sweepExpiredLeases,
+  sweepOrphanedPresence,
   unpackBroadcastBody,
   type LockState,
   type PresenceState,
@@ -502,12 +503,34 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (this.sweepTimer !== null) return
     this.sweepTimer = setInterval(() => {
       const now = Date.now()
+      // AQU-1374: drop rows for sockets that died without firing close/error
+      // BEFORE the lease sweep, so it doesn't emit presence.diff frames for
+      // rows that are about to disappear anyway.
+      this.reapOrphanedPresence()
       const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       this.sweepExpiredConnections(now)
     }, LEASE_SWEEP_INTERVAL_MS)
+  }
+
+  /**
+   * AQU-1374: a presence row outliving its socket makes one person show up as
+   * several "viewing" peers. Named apart from the imported
+   * sweepOrphanedPresence it delegates to, which documents why the live-socket
+   * set is the right reconciliation key.
+   */
+  private reapOrphanedPresence(): void {
+    const liveConnIds = new Set<string>()
+    for (const state of this.connections.values()) liveConnIds.add(state.connId)
+    const result = sweepOrphanedPresence(this.presence, liveConnIds)
+    if (result.emit.length === 0) return
+    this.presence = result.presence
+    for (const m of result.emit) {
+      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      this.broadcastToAll(m)
+    }
   }
 
   /**

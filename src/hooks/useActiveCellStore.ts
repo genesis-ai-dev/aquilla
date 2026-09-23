@@ -245,6 +245,62 @@ interface DerivedCache {
   textPairs: CellTextPair[]
 }
 
+/**
+ * AQU-1047: counters for the work in this store whose cost scales with the
+ * file rather than with what the user touched.
+ *
+ * A whole-Bible-in-one-file project (~34k cells) only stays usable because the
+ * per-cell caches (`viewCache`, `summaryCache`) and the deferred whole-file
+ * walks (`computeDerivedIndexes`, `deriveMilestoneNavigation`) keep ordinary
+ * interaction proportional to the VIEWPORT, not to the file. That property is
+ * invisible from the outside: a memo dependency that quietly starts busting on
+ * every keystroke reads identically in a 12-cell test and melts a 34k-cell
+ * file. So the store counts the work instead of only doing it.
+ *
+ * Every field counts CACHE MISSES — work actually performed — never calls. The
+ * counters are plain increments on paths that were already allocating objects,
+ * so they cost nothing measurable and stay on in production, where
+ * `getMemorySnapshot()` reports them alongside the heap figures.
+ *
+ * See `useActiveCellStore.largeFile.test.ts` for the regression guards built on
+ * them, and `useActiveCellStore.largeFile.bench.test.ts` for the benchmark.
+ */
+export interface CellStoreWorkStats {
+  /**
+   * Cells visited by a loop whose length is the FILE's, summed across every
+   * such loop. The headline number: it is the one counter a full-file walk
+   * cannot hide from, because a walk that costs "1 rebuild" at any size costs
+   * 4,000 here on a 4,000-cell file and 34,000 on a 34,000-cell one. Ordinary
+   * interaction — scrolling, arrowing between cells, typing — must leave it
+   * at zero.
+   */
+  cellsWalked: number
+  /** `getCellView` cache misses — one assembled `CellViewModel`. */
+  cellViewsBuilt: number
+  /** `getCellSummary`/`getAllSummaries` cache misses. */
+  cellSummariesBuilt: number
+  /** Full `computeDerivedIndexes()` walks (progress + footnotes + sections). */
+  derivedIndexRebuilds: number
+  /** Full `deriveMilestoneNavigation()` walks (book/chapter structure). */
+  navigationStructureRebuilds: number
+  /** Full navigation-index rebuilds (per-milestone progress rollups). */
+  navigationIndexRebuilds: number
+  /** Full `ensureDerivedCache()` walks (summaries + text pairs for the file). */
+  derivedCacheRebuilds: number
+}
+
+function emptyWorkStats(): CellStoreWorkStats {
+  return {
+    cellsWalked: 0,
+    cellViewsBuilt: 0,
+    cellSummariesBuilt: 0,
+    derivedIndexRebuilds: 0,
+    navigationStructureRebuilds: 0,
+    navigationIndexRebuilds: 0,
+    derivedCacheRebuilds: 0,
+  }
+}
+
 export class CellStore {
   private ctx: RuntimeContext = {
     projectId: null,
@@ -340,6 +396,9 @@ export class CellStore {
   private viewCache = new Map<string, { version: number; view: CellViewModel }>()
   private allViewsCache: CellViewModel[] | null = null
   private summaryCache = new Map<string, { version: number; summary: CellSummary; textPair: CellTextPair }>()
+  /** AQU-1047: see `CellStoreWorkStats`. Cumulative for this store instance;
+   *  `resetWorkStats()` zeroes it so a caller can measure one interaction. */
+  private work: CellStoreWorkStats = emptyWorkStats()
 
   /**
    * AQU-646: which cells carry a recording of their own.
@@ -508,6 +567,7 @@ export class CellStore {
   getCellIdsForLens(orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
     if (this.order.length === 0) return EMPTY_CELL_IDS
     if (orderedBy !== "time") return this.order
+    this.work.cellsWalked += this.order.length
     const rows = this.order
       .map((id) => {
         const summary = this.getCellSummary(id)
@@ -615,6 +675,7 @@ export class CellStore {
     const version = this.cellVersionById.get(cellId) ?? 0
     const cached = this.viewCache.get(cellId)
     if (cached && cached.version === version) return cached.view
+    this.work.cellViewsBuilt++
     const source = this.sourceById.get(cellId)
     const target = this.targetById.get(cellId)
     const cell = buildCellData(
@@ -694,6 +755,7 @@ export class CellStore {
     const version = this.cellVersionById.get(cellId) ?? 0
     const cached = this.summaryCache.get(cellId)
     if (cached && cached.version === version && cached.summary.index === index) return cached
+    this.work.cellSummariesBuilt++
     const view = this.getCellView(cellId)
     if (!view) return null
     const summary: CellSummary = {
@@ -941,7 +1003,10 @@ export class CellStore {
     // Many workspace consumers read the same version. Resolve its cells once,
     // but retain the public API's fresh array so sorting/splicing a caller's
     // result cannot corrupt subsequent readers.
-    this.allViewsCache ??= this.getCellsByIds(this.order)
+    if (this.allViewsCache === null) {
+      this.work.cellsWalked += this.order.length
+      this.allViewsCache = this.getCellsByIds(this.order)
+    }
     return this.allViewsCache.slice()
   }
 
@@ -1800,6 +1865,19 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /**
+   * AQU-1047: how much file-proportional work this store has done. A snapshot
+   * copy, so a caller can diff two readings across one interaction.
+   */
+  getWorkStats(): Readonly<CellStoreWorkStats> {
+    return { ...this.work }
+  }
+
+  /** Zero the counters so the next interaction can be measured on its own. */
+  resetWorkStats(): void {
+    this.work = emptyWorkStats()
+  }
+
   getMemorySnapshot(extra?: Record<string, unknown>): Record<string, unknown> {
     this.ensureDerivedIndexes()
     let textBytes = 0
@@ -1823,6 +1901,10 @@ export class CellStore {
       textMB: +(textBytes / 1048576).toFixed(2),
       htmlMB: +(htmlBytes / 1048576).toFixed(2),
       maxServerSeq: this.maxServerSeq,
+      // AQU-1047: file-proportional work done so far. On a large file these
+      // are the numbers that say whether interaction is viewport-scoped —
+      // `cellViewsBuilt` climbing by thousands per keystroke is the tell.
+      ...this.work,
       ...extra,
     }
   }
@@ -1867,6 +1949,8 @@ export class CellStore {
 
   private ensureDerivedCache(): void {
     if (this.derivedCache.baseVersion === this.derivedVersion) return
+    this.work.derivedCacheRebuilds++
+    this.work.cellsWalked += this.order.length
     const summaries: CellSummary[] = []
     const textPairs: CellTextPair[] = []
     for (const id of this.order) {
@@ -2041,6 +2125,8 @@ export class CellStore {
   }
 
   private computeDerivedIndexes(): void {
+    this.work.derivedIndexRebuilds++
+    this.work.cellsWalked += this.order.length
     const navigation = this.buildNavigationIndex(this.order)
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
@@ -2148,6 +2234,8 @@ export class CellStore {
         && previous.startMs === startMs
         && previous.metadata === (source?.metadata ?? target?.metadata ?? null)
     })) return cached.derived
+    this.work.navigationStructureRebuilds++
+    this.work.cellsWalked += ids.length
     const cells = ids.map((id): MilestoneNavigationCell => {
       const source = this.sourceById.get(id)
       const target = this.targetById.get(id)
@@ -2174,6 +2262,10 @@ export class CellStore {
       shortLabel: string
     }>
   } {
+    // Counted unconditionally: the `flags` loop below runs over every id even
+    // when the cached entries are returned, so entering here is already O(file)
+    // whatever the cache says.
+    this.work.cellsWalked += ids.length
     const derived = this.getNavigationStructure(ids)
     const cached = this.navigationProgressCache.get(ids)
     const flags = new Uint8Array(ids.length)
@@ -2198,6 +2290,7 @@ export class CellStore {
     }
     if (unchanged && cached) return { entries: cached.entries, milestoneByCellId: derived.milestoneByCellId }
 
+    this.work.navigationIndexRebuilds++
     const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
     const progressFor = (cellIds: readonly string[]) => {
       let translated = 0

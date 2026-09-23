@@ -55,6 +55,7 @@ function drift(audioId: string, over: Partial<RecordingTextDrift> = {}): Recordi
   return {
     audioId,
     recordedAt: Date.parse("2026-06-30T10:00:00Z"),
+    recordedBy: "mariette",
     textAtRecording: "In the beginning",
     textAtRecordingEventId: "c1",
     latestText: "At the first",
@@ -535,6 +536,64 @@ describe("TakesStrip — reporting the last take", () => {
 
       expect(screen.queryByTestId("take-text-drift-a")).toBeTruthy()
       expect(screen.queryByTestId("take-text-drift-b")).toBeNull()
+    })
+  })
+
+  // AQU-1372 — audio history: when a take was made, and by whom. The takes
+  // list IS the audio history for a line, so the answer belongs on its rows
+  // rather than behind a separate drawer.
+  describe("recording provenance", () => {
+    it("stamps a take with the day it was made and the person who made it", async () => {
+      driftResult = new Map([["a", drift("a")]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      const stamp = await screen.findByTestId("take-recorded-a")
+      expect(stamp.textContent).toContain("mariette")
+      expect(stamp.textContent).toContain(
+        new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleDateString(),
+      )
+    })
+
+    it("gives the exact time in the tooltip, since the stamp shows only the day", async () => {
+      driftResult = new Map([["a", drift("a")]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      const title = (await screen.findByTestId("take-recorded-a")).getAttribute("title")
+      expect(title).toContain("Recorded")
+      expect(title).toContain("mariette")
+      expect(title).toContain(new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleString())
+    })
+
+    it("says a synthesised take was GENERATED, not recorded", async () => {
+      // The named person chose to generate it; they did not perform it, and
+      // calling a TTS render a recording misattributes human performance.
+      driftResult = new Map([["g", drift("g", { drifted: false })]])
+      render(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
+
+      const title = (await screen.findByTestId("take-recorded-g")).getAttribute("title")
+      expect(title).toContain("Generated")
+      expect(title).not.toContain("Recorded")
+    })
+
+    it("never badges a synthesised take as text-drifted", async () => {
+      // AQU-1372 widened the resolved id list from recorded takes to ALL takes
+      // so generated ones get a stamp too. A TTS take is synthesised FROM the
+      // current text and can never lag it, so the drift badge must stay off it
+      // even when the resolver hands back drifted: true.
+      driftResult = new Map([["g", drift("g", { drifted: true })]])
+      render(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
+
+      await screen.findByTestId("take-recorded-g")
+      expect(screen.queryByTestId("take-text-drift-g")).toBeNull()
+    })
+
+    it("shows no stamp for a take the resolver could not place", () => {
+      // Absent from the map is "cannot say" — an invented date and author on a
+      // recording is worse than none.
+      driftResult = new Map()
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      expect(screen.queryByTestId("take-recorded-a")).toBeNull()
     })
   })
 })

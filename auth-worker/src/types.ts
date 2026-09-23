@@ -280,6 +280,13 @@ export type Variables = {
    *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
    *  re-verifying the token. */
   tokenPayload: JWTPayload
+  /** Stable identity of the *credential* this request arrived on (not of its
+   *  bearer), set by authMiddleware — `jti:<jti>`, or `tok:<sha256>` for
+   *  pre-`jti` tokens. Authorization state that must not be shared across a
+   *  user's other sessions keys off this: see `requireAdminElevation`
+   *  (OPS-35). Same derivation as the isolate session cache, so the two
+   *  cannot disagree about what "this session" means. */
+  sessionKey: string
 }
 
 /**

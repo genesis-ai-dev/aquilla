@@ -24,8 +24,15 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 vi.mock("@/lib/import", () => ({
   applyEBibleTargetImport: vi.fn(),
 }))
+// ScrollArea (in the spreadsheet column mapping) uses @base-ui/react, which
+// calls getAnimations() — not in jsdom. Replace it with a passthrough div.
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}))
 
-import { FileTargetImportPanel } from "./FileTargetImportPanel"
+import { FileTargetImportPanel, type FileTargetPanelBack } from "./FileTargetImportPanel"
 import { applyEBibleTargetImport } from "@/lib/import"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -494,5 +501,65 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText(/adjusted from 25 to 23\.976 frames per second/)).toBeInTheDocument()
     expect(screen.getByText("30 matched")).toBeInTheDocument()
+  })
+})
+
+describe("FileTargetImportPanel — the back arrow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  /** The panel reports the arrow to its host; keep the latest report. */
+  function renderWithBack() {
+    let back: FileTargetPanelBack | null = null
+    const onBackChange = vi.fn((b: FileTargetPanelBack | null) => { back = b })
+    renderPanel({ onBackChange })
+    return { current: () => back, onBackChange }
+  }
+
+  it("has no arrow on the file picker, and leads from the review back to it", async () => {
+    const back = renderWithBack()
+    expect(back.onBackChange).toHaveBeenCalledWith(null)
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to file selection", disabled: false })
+
+    act(() => back.current()!.onBack())
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+    expect(back.current()).toBeNull()
+
+    // A second file goes straight to its own review.
+    await selectFile(makeFile(USFM_FIXTURE.replace("First verse", "Revised verse")))
+    expect(await screen.findByText("Revised verse translation")).toBeInTheDocument()
+  })
+
+  it("leads a spreadsheet's review back to its column mapping, and the mapping back to the file picker", async () => {
+    const back = renderWithBack()
+    await selectFile(makeFile("ref,target\nGEN 1:1,Uno\nGEN 1:2,Dos\n", "genesis.csv"))
+    expect(await screen.findByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to file selection" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to column mapping" })
+
+    act(() => back.current()!.onBack())
+    expect(screen.getByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    act(() => back.current()!.onBack())
+    expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+    expect(back.current()).toBeNull()
+  })
+
+  it("is disabled while an import is being applied", async () => {
+    vi.mocked(applyEBibleTargetImport).mockReturnValue(new Promise(() => {}))
+    const back = renderWithBack()
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import 2 cells/i }))
+    })
+    expect(back.current()).toMatchObject({ disabled: true })
   })
 })

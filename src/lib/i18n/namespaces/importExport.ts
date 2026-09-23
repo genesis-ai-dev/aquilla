@@ -960,6 +960,8 @@ export const importExport = defineNamespace({
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
     "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.backToColumnMapping": "Back to column mapping",
+    "importExport.fileTarget.backToSheetList": "Back to sheet list",
     "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
@@ -2555,6 +2557,21 @@ export const importExport = defineNamespace({
           "that fills in the open file's translations, listing the file kinds it " +
           "accepts. Only the conjunction joining the format names is " +
           "translated; the format names themselves stay as they are.",
+      },
+      "importExport.fileTarget.backToColumnMapping": {
+        description:
+          "Screen-reader label for the back arrow in the title of the dialog that " +
+          "fills in the open file's translations from a spreadsheet. Shown on the " +
+          "review screen; it returns to the step where the user picks which " +
+          "spreadsheet column holds the translations. Short imperative phrase, no " +
+          "closing full stop.",
+      },
+      "importExport.fileTarget.backToSheetList": {
+        description:
+          "Screen-reader label for the back arrow in the title of the dialog that " +
+          "fills in the open file's translations, shown on the column-picking " +
+          "step of a workbook with several sheets. It returns to the list of " +
+          "sheets to choose from. Short imperative phrase, no closing full stop.",
       },
       "importExport.fileTarget.description": {
         description:

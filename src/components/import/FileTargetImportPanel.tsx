@@ -15,7 +15,7 @@
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatPercent } from "@/lib/i18n/format"
@@ -64,6 +64,19 @@ export interface FileTargetImportPanelProps {
    *  target rows exclude book-name/title/TOC + intro-block cells, staying
    *  aligned with source cells imported under the same setting. */
   excludeFrontMatter?: boolean
+  /** Told where a back arrow should lead from the current step, or `null` on
+   *  the first step. The host draws the arrow in its dialog title, the way the
+   *  source import dialog does, so a wrong file is one click from the file
+   *  picker instead of Cancel and the menu again. */
+  onBackChange?: (back: FileTargetPanelBack | null) => void
+}
+
+export interface FileTargetPanelBack {
+  /** Accessible name for the arrow: where it goes. */
+  label: string
+  onBack: () => void
+  /** True while an import is being applied. */
+  disabled: boolean
 }
 
 type PanelStep = "file" | "sheet" | "mapping" | "review"
@@ -102,6 +115,7 @@ export function FileTargetImportPanel({
   onError,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  onBackChange,
 }: FileTargetImportPanelProps) {
   const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
@@ -113,6 +127,52 @@ export function FileTargetImportPanel({
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
+
+  // Back goes one step: review → column mapping for a spreadsheet (the column
+  // choice is what you'd fix, without re-uploading) and → the file picker for
+  // everything else; mapping → the sheet list when the workbook had several.
+  // Leaving the review drops its ticks, since they belong to that pairing.
+  useEffect(() => {
+    if (!onBackChange) return
+    if (step === "file") {
+      onBackChange(null)
+      return
+    }
+    const toFilePicker = {
+      label: t("importExport.dialog.backToFileSelection"),
+      onBack: () => {
+        setMatchResult(null)
+        setSelectedCellIds(new Set())
+        setSheets([])
+        setSelectedSheet(null)
+        setSourceFile(null)
+        setError(null)
+        setStep("file")
+      },
+    }
+    const back =
+      step === "review" && selectedSheet
+        ? {
+            label: t("importExport.fileTarget.backToColumnMapping"),
+            onBack: () => {
+              setMatchResult(null)
+              setSelectedCellIds(new Set())
+              setError(null)
+              setStep("mapping")
+            },
+          }
+        : step === "mapping" && sheets.length > 1
+          ? {
+              label: t("importExport.fileTarget.backToSheetList"),
+              onBack: () => {
+                setSelectedSheet(null)
+                setError(null)
+                setStep("sheet")
+              },
+            }
+          : toFilePicker
+    onBackChange({ ...back, disabled: applying })
+  }, [step, selectedSheet, sheets.length, applying, onBackChange, t])
 
   const showReview = useCallback((result: FileTargetMatchResult, byOrder: boolean) => {
     setMatchResult(result)

@@ -404,13 +404,13 @@ describe("worker deployment environment contract", () => {
     const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
 
     for (const row of [
-      "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
+      "| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
       "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
     ]) {
       expect(matrix).toContain(row)
     }
 
-    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`release/YYYY/MM/DD` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")

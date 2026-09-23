@@ -1,7 +1,7 @@
 // GET /cell-validators?fileId=&cellId=
 
 import { verifyTokenForFile } from '../auth'
-import { targetVisibilityClause, visibleLanesForRead } from './lane-read-wall'
+import { grantedLaneIds, targetVisibilityClause, visibleLanesForRead } from './lane-read-wall'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 
 export interface ValidatorsReadEnv {
@@ -50,9 +50,7 @@ export async function handleValidatorsReadRequest(
   const lane = url.searchParams.get('lane')
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const wall = targetVisibilityClause({
-    visible: visibleLanes,
-    projectId,
-    targetLangExpr: 'target_lang',
+    laneIds: await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes),
     laneIdExpr: 'lane_id',
   })
   const wallSql = wall ? `\n      ${wall.sql}` : ''

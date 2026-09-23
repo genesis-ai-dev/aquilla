@@ -48,6 +48,43 @@ export function visibleLaneTags(input: {
   return tags
 }
 
+export interface LaneIdentity {
+  id: string
+  name: string
+  /** `''` is the default target lane. Null is treated the same. */
+  legacyTag: string | null
+}
+
+/**
+ * A grant matches a lane by its tag or its name (`es` ≡ Spanish). An empty
+ * grant matches only the empty-tag lane, never a named language.
+ */
+export function laneMatchesGrant(lane: LaneIdentity, grant: string): boolean {
+  const tag = lane.legacyTag ?? ""
+  if (grant === "") return tag === ""
+  if (tag !== "" && languagesEqual(grant, tag)) return true
+  return lane.name.trim() !== "" && languagesEqual(grant, lane.name)
+}
+
+/**
+ * One grant reveals one lane. A grant that matches two lanes reveals neither
+ * of them — a maintainer has to separate those lanes. Two explicit grants
+ * still reveal two lanes, one each.
+ */
+export function uniqueLaneIdsForGrants(lanes: readonly LaneIdentity[], grants: Iterable<string>): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const grant of grants) {
+    const matches = lanes.filter((lane) => laneMatchesGrant(lane, grant))
+    if (matches.length !== 1) continue
+    const id = matches[0]!.id
+    if (seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  return ids
+}
+
 /**
  * Whether a requested lane tag is in the visible set. `es` and `Spanish`
  * match. The empty default-lane tag matches only an empty grant — the lane's
@@ -69,12 +106,19 @@ export function visibilityCacheToken(visible: VisibleLaneTags): string {
   return `:vis:${tags.join(".")}`
 }
 
-function listed(lane: string, visible: ReadonlySet<string>): boolean {
-  for (const grant of visible) {
-    if (grant === lane) return true
-    if (grant !== "" && lane !== "" && languagesEqual(grant, lane)) return true
+/**
+ * Labels a grant may show. A grant that matches two different labels shows
+ * neither, so `Spanish` and `es` side by side are not both revealed.
+ */
+function uniqueLabelsForGrants(labels: readonly string[], grants: Iterable<string>): Set<string> {
+  const distinct = [...new Set(labels.filter((label) => label !== ""))]
+  const kept = new Set<string>()
+  for (const grant of grants) {
+    if (grant === "") continue
+    const matches = distinct.filter((label) => label === grant || languagesEqual(grant, label))
+    if (matches.length === 1) kept.add(matches[0]!)
   }
-  return false
+  return kept
 }
 
 /**
@@ -88,13 +132,21 @@ export function filterSettingsToVisibleLanes<T extends { settings: Record<string
 ): T {
   if (visible === null) return response
   const settings: Record<string, unknown> = { ...response.settings }
+  const primary = settings.targetLanguage
+  const labels: string[] = []
+  if (typeof primary === "string" && primary.trim() !== "") labels.push(primary)
   for (const key of ["targetLanes", "archivedLanes"] as const) {
     const value = settings[key]
     if (!Array.isArray(value)) continue
-    settings[key] = value.filter((lane) => typeof lane === "string" && listed(lane, visible))
+    for (const lane of value) if (typeof lane === "string") labels.push(lane)
   }
-  const primary = settings.targetLanguage
-  if (typeof primary === "string" && primary.trim() !== "" && !listed(primary, visible) && !visible.has("")) {
+  const kept = uniqueLabelsForGrants(labels, visible)
+  for (const key of ["targetLanes", "archivedLanes"] as const) {
+    const value = settings[key]
+    if (!Array.isArray(value)) continue
+    settings[key] = value.filter((lane) => typeof lane === "string" && kept.has(lane))
+  }
+  if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
     settings.targetLanguage = ""
   }
   return { ...response, settings }

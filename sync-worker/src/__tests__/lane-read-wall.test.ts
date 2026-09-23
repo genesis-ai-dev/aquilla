@@ -44,7 +44,8 @@ describe("AQU-730 read wall", () => {
     ))!
     expect(walled.status).toBe(200)
     const walledBody = (await walled.json()) as { cells: Array<{ value: string }> }
-    expect(walledBody.cells.map((c) => c.value).sort()).toEqual(["default-hola", "hola", "source-text"])
+    // Two lanes share Spanish, so this one grant opens neither of them.
+    expect(walledBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
 
     const maintainer = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 600 })
     const all = (await handleCellsReadRequest(
@@ -78,7 +79,7 @@ describe("AQU-730 read wall", () => {
       envWith(db, true),
     ))!
     const byCodeBody = (await byCode.json()) as { cells: Array<{ value: string }> }
-    expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["default-hola", "hola", "source-text"])
+    expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
   })
 
   it("does not return another lane's progress to a contributor without that grant", async () => {

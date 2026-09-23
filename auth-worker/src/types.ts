@@ -91,6 +91,13 @@ export interface Env {
    *  form). Must be a routed/verified destination in Cloudflare Email Routing.
    *  Defaults to joel@frontierrnd.com (routes/contact.ts). */
   CONTACT_EMAIL?: string
+  /** Self-serve newsletter signup (services/resend-audience.ts). Both are
+   *  Worker SECRETS on Joel's SEPARATE Resend account — never reuse the
+   *  transactional RESEND_API_KEY. When either is absent the signup route
+   *  degrades to request-mode (notification email only, manual add). */
+  NEWSLETTER_RESEND_API_KEY?: string
+  /** ID of the "Frontier R&D Newsletter" segment in that Resend account. */
+  NEWSLETTER_RESEND_SEGMENT_ID?: string
   BASE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome

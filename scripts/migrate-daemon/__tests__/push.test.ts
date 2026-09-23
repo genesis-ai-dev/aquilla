@@ -27,7 +27,7 @@ afterEach(() => {
 const PROJECT: ProjectRow = {
   gitlab_id: 7, aquilla_id: "proj-7", name: "Seven", namespace: "ns/seven",
   org_id: 3, team_id: 4, owner_user_id: 5, last_activity_at: "2026-01-01T00:00:00Z",
-  head_sha: "abc", applied_sha: null, content_logic: 0, cast_hash: null,
+  head_sha: "abc", applied_sha: null, audio_applied_sha: null, content_logic: 0, cast_hash: null,
   status: "ok", last_error: null, project_upserted: 1, updated_at: 0,
 }
 const JOB: JobRow = {
@@ -35,14 +35,32 @@ const JOB: JobRow = {
   next_run_at: 0, created_at: 0, updated_at: 0, error: null, plan_path: null,
 }
 
-function event(id: string): IngestEvent {
-  return { id, kind: "source.cell.create", author: "legacy-import", clientTs: 1, payload: { id } }
+function event(id: string, fileId?: string): IngestEvent {
+  return {
+    id, kind: "source.cell.create", author: "legacy-import", clientTs: 1, payload: { id },
+    ...(fileId !== undefined ? { fileId } : {}),
+  }
 }
 
 async function writePlan(name: string, ids: string[], prereq: string[] = []): Promise<string> {
   const w = new PlanWriter(path.join(root, name))
   for (const id of prereq) w.write({ id, event: event(id), prerequisite: true, hash: eventHash(event(id)) })
   for (const id of ids) w.write({ id, event: event(id), hash: eventHash(event(id)) })
+  await w.close()
+  return w.file
+}
+
+/** Plan whose lines carry explicit fileIds — AQU-557's finalize scope is built
+ *  from them. `null` stands for a project-level event with no file. */
+async function writePlanWithFiles(
+  name: string,
+  entries: Array<[id: string, fileId: string | null]>,
+): Promise<string> {
+  const w = new PlanWriter(path.join(root, name))
+  for (const [id, fileId] of entries) {
+    const e = event(id, fileId ?? undefined)
+    w.write({ id, event: e, hash: eventHash(e) })
+  }
   await w.close()
   return w.file
 }
@@ -58,6 +76,8 @@ function plan(planPath: string, over: Partial<MaterializeResult> = {}): Material
 interface Calls {
   ingest: string[][]
   finalize: number
+  /** AQU-557: the file scope each finalize was given, in call order. */
+  finalizeFileIds: string[][]
   settings: number
   upsert: number
   eventCount: number
@@ -67,7 +87,7 @@ function fakeSync(opts: {
   ingest?: (events: IngestEvent[], n: number) => void
   ids?: string[][]
 } = {}): { sync: SyncClient; calls: Calls } {
-  const calls: Calls = { ingest: [], finalize: 0, settings: 0, upsert: 0, eventCount: 0 }
+  const calls: Calls = { ingest: [], finalize: 0, finalizeFileIds: [], settings: 0, upsert: 0, eventCount: 0 }
   let n = 0
   const impl = {
     upsertProject: async () => { calls.upsert++ },
@@ -77,7 +97,10 @@ function fakeSync(opts: {
       calls.ingest.push(events.map((e) => e.id))
       return { status: 200, ms: 10, accepted: events.length }
     },
-    finalize: async () => { calls.finalize++ },
+    finalize: async (_projectId: string, fileIds: string[] = []) => {
+      calls.finalize++
+      calls.finalizeFileIds.push(fileIds)
+    },
     getSettings: async () => ({}),
     postSettings: async () => { calls.settings++ },
     eventCount: async () => {
@@ -129,6 +152,40 @@ describe("pushJob", () => {
     expect(r.pushed).toBe(3)
     expect(r.verified).toBe(true)
     expect(logs.some((m) => m.includes("a.idml"))).toBe(true)
+  })
+
+  it("scopes finalize to the files the push actually touched", async () => {
+    // AQU-557: finalize used to recompute every file in the project on every
+    // push. A push that landed events in two files must ask for those two,
+    // not for the whole project.
+    const planPath = await writePlanWithFiles("scope.ndjson", [
+      ["e1", "f-gen"], ["e2", "f-gen"], ["e3", "f-exo"], ["e4", null],
+    ])
+    const { sync, calls } = fakeSync()
+    const r = await pushJob(deps(sync), { job: JOB, project: PROJECT, plan: plan(planPath) })
+    expect(r.finalized).toBe(true)
+    expect(calls.finalize).toBe(1)
+    // Deduplicated, and a project-level event with no fileId contributes none.
+    expect([...calls.finalizeFileIds[0]].sort()).toEqual(["f-exo", "f-gen"])
+  })
+
+  it("keeps the finalize scope a strict prefix of what prod acked when a chunk fails", async () => {
+    // Same write-after-ack contract as the ledger: a chunk that threw must not
+    // put its file into the scope, or finalize would claim to have repaired a
+    // file whose events never landed.
+    const planPath = await writePlanWithFiles("scope-fail.ndjson", [
+      ["e1", "f-gen"], ["e2", "f-gen"], ["e3", "f-exo"], ["e4", "f-exo"],
+    ])
+    const { sync, calls } = fakeSync({
+      ingest: (_e, n) => { if (n === 2) throw new HttpError(503, "overloaded", true) },
+    })
+    await expect(pushJob(deps(sync), { job: JOB, project: PROJECT, plan: plan(planPath) }))
+      .rejects.toThrow(HttpError)
+    // The failed push never reaches finalize at all …
+    expect(calls.finalize).toBe(0)
+    // … and only chunk 1's events are ledgered, so the retry re-plans f-exo.
+    expect(db.ledgerCount(7)).toBe(2)
+    expect(db.ledgerHas(7, "e3")).toBe(false)
   })
 
   it("skips finalize on an empty plan and skips settings when the cast hash is unchanged", async () => {

@@ -10,10 +10,12 @@ const deploymentManifest = JSON.parse(
 ) as {
   surfaces: Record<string, {
     directory: string
+    requiredSecrets: string[]
     requiredBindings: Record<string, string>
     environments: Record<string, {
       worker: string
       routes: string[]
+      requiredSecrets?: string[]
       plainText: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
@@ -263,9 +265,9 @@ describe("worker deployment environment contract", () => {
       scripts?: Record<string, string>
     }
     expect(rootPackage.scripts?.["deploy:workers-build"])
-      .toBe("node scripts/cloudflare-pr-preview.mjs --workers-build")
+      .toBe("node scripts/cloudflare-stack-preview.mjs")
     expect(rootPackage.scripts?.["build:workers-build"])
-      .toBe("node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs")
+      .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts?.["build:workers-build:identity"])
       .toBe("CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build")
     expect(rootPackage.scripts?.["build:workers-build:sync"])
@@ -281,6 +283,7 @@ describe("worker deployment environment contract", () => {
 
     expect(workerPackage.scripts?.["build:workers-build"])
       .toContain("assert-workers-build-env.mjs")
+    expect(workerPackage.scripts?.["build:workers-build"]).not.toContain("pnpm test")
     expect(workerPackage.scripts?.["deploy:workers-build"])
       .toBe("node ../scripts/cloudflare-build-deploy.mjs sync")
     expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
@@ -290,6 +293,7 @@ describe("worker deployment environment contract", () => {
     }
     expect(authPackage.scripts?.["build:workers-build"])
       .toContain("assert-workers-build-env.mjs")
+    expect(authPackage.scripts?.["build:workers-build"]).not.toContain("pnpm test")
     expect(authPackage.scripts?.["deploy:workers-build"])
       .toBe("node ../scripts/cloudflare-build-deploy.mjs identity")
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
@@ -383,7 +387,7 @@ describe("worker deployment environment contract", () => {
 
     expect(matrix).toContain("`main` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
-    expect(matrix).toContain("Cloudflare Workers Builds owns automatic pull-request validation")
+    expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
@@ -397,6 +401,47 @@ describe("worker deployment environment contract", () => {
       .not.toContain("push to staging")
     expect(readRepoFile("resource-worker", "README.md"))
       .toContain("This Worker has only production and development")
+  })
+
+  // AQU-762: dev.aquilla.app ran for weeks with no OPENROUTER_API_KEY on
+  // aquilla-dev-identity, so every AI surface 500'd and nothing said where the key
+  // was supposed to live. Secrets attach to a Worker NAME and do not copy between
+  // environments, so adding a required secret — or a whole environment — without
+  // documenting where it must be provisioned is the exact silent regression.
+  it("documents where every required Worker secret is provisioned per environment", () => {
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    const sectionStart = matrix.indexOf("## Worker secrets (per environment)")
+    const sectionEnd = matrix.indexOf("## Deployment ownership")
+    expect(sectionStart).toBeGreaterThan(-1)
+    expect(sectionEnd).toBeGreaterThan(sectionStart)
+    const secrets = matrix.slice(sectionStart, sectionEnd)
+
+    // Match each Worker's own table row, not the section as a whole — a secret named
+    // anywhere in the prose must not satisfy the environment that actually needs it.
+    const rows = secrets.split("\n").filter((line) => line.startsWith("| ") && line.endsWith(" |"))
+
+    for (const surfaceConfig of Object.values(deploymentManifest.surfaces)) {
+      for (const expected of Object.values(surfaceConfig.environments)) {
+        const row = rows.filter((line) => line.includes(`\`${expected.worker}\``))
+        expect(row, `one table row for ${expected.worker}`).toHaveLength(1)
+        expect(row[0], `${expected.worker} directory`).toContain(`\`${surfaceConfig.directory}\``)
+        const required = [...surfaceConfig.requiredSecrets, ...(expected.requiredSecrets ?? [])]
+        for (const name of required) {
+          expect(row[0], `${expected.worker} row must list ${name}`).toContain(`\`${name}\``)
+        }
+      }
+    }
+
+    // The provisioning command and the fail-closed deploy check are the two things an
+    // operator needs; neither lives anywhere else a human reads.
+    expect(secrets).toContain("wrangler secret put")
+    expect(secrets).toContain("wrangler secret list")
+    expect(secrets).toContain("missing required secret binding")
+    // No admin-console fallback exists for the AI key (routes/admin.ts tunes models and
+    // budgets only), so the docs must not imply one.
+    expect(secrets).toContain("There is no runtime fallback")
+    expect(readRepoFile("auth-worker", "src", "routes", "admin.ts"))
+      .not.toContain("OPENROUTER_API_KEY")
   })
 
   it("uses explicit environments and live checks in every local deploy command", () => {
@@ -477,39 +522,25 @@ describe("worker deployment environment contract", () => {
     expect(workersBuild).toContain("normalizedBranch === \"main\" ? \"production\" : \"development\"")
     expect(workersBuild).toContain("promote: false")
     expect(workersBuildScript).not.toContain("api.aquilla.app")
-    expect(workersBuildScript).toContain("H=api.dev.aquilla.app")
-    expect(workersBuildScript).toContain("verify-deployment-artifacts.mjs dist")
+    expect(workersBuildScript).toContain("pnpm exec tsc -b")
+    expect(readRepoFile("scripts", "cloudflare-stack-preview.mjs")).toContain('verify(join(cwd, "dist"))')
   })
 
-  it("runs the former required PR gates on Cloudflare infrastructure", () => {
+  it("compiles Cloudflare previews without running validation suites", () => {
     const rootPackage = JSON.parse(readRepoFile("package.json")) as {
-      scripts?: Record<string, string>
+      scripts: Record<string, string>
     }
-    const command = rootPackage.scripts?.["build:workers-build"] ?? ""
-    const checks = readRepoFile("scripts", "cloudflare-ci-checks.mjs")
-    const browserConformance = readRepoFile(
-      "packages",
-      "idml-roundtrip",
-      "scripts",
-      "run-browser-conformance.ts",
-    )
-
-    expect(command).toContain("scripts/cloudflare-ci-checks.mjs")
-    expect(checks).toContain('["pnpm", ["lint"]]')
-    expect(checks).toContain('["pnpm", ["test"]]')
-    expect(checks).toContain('"build:workers-build:identity"')
-    expect(checks).toContain('"build:workers-build:sync"')
-    expect(checks).toContain('["pnpm", ["test:idml"]]')
-    expect(checks).toContain('["pnpm", ["neon:check"]]')
-    expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
-    expect(checks).toContain('"type-check"')
-    expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
-    expect(checks).not.toContain("playwright install")
-    expect(browserConformance).toContain('process.env.WORKERS_CI === "1"')
-    expect(browserConformance).toContain('import("@sparticuz/chromium")')
-    expect(browserConformance).toContain("serverlessChromium.executablePath()")
-    expect(checks).toContain("CHECK_PHASES")
-    expect(checks).toContain("Promise.allSettled")
+    const build = readRepoFile("scripts", "ci-build.sh")
+    expect(rootPackage.scripts["build:workers-build"])
+      .toBe("bash scripts/ci-build.sh")
+    expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
+    expect(build).toContain("pnpm exec tsc -b")
+    expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
+    expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
+    const hook = readRepoFile(".husky", "pre-push")
+    expect(hook).toContain("pnpm run scan:secrets")
+    expect(hook).toContain("pnpm run test:e2e:affected")
+    expect(hook).not.toMatch(/pnpm (?:test$|run check:push|run test:e2e:smoke)/m)
   })
 
   it("keeps all live deployments off automatic push triggers", () => {
@@ -574,5 +605,124 @@ describe("worker deployment environment contract", () => {
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+  })
+})
+
+// AQU-854: Aquilla telemetry moved from PostHog US Cloud to PostHog EU Cloud.
+// The region is encoded in the ingest hostname, so there is no runtime signal
+// that it is wrong — a single producer left on `us.i.posthog.com` keeps
+// shipping browser analytics, session replays and worker error logs into a US
+// processor, silently and indefinitely. The only durable guard is that no live
+// config or producer default can name a US host at all, and that the deploy
+// config states the EU host explicitly rather than leaning on the code
+// default. The retired US *project token* must also not survive the cutover:
+// posting it to an EU endpoint would authenticate against nothing while still
+// putting the old credential on the wire.
+describe("PostHog EU region contract (AQU-854)", () => {
+  // The live config + every producer of a PostHog host. Vendored third-party
+  // docs under .claude/skills and .agents/skills are excluded on purpose:
+  // they are upstream PostHog samples, not Aquilla configuration.
+  const LIVE_POSTHOG_FILES = [
+    ["src", "lib", "posthog.ts"],
+    ["src", "lib", "posthog-host.ts"],
+    ["auth-worker", "src", "posthog-logs.ts"],
+    ["sync-worker", "src", "posthog-logs.ts"],
+    ["agent-worker", "src", "posthog-logs.ts"],
+    ["auth-worker", "src", "types.ts"],
+    ["agent-worker", "src", "types.ts"],
+    ["auth-worker", "wrangler.toml"],
+    ["sync-worker", "wrangler.toml"],
+    ["agent-worker", "wrangler.toml"],
+    ["config", "cloudflare-deployments.json"],
+    [".env.example"],
+    ["auth-worker", ".dev.vars.example"],
+    ["sync-worker", ".dev.vars.example"],
+    ["scripts", "posthog-ops-setup.mjs"],
+  ] as const
+
+  // Assembled rather than written out so this guard does not itself reintroduce
+  // the retired token as a grep-able literal.
+  const RETIRED_US_PROJECT_TOKEN = ["phc", "oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"].join("_")
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s names no US PostHog host",
+    (_label, segments) => {
+      const contents = readRepoFile(...segments)
+
+      expect(contents).not.toContain("us.i.posthog.com")
+      expect(contents).not.toContain("us.posthog.com")
+    },
+  )
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s does not carry the retired US project token",
+    (_label, segments) => {
+      expect(readRepoFile(...segments)).not.toContain(RETIRED_US_PROJECT_TOKEN)
+    },
+  )
+
+  it.each([
+    ["auth-worker", "identity"],
+    ["sync-worker", "sync"],
+    ["agent-worker", "agent sandbox"],
+  ])("%s declares the EU ingest host alongside every POSTHOG_KEY it sets", (directory) => {
+    const config = readRepoFile(directory, "wrangler.toml")
+    const hostDeclarations = config.match(/^POSTHOG_HOST = "https:\/\/eu\.i\.posthog\.com"$/gm) ?? []
+    const keyDeclarations = config.match(/^POSTHOG_KEY = /gm) ?? []
+
+    // Every [vars] / [env.*.vars] block that configures a key also pins the
+    // region, so no deployable profile falls back to the code default.
+    expect(keyDeclarations.length).toBeGreaterThan(0)
+    expect(hostDeclarations).toHaveLength(keyDeclarations.length)
+  })
+
+  it.each([
+    ["src/lib/posthog-host.ts", ["src", "lib", "posthog-host.ts"]],
+    ["auth-worker/src/posthog-logs.ts", ["auth-worker", "src", "posthog-logs.ts"]],
+    ["sync-worker/src/posthog-logs.ts", ["sync-worker", "src", "posthog-logs.ts"]],
+    ["agent-worker/src/posthog-logs.ts", ["agent-worker", "src", "posthog-logs.ts"]],
+  ] as const)("%s defaults its ingest host to EU in code", (_label, segments) => {
+    expect(readRepoFile(...segments)).toContain(
+      'POSTHOG_EU_INGEST_HOST = "https://eu.i.posthog.com"',
+    )
+  })
+
+  it("documents the EU host in the SPA and worker env examples", () => {
+    expect(readRepoFile(".env.example")).toContain("VITE_POSTHOG_HOST=https://eu.i.posthog.com")
+    for (const directory of ["auth-worker", "sync-worker"]) {
+      expect(readRepoFile(directory, ".dev.vars.example")).toContain(
+        'POSTHOG_HOST="https://eu.i.posthog.com"',
+      )
+    }
+  })
+
+  it("retires the US project token in the deployment manifest without pinning the host", () => {
+    // Blank until the EU project token exists (account-side dependency); a
+    // blank key makes `shipLog` a no-op instead of posting a retired token.
+    // The plainText check above asserts this against the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+
+    // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
+    // environment-guard turns every identity plainText key into a hard runtime
+    // requirement — an unset one makes the Worker answer 503 — so pinning a
+    // telemetry variable there would couple identity availability to
+    // telemetry configuration. The region is enforced on the wrangler
+    // profiles themselves by the per-worker check above, which also covers
+    // agent-worker (absent from this manifest entirely).
+    for (const surface of ["identity", "sync"]) {
+      expect(
+        deploymentManifest.surfaces[surface].environments.production.plainText,
+      ).not.toHaveProperty("POSTHOG_HOST")
+    }
+  })
+
+  it("points the one-off ops script at the EU control plane with a per-run project id", () => {
+    const script = readRepoFile("scripts", "posthog-ops-setup.mjs")
+
+    expect(script).toContain('const HOST = "https://eu.posthog.com"')
+    // The US project's numeric id is meaningless on the EU control plane, so it
+    // must not be baked in — that would silently target the retired project.
+    expect(script).toContain("process.env.POSTHOG_PROJECT_ID")
+    expect(script).not.toContain("401628")
   })
 })

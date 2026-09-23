@@ -795,6 +795,7 @@ export function TeamDetail() {
                       }
                       rowClassName="group"
                       onRowClick={(p) => navigate(`/projects/${p.id}`)}
+                      rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
                       renderRowMenuItems={(p) =>
                         isAdmin ? (
                           <>

@@ -17,6 +17,12 @@ const progressReporter = path.resolve(REPO_ROOT, "e2e/reporters/progress-reporte
 
 export default defineConfig({
   testDir: path.resolve(REPO_ROOT, "e2e/specs"),
+  // e2e/specs/production holds the AQU-1024 timing probe, which drives a
+  // DEPLOYED environment with real credentials. It must never be picked up by
+  // a local run: it has its own config and its own entrypoint
+  // (pnpm test:e2e:production:timing). scripts/e2e-determinism.test.ts pins
+  // this exclusion.
+  testIgnore: ["**/production/**"],
   // Tests within a shard share one auth-worker + sync-worker stack and one
   // Postgres database; /__test__/reset is not transactional. Parallel tests
   // would race while reseeding shared state, so keep each shard serial.

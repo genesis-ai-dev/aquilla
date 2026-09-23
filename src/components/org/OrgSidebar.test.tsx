@@ -15,10 +15,12 @@ vi.mock("@/hooks/usePlatformAdmin", () => ({
   usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: false }),
 }))
 
-const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true, canEgress: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     canViewRoster: rosterSettings.canViewRoster,
+    canEgress: rosterSettings.canEgress,
+    egressMinRole: 700,
     hasFetched: true,
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
@@ -35,6 +37,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     version: 1,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -70,6 +73,7 @@ beforeEach(() => {
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   rosterSettings.canViewRoster = true
+  rosterSettings.canEgress = true
   platformAdmin.isAdmin = false
 })
 afterEach(() => vi.clearAllMocks())
@@ -124,7 +128,7 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Shared with you" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
@@ -146,6 +150,44 @@ describe("OrgSidebar all-organizations scope", () => {
     expect(overview).toHaveAttribute("data-tour", "nav-overview")
     expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar Data egress entry (AQU-907)", () => {
+  it("shows the org-scoped link when the egress policy admits the caller", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+  })
+
+  it("shows the entry to a below-admin role the owner opened the surface to", async () => {
+    // egressMinRole is org policy, not the admin block: a contributor (400)
+    // in an org whose owner set the floor at 400 gets the entry even though
+    // Archived/Settings stay hidden.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 400, name: "contributor" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+    expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
+  })
+
+  it("hides the entry when the egress policy excludes the caller", async () => {
+    // Default policy is owner-only — a maintainer without an opened floor
+    // has no entry.
+    rosterSettings.canEgress = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 600, name: "maintainer" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    await screen.findByRole("link", { name: "Teams" })
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
   })
 })
 
@@ -185,7 +227,7 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
 
     renderSidebar("/orgs/1")
 
-    await waitFor(() => expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("link", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Archived" })).toBeInTheDocument()
   })
@@ -197,5 +239,22 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
+  })
+})
+
+describe("OrgSidebar settings link — AQU-1338 ambiguous link purpose", () => {
+  /**
+   * A project view also renders a control labelled "Settings". Two links
+   * with the same name and different destinations cannot be told apart by a
+   * screen reader's link list, and a live Jev journey followed the wrong one
+   * into organization settings and gave up.
+   */
+  it("names the org settings link for its destination while keeping the visible text", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    renderSidebar("/orgs/1")
+    const link = await screen.findByRole("link", { name: "Organization settings" })
+    expect(link).toHaveTextContent("Settings")
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
   })
 })

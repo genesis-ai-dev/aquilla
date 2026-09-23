@@ -28,6 +28,16 @@ describe("BudgetMeter", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("explains a weekly-allowance stop without credit figures and keeps the alert selector", () => {
+    render(<BudgetMeter budget={{ spentCredits: 12, capCredits: 500, exhausted: true, reason: "weekly_allowance" }} />)
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("weekly AI allowance")
+    expect(alert).toHaveTextContent("already staged is kept")
+    expect(alert.textContent).not.toMatch(/cr\b|\$/)
+    expect(alert.getAttribute("data-frame-type")).toBe("budget.exhausted")
+    expect(alert.getAttribute("data-reason")).toBe("weekly_allowance")
+  })
+
   it("tags the meter data-frame-type by state for e2e selectors", () => {
     const { container: under } = render(
       <BudgetMeter budget={{ spentCredits: 120, capCredits: 500, exhausted: false }} />,

@@ -2,6 +2,7 @@
 
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
+import type { PatchSettingsOp } from './commands-patch-settings'
 import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
@@ -13,11 +14,23 @@ export type ExternalEnv = EventsRouteEnv & {
   SNAPSHOTS?: R2Bucket
   /** Optional R2 key prefix for PR/staging isolation (mirrors audio.ts). */
   R2_KEY_PREFIX?: string
+  /** Identity-worker base URL — the DraftCells command (AQU-1186) calls its
+   *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
+   *  same server-to-server pattern as monday-notify.ts. */
+  AUTH_WORKER_URL?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */
 export interface ChangesetWarning {
-  code: 'missing_cell' | 'duplicate_command' | 'stale_pin' | 'rejected' | 'duplicate_file'
+  code:
+    | 'missing_cell'
+    | 'duplicate_command'
+    | 'stale_pin'
+    | 'rejected'
+    | 'duplicate_file'
+    /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
+     *  it is skipped rather than applied. A healthy outcome, not a problem. */
+    | 'superseded_step'
   fileId: string
   cellId: string
   message: string
@@ -30,6 +43,26 @@ export interface ChangesetWarning {
  *  callers can never claim it via headers. */
 export type ProvenanceChannel = 'mcp' | 'rest' | 'app'
 
+/** Command kinds that apply a plain row write instead of events, and so carry a
+ *  provenance-stamp receipt (ReceiptOnlyReceipt) rather than an event-id list.
+ *  The summary names the kind so the human on /approve/:id sees WHICH lifecycle
+ *  op they are approving instead of an empty "No changes summarized." box. */
+export type ReceiptOnlyCommandKind =
+  | 'CreateProject'
+  | 'CreateOrg'
+  | 'UpdateProjectSettings'
+  | 'PatchSettings'
+  | 'SetBrief'
+  | 'RegenerateBriefSummary'
+  | 'AddOrgMember'
+  | 'SetOrgRole'
+  | 'RemoveOrgMember'
+  | 'RenameProject'
+  | 'ArchiveProject'
+  | 'UnarchiveProject'
+  | 'Membership'
+  | 'ProjectSetup'
+
 /** Per-kind effect line for an EmitEvents changeset. `testimony` marks
  *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
  *  per-item confirmation and bulk auto-apply excludes them. */
@@ -37,6 +70,43 @@ export interface EmitEventsSummaryEntry {
   kind: string
   count: number
   testimony: boolean
+  /** Plain-language effect line for the approval page (AQU-1179) — what the
+   *  change does to the project, in a sentence a non-developer can consent to.
+   *  Computed server-side (emitKindEffectLabel) so every reviewing surface says
+   *  the same thing; absent on changesets staged before AQU-1179, where the UI
+   *  falls back to `kind × count`. */
+  label?: string
+}
+
+/** One staged validation/unvalidation, named cell by cell (AQU-1184 guardrail
+ *  2). A count alone ("3 cell.validate") is not an approvable plan: endorsing
+ *  a translation is testimony, so the approver has to see WHICH cells and
+ *  WHAT text they are putting their name to. Server-computed at prepare from
+ *  the live projection — never from anything the agent supplied. */
+export interface TestimonySummaryEntry {
+  kind: 'cell.validate' | 'cell.unvalidate'
+  fileId: string
+  cellId: string
+  /** Target-language lane (absent = the default lane). */
+  laneId?: string
+  /** The lane's current target text, truncated for display. */
+  text: string
+  /** True when `text` was cut at TESTIMONY_TEXT_MAX. */
+  truncated: boolean
+}
+
+/** Effect line for a cell-structure changeset (AQU-1234). Every count is
+ *  server-computed from the live chain at prepare, so the human on /approve/:id
+ *  sees how many rows actually move — not the agent's claim about it. */
+export interface StructureSummaryEntry {
+  command: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  fileId: string
+  cellsAdded: number
+  cellsRemoved: number
+  /** Rows re-pointed in the anchor chain so document order survives the edit. */
+  cellsReanchored: number
+  targetsRemoved: number
+  targetsRewritten: number
 }
 
 /** Server-computed effect summary — facts come from the plan, not the agent.
@@ -55,29 +125,129 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
-   *  approving instead of an empty "No changes summarized." box (design §2 /
-   *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
-  /** CreateProject: the project name being created. */
+  /** Receipt-only (CreateProject / CreateOrg / UpdateProjectSettings /
+   *  PatchSettings / SetBrief / Membership / AddOrgMember / SetOrgRole /
+   *  RemoveOrgMember / RenameProject / ArchiveProject / UnarchiveProject)
+   *  plus the memory commands (AddExample / AddDecision / RetireExample /
+   *  AddNote): the command kind, so the human on /approve/:id sees WHICH
+   *  lifecycle op they're approving instead of an empty "No changes
+   *  summarized." box (design §2 / blind-approval fix). */
+  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  /** AQU-1228 memory commands: the memory path being written or retired, plus
+   *  a one-line preview, so the human on /approve/:id sees the actual effect. */
+  memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
+  /** CreateProject: the project name being created. RenameProject: the new
+   *  name. ArchiveProject / UnarchiveProject: the project's current name, so
+   *  the approval box names what is being trashed or restored. */
   projectName?: string
+  /** RenameProject: the name being replaced, so the approval box reads as a
+   *  before → after rather than a bare new label. */
+  previousProjectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
-  /** CreateProject: the target org id as a string, or 'personal' for org-less. */
+  /** CreateProject: the target org id as a string, or 'personal' for org-less.
+   *  Org-membership commands: the target org's name + id, for the approval page. */
   targetOrg?: string
+  /** AQU-1235: the username being added / changed / removed. */
+  orgMemberUsername?: string
+  /** AQU-1235: the org role the member is being moved TO, as a role name. */
+  orgMemberNewRole?: string
+  /** AQU-1235: the org role the member holds TODAY ('not a member' for an add). */
+  orgMemberCurrentRole?: string
+  /** CreateProject: the language pair being seeded into settings, when the
+   *  command carried one (AQU-1223) — rendered on /approve/:id so a human sees
+   *  the configuration they are authorizing, not just the name. `''` (the
+   *  source-only shape) is shown as 'none'. */
+  newProjectLanguages?: string
+  /** CreateOrg: the organization name being created (AQU-1221). */
+  orgName?: string
+  /** CreateOrg: who will own the new org, in plain language — the credential's
+   *  minting user, resolved server-side (an agent can never name someone else).
+   *  Rendered on /approve/:id as "Org owner: alice", so the human approving is
+   *  told both WHAT is created and WHO ends up owning it. */
+  orgOwner?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
   ifMatchVersion?: number
   /** UpdateProjectSettings / PatchSettings: one truncated "key → preview" per
-   *  top-level settings key being written. Rendered as individual lines on the
-   *  approval page (an object, so the page's flat number/string filter ignores
-   *  it — the page reads it explicitly). */
+   *  top-level settings key being written. SetBrief uses the same shape, keyed
+   *  per brief section (`translationBrief.<fieldId>`), so the approval page
+   *  renders which sections change without a second summary field. Rendered as
+   *  individual lines on the approval page (an object, so the page's flat
+   *  number/string filter ignores it — the page reads it explicitly). */
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** AQU-1183 cell-field commands — one flat counter per effect, so the
+   *  approval page's number/string filter renders each as its own line. Only
+   *  the non-zero ones are set. */
+  sourceEdits?: number
+  transcriptionsSet?: number
+  cellsRetimed?: number
+  timingModesSet?: number
+  trackOverridesSet?: number
+  /** AQU-1185 Membership: one plain-language line per membership change ("Add
+   *  alice to proj-a as contributor (400)"), rendered as its own list on the
+   *  approval page. A human approving a role grant must be able to read who,
+   *  what role, and which project without decoding the command JSON. */
+  membershipChanges?: string[]
+  /** EmitEvents (AQU-1184): every staged cell.validate / cell.unvalidate,
+   *  named individually with the cell's current text. Rendered as its own
+   *  section on the approval page (an array, so the page's flat
+   *  number/string fact filter ignores it — the page reads it explicitly). */
+  testimony?: TestimonySummaryEntry[]
+  /** InsertCell / DeleteCell / SplitCell: the one structural effect line. */
+  structure?: StructureSummaryEntry
   warnings: ChangesetWarning[]
+}
+
+/**
+ * Prepare-time ledger for a cell-structure changeset (AQU-1234).
+ *
+ * One loose shape rather than a union per command: it round-trips through the
+ * `summary` JSONB column, and the fields each command uses are documented
+ * below. Beyond the usual minted event ids it also carries the pinned parent
+ * heads and the CUT TEXT — a split's halves are computed at prepare from the
+ * source the pin proves is still live, so commit applies exactly what was
+ * approved rather than re-deriving it from whatever the cell says now.
+ */
+export interface StructurePlan {
+  kind: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  /** Delete/Split: the cell being removed or cut. */
+  cellId?: string
+  /** Delete/Split: that cell's pinned source chain head. */
+  sourceParentEventId?: string
+  /** Delete: the minted source.cell.delete id. */
+  deleteEventId?: string
+  /** Delete: the anchor the removed cell's successors inherit. */
+  anchorCellId?: string | null
+  /** Split: the minted source.cell.commit id that truncates the original. */
+  commitEventId?: string
+  /** Split: the two halves of the source text, cut at prepare. */
+  sourceHead?: string
+  sourceTail?: string
+  /** Insert/Split: the new cell and its minted source.cell.create id. */
+  newCellId?: string
+  createEventId?: string
+  /** Insert/Split: the new cell's `sequenceIndex`, midway between neighbours. */
+  sequenceIndex?: number
+  /** Split: the original's `type`, inherited by the second half. */
+  newCellType?: string
+  /** Rows to re-point, each with its pinned head and minted reorder id. */
+  reanchor: { cellId: string; parentEventId: string; eventId: string }[]
+  /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
+  targetDeletes?: { lane: string; eventId: string }[]
+  /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
+   *  halves of the translation, and the minted commit ids for each. */
+  targetSplits?: {
+    lane: string
+    parentEventId: string
+    headValue: string
+    tailValue: string
+    headEventId: string
+    tailEventId: string
+  }[]
 }
 
 /** Prepare-time id ledger (W1-B, design §4). All event/file/cell ids a commit
@@ -118,11 +288,43 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** SetBrief (receipt-only): the settings version pinned at prepare — the
+   *  brief lives in the settings blob, so it takes the same version guard. */
+  setBrief?: { version: number }
+  /** RegenerateBriefSummary (receipt-only, AQU-1282): the settings version
+   *  pinned at prepare — same guard as setBrief. */
+  regenerateBriefSummary?: { version: number }
+  /** AQU-1235 org membership (receipt-only): the resolved target org + user
+   *  (pinned at prepare so commit writes the SAME identity the human approved,
+   *  never a re-resolution of the username), plus the role the target held at
+   *  prepare — the drift guard — and the role being written (absent for a
+   *  removal). */
+  orgMember?: {
+    orgId: number
+    targetUserId: string
+    previousRole: number | null
+    role?: number
+  }
+  /** AQU-1228 memory commands: the resolved memory path, and (for the adding
+   *  kinds) the pre-minted agent_memories row id, so a crash-retry re-finds
+   *  its own proposal instead of inserting a second one. RetireExample writes
+   *  no row, so it carries the path only. */
+  memory?: { path: string; memoryId?: string }
   /** EmitEvents: one entry per plan event, in event order — the compiled event
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
-  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string; conceptId?: string }[]
+  /** AQU-1183 cell-field commands: the compiled event id per normalized
+   *  target, in the SAME order planCellFields emits them. Commit re-runs that
+   *  pure normalizer over the stored commands, so the two line up
+   *  index-for-index and a crash-retry re-posts IDENTICAL ids. */
+  cellFields?: PlannedCellFieldIds
+  /** AQU-1185 Membership: the resolved target user id per command, in command
+   *  order. Pinned at prepare so the commit writes the PERSON the human
+   *  approved — a username that has since been reassigned to another account
+   *  is drift (plan_stale), not a target. */
+  membership?: { username: string; userId: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -134,6 +336,77 @@ export interface PlannedEventIds {
     attachEventId: string
     selectEventId: string
   }[]
+  /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
+   *  event ids, pinned parent heads, and the prepare-time cut text. */
+  structure?: StructurePlan
+  /** ProjectSetup (AQU-1294): the ordered step ledger the commit walks, plus
+   *  the settings version the plan was prepared against. Each step carries its
+   *  own status, which commit persists back into this ledger after EVERY step
+   *  — so a retry commit resumes at the failed step instead of re-applying the
+   *  ones that already landed. */
+  projectSetup?: ProjectSetupPlan
+}
+
+/** Status of one ProjectSetup step. `superseded` is a HEALTHY skip: the step's
+ *  end-state already existed at prepare (or at commit), so there is nothing to
+ *  apply. `failed` is what a retry resumes at. */
+export type ProjectSetupStepStatus = 'pending' | 'applied' | 'superseded' | 'failed'
+
+/** One expansion step of a ProjectSetup plan, in the fixed server-owned order:
+ *  settings → policy → brief → members → imports (array order). */
+export type ProjectSetupStep =
+  | { index: number; kind: 'settings'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'policy'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'brief'; status: ProjectSetupStepStatus }
+  | {
+      index: number
+      kind: 'members'
+      status: ProjectSetupStepStatus
+      /** Resolved at prepare so commit writes the PEOPLE the human approved. */
+      pinned: { username: string; userId: string; role: number }[]
+    }
+  | {
+      index: number
+      kind: 'import'
+      status: ProjectSetupStepStatus
+      artifactId: string
+      fileName: string
+      fileType: string
+      resultIndex?: number
+      sourceLanguage?: string
+      targetLanguage?: string
+      /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
+       *  artifact and fails the step if the count moved — the approver approved
+       *  a file of this size. */
+      cellCount: number
+      /** This import's own minted id ledger (a composite plan holds one per
+       *  import, so it cannot live at PlannedEventIds.planImport). */
+      planned: NonNullable<PlannedEventIds['planImport']>
+      /** Set once the step applies, so a resumed commit does not re-import. */
+      fileId?: string
+    }
+
+export interface ProjectSetupPlan {
+  /** The live settings version at prepare. The commit does NOT guard on it —
+   *  the server reads the live version immediately before each settings write
+   *  (plan_stale never surfaces from inside a plan) — it is the receipt's
+   *  before-value and the approval page's pin. */
+  settingsVersion: number
+  steps: ProjectSetupStep[]
+}
+
+/** Prepare-time event ids for a cell-field changeset (AQU-1183). Lists, not
+ *  cellKey-keyed objects: cellKey's NUL separator is not a legal jsonb key. */
+export interface PlannedCellFieldIds {
+  /** One source.cell.commit per cell (SetSource and SetTranscription on the
+   *  same cell merge into ONE event — see commands-cell-fields.ts). */
+  sourceCommits?: { fileId: string; cellId: string; eventId: string }[]
+  /** One cell.retime per cell. */
+  retimes?: { fileId: string; cellId: string; eventId: string }[]
+  /** One file.timing.set per file. */
+  timingModes?: { fileId: string; eventId: string }[]
+  /** One file.track.set per (file, track). */
+  trackOverrides?: { fileId: string; trackId: string; eventId: string }[]
 }
 
 /** Execution receipt recorded on commit. */
@@ -147,6 +420,19 @@ export interface ChangesetReceipt {
   fileId?: string
 }
 
+/** AQU-1185: one applied membership change, recorded on the receipt so the
+ *  audit trail is self-contained — the changeset row already carries the
+ *  credential id, and this says exactly what that credential did to whom. */
+export interface MembershipReceiptEntry {
+  kind: 'InviteMember' | 'SetRole' | 'RemoveMember'
+  userId: string
+  username: string
+  /** The role granted (absent for RemoveMember). */
+  role?: number
+  /** The target's direct role before the write; null when they had no row. */
+  previousRole: number | null
+}
+
 /** W2-A receipt for the receipt-only project-lifecycle commands (spec §2 D8).
  *  These apply a plain row write, not events, so the event-shaped
  *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
@@ -154,14 +440,116 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command: ReceiptOnlyCommandKind
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
-  projectId: string
-  /** UpdateProjectSettings / PatchSettings: the new settings version after the
-   *  write. */
+   *  PatchSettings / SetBrief / Membership / RenameProject / ArchiveProject /
+   *  UnarchiveProject: the project id it wrote. Org membership: the project
+   *  the plan was filed under (the write itself is org-level). Absent for
+   *  CreateOrg — it creates no project, and the changeset's own project id is
+   *  a filing placeholder that never resolves to a row. */
+  projectId?: string
+  /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
+   *  after the write. */
   version?: number
+  /** Membership: every applied change, in command order. */
+  membership?: MembershipReceiptEntry[]
+  /** CreateOrg: the created org id (AQU-1221). AQU-1235: the org the
+   *  membership change landed in. */
+  orgId?: number
+  /** AQU-1235: the user whose membership changed. */
+  targetUserId?: string
+  /** AQU-1235: the org role held before the change (null/absent = not a member). */
+  previousRole?: number
+  /** AQU-1235: the org role written (absent for a removal). */
+  role?: number
+  /** RegenerateBriefSummary (AQU-1282): length of the rendered L1 summary. */
+  briefSummaryChars?: number
+  /** RegenerateBriefSummary (AQU-1282): the model that rendered it. */
+  l1ModelId?: string
+  /** SetBrief (AQU-1282): outcome of the best-effort L1 auto-render that runs
+   *  after the sections commit. `rendered:false` never fails the commit — the
+   *  sections landed; RegenerateBriefSummary re-runs the render on demand. */
+  briefSummary?:
+    | { rendered: true; chars: number; model: string }
+    | { rendered: false; reason: string }
+}
+
+/** AQU-1294 ProjectSetup receipt: a ReceiptOnlyReceipt (it is a row write, not
+ *  events) plus the plan's step ledger and the server-computed VERIFICATION —
+ *  the facts an operator would otherwise have to re-query five endpoints for.
+ *
+ *  On a mid-plan failure this receipt is written while the row stays
+ *  `committing`, so the retry commit reads `completedSteps` / `failedStep` and
+ *  resumes where it stopped. */
+export interface ProjectSetupReceipt extends ReceiptOnlyReceipt {
+  command: 'ProjectSetup'
+  completedSteps: { index: number; kind: ProjectSetupStep['kind']; status: ProjectSetupStepStatus }[]
+  /** null on a fully applied plan. */
+  failedStep: { index: number; kind: ProjectSetupStep['kind']; error: string } | null
+  /** Present only once every step is applied or superseded. */
+  verification?: ProjectSetupVerification
+}
+
+/** Spec §2.4 — computed server-side after the last step. */
+export interface ProjectSetupVerification {
+  /** The settings version after the plan's last settings/brief write. */
+  settingsVersion: number
+  /** The plan's usernames with their LIVE effective roles. */
+  members: { username: string; role: number }[]
+  files: { fileId: string; name: string; cellCount: number; cellsWithMarkup: number }[]
+  /** Does the brief this plan wrote actually reach the copilot?
+   *
+   *  AQU-1323: this is a FRESHNESS claim, not an emptiness one. When the plan
+   *  carried a `brief` block it is true only if the L1 summary was re-rendered
+   *  inside this commit — a plan that wrote sections but left yesterday's L1
+   *  standing reports `false`, because the copilot is still reading the old
+   *  brief. prompt-preview's `parts.brief` is then run for real on the first
+   *  source cell of the first created file (no files: the L1 must be non-empty)
+   *  to confirm the fresh summary is actually injected. */
+  briefReachesCopilot: boolean
+  /** The evidence behind `briefReachesCopilot` (AQU-1323) — always present on a
+   *  fully applied plan, and always carrying a `reason` when the answer is false. */
+  briefDetails?: ProjectSetupBriefDetails
+  /** Policy keys the plan asked for that the server refused at commit because
+   *  they would have LOOSENED against the live blob. */
+  policyKeysNotApplied: string[]
+}
+
+/**
+ * AQU-1323 — the evidence behind `briefReachesCopilot`, so an agent reading the
+ * receipt can act on a `false` instead of guessing, and is warned about the one
+ * failure mode a `true` can still hide (a capped L1).
+ */
+export interface ProjectSetupBriefDetails {
+  /** Plain-language cause when `briefReachesCopilot` is false — the render code
+   *  and message, a failed L1 write, or a stale summary. Absent on a clean true. */
+  reason?: string
+  /** The L1 render hit the 1600-char cap, so some committed sections are NOT in
+   *  what the copilot reads. Reported even alongside `true`: the summary IS
+   *  fresh, it is just incomplete, and only the operator can judge that. */
+  truncated?: boolean
+  /** The live `translationBrief.l1GeneratedAt` after the plan — compare it with
+   *  the receipt's `appliedAt` to see the render land without a second query. */
+  l1GeneratedAt?: string | null
+}
+
+/** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a
+ *  row write, not events), but it reports WHERE the memory landed and in WHAT
+ *  state — `proposed` still needs an in-app review before the copilot reads it,
+ *  so the caller must never have to infer that from silence. */
+export interface MemoryWriteReceipt {
+  credentialId: string
+  channel: ProvenanceChannel
+  changesetId: string
+  command: 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  appliedAt: string
+  projectId: string
+  /** The `agent_memories.path` written or retired. */
+  memoryPath: string
+  memoryStatus: 'proposed' | 'approved' | 'archived'
+  /** Present when the write still needs a human review to take effect. */
+  note?: string
 }
 
 /** The full stored plan, as persisted in `changesets`. */
@@ -194,7 +582,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

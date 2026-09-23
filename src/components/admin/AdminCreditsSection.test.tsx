@@ -232,3 +232,68 @@ describe("AdminCreditsSection — showToOrg toggle", () => {
     )
   })
 })
+
+describe("AdminCreditsSection — AQU-942: the table is the known shell", () => {
+  it("shows a first-load placeholder, then the table", async () => {
+    // Only a load that has resolved nothing may stand in for the table.
+    let release: (rows: AdminOrgCredits[]) => void = () => {}
+    mockList.mockImplementationOnce(
+      () => new Promise<AdminOrgCredits[]>((resolve) => { release = resolve }),
+    )
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+
+    const status = screen.getByRole("status", { name: "Loading credits" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+
+    release([ORG_A])
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+  })
+
+  it("keeps the table mounted while a toggle's revalidation is in flight", async () => {
+    // WHY: every `patch` round-trips through `refresh`, which flips `loading`
+    // back on. Gating the section on `loading` unmounted the whole table — and
+    // the admin's sort and scroll position — on each toggle.
+    mockList.mockResolvedValueOnce([ORG_A])
+    mockPatch.mockResolvedValue(undefined)
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    let release: (rows: AdminOrgCredits[]) => void = () => {}
+    mockList.mockImplementationOnce(
+      () => new Promise<AdminOrgCredits[]>((resolve) => { release = resolve }),
+    )
+    fireEvent.click(screen.getByTestId("enforce-toggle-1"))
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled())
+
+    expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+
+    release([{ ...ORG_A, config: { ...ORG_A.config, enforce: true } }])
+    await waitFor(() =>
+      expect(screen.getByTestId("enforce-toggle-1")).toHaveAttribute("aria-checked", "true"),
+    )
+  })
+
+  it("keeps the table mounted when a toggle patch fails, and surfaces the error", async () => {
+    // WHY: the error gate threw away rows the section had already resolved, so
+    // one rejected patch replaced the entire table with a bare error line.
+    mockList.mockResolvedValue([ORG_A])
+    mockPatch.mockRejectedValue(new Error("cap patch rejected"))
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId("enforce-toggle-1"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cap patch rejected")
+    expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument()
+    expect(screen.getByText("Bible Translators")).toBeInTheDocument()
+  })
+
+  it("still distinguishes a resolved-empty org list from loading", async () => {
+    mockList.mockResolvedValue([])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    expect(await screen.findByText("No orgs found.")).toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+  })
+})

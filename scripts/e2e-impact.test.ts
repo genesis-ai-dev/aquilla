@@ -7,20 +7,44 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+  "e2e/specs/editor/comments.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
   "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+  "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
 ]
 
 describe("changed-file E2E impact selection", () => {
+  it("selects billing for catalog, client, and shared-contract changes", () => {
+    for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
+      "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
+      "db/postgres/migrations/0095_workspace_subscription_state.sql",
+      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
+      "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain(
+        "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")
+    }
+  })
+
+  it("maps smart-testing infrastructure to the edit durability boundary", () => {
+    expect(selectAffectedE2E(["smart-tests/driver.ts"], specs).specs).toContain(
+      "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+    )
+  })
+  it("keeps comment coverage when its no-hover entry point changes", () => {
+    expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
+      "e2e/specs/editor/comments.smoke.spec.ts",
+    )
+  })
   it("runs a changed smoke spec directly", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })
@@ -53,6 +77,7 @@ describe("changed-file E2E impact selection", () => {
         "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
         "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
         "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+        ...(file === "src/pages/Login.tsx" ? ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"] : []),
       ])
     }
   })
@@ -77,6 +102,19 @@ describe("changed-file E2E impact selection", () => {
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
   })
 
+  it("maps app font-size preference and boot script to preferences persist-reload", () => {
+    for (const file of [
+      "src/branding/FontSize.tsx",
+      "src/pages/Preferences.tsx",
+      "src/lib/store/file-view-prefs.ts",
+      "index.html",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
+      )
+    }
+  })
+
   it("maps a format parser to the import journey rather than shared runtime", () => {
     for (const file of [
       "src/lib/parsers/biblica-ebl.ts",
@@ -93,6 +131,17 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("maps original-source download to the export journey", () => {
+    const available = [...specs, "e2e/specs/editor/export.smoke.spec.ts"]
+    expect(selectAffectedE2E(["src/lib/sync/original-download.ts"], available).specs).toContain(
+      "e2e/specs/editor/export.smoke.spec.ts",
+    )
+    expect(selectAffectedE2E(
+      ["sync-worker/src/events/original-download-route.ts"],
+      available,
+    ).specs).toContain("e2e/specs/editor/export.smoke.spec.ts")
   })
 
   it("does not boot a browser for docs and unit-test-only changes", () => {

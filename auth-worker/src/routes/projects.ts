@@ -45,15 +45,33 @@ import {
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
-import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from "../services/assignments"
+import {
+  getFileChapters,
+  getMyAssignments,
+  getProjectAssignmentRoster,
+  getProjectUnitAssignees,
+  getUnitAssignments,
+} from "../services/assignments"
 import {
   bumpOrgActivity,
+  canViewMemberProgress,
   canViewRoster,
+  clampProjectDirectoryLimit,
+  decodeProjectDirectoryCursor,
+  DEFAULT_COMMENT_FLOORS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
+  encodeProjectDirectoryCursor,
+  getCommentFloors,
   getEffectiveOrgRole,
+  getMemberProgressViewMinRole,
+  DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+  DEFAULT_ROSTER_VIEW_MIN_ROLE,
   getOrCreateUserOrg,
   getRosterViewMinRole,
+  getProjectRosterViewMinRole,
   getTermbaseEditMinRole,
+  getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -373,9 +391,8 @@ projects.post(
         createdBy: user.id,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project create failed:", err)
-      return c.json({ error: `create failed: ${message}` }, 500)
+      return c.json({ error: "create failed" }, 500)
     }
 
     return c.json({
@@ -389,6 +406,15 @@ projects.post(
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects — list caller's accessible projects + files
+//
+// Unparameterized (session boot / OrgContext): grants the caller actually
+// holds. Platform operators do NOT receive the rest of the tenancy here —
+// that dump made boot and every project table O(all projects).
+//
+// Picker mode (`q`, `limit`, and/or `cursor`): one page, name-keyset. Admins
+// page the catalog; everyone else pages their accessible set. `?orgId=` still
+// scopes to one org, and an admin listing that org still sees every project
+// in it (bounded to the org, not the tenancy).
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.get("/", authMiddleware, async (c) => {
@@ -414,10 +440,20 @@ projects.get("/", authMiddleware, async (c) => {
     return c.json({ error: "invalid minRole" }, 400)
   }
 
-  // Platform operators see every project (the WHERE access predicate is
-  // bypassed below); their effective role is forced to 700/"platform" in the
-  // JS mapping, mirroring the resolver in project-permissions.ts.
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+  const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const pageLimit = pickerMode ? clampProjectDirectoryLimit(limitRaw) : null
+
+  // Platform operators see every project in an org-scoped list, or one page
+  // of the tenancy in picker mode. Unparameterized boot never bypasses.
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
+  const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
@@ -429,13 +465,43 @@ projects.get("/", authMiddleware, async (c) => {
   // org_members row neither reveals a project nor contributes to its
   // resolved role. Mirrors resolveProjectRole.
   //
-  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds.
+  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds
+  // + optional minRole / q / cursor / limit.
   //   ?1-?4  : user.id for creator CASE expressions
   //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
   //   ?8     : isAdmin (1/0) — platform operators bypass the access check
   //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
-  //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
-  //   ?13    : orgFilter (NULL or number) — equality check (filter case)
+  //   ?12-?13: orgFilter (IS NULL bypass + equality)
+  //   ?14-?15: minRole (IS NULL bypass + threshold)
+  // AQU-1274: the org path's contribution to max-wins, as SQL. Must stay
+  // equivalent to db/shared/project-roles.ts::orgPathContribution — this list
+  // endpoint is where `project.syncRole` comes from, so if it disagrees with
+  // the single-project resolver the SPA gates panels on the wrong role (which
+  // is how the Biblica ETT report surfaced). Maintainer+ contributes outright;
+  // below that the org role only stops a team attachment from demoting, so it
+  // contributes when a group grant exists and no explicit direct grant does.
+  // Contains no `?` placeholders, so positional binds are unaffected.
+  const orgContribSql = `CASE
+              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level
+              WHEN om.role_level IS NOT NULL
+                AND pm.role_level IS NULL
+                AND gg.max_grant IS NOT NULL THEN om.role_level
+              ELSE 0 END`
+
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(q)
+  }
+  if (cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(cursor.name.toLowerCase(), cursor.name.toLowerCase(), cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = pageLimit != null ? " LIMIT ?" : ""
+  if (pageLimit != null) extraBinds.push(pageLimit + 1)
+
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             p.source_project_id,
@@ -450,21 +516,21 @@ projects.get("/", authMiddleware, async (c) => {
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
+              ${orgContribSql},
               CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
             ) AS role_level,
             CASE
               WHEN pm.role_level IS NOT NULL
                 AND pm.role_level >= COALESCE(gg.max_grant, 0)
-                AND pm.role_level >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND pm.role_level >= (${orgContribSql})
                 AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'override'
               WHEN gg.max_grant IS NOT NULL
-                AND gg.max_grant >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND gg.max_grant >= (${orgContribSql})
                 AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'group'
-              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR}
-                AND om.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              WHEN (${orgContribSql}) > 0
+                AND (${orgContribSql}) >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'org'
               ELSE 'creator'
             END AS role_source
@@ -500,14 +566,26 @@ projects.get("/", authMiddleware, async (c) => {
           OR (p.org_id IS NOT NULL AND om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )
         AND (?::bigint IS NULL OR p.org_id = ?::bigint)
-      ORDER BY LOWER(p.name)`,
+        AND (?::int IS NULL OR GREATEST(
+              COALESCE(pm.role_level, 0),
+              COALESCE(gg.max_grant,  0),
+              ${orgContribSql},
+              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+            ) >= ?)
+        ${extraWhereSql}
+      ORDER BY LOWER(p.name), p.id
+      ${limitSql}`,
   )
     .bind(
       user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
       user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
-      isAdmin ? 1 : 0,                     // ?8: platform-operator bypass
+      adminBypass ? 1 : 0,                 // ?8: platform-operator bypass
       user.id, user.id, user.id,           // ?9-?11: WHERE: created_by, pm, om
       orgFilter, orgFilter,                // ?12-?13: org filter (IS NULL bypass + equality)
+      minRoleBind,                         // minRole IS NULL bypass
+      user.id,                             // GREATEST created_by in minRole clause
+      minRoleBind,                         // minRole threshold
+      ...extraBinds,
     )
     .all<{
       id: string
@@ -524,17 +602,18 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  // AQU-321: apply minRole filter before loading files (avoid extra DB round-trip).
   const allRows = rows.results ?? []
-  const filteredRows = minRole !== null && !isAdmin
-    ? allRows.filter((r) => r.role_level >= minRole)
-    : allRows
+  const hasMore = pageLimit != null && allRows.length > pageLimit
+  const pageRows = hasMore ? allRows.slice(0, pageLimit) : allRows
+  const last = pageRows[pageRows.length - 1]
+  const nextCursor =
+    hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null
 
-  const projectIds = filteredRows.map((r) => r.id)
+  const projectIds = pageRows.map((r) => r.id)
   const filesByProject = await loadFilesByProject(c.env, projectIds)
 
   return c.json({
-    projects: filteredRows.map((row) => {
+    projects: pageRows.map((row) => {
       // Platform operators resolve as owner everywhere (resolveProjectRole's
       // "platform" path); a genuine 700-level grant keeps its attribution.
       const role =
@@ -568,6 +647,7 @@ projects.get("/", authMiddleware, async (c) => {
         files: filesByProject.get(row.id) ?? [],
       }
     }),
+    nextCursor,
   })
 })
 
@@ -625,11 +705,37 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? await getTermbaseEditMinRole(c.env, row.org_id)
       : DEFAULT_TERMBASE_EDIT_MIN_ROLE
 
+  // AQU-1083's org default used to ride here too, and moved to the project
+  // SETTINGS response. An open editor re-reads its settings on a remote change
+  // frame and on window focus; it never re-reads this record, so an org-level
+  // flip could not reach a workspace that was already open.
+  //
+  // AQU-1086: same deal for the org's language-edit floor — the Project
+  // Settings language fields and the Languages card gate on it, and the
+  // project-settings route re-resolves it on every language write.
+  const languageEditMinRole =
+    row.org_id != null
+      ? await getLanguageEditMinRole(c.env, row.org_id)
+      : DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+
+
+  // AQU-1002: the org's comment floors ride along for the same reason — the
+  // comments drawer and Comments page gate their controls off the project
+  // record and have no org-settings read of their own. Advisory only:
+  // sync-worker re-resolves both floors on every comment write.
+  const commentFloors =
+    row.org_id != null
+      ? await getCommentFloors(c.env, row.org_id)
+      : DEFAULT_COMMENT_FLOORS
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    languageEditMinRole,
+    commentCreateMinRole: commentFloors.commentCreateMinRole,
+    commentResolveMinRole: commentFloors.commentResolveMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }
@@ -697,9 +803,8 @@ projects.patch(
         return c.json({ error: "not found" }, 404)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project rename failed:", err)
-      return c.json({ error: `rename failed: ${message}` }, 500)
+      return c.json({ error: "rename failed" }, 500)
     }
 
     return c.json({ id: projectId, name })
@@ -730,9 +835,8 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
       .bind(user.id, projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project archive failed:", err)
-    return c.json({ error: `archive failed: ${message}` }, 500)
+    return c.json({ error: "archive failed" }, 500)
   }
 
   const row = await c.env.AQUILLA_PG.prepare(
@@ -776,9 +880,8 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project restore failed:", err)
-    return c.json({ error: `restore failed: ${message}` }, 500)
+    return c.json({ error: "restore failed" }, 500)
   }
 
   c.executionCtx.waitUntil(notifySyncWorkerOfArchive(c.env, projectId, null, null))
@@ -912,6 +1015,127 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
 })
 
 /**
+ * GET /api/v2/projects/:projectId/assignments/unit — every live assignment
+ * covering ONE planning unit, with each assignee's own progress inside it
+ * (AQU-1278, the plan inspector's "Assigned to" section).
+ *
+ *   ?fileId=  required — the unit's file
+ *   ?section= the unit's section key; '' / absent means the whole file
+ *   ?lane=    target-language lane the inspector is showing; '' = default
+ *
+ * GATED ON THE ORG'S memberProgressViewMinRole, NOT on a hard MAINTAINER
+ * floor like /assignments/all above it. That route's hard 600 is a real bug
+ * waiting for someone to trip it: the client's Team card decides whether to
+ * render per-member progress from the org's CONFIGURABLE
+ * memberProgressViewMinRole, so an org that lowers the floor to Contributor
+ * gets a section that renders and then 403s on every fetch. Reading the same
+ * floor the client reads is what keeps the server and the screen agreeing —
+ * this is per-member progress, which is exactly what that setting governs
+ * (AQU-485).
+ *
+ * A project with no org (org_id null — a personal project) has no org policy
+ * to consult, so any member sees it, mirroring /:projectId/members.
+ */
+projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const fileId = c.req.query("fileId") ?? ""
+  if (!fileId) return c.json({ error: "fileId required" }, 400)
+  const sectionKey = c.req.query("section") ?? ""
+  const lane = c.req.query("lane") ?? ""
+
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  // A project with no org still has a floor. The default is MAINTAINER, and
+  // applying it here rather than skipping the check is the difference between
+  // "this org chose who may see per-person productivity" and "a personal
+  // project hands every viewer each assignee's name, deadline and four
+  // progress counts". There is no org to ask, so the answer is the default,
+  // not the absence of one — the same reading every other floor takes for an
+  // org-less project (see getLanguageEditMinRoleForProject).
+  const progressMinRole = project.org_id != null
+    ? await getMemberProgressViewMinRole(c.env, project.org_id)
+    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  if (!canViewMemberProgress(role.level, progressMinRole)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
+  }
+
+  // AND THE ROSTER FLOOR, because this response is identity data.
+  //
+  // AQU-485 made rosterViewMinRole and memberProgressViewMinRole INDEPENDENT
+  // keys: one decides who may learn which people are on a project, the other
+  // who may see per-person productivity. Both default to MAINTAINER, so a
+  // default org sees no change — but an org that lowers the progress floor
+  // below the roster floor was handing every assignee's username to callers
+  // the members route answers 403 to. A name is roster information wherever
+  // it is printed, so this asks both questions and the stricter one wins.
+  const rosterMinRole = project.org_id != null
+    ? await getRosterViewMinRole(c.env, project.org_id)
+    : DEFAULT_ROSTER_VIEW_MIN_ROLE
+  if (!canViewRoster(role.level, rosterMinRole)) {
+    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+  }
+
+  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, lane)
+  return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/units — who is on EVERY planning
+ * unit of the project, one row per (unit, person), for the plan board's avatar
+ * chips (AQU-1278, round 6). Names only, no progress: the per-unit route above
+ * still answers what each person has done once a unit is opened.
+ *
+ * Same floor as the per-unit read, for the same reason: a name on a row is
+ * per-member information, and an org that hides per-member progress from
+ * contributors has hidden this too.
+ */
+projects.get("/:projectId/assignments/units", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  const progressMinRole = project.org_id != null
+    ? await getMemberProgressViewMinRole(c.env, project.org_id)
+    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  if (!canViewMemberProgress(role.level, progressMinRole)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
+  }
+
+  // AND THE ROSTER FLOOR, because this response is identity data.
+  //
+  // AQU-485 made rosterViewMinRole and memberProgressViewMinRole INDEPENDENT
+  // keys: one decides who may learn which people are on a project, the other
+  // who may see per-person productivity. Both default to MAINTAINER, so a
+  // default org sees no change — but an org that lowers the progress floor
+  // below the roster floor was handing every assignee's username to callers
+  // the members route answers 403 to. A name is roster information wherever
+  // it is printed, so this asks both questions and the stricter one wins.
+  const rosterMinRole = project.org_id != null
+    ? await getRosterViewMinRole(c.env, project.org_id)
+    : DEFAULT_ROSTER_VIEW_MIN_ROLE
+  if (!canViewRoster(role.level, rosterMinRole)) {
+    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+  }
+
+  const assignees = await getProjectUnitAssignees(c.env, projectId)
+  return c.json({ assignees })
+})
+
+/**
  * GET /api/v2/projects/:projectId/files/:fileId/chapters — distinct chapters
  * present in a file (for the assign picker's chapter dropdown). Any member.
  */
@@ -950,6 +1174,13 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * floor or above, even when the full roster is hidden. That is the GitHub
  * "view admins" contract — a contributor still needs to see who can change
  * settings, without learning who else is on the project.
+ *
+ * AQU-1308: the floor applied here is `getProjectRosterViewMinRole` — the
+ * lower of the org's `rosterViewMinRole` and its `assignmentMinRole` — so a
+ * caller the org authorizes to assign work can always read the roster the
+ * assignee picker is built from. Under the shipped defaults (roster 600,
+ * assignment 500) a project lead was authorized to assign but 403'd on the
+ * roster, emptying every Assignee dropdown.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -967,7 +1198,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
   if (project.org_id != null && privilegedMinRole == null) {
-    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    const rosterMinRole = await getProjectRosterViewMinRole(c.env, project.org_id)
     if (!canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }
@@ -1302,9 +1533,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
         .bind(fileId, projectId)
         .run()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("delete file projection failed:", err)
-      return c.json({ error: `delete failed: ${message}` }, 500)
+      return c.json({ error: "delete failed" }, 500)
     }
   }
 

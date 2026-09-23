@@ -20,7 +20,8 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
-import { getProject } from "@/lib/store/project-index"
+import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
+import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -57,6 +58,14 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("rulePenalties", settings.rulePenalties)
   assign("algorithmicChecks", settings.algorithmicChecks)
   assign("terminology", settings.terminology)
+  assign("termMatching", settings.termMatching)
+  assign("fileGenres", settings.fileGenres)
+  // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
+  // workspace or the glosser and the alignment panel both read an empty list:
+  // a confirmation then persisted server-side but never fed the BT, never
+  // rendered as decided, and the next PATCH replaced the array instead of
+  // extending it (the panel's dedupe reads this same field).
+  assign("alignmentSeeds", settings.alignmentSeeds)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
   assign("validationCount", settings.validationCount)
@@ -64,11 +73,16 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
-  assign("allowLineCreation", settings.allowLineCreation)
+  assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
   assign("allowTrackEditing", settings.allowTrackEditing)
+  // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
+  // overview or the gate reads false everywhere and an opted-in project would
+  // see no Autopilot at all — the surfaces render only when this is on (or the
+  // legacy device-local flag was already stored true).
+  assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
@@ -90,6 +104,39 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   return next ?? record
 }
 
+/**
+ * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
+ * never on the server) onto a record. Returns the input by reference when the
+ * local copy carries nothing new: the workspace stamps this IDB record on
+ * every sync-token round-trip (syncRole, file metadata), and each of those
+ * writes notifies the subscription below — an equal-but-new object would
+ * re-render every consumer of `project` for nothing.
+ */
+function applyDeviceLocalSettings(
+  record: ProjectRecord,
+  local: ProjectRecord | undefined,
+): ProjectRecord {
+  if (
+    !local ||
+    (!local.completionSettings &&
+      !local.experimentalFlags &&
+      local.aiProviderChosen === undefined)
+  ) {
+    return record
+  }
+  const next: ProjectRecord = {
+    ...record,
+    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
+    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
+    ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
+  }
+  const unchanged =
+    JSON.stringify(record.completionSettings ?? null) === JSON.stringify(next.completionSettings ?? null) &&
+    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null) &&
+    record.aiProviderChosen === next.aiProviderChosen
+  return unchanged ? record : next
+}
+
 async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<ProjectRecord> {
   let local: ProjectRecord | undefined
   try {
@@ -98,12 +145,7 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
     console.warn("[useProject] failed to read device-local project cache", err)
     return record
   }
-  if (!local?.completionSettings && !local?.experimentalFlags) return record
-  return {
-    ...record,
-    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
-    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
-  }
+  return applyDeviceLocalSettings(record, local)
 }
 
 export type ProjectLoadStatus =
@@ -129,7 +171,10 @@ export interface UseProjectOptions {
 
 export function useProject(projectId: string, options?: UseProjectOptions) {
   const enabled = options?.enabled ?? true
-  const initialProject = options?.initialProject ?? null
+  // AQU-1325: fall back to the record a previous resolve of this project
+  // produced in this tab, so overview → editor (and back) paints the chrome
+  // and name immediately and revalidates instead of blanking on a cold fetch.
+  const initialProject = options?.initialProject ?? readResolvedProjectSeed(projectId)
   const [project, setProject] = useState<ProjectRecord | null>(initialProject)
   const [status, setStatus] = useState<ProjectLoadStatus>(initialProject ? "ready" : "loading")
   // AQU-334: the caller's role as returned by THIS load's GET /:projectId (or
@@ -201,6 +246,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       }
       const hydrated = await overlayDeviceLocalSettings(minimalProjectRecord(result.project))
       if (cancelled) return
+      rememberResolvedProject(hydrated)
       setProject(hydrated)
       setRoleLevel(result.project.role.level)
       setPm(result.project.pm ?? null)
@@ -216,6 +262,41 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     return cleanup
   }, [refresh])
 
+  // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
+  // completionSettings, aiProviderChosen) are written by Project settings /
+  // Set up AI, which open as a route-modal OVER a still-mounted
+  // overview/workspace (App.tsx `backgroundLocation`), so nothing re-runs
+  // `refresh` for them. Re-overlay whenever this project's local record changes
+  // — that is what lets Autopilot follow the Experimental toggle and the
+  // sparkle gate see Custom OpenRouter / BYOK without a page reload.
+  // Deliberately not gated on `enabled`: a sub-route reusing an ancestor's
+  // record must follow the same toggle, and an IDB read is not a resolve.
+  useEffect(() => {
+    let cancelled = false
+    let latestRead = 0
+    const unsubscribe = subscribeProjectRecords((changedId) => {
+      if (changedId !== projectId) return
+      // Last-issued read wins: a toggle ON then OFF issues two reads, and
+      // only the newer may land, or a slow older read would resurrect the
+      // value the user just switched away from. The newest read was issued
+      // after the newest write completed (writers notify post-put), so it
+      // sees the final state.
+      const read = ++latestRead
+      void getProject(projectId)
+        .then((local) => {
+          if (cancelled || read !== latestRead) return
+          setProject((prev) => (prev ? applyDeviceLocalSettings(prev, local) : prev))
+        })
+        .catch((err: unknown) => {
+          console.warn("[useProject] failed to re-read device-local project cache", err)
+        })
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [projectId])
+
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any
   // per-callsite changes.
@@ -225,7 +306,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const projectSettings = useProjectSettings(
     !enabled || options?.includeSettings === false ? null : projectId,
     roleLevel,
-    { termbaseEditMinRole: project?.termbaseEditMinRole },
+    {
+      termbaseEditMinRole: project?.termbaseEditMinRole,
+      // AQU-1086: the org's language-edit floor rides along on the project
+      // record too, so a language-only patch can be permitted below the
+      // maintainer settings floor without any extra fetch here.
+      languageEditMinRole: project?.languageEditMinRole,
+    },
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(

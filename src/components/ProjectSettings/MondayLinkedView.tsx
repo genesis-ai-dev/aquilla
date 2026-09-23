@@ -15,6 +15,7 @@ import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 export function MondayLinkedView({
   link,
@@ -86,9 +87,21 @@ export function MondayLinkedView({
             {t("projectSettings.monday.oneItemPerLabel", {
               granularity: link.config.itemGranularity === "file" ? "file" : "project",
             })}
-            {link.lastPushedAt
-              ? <> Last push <DateTooltip value={link.lastPushedAt} label={t("common.date.pushed")} /> — {link.lastPushStatus === "ok" ? "ok" : "failed"}.</>
-              : " Not pushed yet."}
+            {" "}
+            {link.lastPushedAt ? (
+              <RichMessage
+                k={
+                  link.lastPushStatus === "ok"
+                    ? "projectSettings.monday.lastPushOk"
+                    : "projectSettings.monday.lastPushFailed"
+                }
+                values={{
+                  date: <DateTooltip value={link.lastPushedAt} label={t("common.date.pushed")} />,
+                }}
+              />
+            ) : (
+              t("projectSettings.monday.notPushedYet")
+            )}
           </p>
           {link.lastPushStatus === "error" && link.lastPushError && (
             <p className="text-xs text-destructive">{link.lastPushError}</p>

@@ -408,6 +408,59 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
   })
 
+  // AQU-827. The server refuses these starts; the panel's job is to say why
+  // before the click, and to point at the two surfaces that supply the context.
+  it("disables the start button and names the missing context when the server reports start blockers", async () => {
+    fetchMock.mockResolvedValue(overview({
+      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["languages", "brief"] },
+    }))
+    renderPanel()
+    const panel = await screen.findByTestId("project-autopilot-panel")
+
+    expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeDisabled()
+    const gate = within(panel).getByTestId("autopilot-start-gate")
+    expect(within(gate).getByText(/source and target languages/i)).toBeInTheDocument()
+    expect(within(gate).getByText(/at least one translation-brief question/i)).toBeInTheDocument()
+    expect(within(gate).getByRole("link", { name: "Open project settings" }))
+      .toHaveAttribute("href", "/project/p1/settings")
+    expect(within(gate).getByRole("link", { name: "Open the translation brief" }))
+      .toHaveAttribute("href", "/project/p1/memory/brief")
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Run Autopilot" }))
+    expect(startMock).not.toHaveBeenCalled()
+  })
+
+  it("leaves the start button live when only the brief is missing, and clears the notice when nothing is", async () => {
+    fetchMock.mockResolvedValue(overview({
+      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["brief"] },
+    }))
+    renderPanel()
+    let panel = await screen.findByTestId("project-autopilot-panel")
+    let gate = within(panel).getByTestId("autopilot-start-gate")
+    expect(within(gate).queryByText(/source and target languages/i)).not.toBeInTheDocument()
+    expect(within(gate).getByRole("link", { name: "Open the translation brief" })).toBeInTheDocument()
+
+    cleanup()
+    fetchMock.mockResolvedValue(overview({
+      readiness: { items: [], blockingGaps: 0, ready: true, startBlockers: [] },
+    }))
+    renderPanel()
+    panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).queryByTestId("autopilot-start-gate")).not.toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeEnabled()
+  })
+
+  // Older servers omit the field entirely; the client must not invent a block.
+  it("does not gate the start when the server sends no startBlockers field", async () => {
+    fetchMock.mockResolvedValue(overview({
+      readiness: { items: [], blockingGaps: 0, ready: true },
+    }))
+    renderPanel()
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).queryByTestId("autopilot-start-gate")).not.toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeEnabled()
+  })
+
   it("shows a determinate progress bar only when active total is known", async () => {
     fetchMock.mockResolvedValue(overview({
       activeRuns: 1,
@@ -684,5 +737,96 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByText("The latest Autopilot run was stopped.")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
+  })
+
+  // ── AQU-1301: the review tile says where to start, not just how far behind ──
+
+  /** A settled project whose only pending work is staged drafts. */
+  function reviewOverview(patch: Partial<ContextualOverview> = {}) {
+    return overview({
+      files: [fileRow({
+        status: "done",
+        doneSpans: 10,
+        totalSpans: 10,
+        proposedDrafts: 212,
+        currentSpanId: "span-40",
+        currentSpanLabel: "LUK 4:1–4:12",
+        currentSpanDrafts: 6,
+      })],
+      proposedDrafts: 212,
+      currentSpanDrafts: 6,
+      ...patch,
+    })
+  }
+
+  it("names the parked passage and splits its drafts from the backlog", async () => {
+    fetchMock.mockResolvedValue(reviewOverview())
+    renderPanel()
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByText("Waiting on LUK 4:1–4:12 — 6 drafts to review."))
+      .toBeInTheDocument()
+    // The tile leads with the actionable 6, not the 212-deep pile.
+    expect(within(panel).getByRole("button", { name: "View 6 ready to review" }))
+      .toBeInTheDocument()
+    expect(within(panel).getByText("+206 in earlier passages")).toBeInTheDocument()
+  })
+
+  it("shows no backlog line when the parked passage is the whole queue", async () => {
+    fetchMock.mockResolvedValue(reviewOverview({
+      files: [fileRow({
+        status: "done",
+        doneSpans: 10,
+        totalSpans: 10,
+        proposedDrafts: 6,
+        currentSpanId: "span-40",
+        currentSpanLabel: "LUK 4:1–4:12",
+        currentSpanDrafts: 6,
+      })],
+      proposedDrafts: 6,
+      currentSpanDrafts: 6,
+    }))
+    renderPanel()
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByRole("button", { name: "View 6 ready to review" }))
+      .toBeInTheDocument()
+    // AC: no "+0 more".
+    expect(within(panel).queryByText(/in earlier passages/)).not.toBeInTheDocument()
+  })
+
+  it("keeps the flat total when the server does not report the passage split", async () => {
+    // A worker deployed before AQU-1301 omits currentSpanDrafts entirely. The
+    // tile must degrade to the old total, never claim a passage it cannot name.
+    fetchMock.mockResolvedValue(overview({
+      files: [fileRow({ status: "done", doneSpans: 10, totalSpans: 10, proposedDrafts: 212 })],
+      proposedDrafts: 212,
+    }))
+    renderPanel()
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByText("212 drafts are ready for review.")).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 212 ready to review" }))
+      .toBeInTheDocument()
+    expect(within(panel).queryByText(/in earlier passages/)).not.toBeInTheDocument()
+  })
+
+  it("does not name a passage when several files are parked on different ones", async () => {
+    fetchMock.mockResolvedValue(overview({
+      files: [
+        fileRow({ fileId: "f1", runId: "r1", status: "done", doneSpans: 10, totalSpans: 10, proposedDrafts: 100, currentSpanLabel: "LUK 4:1–4:12", currentSpanDrafts: 4 }),
+        fileRow({ fileId: "f2", runId: "r2", status: "done", doneSpans: 10, totalSpans: 10, proposedDrafts: 112, currentSpanLabel: "MRK 2:1–2:8", currentSpanDrafts: 5 }),
+      ],
+      proposedDrafts: 212,
+      currentSpanDrafts: 9,
+    }))
+    renderPanel()
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    // Naming one of two parked passages would be a guess; the count still splits.
+    expect(within(panel).queryByText(/Waiting on/)).not.toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 9 ready to review" }))
+      .toBeInTheDocument()
+    expect(within(panel).getByText("+203 in earlier passages")).toBeInTheDocument()
   })
 })

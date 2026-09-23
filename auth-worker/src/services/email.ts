@@ -444,6 +444,112 @@ export async function sendBookCallEmail(
   return { delivered: true }
 }
 
+/** A marketing-site partner-newsletter request (routes/contact.ts).
+ * Organization is required — the list is curated per
+ * docs/partner-newsletter/PLAYBOOK.md. */
+export interface NewsletterRequestSubmission {
+  name: string
+  email: string
+  organization: string
+  message?: string
+}
+
+/**
+ * Build the internal notification email for a partner-newsletter request.
+ * Pure and exported so the copy can be unit-tested without an EMAIL binding.
+ * Every field is visitor-controlled — escape all of them.
+ */
+export function buildNewsletterRequestEmail(
+  submission: NewsletterRequestSubmission,
+): { subject: string; html: string; text: string } {
+  const name = submission.name.trim()
+  const email = submission.email.trim()
+  const organization = submission.organization.trim()
+  const message = submission.message?.trim() || null
+
+  const subject = `Partner newsletter request — ${name} (${organization})`
+
+  const rows = [
+    ["Name", name],
+    ["Email", email],
+    ["Organization", organization],
+  ]
+    .map(
+      ([label, value]) =>
+        `<tr>
+          <td style="padding: 6px 12px 6px 0; color: #6b7280; white-space: nowrap; vertical-align: top;">${label}</td>
+          <td style="padding: 6px 0;">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("")
+
+  const messageBlock = message
+    ? `<p style="margin-top: 20px; color: #6b7280;">How they work with Aquilla:</p>
+       <p style="background-color: #f3f4f6; padding: 12px; border-radius: 6px; white-space: pre-wrap;">${escapeHtml(message)}</p>`
+    : ""
+
+  const html = `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Partner newsletter request</h2>
+          <p>Someone asked to join the monthly Frontier R&D partner newsletter via the Aquilla homepage. The list is curated — nothing happens until you approve.</p>
+          <table style="border-collapse: collapse; margin: 16px 0;">${rows}</table>
+          ${messageBlock}
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            To approve: add them as a contact to the "Frontier R&D Newsletter"
+            audience in Resend, then send a one-line welcome (Reply-To is set to
+            their address). To decline: reply politely or simply archive this email.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+
+  const text =
+    `Partner newsletter request from the Aquilla homepage.\n\n` +
+    `Name: ${name}\nEmail: ${email}\nOrganization: ${organization}\n` +
+    (message ? `\nHow they work with Aquilla:\n${message}\n` : "") +
+    `\nThe list is curated — nothing happens until you approve. To approve: add\n` +
+    `them as a contact to the "Frontier R&D Newsletter" audience in Resend and\n` +
+    `send a one-line welcome (Reply-To is their address). To decline: reply\n` +
+    `politely or archive.`
+
+  return { subject, html, text }
+}
+
+/**
+ * Forward a partner-newsletter request to the team inbox (CONTACT_EMAIL,
+ * default joel@frontierrnd.com). Same delivery semantics as
+ * sendBookCallEmail: `{ delivered: false }` without error when the EMAIL
+ * binding is absent (local/e2e), throws when a configured send fails.
+ */
+export async function sendNewsletterRequestEmail(
+  env: Env,
+  submission: NewsletterRequestSubmission,
+): Promise<{ delivered: boolean }> {
+  if (!env.EMAIL) return { delivered: false }
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const to = env.CONTACT_EMAIL || "joel@frontierrnd.com"
+  const { subject, html, text } = buildNewsletterRequestEmail(submission)
+  try {
+    await env.EMAIL.send({
+      from,
+      // Reply-To is the requester so a plain reply approves or declines.
+      replyTo: submission.email.trim(),
+      to: [to],
+      subject,
+      html,
+      text,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to send newsletter request email: ${message}`)
+  }
+  return { delivered: true }
+}
+
 function buildAdminElevationHtml(code: string, ttlMinutes: number): string {
   return `
     <html>
@@ -525,5 +631,28 @@ export async function sendPasswordResetEmail(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(`Failed to send email: ${message}`)
+  }
+}
+
+/**
+ * Send the retention recap (weekly/monthly cron, or on demand from the admin
+ * console) to platform operators. Best-effort like the other senders: false
+ * when EMAIL is unbound or the provider rejects it.
+ */
+export async function sendRetentionReportEmail(
+  env: Env,
+  to: string[],
+  report: { subject: string; text: string; html: string },
+): Promise<boolean> {
+  if (!env.EMAIL || to.length === 0) return false
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
+  try {
+    await env.EMAIL.send({ from, replyTo, to, subject: report.subject, html: report.html, text: report.text })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[retention-report] email failed:", message)
+    return false
   }
 }

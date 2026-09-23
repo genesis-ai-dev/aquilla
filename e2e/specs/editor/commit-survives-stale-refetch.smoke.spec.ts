@@ -16,15 +16,15 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Stale refetch ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  // Hold every FULL-file cells stream (side=…) behind an explicit release
+  // Hold every FULL-file cells stream (paired=1) behind an explicit release
   // gate. The response is snapshotted before the edit, then delivered exactly
   // when the test asks; targeted cellIds= fetches pass through untouched.
   let releaseStaleResponse!: () => void
   const staleResponseReleased = new Promise<void>((resolve) => {
     releaseStaleResponse = resolve
   })
-  let staleTargetResponseCaptured = false
-  const deliveredSides = new Set<string>()
+  let staleResponseCaptured = false
+  let staleResponseDelivered = false
 
   // Warm files normally revalidate through the cheap `?since=` delta path.
   // Force that request to take its documented resync fallback so this test
@@ -36,20 +36,19 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
       body: JSON.stringify({ resync: true }),
     })
   })
-  await alice.route(/\/cells\?(?=.*side=)(?!.*cellIds=).*/, async (route) => {
-    const side = new URL(route.request().url()).searchParams.get("side")
+  await alice.route(/\/cells\?(?=.*paired=1)(?!.*cellIds=).*/, async (route) => {
     const response = await route.fetch()
     const body = await response.body()
-    if (side === "target") staleTargetResponseCaptured = true
+    staleResponseCaptured = true
     await staleResponseReleased
     await route.fulfill({ response, body })
-    if (side) deliveredSides.add(side)
+    staleResponseDelivered = true
   })
 
   // Kick a soft refetch (focus handler) so a stale stream is in flight…
   await alice.evaluate(() => window.dispatchEvent(new Event("focus")))
-  await expect.poll(() => staleTargetResponseCaptured, {
-    message: "target-side stale response should be captured before the edit",
+  await expect.poll(() => staleResponseCaptured, {
+    message: "complete-row stale response should be captured before the edit",
     timeout: 10_000,
   }).toBe(true)
 
@@ -57,21 +56,19 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   const text = `Survives stale swap ${Date.now()}`
   await ws.editCell(0, text)
 
-  // Deliver the stale target snapshot, then wait for BOTH sequential sides of
-  // the full stream to finish. Waiting only for target let teardown reload the
-  // page while the source route was still being fulfilled, which produced a
-  // spurious "Route is already handled" failure and, more importantly, made
-  // the assertion run before useCells performed its atomic buffer swap.
+  // Deliver the complete stale snapshot, then assert after its atomic swap.
   releaseStaleResponse()
-  await expect.poll(() => [...deliveredSides].sort(), {
-    message: "both sides of the held full-file stream should be delivered",
+  await expect.poll(() => staleResponseDelivered, {
+    message: "the held complete-row stream should be delivered",
     timeout: 10_000,
-  }).toEqual(["source", "target"])
+  }).toBe(true)
   await expect(ws.cellRow(0)).toContainText(text)
 
   // And survive a real reload (server projection has it).
-  await alice.unroute(/\/cells\?since=\d+(?:&.*)?$/)
-  await alice.unroute(/\/cells\?(?=.*side=)(?!.*cellIds=).*/)
+  // AQU-1220: another full refetch can already be inside route.fetch(),
+  // even after the first complete-row page was delivered. Drain every
+  // in-flight handler before reload cancels its intercepted request.
+  await alice.unrouteAll({ behavior: "wait" })
   await alice.reload()
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()

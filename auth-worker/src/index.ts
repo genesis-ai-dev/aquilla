@@ -53,6 +53,7 @@
 //   GET  /api/v2/admin/activity    (ADMIN_EMAILS only)
 //   GET  /api/v2/health
 //   POST /api/v2/contact/book-call (public — marketing homepage form)
+//   POST /api/v2/contact/newsletter (public — partner-letter request form)
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
 //   POST /__dev__/login  (WRANGLER_LOCAL only)
@@ -78,11 +79,14 @@ import devSeedRoutes from "./routes/dev-seed"
 import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
 import agentRoutes from "./routes/agent"
+import aiDraftInternalRoutes from "./routes/ai-draft-internal"
+import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
+import agentConnectRoutes from "./routes/agent-connect"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
@@ -92,8 +96,10 @@ import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
@@ -107,6 +113,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
@@ -159,7 +166,7 @@ app.use("*", async (c, next) => {
 // Hono throws on `c.executionCtx` when there is none (vitest calls
 // app.fetch without a ctx), so resolve it defensively and fall back to
 // un-awaited fire-and-forget.
-const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+const runInBackground = (c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, task: Promise<void>) => {
   try {
     c.executionCtx.waitUntil(task)
   } catch {
@@ -222,6 +229,7 @@ app.get("/", (c) =>
       "/api/v2/invites/*",
       "/api/v2/admin/*",
       "/api/v2/contact/book-call",
+      "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
@@ -286,14 +294,20 @@ app.route("/api/v2/projects", agentArtifactsRoutes)
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
 app.route("/api/v2/projects", projectKnowledge)
+// Style-rule library + applicability graph (AQU-934 phase 2). Sibling router
+// — propose CONTRIBUTOR+, review/applicability PROJECT_LEAD+, org rows
+// read-only through project routes (routes/style-rules.ts).
+app.route("/api/v2/projects", styleRulesRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
-// Public contact surface (marketing homepage "book a call" form) — no auth;
+// Public contact surface (marketing homepage "book a call" + partner-letter
+// request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
+app.route("/api/v2", billingWorkspaceRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)
@@ -304,6 +318,7 @@ app.route("/api/v2/monday", mondayRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
+app.route("/api/v2/agent-connect", agentConnectRoutes)
 // One-time human approval assertion for ask-mode changesets (AQU-533 §3).
 // Browser-session-authenticated — distinct from the API-credential-gated
 // agent surface in sync-worker's /api/v1/external/projects/*/changesets.
@@ -321,13 +336,18 @@ app.route("/api/v1/import", importSandboxRoutes)
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.
 app.route("/api/v1/ai/agent", agentRoutes)
+// AQU-1186: server-to-server drafting for the external Agent API's DraftCells
+// command. Shared-secret only (sync-worker → here); returns drafts, never writes.
+app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
+// AQU-1282: server-to-server L1 brief-summary render for the external Agent
+// API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
+app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.
-// Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4.
 // /api/v1/usage/me (JWT-authed), /api/v1/usage/org/:orgId (maintainer-gated).
 app.route("/api/v1/usage", usageRoutes)
 
@@ -414,7 +434,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
@@ -441,6 +461,13 @@ const scheduled = async (
   // is configured). The close below must wait for them.
   let sweepDone: Promise<void> = Promise.resolve()
   try {
+    // The retention recap crons (weekly Monday / monthly 1st) share this
+    // handler; they do their one job and return without the 5-minute chores.
+    const recap = await sendScheduledRetentionReport(runEnv, controller.cron, new Date())
+    if (recap !== "not-a-recap-cron") {
+      console.log(`[retention cron] ${controller.cron}: ${recap}`)
+      return
+    }
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
     // revoked_tokens hygiene lives here now, off the request path (it used to

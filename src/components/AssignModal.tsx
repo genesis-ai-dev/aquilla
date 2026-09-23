@@ -60,6 +60,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
   createAssignment,
@@ -111,6 +112,14 @@ interface AssignModalProps {
    * it down to project-specific members — see AQU-676 / partitionMembers.
    */
   members: ProjectMember[]
+  /**
+   * AQU-1308: why `members` is empty, when it is empty for a reason the user
+   * should see. The host owns the roster fetch, so only the host can tell an
+   * org-policy refusal ("hidden") or a failed fetch ("load-failed") apart from
+   * a project that genuinely has no other members. Omitted / null ⇒ the roster
+   * loaded fine, and the picker renders exactly as before.
+   */
+  rosterUnavailable?: "hidden" | "load-failed" | null
   /** Current user's role level — used to gate the modal. */
   roleLevel: number
   /**
@@ -118,6 +127,8 @@ interface AssignModalProps {
    * self-assign. Default false — leads/maintainers-only, pre-AQU-496 behavior.
    */
   allowSelfAssignment?: boolean
+  /** Org-configured floor for assigning work to anyone (default Project lead). */
+  assignmentMinRole?: number
   /**
    * AQU-496: the caller's own Frontier user id. Required to lock the assignee
    * picker to "self" when `roleLevel` is below PROJECT_LEAD — without it, a
@@ -139,10 +150,12 @@ interface AssignModalProps {
 // "segment") so the modal reads correctly for non-scripture imports. When no
 // file is in scope (launched from a project lane) we fall back to the neutral
 // wording too.
-const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set([
-  "usfm",
-  "ebible",
-  "helloao",
+// AQU-997: derived from the canonical set rather than re-listed, so a format
+// admitted there (`codex` was missing from all three hand-maintained copies)
+// reaches the scope copy too. Only the `sdbh` extension is local: a lexicon is
+// addressed by verse for this modal's purposes but produces no sections.
+const VERSE_SCOPED_FILE_TYPES: ReadonlySet<FileType> = new Set<FileType>([
+  ...SCRIPTURE_FILE_TYPES,
   "sdbh",
 ])
 
@@ -166,8 +179,10 @@ export function AssignModal({
   defaultLane = "",
   defaultLaneLabel,
   members,
+  rosterUnavailable = null,
   roleLevel,
   allowSelfAssignment = false,
+  assignmentMinRole = ROLE.PROJECT_LEAD,
   callerUserId = null,
   selectedCellIds,
   jwt,
@@ -178,7 +193,9 @@ export function AssignModal({
   // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
   // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
   // "below lead" and "self-assign mode" are equivalent here.
-  const isSelfAssignMode = roleLevel < ROLE.PROJECT_LEAD
+  const isSelfAssignMode = roleLevel < assignmentMinRole
+  const effectiveCallerUserId =
+    callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
@@ -206,7 +223,11 @@ export function AssignModal({
       setScopeKind(
         selectedCellIds.size > 0 ? "selection" : activeFileId ? "verses" : "books",
       )
-      setSelectedMemberId(isSelfAssignMode && callerUserId != null ? String(callerUserId) : "")
+      setSelectedMemberId(
+        isSelfAssignMode && effectiveCallerUserId != null
+          ? String(effectiveCallerUserId)
+          : "",
+      )
       setSelectedLane(defaultLane)
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
@@ -215,7 +236,7 @@ export function AssignModal({
       setNote("")
       setDeadlineDate(undefined)
     }
-  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, callerUserId, defaultLane])
+  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane])
 
   // AQU-658: derive the unit vocabulary from the active file's type so the
   // scope options and confirmation copy read correctly for non-scripture
@@ -224,7 +245,7 @@ export function AssignModal({
     () => (activeFileId ? projectFiles.find((f) => f.id === activeFileId) ?? null : null),
     [activeFileId, projectFiles],
   )
-  const isScripture = activeFile ? SCRIPTURE_FILE_TYPES.has(activeFile.type) : false
+  const isScripture = activeFile ? VERSE_SCOPED_FILE_TYPES.has(activeFile.type) : false
   const sectionNoun = isScripture
     ? t("editor.milestone.vocab.chapterPlural")
     : t("editor.milestone.vocab.sectionPlural")
@@ -361,7 +382,13 @@ export function AssignModal({
     // AQU-496 defense-in-depth: re-check even though the picker is already
     // locked to self in self-assign mode — the server is authoritative and
     // will 403 regardless, but this avoids a round-trip for the obvious case.
-    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, member.userId)) {
+    if (!canSubmitAssignment(
+      roleLevel,
+      allowSelfAssignment,
+      effectiveCallerUserId,
+      member.userId,
+      assignmentMinRole,
+    )) {
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
@@ -481,13 +508,13 @@ export function AssignModal({
     members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
-    roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
+    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveCallerUserId, deadlineDate, groupLabelByFileId,
     selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
   // when the org's allowSelfAssignment carve-out applies (canOpenAssignUi).
-  if (!canOpenAssignUi(roleLevel, allowSelfAssignment)) return null
+  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole)) return null
 
   // AQU-496: in self-assign mode the picker is locked to the caller's own
   // membership row. If callerUserId couldn't be resolved (edge case — caller
@@ -495,7 +522,7 @@ export function AssignModal({
   // canSubmit stays false, so this fails closed rather than open.
   const assigneeItems = isSelfAssignMode
     ? members
-        .filter((m) => m.userId === callerUserId)
+        .filter((m) => m.userId === effectiveCallerUserId)
         .map((m) => ({
           value: String(m.userId),
           label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }),
@@ -706,6 +733,14 @@ export function AssignModal({
             </Select>
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
+            )}
+            {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
+            {rosterUnavailable && (
+              <FieldError>
+                {rosterUnavailable === "hidden"
+                  ? t("org.assignWork.rosterHiddenError")
+                  : t("org.assignWork.rosterLoadError")}
+              </FieldError>
             )}
           </Field>
 

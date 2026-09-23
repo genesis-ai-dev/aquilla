@@ -1,8 +1,12 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
+import { redactCaptureEvent } from "@/lib/analytics-redaction"
+import { resolvePosthogHost } from "@/lib/posthog-host"
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
-const HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? "https://us.i.posthog.com"
+// AQU-854: EU Cloud by default — see `posthog-host.ts` for why US is not a
+// legal fallback. Override with `VITE_POSTHOG_HOST=https://eu.i.posthog.com`.
+const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
 if (typeof window !== "undefined" && KEY) {
   posthog.init(KEY, {
@@ -13,6 +17,14 @@ if (typeof window !== "undefined" && KEY) {
     // Surface unhandled errors / rejections as $exception events so failures
     // that never reach an explicit captureException call are still queryable.
     capture_exceptions: true,
+    // OPS-29 (docs/OPSEC-REVIEW-2026-09-14.md): the last hook before an event
+    // leaves the browser. `/join/:token`, `/join-org/:token`, `/link/:token`,
+    // `/reset-password?token=` and `/verify-email?token=` all carry a live
+    // credential in the URL, and PostHog attaches `$current_url`/`$pathname` to
+    // every event (plus the replay's own rrweb `href` and the `$initial_*`
+    // person properties). Redact by route position and query-parameter name so
+    // no capture site has to remember to do it.
+    before_send: redactCaptureEvent,
     disable_session_recording: !isAnalyticsEnabled(),
     session_recording: {
       // Keep the page visible so replays are actually diagnosable. Inputs are

@@ -89,15 +89,13 @@ describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
     )
   })
 
-  // THE ORDERING TEST. OmniVoice is the default engine and answers 503 for
+  // THE ORDERING TEST. Inworld is the default engine and answers 503 for
   // this, so the moment brackets parse, the generic 5xx branch would claim it
   // and tell the user to try again in a moment — advice that can never come
-  // true, on the most likely voice failure there is. (AQU-1001 renamed the
-  // category from tts-not-configured to omnivoice-not-configured; the
-  // ordering guarantee is the same.)
+  // true, on the most likely voice failure there is.
   it("calls an unconfigured voice service what it is, not a temporary outage", () => {
     const result = categorizeAiError("voice/tts failed (503): TTS not configured")
-    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.category).toBe("hosted-tts-not-configured")
     expect(result.category).not.toBe("provider-unavailable")
     expect(result.body).not.toMatch(/temporary|try again in a moment/i)
   })
@@ -124,27 +122,27 @@ describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
 })
 
 describe("categorizeAiError — names the TTS engine that failed", () => {
-  it("does not treat a local OmniVoice 503 as a missing Gemini key", () => {
+  it("does not treat a local Inworld 503 as a missing Gemini key", () => {
     const result = categorizeAiError("voice/tts failed (503): TTS not configured")
-    expect(result.category).toBe("omnivoice-not-configured")
-    expect(result.title).toBe("OmniVoice isn't configured")
-    expect(result.body).toMatch(/omnivoice/i)
+    expect(result.category).toBe("hosted-tts-not-configured")
+    expect(result.title).toBe("Inworld TTS isn't configured")
+    expect(result.body).toMatch(/inworld/i)
     expect(result.body).toMatch(/not gemini/i)
     expect(result.body).toMatch(/will not fix/i)
   })
 
-  it("recognizes the authored OmniVoice-not-configured body", () => {
+  it("recognizes the authored Inworld-not-configured body", () => {
     const raw =
-      "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+      "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
     const result = categorizeAiError(raw)
-    expect(result.category).toBe("omnivoice-not-configured")
-    expect(result.title).toBe("OmniVoice isn't configured")
+    expect(result.category).toBe("hosted-tts-not-configured")
+    expect(result.title).toBe("Inworld TTS isn't configured")
   })
 
-  it("names OmniVoice on a later Modal failure", () => {
-    const result = categorizeAiError("OmniVoice TTS failed (502): upstream timeout")
-    expect(result.category).toBe("omnivoice-failed")
-    expect(result.title).toBe("OmniVoice TTS failed")
+  it("names Inworld on a later upstream failure", () => {
+    const result = categorizeAiError("Inworld TTS failed (502): upstream timeout")
+    expect(result.category).toBe("hosted-tts-failed")
+    expect(result.title).toBe("Inworld TTS failed")
     expect(result.body).toMatch(/not a gemini key/i)
   })
 
@@ -161,18 +159,42 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.title).toBe("Voice cloning failed")
   })
 
-  it("keeps a missing Gemini key as Gemini, and offers OmniVoice as the alternative", () => {
+  it("keeps a missing Gemini key as Gemini, and offers Inworld as the alternative", () => {
     const result = categorizeAiError(
       "Add a Gemini API key in Project Settings before using Gemini voice generation.",
     )
     expect(result.category).toBe("missing-gemini-key")
     expect(result.title).toBe("Gemini API key required")
-    expect(result.body).toMatch(/omnivoice/i)
+    expect(result.body).toMatch(/inworld/i)
   })
 
   it("names Gemini when TTS ran but returned no audio", () => {
     const result = categorizeAiError("Gemini TTS response did not include audio data.")
     expect(result.category).toBe("gemini-failed")
     expect(result.title).toBe("Gemini TTS failed")
+  })
+})
+
+describe("categorizeAiError — OpenRouter key vs Gemini (AQU-1158)", () => {
+  const OPENROUTER_NOT_CONFIGURED =
+    'Completion failed: 500 {"error":"OPENROUTER_API_KEY is not configured"}'
+
+  it("titles a hosted OpenRouter miss as OpenRouter, never Gemini", () => {
+    const result = categorizeAiError(OPENROUTER_NOT_CONFIGURED)
+    expect(result.category).toBe("missing-openrouter-key")
+    expect(result.title).toBe("OpenRouter API key required")
+    expect(result.body).toMatch(/openrouter/i)
+    expect(result.body).toMatch(/custom/i)
+    expect(result.body).not.toMatch(/gemini/i)
+    expect(result.body).not.toMatch(/voice/i)
+    expect(result.raw).toBe(OPENROUTER_NOT_CONFIGURED)
+  })
+
+  it("does not treat a generic api_key substring in a completion failure as Gemini", () => {
+    const result = categorizeAiError(
+      'Completion failed: 401 {"error":{"message":"invalid api key","code":401}}',
+    )
+    expect(result.category).not.toBe("missing-gemini-key")
+    expect(result.title).not.toMatch(/gemini/i)
   })
 })

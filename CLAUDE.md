@@ -27,7 +27,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
+├── infra/modal/        # Modal services: diarization.py, seed_vc.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
@@ -99,10 +99,14 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
   diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
-  discovery — see `docs/AGENT-API.md`). PR previews do **not** get an isolated per-PR
-  sync-worker/auth-worker fork — non-draft PRs deploy to the single shared, route-free
-  `aquilla-web-preview` Worker (`wrangler.toml` `[env.preview]`) and point at the shared
-  `development` API backend; see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
+  discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
+  auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by
+  `scripts/cloudflare-stack-preview.mjs` alongside `aquilla-web-preview`, sharing development
+  Hyperdrive/R2). **But a preview sync-worker cannot call a preview auth-worker** — that
+  subrequest 404s, so anything crossing the sync→auth seam (`AUTH_WORKER_URL`: DraftCells,
+  brief-summary render, Monday push) is NOT exercisable on a preview. See
+  "Preview limitations" in `docs/DEPLOYMENT-ENVIRONMENTS.md` before trusting a preview QA
+  result for those paths.
 - **`agent-worker/`** — Worker `aquilla-agent-sandbox`: container-backed Durable Object for
   sandboxed agent code execution (see `docs/AGENT-SANDBOX.md`). Server-side only — auth-worker
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads
@@ -152,7 +156,7 @@ repository commands; unnamed profiles use local-only Worker names. See
   (sync-worker `external/*`) with PAT credentials scoped org/project.
 - **Other major subsystems:** comments (`src/lib/sync/comments-read.ts`, `useComments`),
   search (`src/lib/search/` dual-index + replace), DCS linked-project sync (`src/lib/dcs/`,
-  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Kokoro),
+  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Inworld),
   export (`src/lib/export/`), rules/health/completion (`src/lib/rules|health|completion/`),
   local prefs (`src/lib/store/`, localStorage-backed).
 - **React Compiler gotcha:** the compiler memoizes away version-only dependencies; when

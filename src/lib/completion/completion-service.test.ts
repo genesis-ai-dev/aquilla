@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+
+const shouldUseLocalLlm = vi.fn(async () => false)
+const completeWithLocalLlm = vi.fn(async (..._args: unknown[]) => "")
+vi.mock("@/lib/offline/local-llm-client", () => ({
+  shouldUseLocalLlm: () => shouldUseLocalLlm(),
+  completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
+}))
+
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { setUserApiKey } from "@/lib/store/user-api-keys"
+import {
+  clearUserProviderOverride,
+  setUserProviderOverride,
+} from "@/lib/store/user-provider-override"
+import { resetClientLocalStorageOwnerForTests } from "@/lib/frontier/client-local-storage"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -363,9 +377,129 @@ describe("resolveProvider", () => {
   })
 })
 
+describe("isCompletionConfigured", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+    clearUserProviderOverride()
+  })
+  afterEach(() => {
+    clearUserProviderOverride()
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+  })
+
+  it("treats Frontier as configured when a session JWT is present", () => {
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, "jwt-abc")).toBe(true)
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, null)).toBe(false)
+  })
+
+  it("treats custom OpenRouter with a key as configured even without a model", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+      apiKey: "sk-or-user",
+      model: "",
+    }, "jwt-abc")).toBe(true)
+  })
+
+  it("does not treat custom OpenRouter as configured without a key", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+      model: "moonshotai/kimi-k2",
+    }, "jwt-abc")).toBe(false)
+  })
+
+  it("allows a localhost custom endpoint without a key", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: "http://localhost:8000",
+      model: "",
+    }, null)).toBe(true)
+  })
+
+  it("lets a personal override with endpoint+key configure a Frontier project", () => {
+    expect(isCompletionConfigured(
+      { ...BASE, provider: "frontier" },
+      "jwt-abc",
+      { endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-override" },
+    )).toBe(true)
+  })
+
+  it("keeps a project OpenRouter key configured even if the personal override has no key", () => {
+    expect(isCompletionConfigured(
+      {
+        ...BASE,
+        provider: "custom",
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        apiKey: "sk-or-project",
+      },
+      "jwt-abc",
+      { endpoint: OPENROUTER_BYOK_ENDPOINT },
+    )).toBe(true)
+  })
+
+  it("accepts a user-scoped completion key when the project record has none", () => {
+    setUserApiKey("completion", "sk-or-user-store")
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    }, "jwt-abc")).toBe(true)
+  })
+})
+
+describe("resolveEffectiveCompletionSettings", () => {
+  const projectCustom: CompletionSettings = {
+    ...BASE,
+    provider: "custom",
+    endpoint: OPENROUTER_BYOK_ENDPOINT,
+    apiKey: "sk-or-project",
+    model: "openai/gpt-4o-mini",
+  }
+  const override = {
+    endpoint: "https://openrouter.ai/api/v1",
+    apiKey: "sk-or-global",
+    model: "moonshotai/kimi-k2",
+  }
+
+  it("lets this project's API key beat the personal global override", () => {
+    const resolved = resolveEffectiveCompletionSettings(projectCustom, override)
+    expect(resolved.apiKey).toBe("sk-or-project")
+    expect(resolved.model).toBe("openai/gpt-4o-mini")
+  })
+
+  it("uses the personal override when the project is still on Frontier", () => {
+    const resolved = resolveEffectiveCompletionSettings(
+      { ...BASE, provider: "frontier" },
+      override,
+    )
+    expect(resolved.provider).toBe("custom")
+    expect(resolved.apiKey).toBe("sk-or-global")
+    expect(resolved.model).toBe("moonshotai/kimi-k2")
+  })
+})
+
+describe("shouldPromptAiSetup", () => {
+  it("asks once until the user has picked a drafting path", () => {
+    expect(shouldPromptAiSetup(undefined)).toBe(true)
+    expect(shouldPromptAiSetup(false)).toBe(true)
+    expect(shouldPromptAiSetup(true)).toBe(false)
+  })
+})
+
 describe("complete", () => {
   const fetchMock = vi.fn()
-  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock)
+    fetchMock.mockReset()
+    shouldUseLocalLlm.mockReset().mockResolvedValue(false)
+    completeWithLocalLlm.mockReset().mockResolvedValue("")
+  })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   function okJson(body: unknown): Response {
@@ -428,6 +562,46 @@ describe("complete", () => {
     expect(body.model).toBe("gemma")
   })
 
+  describe("offline routing to the local LLM (Phase 6)", () => {
+    it("routes to the local LLM instead of Frontier when offline in Tauri, regardless of provider", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+
+      expect(out).toBe("local translation")
+      expect(completeWithLocalLlm).toHaveBeenCalledWith(msg, { signal: undefined })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("calls onChunk once with the full local-LLM result", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+      const onChunk = vi.fn()
+
+      await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg, onChunk })
+
+      expect(onChunk).toHaveBeenCalledTimes(1)
+      expect(onChunk).toHaveBeenCalledWith("local translation")
+    })
+
+    it("does not require a Frontier session when routed to the local LLM", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("ok")
+
+      await expect(
+        complete({ settings: { ...BASE, provider: "frontier" }, session: null, messages: msg }),
+      ).resolves.toBe("ok")
+    })
+
+    it("stays on the normal Frontier path when online (default)", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+      expect(out).toBe("translated")
+      expect(completeWithLocalLlm).not.toHaveBeenCalled()
+    })
+  })
+
   // AQU-414 follow-up: frontier chat invoked from a project route carries the
   // project id so the server bills the spend to that project's org.
   describe("projectId attribution (AQU-414 follow-up)", () => {
@@ -476,6 +650,138 @@ describe("complete", () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe("https://openrouter.ai/api/v1/chat/completions")
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-secret" })
+    expect(url).not.toBe(FRONTIER_CHAT_URL)
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body).not.toHaveProperty("projectId")
+  })
+
+  describe("BYOK OpenRouter vs hosted Frontier (AQU-1158)", () => {
+    beforeEach(() => {
+      localStorage.clear()
+      resetClientLocalStorageOwnerForTests()
+      clearUserProviderOverride()
+    })
+    afterEach(() => {
+      clearUserProviderOverride()
+      localStorage.clear()
+      resetClientLocalStorageOwnerForTests()
+    })
+
+    it("never sends a custom OpenRouter request through the Frontier chat proxy", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: {
+          ...BASE, provider: "custom",
+          endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-user",
+          model: "moonshotai/kimi-k2",
+        },
+        session: SESSION, messages: msg,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-user" })
+      expect((init as RequestInit).headers).not.toMatchObject({ Authorization: "Bearer jwt-abc" })
+    })
+
+    it("personal override talks to OpenRouter with the user key, not the hosted proxy", async () => {
+      setUserProviderOverride({
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        model: "moonshotai/kimi-k2",
+        apiKey: "sk-or-override",
+      })
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "frontier" },
+        session: SESSION, messages: msg,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-override" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+    })
+
+    it("project OpenRouter key beats a personal override at request time", async () => {
+      setUserProviderOverride({
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        model: "moonshotai/kimi-k2",
+        apiKey: "sk-or-override",
+      })
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: {
+          ...BASE, provider: "custom",
+          endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-project",
+          model: "openai/gpt-4o-mini",
+        },
+        session: SESSION, messages: msg,
+      })
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-project" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.model).toBe("openai/gpt-4o-mini")
+    })
+
+    it("falls back to the user's OpenRouter key when hosted Frontier has none", async () => {
+      setUserApiKey("completion", "sk-or-saved")
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ))
+        .mockResolvedValueOnce(okJson({ choices: [{ message: { content: "from-byok" } }] }))
+
+      const out = await complete({
+        settings: { ...BASE, provider: "frontier", model: "moonshotai/kimi-k2" },
+        session: SESSION, messages: msg,
+      })
+      expect(out).toBe("from-byok")
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock.mock.calls[0][0]).toBe(FRONTIER_CHAT_URL)
+      const [url, init] = fetchMock.mock.calls[1]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-saved" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+      expect(body.model).toBe("moonshotai/kimi-k2")
+    })
+
+    it("does not fall back when the user has no OpenRouter key", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ))
+      await expect(
+        complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
+      ).rejects.toThrow(/OPENROUTER_API_KEY is not configured/)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock.mock.calls[0][0]).toBe(FRONTIER_CHAT_URL)
+    })
+
+    it("uses a project completion key for the fallback, not the session JWT", async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+          { status: 500 },
+        ))
+        .mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "frontier", apiKey: "sk-or-project" },
+        session: SESSION, messages: msg,
+      })
+      const [, init] = fetchMock.mock.calls[1]
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-project" })
+    })
+  })
+
+  it("recognizes the hosted OpenRouter miss independently of wrapping", () => {
+    expect(isHostedOpenRouterUnconfigured(500, '{"error":"OPENROUTER_API_KEY is not configured"}')).toBe(true)
+    expect(isHostedOpenRouterUnconfigured(503, '{"error":"openrouter_not_configured"}')).toBe(true)
+    expect(isHostedOpenRouterUnconfigured(500, "upstream exploded")).toBe(false)
+    expect(isHostedOpenRouterUnconfigured(402, '{"error":"OPENROUTER_API_KEY is not configured"}')).toBe(false)
   })
 
   it("custom: trims whitespace from apiKey", async () => {
@@ -699,6 +1005,51 @@ describe("selectApprovedExamples", () => {
 
     expect(selected).toEqual([{ cellId: "long", source: longSource, target: "full target" }])
     expect(selected[0].source.endsWith("ending")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-153: retrieval hits are only examples once they are real pairs
+// ---------------------------------------------------------------------------
+
+describe("retainTranslationPairs (AQU-153)", () => {
+  it("drops source-side hits that carry no translation", () => {
+    const retained = retainTranslationPairs([
+      { cellId: "paired", source: "In the beginning", target: "Au commencement" },
+      { cellId: "untranslated", source: "God created the heavens", target: "" },
+      { cellId: "whitespace", source: "And the earth was formless", target: "   " },
+    ])
+
+    expect(retained.map((pair) => pair.cellId)).toEqual(["paired"])
+  })
+
+  it("reports zero examples for a project where nothing has been translated yet", () => {
+    // The walkthrough symptom: every retrieval hit is a source cell with no
+    // target, so the count the editor shows must be 0, not the hit count.
+    const hits = [
+      { cellId: "c1", source: "In the beginning", target: "" },
+      { cellId: "c2", source: "God created the heavens", target: "" },
+      { cellId: "c3", source: "And the earth was formless", target: "" },
+      { cellId: "c4", source: "Darkness was over the deep", target: "" },
+      { cellId: "c5", source: "And God said", target: "" },
+    ]
+
+    expect(retainTranslationPairs(hits)).toHaveLength(0)
+    expect(selectApprovedExamples(hits, [], DEFAULT_APPROVED_EXAMPLE_COUNT)).toHaveLength(0)
+  })
+
+  it("keeps a hit whose source is blank out of the pool as well", () => {
+    expect(retainTranslationPairs([{ cellId: "no-source", source: "  ", target: "Au commencement" }])).toEqual([])
+  })
+
+  it("preserves retrieval order and the hit payload of the pairs it keeps", () => {
+    const hits = [
+      { cellId: "a", source: "one", target: "un", score: 0.9 },
+      { cellId: "b", source: "two", target: "", score: 0.8 },
+      { cellId: "c", source: "three", target: "trois", score: 0.7 },
+    ]
+
+    expect(retainTranslationPairs(hits)).toEqual([hits[0], hits[2]])
   })
 })
 
@@ -1005,6 +1356,96 @@ describe("buildBriefBlock", () => {
   it("returns empty string for blank input", () => {
     expect(buildBriefBlock("")).toBe("")
     expect(buildBriefBlock("   ")).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-934: per-passage style-rule instructions resolved from the applicability
+// graph. Unlike buildRulesBlock these are natural language, so a rule that no
+// regex can express still reaches the model — and only where it applies.
+// ---------------------------------------------------------------------------
+
+describe("buildStyleRulesBlock", () => {
+  it("renders one bullet per instruction under a labeled header", () => {
+    const block = buildStyleRulesBlock(["Use formal register.", "Keep numerals as digits."])
+    expect(block).toBe(
+      "Style rules that apply to this passage (MUST follow):\n" +
+        "- Use formal register.\n" +
+        "- Keep numerals as digits.",
+    )
+  })
+
+  it("returns empty string for empty, blank, undefined, or null input", () => {
+    expect(buildStyleRulesBlock([])).toBe("")
+    expect(buildStyleRulesBlock(["   ", ""])).toBe("")
+    expect(buildStyleRulesBlock(undefined)).toBe("")
+    expect(buildStyleRulesBlock(null)).toBe("")
+  })
+
+  it("drops duplicates so a union across a batch cannot repeat a rule", () => {
+    const block = buildStyleRulesBlock(["Use formal register.", "Use formal register."])
+    expect(block.match(/Use formal register\./g)).toHaveLength(1)
+  })
+})
+
+describe("style instructions in the prompt builders", () => {
+  const styleInstructions = ["Render divine names in small caps."]
+
+  it("injects the block into the single-cell system message", () => {
+    const [sys] = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Style rules that apply to this passage")
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("injects the block into the batch system message", () => {
+    const [sys] = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, cells: [{ source: "hello" }],
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("injects the block into the paragraph system message", () => {
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: "c1", source: "hello" }],
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("leaves every prompt byte-identical when no instructions apply", () => {
+    const args = {
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [{ source: "God", target: "Dieu" }],
+    }
+    expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: [] }))
+    expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: undefined }))
+  })
+
+  it("keeps the deterministic rules block and the style block as separate blocks", () => {
+    const rule: TranslationRule = {
+      id: "r1", name: "no LORD", description: "", severity: "minor",
+      source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
+      check: { type: "target-forbids", targetPattern: "LORD" },
+    }
+    const [sys] = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [], rules: [rule], styleInstructions,
+    })
+    expect(sys.content).toContain("Project terminology and style rules (MUST follow):")
+    expect(sys.content).toContain("Style rules that apply to this passage (MUST follow):")
+    // Deterministic rules first, resolved guidance after.
+    expect(sys.content.indexOf("Project terminology and style rules"))
+      .toBeLessThan(sys.content.indexOf("Style rules that apply to this passage"))
   })
 })
 

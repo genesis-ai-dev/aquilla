@@ -26,7 +26,8 @@ export function sliceCompletionLaneMap<T>(store: Map<string, T>, lane: string): 
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
+import { useUserApiKey } from "@/lib/store/user-api-keys"
 
 /**
  * Few-shot retrieval for the AI copilot. As of AD-13 (branching search) the
@@ -43,7 +44,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -190,6 +191,23 @@ export interface CompleteSingleOptions {
   commitGuard?: () => boolean
 }
 
+/**
+ * Union of the style instructions in force across a group of cells, in first-seen
+ * order. A batch/paragraph call shares ONE system prompt, so it must carry the
+ * union of what applies to its members rather than any single cell's set.
+ */
+function unionStyleInstructions(
+  cells: CellData[],
+  resolve: ((cell: CellData) => string[]) | undefined,
+): string[] | undefined {
+  if (!resolve) return undefined
+  const seen = new Set<string>()
+  for (const cell of cells) {
+    for (const instruction of resolve(cell)) seen.add(instruction)
+  }
+  return seen.size > 0 ? [...seen] : undefined
+}
+
 export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
@@ -212,6 +230,9 @@ export function useCompletion(
   lane = "",
   /** AQU-1145: persist one mapped model-response chunk as one local batch. */
   commitCompletedCells?: CommitCompletedCells,
+  /** Style-rule instructions in force for one cell, resolved from the
+   *  applicability graph (AQU-934). Omitted → no style block is injected. */
+  styleInstructionsFor?: (cell: CellData) => string[],
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -229,25 +250,29 @@ export function useCompletion(
     const base = settings ?? FALLBACK_COMPLETION_SETTINGS
     return { ...base, maxTokens: normalizeCompletionMaxTokens(base.maxTokens) }
   }, [settings])
-  // A per-device override (user Settings) always beats the project settings.
-  // Mirror the same precedence that complete() applies so isConfigured is
-  // consistent with what the request will actually use.
-  const deviceOverride = getUserProviderOverride()
-  const resolvedSettings: CompletionSettings = deviceOverride
-    ? { ...effectiveSettings, provider: "custom", endpoint: deviceOverride.endpoint, model: deviceOverride.model || effectiveSettings.model, apiKey: deviceOverride.apiKey }
-    : effectiveSettings
+  // Project custom provider beats the device-wide personal override.
+  // Mirror complete() so isConfigured matches the request that will fire.
+  const deviceOverride = useUserProviderOverride()
+  // Subscribe so a device-local completion key (Project Settings "save across
+  // my projects") re-evaluates the sparkle gate without a remount.
+  useUserApiKey("completion")
+  const resolvedSettings: CompletionSettings = resolveEffectiveCompletionSettings(
+    effectiveSettings,
+    deviceOverride,
+  )
   const provider = resolveProvider(resolvedSettings)
   const modelName = resolvedSettings.model || "frontier-default"
   const { available: frontierAvailable } = useFrontierHealth()
 
   // "Configured" = the user has done the setup. Frontier: signed in.
-  // Custom: endpoint + model. Service reachability (`isAvailable` below) is
-  // a separate, runtime concern — folding it in here causes the AI setup
-  // dialog to re-prompt every time the health probe fails, even though the
-  // user already configured a provider.
-  const isConfigured = provider === "frontier"
-    ? Boolean(session?.jwt)
-    : Boolean(resolvedSettings.endpoint && resolvedSettings.model)
+  // Custom / personal override: endpoint (+ key when the host requires one).
+  // A missing model must not reopen Set up AI — connecting OpenRouter lists
+  // models; the sparkle should run with the saved key.
+  const isConfigured = isCompletionConfigured(
+    effectiveSettings,
+    session?.jwt,
+    deviceOverride,
+  )
 
   // "Available" = service is reachable right now. Used to disable Generate
   // with a clear "service unavailable" message — never to gate setup.
@@ -261,7 +286,12 @@ export function useCompletion(
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
     let found: ScoredPair[] = []
     try {
-      found = await search(sourceText, topK, cell.id)
+      // AQU-153: branching search ranks SOURCE cells, so an untranslated cell
+      // is a valid hit but not an example. Drop the unpaired hits here, at the
+      // retrieval boundary, so the evidence panel's count and the prompt pool
+      // both mean "real source→target pairs" rather than trusting whatever
+      // filter the retriever was asked for.
+      found = retainTranslationPairs(await search(sourceText, topK, cell.id))
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -373,6 +403,7 @@ export function useCompletion(
         sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
         examples: [],
         rules,
+        ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
@@ -497,7 +528,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, briefSummary, draftProvenance, prepareSingleEvidence, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -576,11 +607,16 @@ export function useCompletion(
           break
         }
 
-        const flatExamples: ScoredPair[] = passages.flatMap((p) =>
-          p.cells.filter((c) => c.hit).map((c) => ({
-            cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
-            score: 1, matchedTokens: [], coverageWeight: 1,
-          }))
+        // AQU-153: same pair requirement as the single path — a passage hit
+        // whose target is still empty is not an example, so it must not swell
+        // the per-cell example count the editor shows.
+        const flatExamples: ScoredPair[] = retainTranslationPairs(
+          passages.flatMap((p) =>
+            p.cells.filter((c) => c.hit).map((c) => ({
+              cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
+              score: 1, matchedTokens: [], coverageWeight: 1,
+            }))
+          )
         )
         const llmAuthor = modelName
         for (const c of chunk) {
@@ -632,6 +668,9 @@ export function useCompletion(
           })),
           examples: [],
           rules,
+          ...(styleInstructionsFor && {
+            styleInstructions: unionStyleInstructions(chunk, styleInstructionsFor),
+          }),
           validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
@@ -872,7 +911,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -968,6 +1007,9 @@ export function useCompletion(
         examples: [],
         validatedPairs: approvedExamples,
         rules,
+        ...(styleInstructionsFor && {
+          styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
+        }),
         briefSummary,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
@@ -1103,7 +1145,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(lk(c.id), msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

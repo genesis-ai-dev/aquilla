@@ -1,7 +1,7 @@
 // AQU-538 §3.2 — org "Language Grid" on the project table: lane chips and
 // expandable per-lane sub-rows.
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
@@ -22,6 +22,39 @@ vi.mock("./OrgLaneAssignModal", () => ({
   OrgLaneAssignModal: (props: { projectId: string; lane: string }) => (
     <div data-testid={`assign-open-${props.projectId}-${props.lane}`} />
   ),
+}))
+
+// Offline (Tauri desktop, Phase 5) mocks — same convention as
+// ProjectOverview.test.tsx's own offline describe block, reused here since
+// this table is the OTHER surface that gained offline actions.
+let tauriRuntime = false
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => tauriRuntime,
+}))
+const fakeOfflineStore = { id: "fake-offline-store" }
+let offlineStoreValue: { store: unknown; loading: boolean; error: Error | null } = {
+  store: null,
+  loading: false,
+  error: null,
+}
+vi.mock("@/context/OfflineStoreContext", () => ({
+  useOfflineStore: () => offlineStoreValue,
+}))
+let offlineProjectStatus: { projectId: string; status: string } | null = null
+let downloadProgressValue: { filesDone: number; filesTotal: number } | null = null
+const downloadProjectOffline = vi.fn()
+const removeOfflineProject = vi.fn((..._a: unknown[]) => ({ ok: true }))
+const getOfflineQueueDepth = vi.fn((..._a: unknown[]) => 0)
+vi.mock("@/lib/offline/download", () => ({
+  downloadProjectOffline: (...a: unknown[]) => downloadProjectOffline(...a),
+  removeOfflineProject: (...a: unknown[]) => removeOfflineProject(...a),
+  getOfflineQueueDepth: (...a: unknown[]) => getOfflineQueueDepth(...a),
+  useOfflineProjectStatus: () => offlineProjectStatus,
+  useDownloadProgress: () => downloadProgressValue,
+}))
+const toastAdd = vi.fn()
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: (...a: unknown[]) => toastAdd(...a), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
 
 function baseProject(overrides: Partial<PortfolioProject>): PortfolioProject {
@@ -51,6 +84,11 @@ function renderTable(
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
+    searchValue?: string
+    onSearchChange?: (value: string) => void
+    searching?: boolean
+    hasMore?: boolean
+    onLoadMore?: () => void
   } = {},
 ) {
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
@@ -70,6 +108,11 @@ function renderTable(
         author="anna"
         viewerUsername={opts.viewerUsername ?? null}
         layout={opts.layout ?? "page"}
+        searchValue={opts.searchValue}
+        onSearchChange={opts.onSearchChange}
+        searching={opts.searching}
+        hasMore={opts.hasMore}
+        onLoadMore={opts.onLoadMore}
       />
     </MemoryRouter>,
   )
@@ -140,12 +183,17 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
 
     const table = screen.getByTestId("project-table")
-    expect(table).toHaveClass("min-w-0", "w-full", "overflow-auto")
+    expect(table).toHaveClass("min-w-0", "w-full", "mx-0")
+    // No overflow-hidden on a virtualized fillHeight root: it clips the
+    // LegendList scrollbar track (the bounded Section contains the pane).
+    expect(table).not.toHaveClass("overflow-hidden")
     expect(table.className).not.toContain("overflow-x-hidden")
-    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-visible")
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+    expect(table.querySelector(".overflow-x-auto")).toBeTruthy()
 
     const htmlTable = table.querySelector('[data-slot="table"]')
-    expect(htmlTable).not.toHaveClass("table-fixed")
+    expect(htmlTable).toHaveClass("w-full")
+    expect(htmlTable).not.toHaveClass("min-w-max")
 
     const nameCell = screen.getByTestId("project-table-name").closest("td")
     expect(nameCell).toHaveClass("min-w-[12rem]")
@@ -396,5 +444,109 @@ describe("PM column self marker (AQU-1027)", () => {
   it("is absent in embedded layout, which has no PM column at all", () => {
     renderTable(rows(), { viewerUsername: "anna", layout: "embedded" })
     expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+})
+
+describe("OrgProjectsDataTable async directory", () => {
+  it("does not locally filter rows when search is controlled by the parent", () => {
+    const onSearchChange = vi.fn()
+    renderTable(
+      [baseProject({ id: "gospels", name: "Gospels" }), baseProject({ id: "ruth", name: "Ruth" })],
+      { searchValue: "zzz", onSearchChange },
+    )
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+    fireEvent.change(screen.getByRole("textbox", { name: /Search projects/i }), {
+      target: { value: "gos" },
+    })
+    expect(onSearchChange).toHaveBeenCalledWith("gos")
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+  })
+
+  it("shows a spinner in the search field while the directory query is in flight", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      searchValue: "gos",
+      onSearchChange: vi.fn(),
+      searching: true,
+    })
+    const search = screen.getByRole("textbox", { name: /Search projects/i })
+    expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+  })
+
+  it("renders the load-more sentinel when another page remains", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      hasMore: true,
+      onLoadMore: vi.fn(),
+    })
+    expect(screen.getByTestId("project-directory-load-more")).toBeInTheDocument()
+  })
+})
+
+// Offline actions on the main projects list (Tauri desktop, Phase 5 follow-up):
+// this table (routed at /orgs/:orgId/projects) is the actual reachable "main
+// projects list" — the standalone ProjectsList.tsx component these actions
+// were first asked about living on turned out to be unrouted/unreachable.
+describe("OrgProjectsDataTable offline actions (Tauri desktop)", () => {
+  beforeEach(() => {
+    tauriRuntime = true
+    offlineStoreValue = { store: fakeOfflineStore, loading: false, error: null }
+    offlineProjectStatus = null
+    downloadProgressValue = null
+    downloadProjectOffline.mockClear()
+    removeOfflineProject.mockClear().mockReturnValue({ ok: true })
+    getOfflineQueueDepth.mockClear().mockReturnValue(0)
+    toastAdd.mockClear()
+  })
+
+  it("does not show an offline badge or row-menu offline items outside Tauri", () => {
+    tauriRuntime = false
+    renderTable([baseProject({ id: "p1", name: "Gospels" })])
+    expect(screen.queryByTestId("offline-ready-badge")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    expect(screen.queryByRole("menuitem", { name: /offline/i })).not.toBeInTheDocument()
+  })
+
+  it("offers Make available offline for a project with no local copy", () => {
+    renderTable([baseProject({ id: "p1", name: "Gospels" })])
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    const item = screen.getByRole("menuitem", { name: "Make available offline" })
+    fireEvent.click(item)
+    expect(downloadProjectOffline).toHaveBeenCalledWith(fakeOfflineStore, "p1", "jwt")
+  })
+
+  it("shows the offline badge and Remove offline copy once ready", () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    renderTable([baseProject({ id: "p1", name: "Gospels" })])
+    expect(screen.getByTestId("offline-ready-badge")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove offline copy" }))
+    expect(removeOfflineProject).toHaveBeenCalledWith(fakeOfflineStore, "p1")
+  })
+
+  it("shows a downloading badge with file progress while a download is in flight", () => {
+    offlineProjectStatus = { projectId: "p1", status: "downloading" }
+    downloadProgressValue = { filesDone: 1, filesTotal: 4 }
+    renderTable([baseProject({ id: "p1", name: "Gospels" })])
+    expect(screen.getByTestId("offline-downloading-badge")).toHaveTextContent("Downloading… (1/4 files)")
+  })
+
+  it("blocks Remove offline copy and toasts an error when writes are still queued", () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    getOfflineQueueDepth.mockReturnValue(2)
+    renderTable([baseProject({ id: "p1", name: "Gospels" })])
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove offline copy" }))
+    expect(removeOfflineProject).not.toHaveBeenCalled()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", title: expect.stringContaining("haven't synced") }),
+    )
+  })
+
+  it("does not show offline actions in the embedded (all-orgs overview) table", () => {
+    renderTable([baseProject({ id: "p1", name: "Gospels" })], { layout: "embedded" })
+    expect(screen.queryByTestId("offline-ready-badge")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-row-actions-p1")).not.toBeInTheDocument()
   })
 })

@@ -10,6 +10,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon, SearchIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const Combobox = ComboboxPrimitive.Root
 
@@ -38,7 +40,13 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
-      render={<InputGroupButton variant="ghost" size="icon-xs" />}
+      render={
+        <InputGroupButton
+          variant="ghost"
+          size="icon-xs"
+          className="bg-transparent text-muted-foreground shadow-none hover:bg-accent/40 hover:text-foreground aria-expanded:bg-transparent aria-pressed:bg-transparent data-popup-open:bg-transparent dark:bg-transparent dark:hover:bg-accent/40 dark:aria-expanded:bg-transparent dark:aria-pressed:bg-transparent dark:data-popup-open:bg-transparent"
+        />
+      }
       className={cn(className)}
       {...props}
     >
@@ -54,6 +62,7 @@ function ComboboxInput({
   showTrigger = true,
   showClear = false,
   showSearchIcon = false,
+  loading = false,
   // Pickers/filters — not contact or credential entry. Default off so
   // Chrome/Safari don't inject saved contacts into member/org search.
   autoComplete = "off",
@@ -62,9 +71,11 @@ function ComboboxInput({
   showTrigger?: boolean
   showClear?: boolean
   showSearchIcon?: boolean
+  loading?: boolean
 }) {
+  const t = useT()
   return (
-    <InputGroup className={cn("w-auto", className)}>
+    <InputGroup className={cn("w-auto", className)} aria-busy={loading || undefined}>
       {showSearchIcon && (
         <InputGroupAddon align="inline-start">
           <SearchIcon className="size-4 text-muted-foreground" />
@@ -76,6 +87,9 @@ function ComboboxInput({
         autoComplete={autoComplete}
       />
       <InputGroupAddon align="inline-end">
+        {loading && (
+          <Spinner className="size-4" aria-label={t("common.searching")} />
+        )}
         {showTrigger && (
           <InputGroupButton
             size="icon-xs"

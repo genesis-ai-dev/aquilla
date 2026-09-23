@@ -29,6 +29,7 @@ import {
   verseMarkerOnlyNote,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
+import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
 import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
 
@@ -170,6 +171,67 @@ describe("IDML export of a note block that was imported as several cells", () =>
     expect(story).toContain("<Content>In the beginning God created the heavens and the earth.</Content>")
   })
 
+  /**
+   * AQU-1234 is why the Agent API refuses InsertCell / DeleteCell / SplitCell on
+   * a file imported with preserved export slots: a row that never came from the
+   * package has no locator, and the exporter has nowhere to put it. That refusal
+   * lives at the editing gate (`rowActionAvailability`), NOT here.
+   *
+   * AQU-1068 settled what the exporter does if such a row reaches it anyway: an
+   * added row is marked with `aquillaOrigin`, and the exporter leaves it out
+   * rather than failing the download, because losing the whole deliverable over
+   * one stray line is the worse failure. AQU-1343: these two tests pin both
+   * halves, which previously disagreed — the marked row is skipped, an unmarked
+   * row with no locator still stops the export.
+   */
+  it("leaves a row somebody added after the import out of the export", async () => {
+    const { bytes, cells } = await importBiblicaCells()
+    for (const cell of cells) translate(cell)
+    const inserted: CellData = {
+      ...cells[0]!,
+      id: "inserted-line",
+      original: "A line somebody added after the import.",
+      originalHtml: undefined,
+      translatedHtml: undefined,
+      metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
+    }
+
+    const baseline = await exportIdml(bytes.slice(0), cells, directExecutor)
+    const result = await exportIdml(bytes, [...cells, inserted], directExecutor)
+    const story = await storyOf(result.blob)
+
+    // The added line is dropped, and every imported row still lands: the export
+    // is byte-identical to the one without it.
+    expect(story).not.toContain("A line somebody added after the import.")
+    expect(result.report).toMatchObject({
+      missing: 0,
+      rejected: 0,
+      translated: baseline.report.translated,
+    })
+    expect(new Uint8Array(await result.blob.arrayBuffer()))
+      .toEqual(new Uint8Array(await baseline.blob.arrayBuffer()))
+  })
+
+  it("refuses to export a row that carries no IDML locator and no added-line marker", async () => {
+    const { bytes, cells } = await importBiblicaCells()
+    for (const cell of cells) translate(cell)
+    // Same row as above minus `aquillaOrigin`: nothing says a person added it,
+    // so it reads as an imported row whose locator went missing — corruption the
+    // exporter must not paper over by silently dropping the content.
+    const orphaned: CellData = {
+      ...cells[0]!,
+      id: "orphaned-line",
+      original: "A row whose IDML locator went missing.",
+      originalHtml: undefined,
+      translatedHtml: undefined,
+      metadata: {},
+    }
+
+    await expect(exportIdml(bytes, [...cells, orphaned], directExecutor)).rejects.toThrow(
+      IdmlWebExportError,
+    )
+  })
+
   it("refuses to export a note block whose other sentences are absent", async () => {
     const { bytes, cells } = await importBiblicaCells()
     const sentences = cellsFor(cells, SAMPLE_NOTES.noteBlockSentences)
@@ -202,6 +264,43 @@ describe("IDML export of a note block that was imported as several cells", () =>
     // needs them to close Matthew's last verse.
     expect(story).toContain(`<Content>28:</Content>`)
     expect(story.match(/<Content>20<\/Content>/g)).toHaveLength(2)
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  // AQU-1174: the "source serif" apostrophe run is English typesetting glue.
+  // A model asked to translate its slot copies the apostrophe through, gluing a
+  // stray `'` onto translated words in the editor and in the exported story.
+  it("does not write the publisher's apostrophe glue onto translated words", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      paragraph(
+        "p-n",
+        "intro%3aip",
+        run("$ID/[No character style]", "Israel")
+          + run("source%20serif", "ʼ")
+          + run("$ID/[No character style]", "s covenant history begins here."),
+      ),
+    ])
+    const cell = cells[0]!
+    expect(cell.original).toBe("Israelʼs covenant history begins here.")
+
+    // The draft the model returns: prose translated, glue slot copied verbatim.
+    const drafted = normalizeProtectedCompletion(
+      { id: cell.id, originalHtml: cell.originalHtml, metadata: cell.metadata },
+      cell.originalHtml!.replace(/>([^<>]+)</g, (match, text: string) =>
+        text === "ʼ" ? match : match.toUpperCase()),
+    )
+    cell.translated = drafted.value
+    cell.translatedHtml = drafted.valueHtml
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>ISRAEL</Content>")
+    expect(story).toContain("<Content>S COVENANT HISTORY BEGINS HERE.</Content>")
+    // The glue run keeps its element — IDML needs the anchor — but carries no
+    // apostrophe into the Marathi text.
+    expect(story).not.toContain("<Content>ʼ</Content>")
     expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
   })
 

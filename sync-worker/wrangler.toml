@@ -118,6 +118,13 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   strict auth (reject all WS connections without a valid sync-token JWT)
 #   — the intended prod default. If you need to disable auth in prod for
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
+#
+#   INWORLD_API_KEY is the hosted TTS 2 Flash / Instant Voice Cloning secret
+#   (AQU-1189). Local: sync-worker/.dev.vars. Deployed:
+#     npx wrangler secret put INWORLD_API_KEY --env development
+#     npx wrangler secret put INWORLD_API_KEY --env production
+#   Paste the Portal key as-is (the worker prefixes `Basic `). Never put this
+#   in VITE_* or the SPA. See docs/INWORLD-TTS.md.
 
 [observability]
 enabled = true
@@ -150,9 +157,16 @@ binding = "CF_VERSION_METADATA"
 [env.production.vars]
 ENVIRONMENT = "production"
 DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
-# PostHog *project* token (public — same one shipped in the SPA bundle).
-# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+# PostHog ingest region + *project* token (public — same one shipped in the SPA
+# bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+# AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
+# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
+# EMPTY until the EU project exists — the retired US project token must not be
+# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
+# shipping stays off (local logging is unaffected) until the EU token is filled
+# in here. See the Linear issue's "Account-side dependency".
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.aquilla.app/identity"
 # SPA host for the ask-mode approval deep link (external/prepare.ts).

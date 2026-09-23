@@ -58,11 +58,15 @@ export function OrgSidebar() {
   // AQU-485: Members is a roster-visibility surface, not a generic admin
   // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
   // the nav item, and a lowered floor can surface it for contributors.
-  const { canViewRoster } = useOrgSettings(
+  const { canViewRoster, canEgress } = useOrgSettings(
     isMemberOrg ? activeOrgId : null,
     activeOrg?.role?.level,
   )
   const showMembersNav = isMemberOrg && canViewRoster
+  // AQU-907: Data egress follows egressMinRole (OWNER default; an owner may
+  // open it to lower roles), so it gates independently of the admin block —
+  // a below-admin role the org opened the surface to still gets the entry.
+  const showEgressNav = isMemberOrg && canEgress
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
 
@@ -141,16 +145,32 @@ export function OrgSidebar() {
             {t("editor.navTitle.members")}
           </OrgNavLink>
         )}
-        {isAdmin && activeOrgId != null && <>
+        {isAdmin && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
             {t("org.orgSidebar.archived")}
           </OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
+        )}
+        {showEgressNav && activeOrgId != null && (
+          <OrgNavLink to={orgPath(activeOrgId, "/egress")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.egress} />
+            {t("org.egress.title")}
+          </OrgNavLink>
+        )}
+        {isAdmin && activeOrgId != null && (
+          <OrgNavLink
+            to={orgPath(activeOrgId, "/settings")}
+            className={link}
+            data-tour="nav-settings"
+            // AQU-1338: a project view also carries a link labelled
+            // "Settings". Two links with one name and different destinations
+            // is ambiguous link purpose; name this one for where it goes.
+            aria-label={t("editor.navTitle.organizationSettings")}
+          >
             <NavIcon icon={NAV_PAGE_ICONS.settings} />
             {t("nav.settings")}
           </OrgNavLink>
-        </>}
+        )}
         {isPlatformAdmin && <>
           {!isAllOrgs && <div className="my-1 border-t" data-testid="platform-admin-nav-separator" />}
           <OrgNavLink to="/admin" className={link}>

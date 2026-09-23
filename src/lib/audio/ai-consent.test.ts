@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import {
   AiModelConsentDeniedError,
-  KOKORO_MODEL,
+  MMS_MODEL,
   WHISPER_MODEL,
   clearStoredConsent,
   requestAiModelConsent,
@@ -29,17 +29,17 @@ describe("requestAiModelConsent", () => {
 
   it("returns false when the user cancels", async () => {
     const { result } = renderHook(() => usePendingAiConsent())
-    const promise = requestAiModelConsent(KOKORO_MODEL)
+    const promise = requestAiModelConsent(MMS_MODEL)
     await act(async () => {})
-    expect(result.current?.model.id).toBe("kokoro")
+    expect(result.current?.model.id).toBe("mms")
     act(() => { result.current!.resolve(false) })
     await expect(promise).resolves.toBe(false)
 
     // Cancellation does NOT persist consent — next request shows the dialog again.
     const r2 = renderHook(() => usePendingAiConsent())
-    const p2 = requestAiModelConsent(KOKORO_MODEL)
+    const p2 = requestAiModelConsent(MMS_MODEL)
     await act(async () => {})
-    expect(r2.result.current?.model.id).toBe("kokoro")
+    expect(r2.result.current?.model.id).toBe("mms")
     act(() => { r2.result.current!.resolve(false) })
     await expect(p2).resolves.toBe(false)
   })
@@ -57,15 +57,15 @@ describe("requestAiModelConsent", () => {
 
   it("a later dialog close cannot undo accept for coalesced waiters", async () => {
     const { result } = renderHook(() => usePendingAiConsent())
-    const a = requestAiModelConsent(KOKORO_MODEL)
-    const b = requestAiModelConsent(KOKORO_MODEL)
+    const a = requestAiModelConsent(MMS_MODEL)
+    const b = requestAiModelConsent(MMS_MODEL)
     await act(async () => {})
     const req = result.current!
     act(() => { req.resolve(true) })
     act(() => { req.resolve(false) })
     expect(await a).toBe(true)
     expect(await b).toBe(true)
-    await expect(requestAiModelConsent(KOKORO_MODEL)).resolves.toBe(true)
+    await expect(requestAiModelConsent(MMS_MODEL)).resolves.toBe(true)
   })
 
   it("AiModelConsentDeniedError carries the model id", () => {

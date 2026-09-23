@@ -637,9 +637,8 @@ monday.post(
       if (err instanceof NoBoardsError) {
         return c.json({ error: err.message, noBoards: true }, 409)
       }
-      const message = err instanceof Error ? err.message : String(err)
       console.error("[monday] analyze board fetch failed:", err)
-      return c.json({ error: `Monday API error: ${message}` }, 502)
+      return c.json({ error: "Monday API error" }, 502)
     }
 
     const currentConfig = body.currentConfig
@@ -673,8 +672,8 @@ monday.post(
       if (err instanceof AnalyzeUpstreamError) {
         return c.json({ error: err.message }, 502)
       }
-      const message = err instanceof Error ? err.message : String(err)
-      return c.json({ error: `analyze failed: ${message}` }, 502)
+      console.error("[monday] analyze failed:", err)
+      return c.json({ error: "analyze failed" }, 502)
     }
   },
 )

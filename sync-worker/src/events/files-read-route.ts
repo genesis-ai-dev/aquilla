@@ -39,6 +39,8 @@ interface FileRowRaw {
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
+  /** AQU-656: true when file_source_blobs has a row (pointer or legacy inline). */
+  has_original_source: boolean | number | null
 }
 
 interface FileSummary {
@@ -99,6 +101,8 @@ interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
+  /** AQU-656: original import blob exists (R2 or legacy raw_source). */
+  hasOriginalSource: boolean
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -164,6 +168,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
+    hasOriginalSource: Boolean(row.has_original_source),
   }
 }
 
@@ -224,15 +229,38 @@ export async function handleFilesReadRequest(
   // mass at or above the threshold. The threshold is resolved ONCE in a CTE:
   // the previous shape re-parsed `project_settings.settings` as jsonb inside a
   // correlated subquery, i.e. per histogram bucket per file row.
+  //
+  // AQU-1083: the same CTE resolves whether this project counts structural
+  // cells — its own answer, else its org's, else yes — from the STORED
+  // GENERATED columns, never the blob. Every number below is then
+  // `total − structural` when it excludes, and the structural histogram is
+  // summed above the same threshold (`sa`) so validated subtracts bucket-wise.
+  const less = (amount: string) => `CASE WHEN COALESCE(thr.exclude_structural, false) THEN ${amount} ELSE 0 END`
   const columns =
     "f.id, f.project_id, f.name, f.role, f.kind, f.anchor_file_id, f.event_id, f.meta, " +
-    "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
-    "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE(a.approved, 0) END AS approved_count, " +
-    "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
-    "f.word_count, f.last_edit_at, f.deleted_at"
+    // GREATEST(0, …) throughout: a file backfilled before its projection row
+    // existed can carry a structural count without a matching total, and a
+    // negative denominator would render as a nonsense percentage.
+    `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
+    `CASE WHEN p.file_id IS NULL
+            THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
+            ELSE GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+          END AS approved_count, ` +
+    `GREATEST(0, COALESCE(p.filled_count, f.filled_count) - ${less("COALESCE(p.structural_filled_count, f.structural_filled_count)")}) AS filled_count, ` +
+    "f.word_count, f.last_edit_at, f.deleted_at, " +
+    "(b.file_id IS NOT NULL) AS has_original_source"
+  // Anchored on the bound project id rather than on either table, so the CTE
+  // always yields exactly one row: a project that has never had a settings row
+  // still gets its org's default, and the threshold still resolves from the
+  // settings alone.
   const thresholdCte =
-    "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
-    "THEN (settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n FROM project_settings WHERE project_id = ?)"
+    "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
+    "THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n, " +
+    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural " +
+    "FROM (SELECT ?::text AS id) q " +
+    "LEFT JOIN project_settings ps ON ps.project_id = q.id " +
+    "LEFT JOIN projects pr ON pr.id = q.id " +
+    "LEFT JOIN org_settings os ON os.org_id = pr.org_id)"
   const joins =
     // AQU-538: file_section_progress now materializes one row per target lane.
     // The files list is a cross-project legacy surface — pin it to the default
@@ -240,7 +268,10 @@ export async function handleFilesReadRequest(
     // one listing row per lane.
     " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
     " LEFT JOIN thr ON true" +
-    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true"
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
+    // AQU-1083: the structural share of the same buckets, for the subtraction.
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) sa ON true" +
+    " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
   const orderBy = "ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC, f.id ASC"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.

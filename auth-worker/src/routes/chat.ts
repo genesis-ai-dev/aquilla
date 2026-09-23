@@ -1,3 +1,4 @@
+import { admitChatUsage, chatUsageRehearsalAllowed, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -191,6 +192,19 @@ chat.post(
     // to org 0 as before. The guard uses the same org so chat respects the
     // org's caps once an admin turns enforcement on (log-only by default).
     const orgId = await resolveChatOrgId(c.env, user, request.projectId)
+    let usage: ChatUsage | undefined
+    if (c.env.BILLING_CHAT_USAGE_REHEARSAL === 'true') {
+      if (!chatUsageRehearsalAllowed(c.env, c.req.url)) {
+        return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
+      }
+      // Unlike legacy attribution, enforced usage must never fall back to org 0.
+      if (!request.projectId || orgId <= 0) return c.json({ error: 'forbidden' }, 403)
+      const suppliedId = c.req.header('Idempotency-Key')
+      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
+        return c.json({ error: 'invalid_request_id' }, 400)
+      }
+      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
+    }
     const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
     if (!chatCreditCheck.ok) {
       return c.json(
@@ -204,6 +218,17 @@ chat.post(
     }
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
+    if (usage) {
+      try {
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId! })
+        if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
+          return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
+        }
+        return c.json({ error: 'usage_accounting_unavailable' }, 503)
+      }
+    }
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -213,6 +238,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
+        ...(usage ? { signal: c.req.raw.signal } : {}),
       })
       const latencyMs = Date.now() - startedAt
 
@@ -260,10 +286,12 @@ chat.post(
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        return new Response(upstream.body, { status: 200, headers: streamHeaders })
+        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        return new Response(body, { status: 200, headers: streamHeaders })
       }
 
       const data = (await upstream.json()) as Record<string, unknown>
+      if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
 
       // Non-streaming: extract OpenRouter usage.cost if present.
       // usage.cost is in dollars → × 100 for cents.

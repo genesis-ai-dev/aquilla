@@ -268,6 +268,17 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_PUBLISHABLE_KEY?: string
   /** Recurring $500 / 4-week Field Plan price id (price_…). */
+  BILLING_CHECKOUT_ENABLED?: string
+  /** Local loopback + test-key only. Never enables production purchasing. */
+  BILLING_CHAT_USAGE_REHEARSAL?: string
+  BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
+  STRIPE_PRICE_CATALOG?: string
+  /** Explicit sandbox portal configurations; validated scope-specific management. */
+  STRIPE_PORTAL_PERSONAL_CONFIGURATION?: string
+  STRIPE_PORTAL_TEAM_CONFIGURATION?: string
+  STRIPE_PRICE_FIELD_MONTHLY?: string
+  STRIPE_PRICE_FIELD_ANNUAL?: string
   STRIPE_PRICE_FIELD?: string
   /** One-time $200 / 100k-word add-on price id (price_…). */
   STRIPE_PRICE_ADDON?: string

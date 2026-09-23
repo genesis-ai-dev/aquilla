@@ -7,6 +7,7 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
@@ -23,6 +24,17 @@ const specs = [
 ]
 
 describe("changed-file E2E impact selection", () => {
+  it("selects billing for catalog, client, and shared-contract changes", () => {
+    for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
+      "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
+      "db/postgres/migrations/0095_workspace_subscription_state.sql",
+      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "db/shared/workspace-access.ts",
+      "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain(
+        "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")
+    }
+  })
+
   it("maps smart-testing infrastructure to the edit durability boundary", () => {
     expect(selectAffectedE2E(["smart-tests/driver.ts"], specs).specs).toContain(
       "e2e/specs/editor/import-and-edit.smoke.spec.ts",
@@ -65,6 +77,7 @@ describe("changed-file E2E impact selection", () => {
         "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
         "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
         "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+        ...(file === "src/pages/Login.tsx" ? ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"] : []),
       ])
     }
   })

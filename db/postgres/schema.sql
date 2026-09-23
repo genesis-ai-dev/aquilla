@@ -71,7 +71,8 @@ CREATE TABLE organizations (
     owner_user_id BIGINT NOT NULL,
     created_at    TIMESTAMPTZ DEFAULT now(),
     updated_at    TIMESTAMPTZ DEFAULT now(),
-    legacy_uuid   TEXT
+    legacy_uuid   TEXT,
+    billing_scope TEXT CHECK (billing_scope IN ('personal', 'team'))
 );
 
 CREATE TABLE org_members (
@@ -1725,6 +1726,108 @@ CREATE INDEX IF NOT EXISTS contextual_decisions_run
 --   SELECT setval(pg_get_serial_sequence('groups','id'),        COALESCE((SELECT MAX(id) FROM groups),1));
 --   SELECT setval(pg_get_serial_sequence('activity_logs','id'), COALESCE((SELECT MAX(id) FROM activity_logs),1));
 --   SELECT setval(pg_get_serial_sequence('password_reset_tokens','id'), COALESCE((SELECT MAX(id) FROM password_reset_tokens),1));
+-- Immutable offer assignments. This migration activates no experiments.
+CREATE TABLE IF NOT EXISTS billing_price_cohorts (
+  org_id BIGINT NOT NULL REFERENCES organizations(id),
+  experiment_key TEXT NOT NULL,
+  variant TEXT NOT NULL,
+  price_version TEXT NOT NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  exposed_at TIMESTAMPTZ,
+  PRIMARY KEY (org_id, experiment_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_personal_billing_owner
+  ON organizations(owner_user_id) WHERE billing_scope = 'personal';
+
+CREATE TABLE IF NOT EXISTS workspace_plan_entitlements (
+  org_id BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+  offer TEXT NOT NULL CHECK (offer IN ('pro', 'max_5x', 'max_20x', 'team', 'team_20x')),
+  scope TEXT NOT NULL CHECK (scope IN ('personal', 'team')),
+  quantity INTEGER NOT NULL CHECK (quantity = 1),
+  entitlement_version TEXT NOT NULL CHECK (entitlement_version = '2026-09-weekly'),
+  price_version TEXT NOT NULL CHECK (length(price_version) > 0),
+  price_ids JSONB NOT NULL CHECK (jsonb_typeof(price_ids) = 'array'),
+  stripe_subscription_id TEXT NOT NULL UNIQUE,
+  stripe_customer_id TEXT NOT NULL UNIQUE,
+  billing_interval TEXT NOT NULL CHECK (billing_interval IN ('month', 'year')),
+  usage_anchor TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((scope = 'team') = (offer IN ('team', 'team_20x')))
+);
+
+-- AQU-837: sandbox rehearsal only. One unresolved checkout per workspace.
+-- Never delete/reuse an attempt to recover an ambiguous Stripe response.
+CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
+  id TEXT PRIMARY KEY,
+  org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  catalog_json JSONB NOT NULL CHECK (jsonb_typeof(catalog_json) = 'object'),
+  prices_json JSONB NOT NULL CHECK (jsonb_typeof(prices_json) = 'array'),
+  quote_json JSONB NOT NULL CHECK (jsonb_typeof(quote_json) = 'object'),
+  request_params JSONB NOT NULL CHECK (jsonb_typeof(request_params) = 'object'),
+  expires_at BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  session_id TEXT UNIQUE,
+  resolved_at TIMESTAMPTZ,
+  resolution TEXT,
+  CONSTRAINT workspace_checkout_resolution_check
+    CHECK ((resolved_at IS NULL AND resolution IS NULL)
+      OR (resolved_at IS NOT NULL AND resolution IS NOT NULL AND resolution = 'expired')),
+  sandbox BOOLEAN NOT NULL DEFAULT TRUE CHECK (sandbox = TRUE)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS workspace_checkout_pending_org
+  ON workspace_checkout_attempts (org_id) WHERE resolved_at IS NULL;
+-- Verified subscription facts; no change to legacy Field billing or usage anchors.
+CREATE TABLE IF NOT EXISTS workspace_subscription_state (
+  org_id BIGINT PRIMARY KEY REFERENCES workspace_plan_entitlements(org_id) ON DELETE CASCADE,
+  revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+  payment_failed BOOLEAN NOT NULL,
+  paid_through TIMESTAMPTZ NOT NULL,
+  cancel_at_period_end BOOLEAN NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Immutable review facts. No subscription mutation or entitlement is implied.
+CREATE TABLE IF NOT EXISTS workspace_plan_change_reviews (
+  id TEXT PRIMARY KEY,
+  org_id BIGINT NOT NULL REFERENCES workspace_plan_entitlements(org_id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('upgrade', 'downgrade')),
+  source_json JSONB NOT NULL CHECK (jsonb_typeof(source_json) = 'object'),
+  quote_json JSONB NOT NULL CHECK (jsonb_typeof(quote_json) = 'object'),
+  request_params JSONB NOT NULL CHECK (jsonb_typeof(request_params) = 'object'),
+  invoice_json JSONB,
+  review_json JSONB NOT NULL CHECK (jsonb_typeof(review_json) = 'object'),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS workspace_plan_change_reviews_org
+  ON workspace_plan_change_reviews (org_id, created_at);
+-- AQU-837: durable, exact-period cost reservations. Prepared, not deployed.
+CREATE TABLE IF NOT EXISTS workspace_usage_requests (
+  org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  rail TEXT NOT NULL CHECK (rail IN ('llm', 'agent', 'tts')),
+  rate_version TEXT NOT NULL CHECK (rate_version = '2026-09-cost-v1'),
+  multiplier INTEGER NOT NULL CHECK (multiplier = 4),
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL CHECK (period_end > period_start),
+  reserved_micro_units BIGINT NOT NULL CHECK (reserved_micro_units > 0 AND reserved_micro_units <= 9007199254740991),
+  state TEXT NOT NULL DEFAULT 'reserved' CHECK (state IN ('reserved', 'settled', 'released')),
+  raw_micro_cents BIGINT CHECK (raw_micro_cents >= 0 AND raw_micro_cents <= 9007199254740991),
+  settled_micro_units BIGINT CHECK (settled_micro_units >= 0 AND settled_micro_units <= 9007199254740991),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  PRIMARY KEY (org_id, request_id),
+  CHECK ((state = 'reserved' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NULL)
+    OR (state = 'settled' AND raw_micro_cents IS NOT NULL AND settled_micro_units = raw_micro_cents * multiplier AND resolved_at IS NOT NULL)
+    OR (state = 'released' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_usage_period
+  ON workspace_usage_requests(org_id, period_start, period_end);
 -- AQU-1205: RFC 8628 device grants. Only hashes of both codes persist.
 CREATE TABLE IF NOT EXISTS agent_authorizations (
   device_hash TEXT PRIMARY KEY,

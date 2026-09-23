@@ -592,7 +592,7 @@ admin.get("/activity", async (c) => {
  * GET /api/v2/admin/agent-sessions — list recent agent sessions (metadata only,
  * no full convo). `limit` defaults to 50 and is capped at 200; `cursor` is an
  * optional pagination cursor (updated_at timestamp). Returns sessions newest first.
- * 
+ *
  * Weekly qualitative product review: see missed tool calls, unhelpful loops,
  * users having to rephrase. Full transcript is fetched separately via
  * GET /api/v2/admin/agent-sessions/:sessionId to avoid inadvertently including
@@ -655,7 +655,7 @@ admin.get("/agent-sessions", async (c) => {
  * GET /api/v2/admin/agent-sessions/:sessionId — fetch one session's full
  * transcript (convo) plus its runs. Read-only, for weekly qualitative product
  * review (missed tool calls, unhelpful loops, users having to rephrase).
- * 
+ *
  * The transcript may contain unpublished scripture — this endpoint is admin-gated
  * and should never be exposed to non-admins.
  */

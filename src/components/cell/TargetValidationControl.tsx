@@ -152,7 +152,7 @@ export function TargetValidationControl({
   const tooltip = canValidateThisCell
     ? t("editor.validation.notValidatedTooltip")
     : canValidate ? t("editor.validation.outOfScopeTooltip") : t("editor.validation.unavailableTooltip")
-  // Why the viewer cannot add a vote, at the foot of the "Validated by" list —
+  // Why the viewer cannot add a vote, at the foot of the "Text validated by" list —
   // the same place the audio control puts it, so a blocked reason is never
   // hidden just because somebody else voted first.
   const blockedNote = canValidateThisCell || isSelfValidated ? null : tooltip

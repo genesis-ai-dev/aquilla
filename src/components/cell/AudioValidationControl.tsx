@@ -343,13 +343,12 @@ export function AudioValidationControl({
         render={renderButton(clickable ? validateAll : undefined)}
       />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
-        {/* Headed like the text control's list, so the two popovers read as
-            one kind of thing. Several takes get the per-take heading instead,
-            since each take below carries its own list. */}
+        {/* "Audio validated by", the twin of the text list's "Text validated
+            by" (Sam, 2026-09-23) — both name their half, since the two sit side
+            by side. Several takes keep the one heading; each take's name
+            follows as a sub-heading above its own list. */}
         <div className="mb-1 px-1 text-xs text-muted-foreground">
-          {displayed.length > 1
-            ? t("editor.audioValidation.takesHeading")
-            : t("editor.validation.validatedBy")}
+          {t("editor.audioValidation.validatedBy")}
         </div>
         <ul className="space-y-1">
           {displayed.map((take) => {
@@ -429,7 +428,7 @@ export function AudioValidationControl({
   // THE SAME HOVER RULE AS TEXT (Sam, 2026-09-23). Until somebody has voted
   // there is no list worth opening, so the hover is a TOOLTIP saying what a
   // click would do — or why it would not. From the first vote on, the hover is
-  // the "Validated by" list, and the why-not rides at its foot. This used to
+  // the "Audio validated by" list, and the why-not rides at its foot. This used to
   // open the popover on every line, and a popover suppresses the tooltip
   // around it: an untouched line said "Nobody has validated this take" where
   // text said "click to validate", and "you recorded this" was unreachable.

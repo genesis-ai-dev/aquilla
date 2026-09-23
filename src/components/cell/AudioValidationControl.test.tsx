@@ -320,10 +320,10 @@ describe("the hover matches the text control", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("You recorded this")
   })
 
-  it("once somebody has voted, the hover is the Validated by list", async () => {
+  it("once somebody has voted, the hover is the Audio validated by list", async () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
     await userEvent.hover(button()!)
-    expect(await screen.findByText("Validated by")).toBeInTheDocument()
+    expect(await screen.findByText("Audio validated by")).toBeInTheDocument()
     expect(screen.getByText("bo")).toBeInTheDocument()
     expect(screen.queryByTestId("audio-validation-blocked-note")).toBeNull()
   })

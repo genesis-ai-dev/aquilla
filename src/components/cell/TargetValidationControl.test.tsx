@@ -111,7 +111,7 @@ describe("TargetValidationControl", () => {
       />,
     )
     fireEvent.click(screen.getByRole("button"))
-    expect(await screen.findByText("Validated by")).toBeInTheDocument()
+    expect(await screen.findByText("Text validated by")).toBeInTheDocument()
     expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
   })
 })

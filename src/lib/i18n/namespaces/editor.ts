@@ -1271,7 +1271,7 @@ export const editor = defineNamespace({
     "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
     "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
     "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
-    "editor.validation.validatedBy": "Validated by",
+    "editor.validation.validatedBy": "Text validated by",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -1303,7 +1303,7 @@ export const editor = defineNamespace({
       one: "You have validated this audio — {ref}. {count} more validator needed.",
       other: "You have validated this audio — {ref}. {count} more validators needed.",
     }),
-    "editor.audioValidation.takesHeading": "Takes on this line",
+    "editor.audioValidation.validatedBy": "Audio validated by",
     "editor.audioValidation.takeFraction": "{done}/{total}",
     "editor.audioValidation.needsMore": plural({
       one: "{count} more validator needed",
@@ -4640,8 +4640,8 @@ export const editor = defineNamespace({
       "editor.validation.validatedBy": {
         description:
           "Heading of the popover listing the people who have signed this " +
-          "translation off. A sentence fragment introducing the list of names that " +
-          "follows.",
+          "translation's TEXT off. Names the text half because an audio twin sits " +
+          "beside it. A sentence fragment introducing the list of names that follows.",
         maxLength: 22,
       },
       "editor.validation.noActiveValidators": {
@@ -4780,10 +4780,11 @@ export const editor = defineNamespace({
           count: "How many further validators the recording still needs.",
         },
       },
-      "editor.audioValidation.takesHeading": {
+      "editor.audioValidation.validatedBy": {
         description:
-          "Heading of the popover listing a line's takes with each one's validators. " +
-          "Shown only when the line has more than one take.",
+          "Heading of the popover listing who has validated the line's AUDIO — the " +
+          "twin of 'Text validated by'. On a line with several takes, each take's " +
+          "name follows as a sub-heading above its own list.",
         maxLength: 28,
       },
       "editor.audioValidation.takeFraction": {

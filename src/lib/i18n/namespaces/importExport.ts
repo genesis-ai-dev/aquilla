@@ -1045,6 +1045,16 @@ export const importExport = defineNamespace({
       one: "{count} cue skipped (empty or unreadable)",
       other: "{count} cues skipped (empty or unreadable)",
     }),
+    "importExport.review.offsetAlsoRateNamed": "This also adjusts them from {fromFps} to {toFps} frames per second.",
+    "importExport.review.offsetAlsoRateUnnamed": "This also stretches them by {percent}.",
+    "importExport.review.offsetEarlier": plural({
+      one: "Shift the uploaded file's timings {amount} earlier, which lines up {count} more line.",
+      other: "Shift the uploaded file's timings {amount} earlier, which lines up {count} more lines.",
+    }),
+    "importExport.review.offsetLater": plural({
+      one: "Shift the uploaded file's timings {amount} later, which lines up {count} more line.",
+      other: "Shift the uploaded file's timings {amount} later, which lines up {count} more lines.",
+    }),
     "importExport.review.timebaseNamed": plural({
       one: "Timings in the uploaded file were adjusted from {fromFps} to {toFps} frames per " +
         "second, which lined up {count} more line.",
@@ -2945,6 +2955,50 @@ export const importExport = defineNamespace({
           "part names those two causes.",
         placeholders: {
           count: "Number of cues in the uploaded file that produced no row.",
+        },
+      },
+      "importExport.review.offsetAlsoRateNamed": {
+        description:
+          "Second sentence of the tickbox label that offers to shift the uploaded " +
+          "subtitle file's timings: the same correction also rescales its timings " +
+          "from one video frame rate to another. \"Them\" is the file's timings.",
+        placeholders: {
+          fromFps: "Frame rate the uploaded file's timings were authored at, e.g. \"25\". Keep as is.",
+          toFps: "Frame rate the timings are moved onto, e.g. \"23.976\". Keep as is.",
+        },
+      },
+      "importExport.review.offsetAlsoRateUnnamed": {
+        description:
+          "Second sentence of the tickbox label that offers to shift the uploaded " +
+          "subtitle file's timings: the same correction also stretches or shrinks " +
+          "them by a small percentage, to undo a frame-rate mismatch whose exact " +
+          "rates can't be named. \"Them\" is the file's timings.",
+        placeholders: {
+          percent: "Signed percentage the timings are scaled by, e.g. \"+0.1%\".",
+        },
+      },
+      "importExport.review.offsetEarlier": {
+        description:
+          "Label of a tickbox above the match-review list. Every timing in the " +
+          "uploaded subtitle file is late by the same amount, so moving them all " +
+          "earlier pairs far more cues with the right line. Ticked, the pairing below " +
+          "uses the shifted timings; unticked, it uses them as delivered. Only the " +
+          "pairing changes: the open file's own timings are never altered.",
+        placeholders: {
+          amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
+          count: "How many more lines are paired closely with the shift applied.",
+        },
+      },
+      "importExport.review.offsetLater": {
+        description:
+          "Label of a tickbox above the match-review list. Every timing in the " +
+          "uploaded subtitle file is early by the same amount, so moving them all " +
+          "later pairs far more cues with the right line. Ticked, the pairing below " +
+          "uses the shifted timings; unticked, it uses them as delivered. Only the " +
+          "pairing changes: the open file's own timings are never altered.",
+        placeholders: {
+          amount: "How far the timings move, already formatted: \"2 seconds\", or \"1:00:00\" (hours:minutes:seconds) for a shift of a minute or more.",
+          count: "How many more lines are paired closely with the shift applied.",
         },
       },
       "importExport.review.timebaseNamed": {

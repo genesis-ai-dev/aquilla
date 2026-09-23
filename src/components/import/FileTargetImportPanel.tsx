@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatCount, formatPercent } from "@/lib/i18n/format"
+import { formatCount, formatNumber, formatPercent } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -104,6 +104,24 @@ function sourceArtifactFormat(fileName: string) {
   return "csv" as const
 }
 
+/** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
+ *  and "1:00:00" (h:mm:ss) past it — a broadcast file's hour reads as a
+ *  timecode, not as 3,600 seconds. Direction is said by the sentence. */
+function formatShift(offsetMs: number, locale: string): string {
+  const ms = Math.abs(offsetMs)
+  if (ms < 60_000) {
+    return formatNumber(ms / 1000, locale, {
+      style: "unit",
+      unit: "second",
+      unitDisplay: "long",
+      maximumFractionDigits: 2,
+    })
+  }
+  const totalSeconds = Math.round(ms / 1000)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${Math.floor(totalSeconds / 3600)}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}`
+}
+
 /** The amber pill a review row uses for anything a person should check. */
 const AMBER_PILL = "border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
 
@@ -139,6 +157,9 @@ export function FileTargetImportPanel({
   const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
+  // A subtitle file's parsed cues, kept so the review's shift tickbox can
+  // re-run the match with the shift on or off.
+  const [subtitleRows, setSubtitleRows] = useState<{ rows: TargetRow[]; skippedCues: number } | null>(null)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
 
@@ -160,6 +181,7 @@ export function FileTargetImportPanel({
         setSheets([])
         setSelectedSheet(null)
         setSourceFile(null)
+        setSubtitleRows(null)
         setError(null)
         setStep("file")
       },
@@ -228,6 +250,7 @@ export function FileTargetImportPanel({
           setError(t("importExport.fileTarget.noCuesInVtt"))
           return
         }
+        setSubtitleRows({ rows, skippedCues })
         showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
@@ -241,6 +264,7 @@ export function FileTargetImportPanel({
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
           return
         }
+        setSubtitleRows({ rows, skippedCues })
         showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
@@ -440,7 +464,33 @@ export function FileTargetImportPanel({
           : reason === "noLineInReach"
             ? t("importExport.review.reasonNoLineInReach")
             : null
-    const timebaseNote = timebase
+    // A whole-file shift is offered as a tickbox (ticked when the matcher
+    // applied it); the frame-rate note stands alone only for a stretch without
+    // a shift, since the tickbox's label names any stretch that comes with it.
+    const { offsetCorrection } = matchResult
+    const offsetApplied = (timebase?.offsetMs ?? 0) !== 0
+    const offsetLabel = offsetCorrection
+      ? [
+          t(offsetCorrection.offsetMs < 0 ? "importExport.review.offsetEarlier" : "importExport.review.offsetLater", {
+            amount: formatShift(offsetCorrection.offsetMs, locale),
+            count: offsetCorrection.closeAfter - offsetCorrection.closeBefore,
+          }),
+          offsetCorrection.scale === 1
+            ? null
+            : offsetCorrection.fromFps && offsetCorrection.toFps
+              ? t("importExport.review.offsetAlsoRateNamed", {
+                  fromFps: offsetCorrection.fromFps,
+                  toFps: offsetCorrection.toFps,
+                })
+              : t("importExport.review.offsetAlsoRateUnnamed", {
+                  percent: formatPercent(offsetCorrection.scale - 1, locale, {
+                    maximumFractionDigits: 1,
+                    signDisplay: "always",
+                  }),
+                }),
+        ].filter(Boolean).join(" ")
+      : null
+    const timebaseNote = timebase && timebase.offsetMs === 0
       ? timebase.fromFps && timebase.toFps
         ? t("importExport.review.timebaseNamed", {
             fromFps: timebase.fromFps,
@@ -495,6 +545,25 @@ export function FileTargetImportPanel({
           )}
           {looseFit && (
             <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
+          )}
+          {offsetLabel && subtitleRows && (
+            <label className="mt-1.5 flex items-start gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded"
+                checked={offsetApplied}
+                onChange={(e) =>
+                  showReview(
+                    {
+                      ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: e.target.checked }),
+                      skippedCues: subtitleRows.skippedCues,
+                    },
+                    true,
+                  )
+                }
+              />
+              <span>{offsetLabel}</span>
+            </label>
           )}
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
 

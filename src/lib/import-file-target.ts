@@ -181,8 +181,13 @@ export interface FileTargetMatchResult {
    *  text, or a timestamp line the parser couldn't read. Set by the caller
    *  from the parse report, since the matchers only ever see the rows. */
   skippedCues?: number
-  /** A frame-rate correction applied before matching, when one was. */
+  /** The correction applied to the uploaded file's timings before matching,
+   *  when one was: a frame-rate stretch, a whole-file shift, or both. */
   timebase?: TimebaseAdjustment
+  /** A whole-file shift that lines the file up, whether or not it was applied.
+   *  The review screen offers it as a tickbox; unticking re-runs the match with
+   *  `applyOffset: false`. Absent when no shift qualifies. */
+  offsetCorrection?: TimebaseAdjustment
   /** Too many pairings only loosely overlap their lines — see
    *  `LOOSE_FIT_SHARE`. Set only when true. */
   looseFit?: boolean
@@ -562,6 +567,15 @@ const LOOSE_FIT_MIN_ROWS = 5
 // 25/23.976 gain 0.47–0.61 of the file and 1000/1001 over 42 minutes about
 // 0.44; wrong scales never fit above 0.56; and every correct file already
 // scores above 0.75 at scale 1, so it can never gain the 0.25 required.
+//
+// A whole-file SHIFT (a start offset, or a broadcast file that starts at
+// 01:00:00.000) mis-pairs the same silent way, and is corrected by the same
+// rules, with one more: the file suggests its own shifts (see
+// `suggestOffsets`), and the best one must clearly beat the best DIFFERENT
+// shift. On a regular grid, moving a file by exactly one line's spacing lines
+// every cue up with its neighbour almost as well as the true shift does; that
+// margin is what refuses it. A shift is offered, not imposed: the review
+// screen shows it as a tickbox (Sam, 2026-09-23).
 
 /** Too few rows and the per-quarter check means nothing. */
 const RESCALE_MIN_ROWS = 20
@@ -572,15 +586,36 @@ const RESCALE_MIN_FIT = 0.6
 /** …and hold in every quarter of the file. This is what stops a START OFFSET
  *  being "fixed" with a wrong scale: an offset cancels against a scale in one
  *  part of the file only (a 2s offset scores 0.72 overall at 0.999, but 0.32
- *  in its first quarter). Offsets themselves are out of scope. */
+ *  in its first quarter). The offset is then found by `suggestOffsets`. */
 const RESCALE_MIN_QUARTER_FIT = 0.5
 /** Only ratios this close to 1 are considered — see `frameRateScalesNear`. */
 const RESCALE_MAX_DEVIATION = 0.05
 
-/** A frame-rate correction applied to the uploaded file's timings. */
+/** Width of the buckets the cue-to-line distances are counted in. */
+const OFFSET_BUCKET_MS = 20
+/** How many of the most common distances are tried, per scale. */
+const OFFSET_PEAKS = 3
+/** Two corrections that put the file's first and last cues within this of
+ *  each other are the same correction. */
+const OFFSET_SAME_MS = 250
+/** A shift smaller than this is not worth offering: the matcher's own 500ms
+ *  tolerance and the "Timing differs" pills already cover it. */
+const OFFSET_MIN_MS = 100
+/** The winning shift must line up this share of the file more than the best
+ *  DIFFERENT shift — the guard against the off-by-one-line alias. */
+const OFFSET_MIN_MARGIN = 0.25
+/** At most this many rows are sampled when counting distances; a peak shows
+ *  just as clearly in 200 cues as in 2,000, and it keeps the count cheap. */
+const OFFSET_SAMPLE_ROWS = 200
+
+/** A correction applied to the uploaded file's timings: each incoming time t
+ *  becomes t × scale + offsetMs. */
 export interface TimebaseAdjustment {
   /** Multiplier applied to every incoming cue time. */
   scale: number
+  /** Milliseconds added after scaling. 0 for a frame-rate correction alone;
+   *  negative moves the file earlier. */
+  offsetMs: number
   /** The rate the file's timings behaved as if authored at, and the rate they
    *  were moved onto — null when the ratio names several pairs equally well
    *  (24/23.976 and 30/29.97 are both exactly 1001/1000). */
@@ -591,22 +626,21 @@ export interface TimebaseAdjustment {
   closeAfter: number
 }
 
-function scaleTimedRows(rows: TimedRow[], scale: number): TimedRow[] {
-  return rows.map((r) => ({
-    ...r,
-    timing: { startMs: Math.round(r.timing.startMs * scale), endMs: Math.round(r.timing.endMs * scale) },
-  }))
+function adjustTimedRows(rows: TimedRow[], scale: number, offsetMs = 0): TimedRow[] {
+  const at = (t: number) => Math.round(t * scale + offsetMs)
+  return rows.map((r) => ({ ...r, timing: { startMs: at(r.timing.startMs), endMs: at(r.timing.endMs) } }))
 }
 
 interface ScaleEvaluation {
   scale: number
+  offsetMs: number
   close: number
   totalOverlap: number
   everyQuarterFits: boolean
 }
 
-function evaluateScale(rows: TimedRow[], cells: TimedCell[], scale: number): ScaleEvaluation {
-  const scaled = scale === 1 ? rows : scaleTimedRows(rows, scale)
+function evaluateScale(rows: TimedRow[], cells: TimedCell[], scale: number, offsetMs = 0): ScaleEvaluation {
+  const scaled = scale === 1 && offsetMs === 0 ? rows : adjustTimedRows(rows, scale, offsetMs)
   const assignment = assignByOverlap(scaled, cells)
   const close = closeMatchedRows(assignment)
   let totalOverlap = 0
@@ -623,38 +657,113 @@ function evaluateScale(rows: TimedRow[], cells: TimedCell[], scale: number): Sca
     const hits = quarter.filter((r) => close.has(r.at)).length
     if (quarter.length > 0 && hits < RESCALE_MIN_QUARTER_FIT * quarter.length) everyQuarterFits = false
   }
-  return { scale, close: close.size, totalOverlap, everyQuarterFits }
+  return { scale, offsetMs, close: close.size, totalOverlap, everyQuarterFits }
 }
 
-/** The frame-rate correction to apply before matching, or null to leave the
- *  file's timings exactly as delivered. It declines unless the best candidate
- *  clears every threshold above AND strictly beats every other candidate —
- *  near-duplicate ratios (25/24 against 25/23.976) that tie on close matches
- *  are split by total overlap, and if still level nothing is applied. */
-function chooseTimebase(rows: TimedRow[], cells: TimedCell[]): TimebaseAdjustment | null {
-  if (rows.length < RESCALE_MIN_ROWS || cells.length === 0) return null
+/** The shifts the file itself suggests at a given scale: the most common
+ *  distances from a (scaled) cue start to any line start. A file shifted by
+ *  2s puts one distance, about +2000ms, far above every other; the peaks are
+ *  refined to the weighted middle of their bucket and its neighbours. */
+function suggestOffsets(rows: TimedRow[], cells: TimedCell[], scale: number): number[] {
+  const step = Math.max(1, Math.ceil(rows.length / OFFSET_SAMPLE_ROWS))
+  const buckets = new Map<number, number>()
+  for (let r = 0; r < rows.length; r += step) {
+    const start = rows[r].timing.startMs * scale
+    for (const c of cells) {
+      const b = Math.round((c.timing.startMs - start) / OFFSET_BUCKET_MS)
+      buckets.set(b, (buckets.get(b) ?? 0) + 1)
+    }
+  }
+  const peaks: number[] = []
+  for (const [b] of [...buckets].sort((x, y) => y[1] - x[1] || x[0] - y[0])) {
+    if (peaks.length === OFFSET_PEAKS) break
+    let weight = 0
+    let sum = 0
+    for (const n of [b - 1, b, b + 1]) {
+      const count = buckets.get(n) ?? 0
+      weight += count
+      sum += count * n * OFFSET_BUCKET_MS
+    }
+    const offset = Math.round(sum / weight)
+    if (peaks.every((p) => Math.abs(p - offset) > OFFSET_SAME_MS)) peaks.push(offset)
+  }
+  return peaks
+}
+
+const byFit = (a: ScaleEvaluation, b: ScaleEvaluation) => b.close - a.close || b.totalOverlap - a.totalOverlap
+
+/** The corrections that would line the file up, each null when none
+ *  qualifies — or both null, leaving the file's timings exactly as delivered.
+ *
+ *  `rate`: a frame-rate stretch alone. It must clear every threshold above AND
+ *  strictly beat every other ratio: near-duplicates (25/24 against 25/23.976)
+ *  that tie on close matches are split by total overlap, and if still level
+ *  nothing is applied.
+ *
+ *  `offset`: a whole-file shift, alone or with a stretch. Same thresholds,
+ *  plus it must beat the best DIFFERENT shift by `OFFSET_MIN_MARGIN` and line
+ *  up more than the stretch alone would. On an exact tie between one shift at
+ *  two scales, the plain shift (scale 1) is kept. */
+function chooseTimebase(
+  rows: TimedRow[],
+  cells: TimedCell[],
+): { rate: TimebaseAdjustment | null; offset: TimebaseAdjustment | null } {
+  const none = { rate: null, offset: null }
+  if (rows.length < RESCALE_MIN_ROWS || cells.length === 0) return none
   const maxCloseMatches = Math.min(rows.length, cells.length)
   const base = evaluateScale(rows, cells, 1)
   // Already lined up too well to gain the required margin: nothing to try.
-  if (base.close > (1 - RESCALE_MIN_GAIN) * maxCloseMatches) return null
+  if (base.close > (1 - RESCALE_MIN_GAIN) * maxCloseMatches) return none
 
-  const [best, runnerUp] = frameRateScalesNear(RESCALE_MAX_DEVIATION)
-    .map((scale) => evaluateScale(rows, cells, scale))
-    .sort((a, b) => b.close - a.close || b.totalOverlap - a.totalOverlap)
-  if (!best) return null
-  if (runnerUp && runnerUp.close === best.close && runnerUp.totalOverlap === best.totalOverlap) return null
-  if (best.close - base.close < RESCALE_MIN_GAIN * maxCloseMatches) return null
-  if (best.close < RESCALE_MIN_FIT * maxCloseMatches) return null
-  if (!best.everyQuarterFits) return null
-
-  const named = snapToFrameRatio(best.scale)
-  return {
-    scale: best.scale,
-    fromFps: named?.cue ?? null,
-    toFps: named?.reference ?? null,
-    closeBefore: base.close,
-    closeAfter: best.close,
+  const qualifies = (e: ScaleEvaluation) =>
+    e.close - base.close >= RESCALE_MIN_GAIN * maxCloseMatches &&
+    e.close >= RESCALE_MIN_FIT * maxCloseMatches &&
+    e.everyQuarterFits
+  const adjustment = (e: ScaleEvaluation): TimebaseAdjustment => {
+    const named = e.scale === 1 ? null : snapToFrameRatio(e.scale)
+    return {
+      scale: e.scale,
+      offsetMs: e.offsetMs,
+      fromFps: named?.cue ?? null,
+      toFps: named?.reference ?? null,
+      closeBefore: base.close,
+      closeAfter: e.close,
+    }
   }
+
+  const scales = frameRateScalesNear(RESCALE_MAX_DEVIATION)
+  const [best, runnerUp] = scales.map((scale) => evaluateScale(rows, cells, scale)).sort(byFit)
+  const tied = runnerUp && runnerUp.close === best.close && runnerUp.totalOverlap === best.totalOverlap
+  const rate = best && !tied && qualifies(best) ? adjustment(best) : null
+
+  // Stable sort: scale 1 is listed first, so it wins an exact tie.
+  const shifts = [1, ...scales]
+    .flatMap((scale) =>
+      suggestOffsets(rows, cells, scale)
+        .filter((offsetMs) => Math.abs(offsetMs) >= OFFSET_MIN_MS)
+        .map((offsetMs) => evaluateScale(rows, cells, scale, offsetMs)),
+    )
+    .sort(byFit)
+  const shift = shifts[0]
+  // A rival is a correction that puts the file somewhere ELSE — compared by
+  // where it lands the first and last cues, not by its offset number: on a
+  // short file, one hour at scale 1 and one hour plus 3.6s at 1.001 land every
+  // cue in the same place, and are the same answer, not two.
+  const starts = rows.map((r) => r.timing.startMs)
+  const [first, last] = [Math.min(...starts), Math.max(...starts)]
+  const lands = (e: ScaleEvaluation, t: number) => t * e.scale + e.offsetMs
+  const sameAs = (a: ScaleEvaluation, b: ScaleEvaluation) =>
+    Math.abs(lands(a, first) - lands(b, first)) <= OFFSET_SAME_MS &&
+    Math.abs(lands(a, last) - lands(b, last)) <= OFFSET_SAME_MS
+  const rival = shift && shifts.find((e) => !sameAs(e, shift))
+  const offset =
+    shift &&
+    qualifies(shift) &&
+    (!rival || shift.close - rival.close >= OFFSET_MIN_MARGIN * maxCloseMatches) &&
+    (!rate || shift.close > rate.closeAfter)
+      ? adjustment(shift)
+      : null
+  return { rate, offset }
 }
 
 /** Raw positional matching: data row N → file cell N. Empty rows keep their
@@ -714,10 +823,12 @@ function matchRowsPositionally(
 export function matchTargetRowsByOverlap(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
-  /** `rescale`: try a frame-rate correction before matching (AQU-1360). Off
-   *  here so a direct call is pure overlap; `matchTargetRowsByOrder`, the
-   *  policy entry point the dialog uses, turns it on. */
-  options: { rescale?: boolean } = {},
+  /** `rescale`: look for a frame-rate or whole-file-shift correction before
+   *  matching (AQU-1360). Off here so a direct call is pure overlap;
+   *  `matchTargetRowsByOrder`, the policy entry point the dialog uses, turns it
+   *  on. `applyOffset: false` leaves a qualifying shift unapplied (the review
+   *  screen's tickbox) while still reporting it. */
+  options: { rescale?: boolean; applyOffset?: boolean } = {},
 ): FileTargetMatchResult {
   // Rows carrying no text can't commit anything, and must not hold a cell
   // hostage — a blank incoming cue never clears an existing translation.
@@ -737,11 +848,13 @@ export function matchTargetRowsByOverlap(
   }
 
   const timedCells = timedCellsOf(cells)
-  // Rescaled rows keep their `row` (so their label is still the file's own
+  // Adjusted rows keep their `row` (so their label is still the file's own
   // timecode); only the timing the matcher compares changes.
-  const timebase = options.rescale ? chooseTimebase(timedRows, timedCells) : null
+  const corrections = options.rescale ? chooseTimebase(timedRows, timedCells) : { rate: null, offset: null }
+  const timebase =
+    corrections.offset && options.applyOffset !== false ? corrections.offset : corrections.rate
   const assignment = assignByOverlap(
-    timebase ? scaleTimedRows(timedRows, timebase.scale) : timedRows,
+    timebase ? adjustTimedRows(timedRows, timebase.scale, timebase.offsetMs) : timedRows,
     timedCells,
   )
 
@@ -805,6 +918,7 @@ export function matchTargetRowsByOverlap(
     uncovered,
     alignedBy: "overlap",
     ...(timebase ? { timebase } : {}),
+    ...(corrections.offset ? { offsetCorrection: corrections.offset } : {}),
     ...(looseFit ? { looseFit } : {}),
   }
 }
@@ -825,6 +939,8 @@ export function matchTargetRowsByOverlap(
 export function matchTargetRowsByOrder(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
+  /** `applyOffset: false` — the review screen's tickbox, unticked. */
+  options: { applyOffset?: boolean } = {},
 ): FileTargetMatchResult {
   const nonEmptyRows = rows.filter((row) => row.text.trim().length > 0)
   const canMatchByOverlap =
@@ -834,7 +950,7 @@ export function matchTargetRowsByOrder(
     nonEmptyRows.every((row) => rowTimingMs(row) !== null)
 
   return canMatchByOverlap
-    ? matchTargetRowsByOverlap(rows, cells, { rescale: true })
+    ? matchTargetRowsByOverlap(rows, cells, { rescale: true, applyOffset: options.applyOffset })
     : matchRowsPositionally(rows, cells)
 }
 

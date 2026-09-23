@@ -789,6 +789,7 @@ describe("frame-rate rescale (AQU-1360)", () => {
     const cells = episode(650)
     const result = matchTargetRowsByOrder(delivered(cells, (t) => t), cells)
     expect(result.timebase).toBeUndefined()
+    expect(result.offsetCorrection).toBeUndefined()
     expect(correct(result)).toBe(650)
   })
 
@@ -827,14 +828,68 @@ describe("frame-rate rescale (AQU-1360)", () => {
   })
 
   it.each([
-    ["a 2s start offset", (t: number) => t + 2000],
-    ["a 700ms start offset", (t: number) => t + 700],
-    ["a -5s start offset", (t: number) => t - 5000],
-    ["a one-hour broadcast offset", (t: number) => t + 3_600_000],
-    ["25/23.976 combined with a 2s offset", (t: number) => t / PAL + 2000],
-  ])("declines %s — offsets are out of scope, and must never be 'fixed' with a wrong scale", (_name, f) => {
+    ["a 2s start offset", (t: number) => t + 2000, -2000],
+    ["a 700ms start offset", (t: number) => t + 700, -700],
+    ["a -5s start offset", (t: number) => t - 5000, 5000],
+    ["a one-hour broadcast offset", (t: number) => t + 3_600_000, -3_600_000],
+  ])("shifts %s back into place — never 'fixing' it with a wrong frame rate", (_name, f, expected) => {
     const cells = episode(650)
-    expect(matchTargetRowsByOrder(delivered(cells, f), cells).timebase).toBeUndefined()
+    const result = matchTargetRowsByOrder(delivered(cells, f), cells)
+    expect(result.offsetCorrection?.scale).toBe(1)
+    expect(Math.abs(result.offsetCorrection!.offsetMs - expected)).toBeLessThanOrEqual(20)
+    // Offered AND applied: the tickbox starts ticked.
+    expect(result.timebase).toEqual(result.offsetCorrection)
+    expect(correct(result)).toBe(650)
+  })
+
+  it("corrects a frame-rate mismatch and a shift together", () => {
+    const cells = episode(650)
+    const result = matchTargetRowsByOrder(delivered(cells, (t) => t / PAL + 2000), cells)
+    expect(result.offsetCorrection?.scale).toBeCloseTo(PAL, 9)
+    expect(result.offsetCorrection).toMatchObject({ fromFps: "25", toFps: "23.976" })
+    expect(Math.abs(result.offsetCorrection!.offsetMs + 2000 * PAL)).toBeLessThanOrEqual(20)
+    expect(correct(result)).toBe(650)
+  })
+
+  it("unticked, leaves the shift unapplied but still offers it", () => {
+    const cells = episode(650)
+    const rows = delivered(cells, (t) => t + 2000)
+    const ticked = matchTargetRowsByOrder(rows, cells)
+    const unticked = matchTargetRowsByOrder(rows, cells, { applyOffset: false })
+    expect(unticked.timebase).toBeUndefined()
+    expect(unticked.offsetCorrection).toEqual(ticked.offsetCorrection)
+    expect(correct(unticked)).toBeLessThan(100)
+    expect(unticked.looseFit).toBe(true)
+  })
+
+  it("unticked, still applies a frame-rate correction that stands on its own", () => {
+    const cells = episode(650)
+    const unticked = matchTargetRowsByOrder(delivered(cells, (t) => t / PAL + 2000), cells, { applyOffset: false })
+    // The stretch alone can't line this file up (every quarter must fit), so nothing applies.
+    expect(unticked.timebase).toBeUndefined()
+    // A pure frame-rate file never offers a shift at all.
+    const pure = matchTargetRowsByOrder(delivered(cells, (t) => t / PAL), cells)
+    expect(pure.offsetCorrection).toBeUndefined()
+    expect(pure.timebase?.offsetMs).toBe(0)
+  })
+
+  it("shifts a short file's broadcast hour — a frame rate that lands every cue in the same place is not a rival", () => {
+    // Over a one-minute file, "one hour" and "one hour plus 3.6s at 1.001"
+    // put every cue within a few ms of each other. They are one answer.
+    const cells = episode(30)
+    const result = matchTargetRowsByOrder(delivered(cells, (t) => t + 3_600_000), cells)
+    expect(result.offsetCorrection).toMatchObject({ scale: 1, offsetMs: -3_600_000 })
+    expect(correct(result)).toBe(30)
+  })
+
+  it("refuses to choose between two equally good shifts on a regular grid", () => {
+    // Every line 1s long, every 2s. A file half a spacing late fits the true
+    // shift and the one-line-over shift equally well: it can't be told which.
+    const grid = Array.from({ length: 100 }, (_, i) =>
+      cell({ cellId: `c${i}`, startMs: 10_000 + i * 2000, endMs: 11_000 + i * 2000 }))
+    const result = matchTargetRowsByOrder(delivered(grid, (t) => t + 1000), grid)
+    expect(result.offsetCorrection).toBeUndefined()
+    expect(result.timebase).toBeUndefined()
   })
 
   it("declines a re-segmented file, where the translator split lines instead of shifting them", () => {
@@ -850,6 +905,7 @@ describe("frame-rate rescale (AQU-1360)", () => {
       }
     })
     expect(matchTargetRowsByOrder(rows, cells).timebase).toBeUndefined()
+    expect(matchTargetRowsByOrder(rows, cells).offsetCorrection).toBeUndefined()
   })
 
   it("declines missing and extra cues", () => {
@@ -857,11 +913,13 @@ describe("frame-rate rescale (AQU-1360)", () => {
     const rows = delivered(cells, (t) => t).filter((_, i) => i % 9 !== 4)
     rows.push({ ref: "extra", text: "target extra", startMs: 99_000_000, endMs: 99_001_000 })
     expect(matchTargetRowsByOrder(rows, cells).timebase).toBeUndefined()
+    expect(matchTargetRowsByOrder(rows, cells).offsetCorrection).toBeUndefined()
   })
 
-  it("never rescales a file too small to judge", () => {
+  it("never rescales or shifts a file too small to judge", () => {
     const cells = episode(19)
     expect(matchTargetRowsByOrder(delivered(cells, (t) => t / PAL), cells).timebase).toBeUndefined()
+    expect(matchTargetRowsByOrder(delivered(cells, (t) => t + 2000), cells).offsetCorrection).toBeUndefined()
   })
 })
 
@@ -1102,9 +1160,17 @@ describe("review flags on a full-length episode (AQU-1360)", () => {
     expect(r.looseFit).toBeUndefined()
   })
 
-  it("a 2s offset — which nothing corrects — raises the loose-fit warning", () => {
+  it("a shifted episode, once shifted back, raises no flag and no loose-fit warning", () => {
     const cells = episode(650)
     const r = matchTargetRowsByOrder(as(cells, (t) => t + 2000), cells)
+    expect(r.timebase?.offsetMs).toBeDefined()
+    expect(flagged(r)).toBe(0)
+    expect(r.looseFit).toBeUndefined()
+  })
+
+  it("left unshifted (the tickbox unticked), it raises the loose-fit warning", () => {
+    const cells = episode(650)
+    const r = matchTargetRowsByOrder(as(cells, (t) => t + 2000), cells, { applyOffset: false })
     expect(r.timebase).toBeUndefined()
     expect(r.looseFit).toBe(true)
   })

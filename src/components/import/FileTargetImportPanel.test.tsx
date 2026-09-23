@@ -18,7 +18,7 @@
 
 import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, act, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
 // ── Mock the heavy outbox call ────────────────────────────────────────────────
 vi.mock("@/lib/import", () => ({
@@ -527,6 +527,64 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     ))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText("1 cue skipped (empty or unreadable)")).toHaveClass("text-amber-600")
+  })
+
+  describe("a whole-file shift, offered as a tickbox", () => {
+    // An irregular grid, like a real subtitle file: a regular one can't tell
+    // the true shift from the one-line-over shift, and is rightly refused.
+    const episodeLines = Array.from({ length: 30 }, (_, i) => {
+      const start = 5000 + i * 2600 + (i % 4) * 170
+      return line(i + 1, start, start + 900 + (i % 5) * 260)
+    })
+    const shifted = (by: number) =>
+      vtt(episodeLines.map((c, i) => [c.startMs + by, c.endMs + by, `TARGET ${i + 1}`]))
+    const onOwnLine = () =>
+      screen.getAllByText(/^TARGET \d+$/).filter((el) => {
+        // Cues that found no line sit in the unmatched list, not in a row.
+        const row = el.closest("label")
+        return row !== null && new RegExp(`SOURCE ${el.textContent!.split(" ")[1]}(?!\\d)`).test(row.textContent!)
+      }).length
+
+    it("applies the shift, ticked, and says how far and how much it helped", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(2000), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const box = screen.getByLabelText(/Shift the uploaded file's timings 2 seconds earlier, which lines up \d+ more lines\./)
+      expect(box).toBeChecked()
+      expect(onOwnLine()).toBe(30)
+      expect(screen.queryByText(/partly overlap/)).not.toBeInTheDocument()
+    })
+
+    it("unticked, pairs the file as delivered, and ticked again, shifts it back", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(2000), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const box = () => screen.getByLabelText(/Shift the uploaded file's timings/)
+      fireEvent.click(box())
+      expect(box()).not.toBeChecked()
+      expect(onOwnLine()).toBeLessThan(10)
+      expect(screen.getByText(/partly overlap/)).toBeInTheDocument()
+      fireEvent.click(box())
+      expect(box()).toBeChecked()
+      expect(onOwnLine()).toBe(30)
+    })
+
+    it("reads a broadcast hour as a timecode, and a shift the other way as later", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(3_600_000), "episode.vtt"))
+      expect(await screen.findByLabelText(/timings 1:00:00 earlier/)).toBeChecked()
+      cleanup()
+      renderPanel({ cells: episodeLines.map((c) => ({ ...c, startMs: c.startMs + 5000, endMs: c.endMs + 5000 })) })
+      await selectFile(makeFile(shifted(0), "episode.vtt"))
+      expect(await screen.findByLabelText(/timings 5 seconds later/)).toBeChecked()
+    })
+
+    it("offers nothing on a file that already lines up", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(0), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/Shift the uploaded file's timings/)).not.toBeInTheDocument()
+    })
   })
 
   it("explains a frame-rate correction", async () => {

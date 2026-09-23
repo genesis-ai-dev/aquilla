@@ -100,20 +100,27 @@ export function TakesStrip({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
 
-  // AQU-464: which of these takes were recorded against text that has since
-  // been re-worded. Recorded takes only — a generated (TTS) take is synthesised
-  // FROM the current text, so it cannot lag it, and flagging one would be noise.
-  const recordedTakeIds = useMemo(
-    () => takes.filter((t) => !t.voiceId && t.slot !== GENERATED_VOICE_SLOT).map((t) => t.audioId),
-    [takes],
-  )
+  // One history read per cell answers two questions about every take on it:
+  //
+  //   AQU-464  — was this take recorded against text that has since been
+  //              re-worded? Recorded takes only; a generated (TTS) take is
+  //              synthesised FROM the current text, so it cannot lag it and
+  //              flagging one would be noise. That filter now lives at the
+  //              BADGE (`isGenerated` below) rather than in the id list.
+  //   AQU-1372 — when was it made, and by whom? True of every take, generated
+  //              ones included, so the list asked for must be all of them.
+  //
+  // Widening the id list is what lets one read serve both: resolving the whole
+  // cell costs no extra request, and a second hook for provenance would have
+  // doubled the history read on the hottest strip in the editor.
+  const allTakeIds = useMemo(() => takes.map((t) => t.audioId), [takes])
   const driftTokenFetcher = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
-  const textDrift = useRecordingTextDrift({
-    enabled: Boolean(session?.jwt) && recordedTakeIds.length > 0,
+  const takeHistory = useRecordingTextDrift({
+    enabled: Boolean(session?.jwt) && allTakeIds.length > 0,
     projectId,
     fileId,
     cellId,
-    audioIds: recordedTakeIds,
+    audioIds: allTakeIds,
     getTokenForFile: driftTokenFetcher,
   })
 
@@ -416,6 +423,10 @@ export function TakesStrip({
     // an added track's single slot holds both kinds. `voiceId` is set by all
     // three paths that mint a generated voice.
     const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
+          // AQU-1372: when this take was made and who made it. Absent — never
+          // guessed — while the history read is still in flight, or when the
+          // 200-event window does not reach back to this take's attach.
+          const provenance = takeHistory.get(att.audioId) ?? null
           const isPlaying = att.audioId === playingId
           const isLoading = att.audioId === loadingId
           const isBusy = att.audioId === busyId
@@ -517,14 +528,44 @@ export function TakesStrip({
                         <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
                       </button>
                     )}
+                    {/* AQU-1372: "recorded when, by whom" — the answer the
+                        event log already holds, on the row that asks it.
+                        Compact by necessity (this row is dense): the date and
+                        the person inline, the exact time in the tooltip. */}
+                    {provenance && (
+                      <span
+                        data-testid={`take-recorded-${att.audioId}`}
+                        title={t(
+                          isGenerated
+                            ? "audio.takesStrip.generatedByTooltip"
+                            : "audio.takesStrip.recordedByTooltip",
+                          {
+                            datetime: new Date(provenance.recordedAt).toLocaleString(),
+                            author: provenance.recordedBy,
+                          },
+                        )}
+                        className="min-w-0 shrink truncate text-[10px] text-muted-foreground/60"
+                      >
+                        {t("audio.takesStrip.recordedByBadge", {
+                          date: new Date(provenance.recordedAt).toLocaleDateString(),
+                          author: provenance.recordedBy,
+                        })}
+                      </span>
+                    )}
                     {/* AQU-464: this take speaks wording the line no longer
                         carries. Advisory, not an error — reviewing audio
-                        against its own older text is the point. */}
-                    {textDrift.get(att.audioId)?.drifted && (
+                        against its own older text is the point.
+
+                        AQU-1372: `!isGenerated` is the filter that used to be
+                        the hook's id list. A synthesised take is made FROM the
+                        current text, so it can never lag it — without this
+                        guard, widening that list to every take would have
+                        started badging TTS takes as stale. */}
+                    {!isGenerated && provenance?.drifted && (
                       <span
                         title={t("audio.takesStrip.textDriftTooltip", {
-                          date: new Date(textDrift.get(att.audioId)!.recordedAt).toLocaleDateString(),
-                          text: textDrift.get(att.audioId)!.textAtRecording ?? "",
+                          date: new Date(provenance.recordedAt).toLocaleDateString(),
+                          text: provenance.textAtRecording ?? "",
                         })}
                         data-testid={`take-text-drift-${att.audioId}`}
                         className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"

@@ -43,6 +43,7 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
 import {
@@ -545,13 +546,21 @@ async function loadPrecedingContext(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "LEFT JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.sequence_index IS NOT NULL AND s.sequence_index < ? " +
         "  AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index DESC LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.sequenceIndex, args.count)
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.sequenceIndex,
+      args.count,
+    )
     .all<ContextRow>()
 
   return rows.results
@@ -586,7 +595,9 @@ async function loadValidatedFallback(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.cell_id != ? AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index NULLS LAST, s.cell_id " +
@@ -595,7 +606,13 @@ async function loadValidatedFallback(
         // enough net for token overlap while staying a cheap query.
         "LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.cellId, Math.min(2000, args.limit * 20))
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.cellId,
+      Math.min(2000, args.limit * 20),
+    )
     .all<ContextRow>()
 
   const pairs = rows.results

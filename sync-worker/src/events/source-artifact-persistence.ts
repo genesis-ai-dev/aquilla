@@ -1,3 +1,5 @@
+import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+
 export interface SourceArtifactPersistenceInput {
   projectId: string
   fileId: string
@@ -75,8 +77,8 @@ export function buildSourceArtifactPersistenceStatements(
     db.prepare(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
-         member_path, profile_id, profile_version, fidelity, manifest, recipe
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
+         member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
        ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
@@ -84,6 +86,7 @@ export function buildSourceArtifactPersistenceStatements(
          fidelity = EXCLUDED.fidelity,
          manifest = EXCLUDED.manifest,
          recipe = EXCLUDED.recipe,
+         lane_id = COALESCE(EXCLUDED.lane_id, artifact_bindings.lane_id),
          updated_at = now()`,
     ).bind(
       input.bindingId,
@@ -98,6 +101,8 @@ export function buildSourceArtifactPersistenceStatements(
       input.fidelity,
       JSON.stringify(input.manifest),
       input.recipe ? JSON.stringify(input.recipe) : null,
+      // AQU-1240 slice 8: source role -> source lane; else target lane by tag.
+      ...laneIdResolveBindingBinds(input.projectId, input.bindingRole, input.targetLang),
     ),
   )
   return statements

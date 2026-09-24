@@ -7,6 +7,16 @@
 //
 // UNWIRED: no route calls resolveVisibleLanes yet. The LaneScopedRead brand
 // and ESLint perimeter exist so future read paths cannot skip the resolver.
+//
+// AQU-1389: this file is PRESERVED, NOT ACTIVE, and is owned by AQU-1352 — not
+// by the AQU-1240 lane-model cutover. The `laneGrants` claim it reads is also
+// gated off at the mint (auth-worker/src/services/lane-grants.ts), so today
+// every caller would get the `role >= 600` or empty-set answer regardless.
+// Do NOT wire this up as a standalone second authority: AQU-1352 collapses
+// every grant source into `access_grants` behind one resolver, and this
+// function's read perimeter is meant to sit in FRONT of that resolver, taking
+// its lane answer from it. Wiring it to project_member_lane_roles directly
+// would re-create the divergence AQU-1389 just removed.
 
 import type { SyncTokenClaims } from '../auth'
 import type { VerifiedProjectId } from './scoped-search'

@@ -1,5 +1,42 @@
 # Per-lane permissions + read wall + metadata isolation — Design
 
+> ## Extraction record — AQU-1389 (2026-09-24)
+>
+> **This design is now owned by AQU-1352 (membership & permissions redesign), not by
+> AQU-1240 (lane model).** PR #719 merged into `dev` at `f7bdadc` carrying both the lane
+> *model* and the first slice of this lane *permission* system. AQU-1389 separates them so
+> the lanes-only cutover can ship and roll back without changing who can access a lane.
+>
+> **Prerequisites before any of this activates** — none are met today:
+> 1. AQU-1352's D1–D6 decisions closed, and `access_grants` + the single resolver landed.
+> 2. The deferred backfill of §5 run *after* the default lane is gone (AQU-1240), so no
+>    grant ever stores the literal `''` lane.
+> 3. A parity audit proving zero effective-role changes, then the activation gate flipped.
+>
+> **What is live on `dev` after the extraction:**
+>
+> | Piece | State | Owner |
+> | -- | -- | -- |
+> | `project_member_lane_roles` (migration 0091) | table exists, **empty, unread** | AQU-1352 — migrate into `access_grants`; never drop |
+> | `laneGrants` sync-token claim + mint read | **gated off** by `LANE_GRANTS_ENABLED` (`auth-worker/src/services/lane-grants.ts`) | AQU-1352 — the gate is its activation flag |
+> | `resolveVisibleLanes` / `LaneScopedRead` / ESLint perimeter | **unwired**, no route calls it | AQU-1352 — reusable as-is; wire to the canonical resolver |
+> | read wall / metadata isolation (§3–§4) | **not implemented** | AQU-1352 P3 |
+> | lane-model pieces (first-class lanes, lane ids, content backfill, FKs) | live, unchanged | AQU-1240 |
+>
+> **Reusable vs. superseded.** Reusable: the enforcement-choke-point analysis, the branded
+> `LaneScopedRead` perimeter, `isLaneVisible`, the slice structure, and the metadata-isolation
+> requirements (AQU-730 keeps the requirements record). Superseded as an *independent
+> mechanism*: `project_member_lane_roles` as its own authority and any per-lane resolver that
+> answers outside the canonical `effectiveRole` — lane grants become `scope_type='lane'` rows
+> in `access_grants`, resolved by the one resolver, per AQU-1352's "one rule".
+>
+> **Follow-up ownership** (so default-lane elimination depends on none of it): grant
+> migration, metadata/read enforcement, mutation authorization and revocation → AQU-1352 P3;
+> lane-scoped invitations → AQU-528 *through* AQU-1352's authority; the shared access UI and
+> member inspector → AQU-1352 P4. No new permission-management surface ships before then.
+>
+> This extraction does **not** claim AQU-730's isolation requirements are implemented.
+
 **Status:** Proposal for discussion · 2026-09-10 · Luke (w/ team permission)
 **Linear:** AQU-730 (permission model + visibility decisions), interlocks with AQU-1240
 (eliminate default lane) and AQU-1026 (partner per-lane assignment).

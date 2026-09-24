@@ -82,7 +82,14 @@ interface AdversarialTarget {
   the password flow (`POST /api/v1/auth/token`) with three dedicated
   users (`ADVERSARIAL_USER_1..3`, each `username:password`) supplied via
   `.env.adversarial.local` or CI secrets. Ryder registers these users on
-  dev once; the suite never registers accounts. The runner never calls
+  dev once; the suite never registers accounts. They are deliberately
+  **not** the PR walk bot's `qa-bot` / `qa-bot-2` accounts
+  (`e2e/journeys/README.md`, "Fixtures on development storage"). Those
+  accounts belong to QA Bot Workspace, which holds standing projects the
+  walk bot depends on. An adversarial goal such as "delete every
+  translation" must not be able to navigate there, so the adversarial
+  users are members of their own run orgs only. Once registered, they are
+  added to that README fixtures list so the two bots never collide. The runner never calls
   `/__dev__/*` or `/__test__/reset` on this target.
 - **Run org lifecycle.** Each run creates one org named `adv-<runId>`
   through `POST /api/v2/orgs`. Every test seeds its own project inside
@@ -200,6 +207,23 @@ target stays at one worker per stack (existing rule). Login rate limits
 are respected by minting each user's JWT once per run in the launcher
 and passing it to workers through the environment.
 
+### Harness health gate
+
+The cooperative suite spent days reporting INCONCLUSIVE on every commit
+because its setup could not reach the stack (AQU-1350, PR #788). The
+adversarial suite adopts #788's rule so a dead harness can never file
+tickets:
+
+- Before any attack, the launcher runs a **canary pair** in the run org:
+  one scripted Playwright edit (no model) that must pass the edit oracle,
+  and one planted wrong-cell write that the invariant oracle must reject.
+  Either failing means the oracles or the target are broken.
+- If the canary pair fails, or if every attack in a run ends
+  `inconclusive`, the run is **HARNESS UNAVAILABLE**. The reporter files
+  no bug tickets, posts one rollup on AQU-1338 naming the failed check,
+  and exits non-zero.
+- Only a run whose canary pair passed may create product-failure tickets.
+
 ### Evidence and reporting
 
 Evidence lands in `smart-tests/results/adv-<runId>/` in the existing
@@ -311,6 +335,17 @@ Live evidence before merge: one full catalogue run against dev with
 `--repeat-each 2`, results committed as
 `smart-tests/adversarial/QUALIFICATION.md` (counts, cost, wall time,
 inconclusive reasons). Any product failure found is ticketed as designed.
+
+## Relation to the release line
+
+Dev is where the release bot cuts `release/YYYY/MM/DD` branches
+(`e2e/journeys/QA-BOT-REGIMEN.md`, PRs #794, #796, #797). The PR walk
+bot checks each PR before merge; nothing checks the merged dev build as
+a whole under stress. The adversarial suite fills that gap, keyed by the
+`version.json` sha it tested. v1 only reports. Feeding its verdict into
+`scripts/release-plan.mjs` as a hold signal is a later decision, and
+should wait until the suite has run cleanly for a while, so a flaky
+attack cannot block a release.
 
 ## Deferred: long-lived explorers on Agent Substrate
 

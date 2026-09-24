@@ -15,12 +15,23 @@ function makeDb(options: {
   /** AQU-581: the lane-delegate carve-out's org setting. */
   allowScopedLaneAssignment?: boolean
   assignmentMinRole?: number
+  /** AQU-581 review: the assignee's direct role on the project (null = none). */
+  assigneeRoleLevel?: number | null
+  /** AQU-581 review: the assignee's own lane/file scopes. */
+  assigneeScopes?: { kind: "lane" | "file"; value: string }[]
+  /** AQU-581 review: the stored assignment a delegate's unassign targets. */
+  assignmentRow?: { created_by: number; target_lang: string; unassigned_at: number | null } | null
+  assignmentFiles?: string[]
 }): AquillaDb {
   const {
     orgId = 1,
     allowSelfAssignment = false,
     allowScopedLaneAssignment = false,
     assignmentMinRole,
+    assigneeRoleLevel = 400,
+    assigneeScopes = [],
+    assignmentRow = null,
+    assignmentFiles = ["file-x"],
   } = options
   return {
     prepare(sql: string) {
@@ -28,7 +39,11 @@ function makeDb(options: {
         bind(..._args: unknown[]) {
           return {
             async first() {
-              if (sql.includes("FROM projects")) return { org_id: orgId }
+              if (sql.includes("FROM project_members")) {
+                return assigneeRoleLevel == null ? null : { role_level: assigneeRoleLevel }
+              }
+              if (sql.includes("FROM assignments")) return assignmentRow
+              if (sql.includes("FROM projects")) return { org_id: orgId, created_by: 999, archived_at: null }
               if (sql.includes("FROM org_settings")) {
                 return {
                   settings: JSON.stringify({
@@ -40,7 +55,13 @@ function makeDb(options: {
               }
               return null
             },
-            async all() { return { results: [] } },
+            async all() {
+              if (sql.includes("FROM project_member_scopes")) return { results: assigneeScopes }
+              if (sql.includes("FROM assignment_cells")) {
+                return { results: assignmentFiles.map((file_id) => ({ file_id })) }
+              }
+              return { results: [] }
+            },
           }
         },
       }
@@ -725,5 +746,112 @@ describe("authorize() — assignment.create lane-delegate carve-out (AQU-581)", 
     const db = makeDb({ allowScopedLaneAssignment: false })
     const result = await authorize(token, laneAssign({ targetLang: "fr" }), SECRET, db)
     expect(result.ok).toBe(true)
+  })
+
+  // ── AQU-581 review: the assignee must be able to do the work ──────────────
+
+  it("a delegate is BLOCKED (403) from assigning a VIEWER — they cannot translate", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeRoleLevel: 100 })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      // The dialog shows this reason verbatim, so it must say why.
+      expect(result.reason).toMatch(/cannot take work in this language/)
+    }
+  })
+
+  it("a delegate is BLOCKED (403) from assigning someone with no role on the project", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeRoleLevel: null })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(false)
+  })
+
+  it("a delegate is BLOCKED (403) from assigning Spanish work to a member scoped only to German", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeScopes: [{ kind: "lane", value: "de" }] })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it("a delegate may assign a member scoped to the same lane", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeScopes: [{ kind: "lane", value: "es" }] })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  it("a delegate is BLOCKED (403) from assigning a file outside the assignee's file scopes", async () => {
+    const token = await makeToken({ role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeScopes: [{ kind: "file", value: "file-other" }] })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(false)
+  })
+
+  it("a lead may still assign a viewer — the assignee check is the delegate's only", async () => {
+    const token = await makeToken({ role: 500, projectId: "proj-a", fileId: "file-x" })
+    const db = makeDb({ allowScopedLaneAssignment: true, assigneeRoleLevel: 100 })
+    const result = await authorize(token, laneAssign(), SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  // ── AQU-581 review: a delegate can take back what they handed out ──────────
+
+  function laneUnassign(): RawEvent<"assignment.unassign"> {
+    return {
+      id: "unassign-lane",
+      schemaVersion: 1,
+      kind: "assignment.unassign",
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: undefined,
+      parentId: null,
+      author: "alice",
+      payload: { assignmentId: "asg-lane" },
+      clientTs: Date.now(),
+    }
+  }
+  const OWN_ES = { created_by: 42, target_lang: "es", unassigned_at: null }
+
+  it("a delegate may unassign an open assignment they created in a lane they hold", async () => {
+    const token = await makeToken({ userId: 42, role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assignmentRow: OWN_ES })
+    const result = await authorize(token, laneUnassign(), SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  it("a delegate is BLOCKED (403) from unassigning someone else's assignment", async () => {
+    const token = await makeToken({ userId: 42, role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assignmentRow: { ...OWN_ES, created_by: 7 } })
+    const result = await authorize(token, laneUnassign(), SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it("a delegate is BLOCKED (403) from unassigning their own assignment in a lane they no longer hold", async () => {
+    const token = await makeToken({ userId: 42, role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: true, assignmentRow: { ...OWN_ES, target_lang: "de" } })
+    const result = await authorize(token, laneUnassign(), SECRET, db)
+    expect(result.ok).toBe(false)
+  })
+
+  it("a delegate is BLOCKED (403) from unassigning while the setting is OFF", async () => {
+    const token = await makeToken({ userId: 42, role: 400, projectId: "proj-a", fileId: "file-x", scopes: LANE_ES })
+    const db = makeDb({ allowScopedLaneAssignment: false, assignmentRow: OWN_ES })
+    const result = await authorize(token, laneUnassign(), SECRET, db)
+    expect(result.ok).toBe(false)
+  })
+
+  it("a file-scoped delegate is BLOCKED (403) when their assignment reaches a file they no longer hold", async () => {
+    const token = await makeToken({
+      userId: 42, role: 400, projectId: "proj-a", fileId: "file-x",
+      scopes: [...LANE_ES, { kind: "file", value: "file-x" }],
+    })
+    const db = makeDb({ allowScopedLaneAssignment: true, assignmentRow: OWN_ES, assignmentFiles: ["file-x", "file-y"] })
+    const result = await authorize(token, laneUnassign(), SECRET, db)
+    expect(result.ok).toBe(false)
   })
 })

@@ -303,9 +303,17 @@ export function AssignModal({
   // doing assignments sees (and could assign to) other language teams' people.
   // partitionMembers (AQU-454) keeps only members with a project-specific path
   // (override / group / creator); org-baseline-only members drop out.
+  //
+  // AQU-581: a lane coordinator may only hand work to someone who can do it —
+  // CONTRIBUTOR and up. The server also refuses anyone scoped away from the
+  // lane; other members' scopes aren't readable here, so that case surfaces
+  // as the server's refusal. A lead is trusted to pick.
   const eligibleMembers = useMemo(
-    () => partitionMembers(members).projectMembers,
-    [members],
+    () =>
+      partitionMembers(members).projectMembers.filter(
+        (m) => !isLaneDelegate || m.role.level >= ROLE.CONTRIBUTOR,
+      ),
+    [members, isLaneDelegate],
   )
 
   // AQU-497: group the books-scope file list by corpusMarker (real season/

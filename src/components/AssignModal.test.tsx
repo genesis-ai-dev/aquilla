@@ -571,6 +571,25 @@ describe("lane select (AQU-538)", () => {
     expect(mockCreate.mock.calls[0][0].targetLang).toBe("Spanish")
   })
 
+  it("offers a coordinator only members who can do the work (Contributor and up)", async () => {
+    const withViewer = [
+      ...BASE_PROPS.members,
+      { userId: 55, username: "vera", role: { level: 100, name: "viewer", source: "override" as const }, secondarySources: [] },
+    ]
+    const delegate = { allowScopedLaneAssignment: true, scopes: [{ kind: "lane" as const, value: "Spanish" }] }
+    const { unmount } = render(
+      <AssignModal {...BASE_PROPS} members={withViewer} roleLevel={ROLE.CONTRIBUTOR} targetLanes={["Spanish"]} laneDelegate={delegate} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    expect(await screen.findByRole("option", { name: /anna/ })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /vera/ })).toBeNull()
+    unmount()
+    // A lead still sees everyone.
+    render(<AssignModal {...BASE_PROPS} members={withViewer} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    expect(await screen.findByRole("option", { name: /vera/ })).toBeTruthy()
+  })
+
   it("names the main language by its name when that is a coordinator's only lane", () => {
     render(
       <AssignModal

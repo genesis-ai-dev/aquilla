@@ -12,6 +12,7 @@ import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
+import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -342,13 +343,47 @@ export async function authorize<K extends EventKind>(
     // and only while the org has opted into `allowScopedLaneAssignment`. It is
     // evaluated SECOND so a self-assign under the older setting short-circuits
     // first, and so an org running only AQU-496 behaves exactly as it did
-    // before. assignment.create ONLY — reassign/unassign keep the floor.
-    const laneDelegateOk =
+    // before.
+    //
+    // The ASSIGNEE is checked too (AQU-581 review): they must be able to do
+    // the work — CONTRIBUTOR+ and, if scoped, scoped to this lane and files.
+    // A lead is trusted to pick; a delegate's choice is what the grant is for.
+    //
+    // A delegate may also `assignment.unassign` work they handed out
+    // themselves, in a lane they still hold — otherwise their mistakes could
+    // only be undone by a lead. Reassign keeps the floor: nothing emits it.
+    const delegateCandidate =
       !selfAssignOk &&
       db != null &&
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
-      isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>) &&
-      assignmentAuthority?.allowScopedLaneAssignment === true
+      assignmentAuthority?.allowScopedLaneAssignment === true &&
+      Array.isArray(tokenClaims.scopes) &&
+      tokenClaims.scopes.some((s) => s.kind === 'lane')
+    let laneDelegateOk = false
+    if (delegateCandidate && isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>)) {
+      const payload = raw.payload as RawEvent<'assignment.create'>['payload']
+      const eligible = await isEligibleLaneAssignee(
+        db,
+        raw.projectId,
+        payload.assigneeUserId,
+        typeof payload.targetLang === 'string' ? payload.targetLang : '',
+        payload.scope.map((entry) => entry.fileId),
+      )
+      // Shown to the coordinator as-is by the assign dialog, so say why.
+      if (!eligible) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'this person cannot take work in this language: they need contributor access and must be allowed to work in it',
+        }
+      }
+      laneDelegateOk = true
+    } else if (delegateCandidate && raw.kind === 'assignment.unassign') {
+      const payload = raw.payload as RawEvent<'assignment.unassign'>['payload']
+      laneDelegateOk =
+        typeof payload?.assignmentId === 'string' &&
+        (await isOwnLaneAssignment(db, raw.projectId, payload.assignmentId, tokenClaims.userId, tokenClaims.scopes ?? []))
+    }
 
     if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }

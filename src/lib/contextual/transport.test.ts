@@ -328,6 +328,29 @@ describe("project Autopilot observability", () => {
     })
   })
 
+  // AQU-935. The lane is what makes a project-wide start mean one language
+  // rather than "whatever the default is". `''` must stay OFF the wire so a
+  // single-language project's request is byte-identical to the pre-lane one.
+  it("carries a chosen target lane into the project-wide start, and omits the default", async () => {
+    const startBody = {
+      scope: "project",
+      scopeGroup: "scope-1",
+      started: [{ runId: RUN.runId, fileId: FILE_ID }],
+      skipped: [],
+      totalCandidates: 1,
+      deferred: { count: 0, reason: null },
+      truncated: false,
+    }
+    fetchMock.mockResolvedValueOnce(jsonResponse(startBody, 201))
+    await startProjectContextualRun(PROJECT_ID, "th")
+    expect(JSON.parse(lastRequest().init.body as string))
+      .toEqual({ scope: "project", targetLang: "th" })
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(startBody, 201))
+    await startProjectContextualRun(PROJECT_ID, "")
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({ scope: "project" })
+  })
+
   it("lists and normalizes durable run history", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       available: true,

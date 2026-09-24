@@ -766,12 +766,16 @@ export interface ProjectRunStartResult {
  *  The server picks the files and divides the concurrency ceiling across them. */
 export async function startProjectContextualRun(
   projectId: string,
+  /** AQU-935: the target-language lane to fan out across. `''` is the project
+   *  default lane and is OMITTED from the body, so a single-language project's
+   *  request is byte-identical to the pre-lane one. */
+  targetLang = "",
 ): Promise<ProjectRunStartResult> {
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(runsBase(projectId), {
     method: "POST",
     headers: authHeaders(jwt),
-    body: JSON.stringify({ scope: "project" }),
+    body: JSON.stringify({ scope: "project", ...(targetLang ? { targetLang } : {}) }),
   })
   if (!res.ok) return throwFromResponse(res, "start project autopilot failed")
   const body = (await res.json()) as Partial<ProjectRunStartResult>

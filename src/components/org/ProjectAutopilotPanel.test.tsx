@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
@@ -13,7 +14,7 @@ import type {
 } from "@/lib/contextual/transport"
 
 const fetchMock = vi.fn<(projectId: string) => Promise<ContextualOverview>>()
-const startMock = vi.fn<(projectId: string) => Promise<ProjectRunStartResult>>()
+const startMock = vi.fn<(projectId: string, targetLang?: string) => Promise<ProjectRunStartResult>>()
 const runsMock = vi.fn<(
   _projectId: string,
   _options?: ContextualRunListOptions,
@@ -41,7 +42,7 @@ const retryMock = vi.fn<(_projectId: string, _fileId: string) => Promise<{ runId
 
 vi.mock("@/lib/contextual/transport", () => ({
   fetchContextualOverview: (projectId: string) => fetchMock(projectId),
-  startProjectContextualRun: (projectId: string) => startMock(projectId),
+  startProjectContextualRun: (projectId: string, targetLang?: string) => startMock(projectId, targetLang),
   fetchContextualRuns: (projectId: string, options?: ContextualRunListOptions) => runsMock(projectId, options),
   fetchContextualRunActivity: (projectId: string, runId: string, options?: ContextualRunActivityOptions) => activityMock(projectId, runId, options),
   commandContextualRun: (projectId: string, runId: string, command: string) => commandMock(projectId, runId, command),
@@ -91,12 +92,20 @@ function fileRow(patch: Partial<ContextualOverview["files"][number]> = {}) {
 
 const fileNames = new Map([["f1", "MRK.usfm"], ["f2", "LUK.usfm"]])
 
-function renderPanel(canStart = true) {
+function renderPanel(
+  canStart = true,
+  laneProps: { lanes?: string[]; defaultLaneLabel?: string } = {},
+) {
   // MemoryRouter: the inspector sheet embeds the router-linked
   // LivingMemoryButton (AQU-932).
   return render(
     <MemoryRouter>
-      <ProjectAutopilotPanel projectId="p1" fileNames={fileNames} canStart={canStart} />
+      <ProjectAutopilotPanel
+        projectId="p1"
+        fileNames={fileNames}
+        canStart={canStart}
+        {...laneProps}
+      />
     </MemoryRouter>,
   )
 }
@@ -828,5 +837,136 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByRole("button", { name: "View 9 ready to review" }))
       .toBeInTheDocument()
     expect(within(panel).getByText("+203 in earlier passages")).toBeInTheDocument()
+  })
+
+  // ── AQU-935: the target-language lane ─────────────────────────────────────
+  //
+  // "Run Autopilot" used to take the default lane in silence, whatever the
+  // project's other languages. These pin the three things that fixes: the card
+  // SAYS which lane, a contributor can CHANGE it, and the choice REACHES the
+  // start request.
+
+  it("names the default lane on a single-language project without offering a chooser", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    renderPanel(true, { lanes: [""], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByTestId("autopilot-lane-static")).toHaveTextContent("Burmese")
+    expect(within(panel).queryByRole("combobox", { name: "Target language Autopilot will draft" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("falls back to a generic default-lane name when the project has no target language yet", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    renderPanel(true, { lanes: [""] })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByTestId("autopilot-lane-static")).toHaveTextContent("Project default")
+  })
+
+  it("offers every registered lane and carries the chosen one into the start request", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    renderPanel(true, { lanes: ["", "th", "id"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    const user = userEvent.setup()
+    const select = within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" })
+    expect(select).toHaveTextContent("Burmese")
+    expect(within(panel).getByTestId("autopilot-lane")).toBeInTheDocument()
+
+    await user.click(select)
+    expect(await screen.findByRole("option", { name: "Burmese" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "id" })).toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "th" }))
+
+    await waitFor(() => expect(select).toHaveTextContent("th"))
+    fireEvent.click(within(panel).getByRole("button", { name: "Run Autopilot" }))
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith("p1", "th"))
+  })
+
+  // The default lane stays the wire's empty string — a single-language project
+  // must send exactly what it sent before this feature existed.
+  it("starts the default lane with an empty lane argument", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    renderPanel(true, { lanes: ["", "th"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    fireEvent.click(within(panel).getByRole("button", { name: "Run Autopilot" }))
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith("p1", ""))
+  })
+
+  it("shows a viewer the lane but no chooser and no start button", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    renderPanel(false, { lanes: ["", "th"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).getByTestId("autopilot-lane-static")).toHaveTextContent("Burmese")
+    expect(within(panel).queryByRole("combobox", { name: "Target language Autopilot will draft" }))
+      .not.toBeInTheDocument()
+    expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
+  })
+
+  // Conflict detection is per lane on the server (AQU-935); the button that
+  // fronts it must agree, or a busy Burmese run hides Thai's only way to start.
+  it("keeps the start button live for a free lane while another lane is running", async () => {
+    fetchMock.mockResolvedValue(overview({
+      files: [fileRow({ fileId: "f1", runId: "r1", targetLang: "", status: "running" })],
+    }))
+    renderPanel(true, { lanes: ["", "th"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    // The default lane is busy: no start offered there.
+    expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
+
+    const user = userEvent.setup()
+    await user.click(within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" }))
+    await user.click(await screen.findByRole("option", { name: "th" }))
+
+    await waitFor(() =>
+      expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument())
+    fireEvent.click(within(panel).getByRole("button", { name: "Run Autopilot" }))
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith("p1", "th"))
+  })
+
+  // A server that predates lane-aware runs omits `targetLang`; every row it
+  // sends IS the default lane, so the default lane must still read as blocked.
+  it("treats rows with no targetLang as the default lane", async () => {
+    fetchMock.mockResolvedValue(overview({
+      files: [{ ...fileRow({ fileId: "f1", runId: "r1", status: "running" }), targetLang: undefined }],
+    }))
+    renderPanel(true, { lanes: ["", "th"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
+  })
+
+  it("drops a selected lane that leaves the project's registry", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    const { rerender } = renderPanel(true, { lanes: ["", "th"], defaultLaneLabel: "Burmese" })
+
+    const panel = await screen.findByTestId("project-autopilot-panel")
+    const user = userEvent.setup()
+    const select = within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" })
+    await user.click(select)
+    await user.click(await screen.findByRole("option", { name: "th" }))
+    await waitFor(() => expect(select).toHaveTextContent("th"))
+
+    // `th` is removed from project settings while the card is open.
+    rerender(
+      <MemoryRouter>
+        <ProjectAutopilotPanel
+          projectId="p1"
+          fileNames={fileNames}
+          canStart
+          lanes={[""]}
+          defaultLaneLabel="Burmese"
+        />
+      </MemoryRouter>,
+    )
+
+    const after = await screen.findByTestId("project-autopilot-panel")
+    expect(within(after).getByTestId("autopilot-lane-static")).toHaveTextContent("Burmese")
+    fireEvent.click(within(after).getByRole("button", { name: "Run Autopilot" }))
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith("p1", ""))
   })
 })

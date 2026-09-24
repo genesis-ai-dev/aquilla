@@ -406,6 +406,28 @@ export function ProjectOverview() {
     () => new Map(files.map((f) => [f.fileId, f.name])),
     [files],
   )
+  /**
+   * AQU-935: the lanes a project-wide Autopilot run may be started on —
+   * `['', ...registered non-archived lanes]`, the `EditorTable`/`ProjectWorkspace`
+   * contract. The REGISTRY is the source, not `audio.lanes`: a language nobody
+   * has drafted yet has no portfolio row, and that is precisely the lane a PM
+   * opens this card to start.
+   *
+   * Archived lanes are dropped because the server refuses to start on one
+   * (`isRegisteredTargetLane`), and offering a choice that fails on click is
+   * worse than not offering it.
+   */
+  const autopilotLanes = useMemo(() => {
+    const archived = new Set(
+      (project?.archivedLanes ?? []).map((lane) => lane.trim().toLowerCase()).filter(Boolean),
+    )
+    return [
+      "",
+      ...(project?.targetLanes ?? []).filter(
+        (lane) => lane.trim() !== "" && !archived.has(lane.trim().toLowerCase()),
+      ),
+    ]
+  }, [project?.targetLanes, project?.archivedLanes])
   // AQU-656: originals live on `file_source_blobs`, not the plan. The files
   // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
   // PM download gallery is this compact list — only files that have a blob.
@@ -1992,6 +2014,8 @@ export function ProjectOverview() {
                   projectId={id}
                   fileNames={autopilotFileNames}
                   canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
+                  lanes={autopilotLanes}
+                  defaultLaneLabel={project?.targetLanguage ?? ""}
                 />
               )}
 

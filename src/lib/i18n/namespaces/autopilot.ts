@@ -50,6 +50,8 @@ export const autopilot = defineNamespace({
     "autopilot.time.checkedNever": "Not checked yet",
     "autopilot.time.checkedAt": "Checked {time}",
     "autopilot.lane.projectDefault": "Project default",
+    "autopilot.lane.label": "Target lane",
+    "autopilot.lane.selectAria": "Target language Autopilot will draft",
     "autopilot.phase.reading": "Reading context…",
     "autopilot.phase.drafting": "Drafting…",
     "autopilot.phase.checking": "Checking…",
@@ -684,6 +686,15 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.lane.label": {
+        description:
+          "Inline label before the target-language lane Autopilot will draft on the project overview card. A noun phrase naming WHICH language a run would work on — it must not imply a run is under way, because the card shows it while paused and stopped too. Sits beside a short dropdown.",
+        maxLength: 24,
+      },
+      "autopilot.lane.selectAria": {
+        description:
+          "Screen-reader name for the dropdown that chooses which of the project's target-language lanes a project-wide Autopilot run will draft.",
+      },
       "autopilot.proposal.unsupportedKind": {
         description: "Explanation beside an agent event kind the current app cannot apply.",
       },

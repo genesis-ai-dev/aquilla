@@ -339,6 +339,14 @@ export interface EventPayloads {
      */
     undo_of_agent_run_id?: string
     /**
+     * AQU-1391 / repetition provenance: the cell whose validation propagated
+     * this text to a repeated source segment. Stored verbatim and read back by
+     * the client's history view; the perimeter neither requires nor enforces
+     * it — propagation is an ordinary target commit that already passed the
+     * contributor floor, and the tag only records where the text came from.
+     */
+    propagated_from_cell_id?: string
+    /**
      * AQU-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14

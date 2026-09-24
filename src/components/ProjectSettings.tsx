@@ -82,6 +82,7 @@ import {
 } from "@/lib/parsers/types"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
@@ -441,7 +442,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
   // row. Local (unsynced) projects have no org floor, so the pane stays.
   const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
-  const { canViewRoster } = useOrgSettings(
+  const { canViewRoster, autoPropagateRepetitions: orgAutoPropagateRepetitions } = useOrgSettings(
     rosterOrgId,
     activeOrg?.activeOrg?.role?.level,
     project?.syncRole?.level ?? null,
@@ -2483,6 +2484,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
                   orgDefault={orgCountStructuralCells ?? true}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
+              // AQU-1391: same slot treatment, same card — validation is the
+              // gesture that triggers propagation.
+              repetitionPropagationRow={
+                <RepetitionPropagationProjectSection
+                  value={sharedSettingsBlob?.autoPropagateRepetitions}
+                  orgDefault={orgAutoPropagateRepetitions}
                   disabled={!canEditShared}
                   disabledTooltip={sharedDisabledTooltip ?? undefined}
                   onPatch={patchShared}

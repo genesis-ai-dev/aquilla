@@ -165,6 +165,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
   countStructuralCells: true,
+  autoPropagateRepetitions: true,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.

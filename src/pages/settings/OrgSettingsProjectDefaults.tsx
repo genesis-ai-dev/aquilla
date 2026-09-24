@@ -10,6 +10,7 @@
 // it is full — a project-level control that offers "use the organization
 // default" needs somewhere honest for that default to live.
 
+import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -34,6 +35,9 @@ export function OrgSettingsProjectDefaults() {
         {/* The hook's own MAINTAINER write gate, not the page-level owner
             gate Security passes down: this is not a permission policy. */}
         <StructuralCellsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* AQU-1391 — same card, same MAINTAINER gate, same reason: it shapes
+            what a project's editor does, not who may reach it. */}
+        <RepetitionPropagationSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

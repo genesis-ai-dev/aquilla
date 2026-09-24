@@ -633,6 +633,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.members.removeDirectAccess": "Remove direct access",
     "projectSettings.members.revokeAllAccess": "Revoke all access…",
     "projectSettings.members.noActionsAvailable": "No actions available",
+    "projectSettings.members.roleChangeNeedsRole":
+      "{role} or higher can change member roles",
+    "projectSettings.members.roleChangeOutranked":
+      "You can't change a member whose role is at or above your own",
     "projectSettings.members.addDialogDescription":
       "Grant access from your organization, or create a shareable invite link.",
     "projectSettings.members.actionsForRow": "Actions for {username}",
@@ -1307,6 +1311,22 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.members.roleChangeNeedsRole": {
+        description:
+          "Shown on the project Members table when the VIEWER's own role is below the " +
+          "floor for managing membership: as a disabled row-menu note in place of " +
+          "'Change role', and as the tooltip on the disabled 'Add a member' button. " +
+          "States the required role rather than leaving the control silently missing.",
+        placeholders: {
+          role: "The localized name of the required role (today 'Project lead'), resolved from the role ladder — insert exactly as given.",
+        },
+      },
+      "projectSettings.members.roleChangeOutranked": {
+        description:
+          "Disabled note in a project Members row menu, shown in place of 'Change role' " +
+          "when the viewer may manage membership in general but not THIS member, whose " +
+          "current role is at or above the viewer's own.",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",

@@ -693,7 +693,7 @@ interface UsfmCell {
   content: string
   type?: string
   canonicalRef?: string
-  metadata?: { usfmNotes?: { kind: string; caller: string; ref: string; text: string }[] }
+  metadata?: { usfmNotes?: { kind: string; caller: string; ref: string; text: string; raw?: string }[] }
 }
 
 async function setImportExcludeFrontMatter(value: boolean) {
@@ -729,8 +729,17 @@ describe('artifact parse — USFM content-only fidelity (AQU-1283)', () => {
 
     const v4 = cells.find((c) => c.canonicalRef === 'ACT 1:4')!
     expect(v4.content).toBe(ACT_1_4_TEXT)
+    // AQU-1295: `raw` rides along so export can put the note back exactly as
+    // it arrived. This note is why it has to: `\fqa` is flattened out of
+    // `text`, so a rebuild from the parsed fields would lose the sub-marker.
     expect(v4.metadata?.usfmNotes).toEqual([
-      { kind: 'footnote', caller: '+', ref: '1:4', text: 'Или: « Однажды, собрав их… »' },
+      {
+        kind: 'footnote',
+        caller: '+',
+        ref: '1:4',
+        text: 'Или: « Однажды, собрав их… »',
+        raw: '\\f + \\fr 1:4 \\ft Или: «\\fqa Однажды, собрав их…\\ft »\\f*',
+      },
     ])
     const v5 = cells.find((c) => c.canonicalRef === 'ACT 1:5')!
     expect(v5.content).toBe('Иоанн крестил водой.')

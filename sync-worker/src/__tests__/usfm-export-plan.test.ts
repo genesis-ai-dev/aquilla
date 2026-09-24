@@ -31,6 +31,16 @@ async function verse(cellId: string, ref: string, anchor: string | null = null):
   )
 }
 
+/** A verse imported CONTENT-ONLY by the Agent API: markers are out of `value`
+ *  and the notes are parked in metadata (AQU-1283). */
+async function contentOnlyVerse(cellId: string, ref: string, metadata: unknown): Promise<void> {
+  await t.pg.query(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, metadata, event_id, last_edit_at)
+     VALUES ($1, $2, $3, 'source', '', 'source text', $4, $5, $6, 1)`,
+    [PROJECT, FILE, cellId, ref, JSON.stringify(metadata), `head-${cellId}`],
+  )
+}
+
 /** A cell somebody added in the app: the origin marker, and no address. */
 async function addedCell(cellId: string, anchor: string | null): Promise<void> {
   await t.pg.query(
@@ -90,6 +100,93 @@ describe("buildUsfmExportPlan — translations", () => {
 
     const scoped = await buildUsfmExportPlan(t.db, PROJECT, FILE, "fr-CA")
     expect(scoped.overrides.get("GEN 1:4")).toBe("canadien")
+  })
+})
+
+describe("buildUsfmExportPlan — notes parked by a content-only import (AQU-1295)", () => {
+  const FOOTNOTE = {
+    kind: "footnote",
+    caller: "+",
+    ref: "1:4",
+    text: "Или: « Однажды, собрав их… »",
+    raw: "\\f + \\fr 1:4 \\ft Или: « Однажды, собрав их… »\\f*",
+  }
+
+  it("re-attaches a translated verse's notes, so export cannot drop them", async () => {
+    // The whole point of the ticket: substituting the translation replaces the
+    // verse span, notes included, and nothing downstream reads usfmNotes.
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    const { overrides } = await plan()
+    expect(overrides.get("ACT 1:4")).toBe(`Un jour, il leur ordonna. ${FOOTNOTE.raw}`)
+  })
+
+  it("restores the note byte-for-byte from `raw` rather than rebuilding it", async () => {
+    // A file's own \fq/\fk sub-markers are flattened into `text` at import, so
+    // a rebuild is faithful in content but not in bytes. `raw` is why the
+    // importer keeps the original span.
+    const nested = {
+      kind: "footnote",
+      caller: "+",
+      ref: "1:4",
+      text: "wait for the promise",
+      raw: "\\f + \\fr 1:4 \\fk promise \\ft wait for the \\fq promise\\fq*\\f*",
+    }
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [nested] })
+    await translation("c4", "Attendez la promesse.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(`Attendez la promesse. ${nested.raw}`)
+  })
+
+  it("rebuilds a note recorded before `raw` was captured", async () => {
+    // Files imported before this change have records with no raw span. They
+    // must still round-trip — rebuilt from the parsed fields.
+    const { raw: _raw, ...legacy } = FOOTNOTE
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [legacy] })
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(
+      `Un jour, il leur ordonna. \\f + \\fr 1:4 \\ft ${FOOTNOTE.text}\\f*`,
+    )
+  })
+
+  it("keeps several notes on one verse in document order", async () => {
+    const second = { kind: "xref", caller: "-", ref: "1:5", text: "Мк. 1:8", raw: "\\x - \\xo 1:5 \\xt Мк. 1:8\\x*" }
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE, second] })
+    await translation("c4", "Un jour.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(`Un jour. ${FOOTNOTE.raw} ${second.raw}`)
+  })
+
+  it("leaves an UNTRANSLATED verse alone — its original span already has the notes", async () => {
+    // Re-attaching here would double every note: with no override the
+    // serializer emits the client's own verse text verbatim.
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "")
+
+    expect((await plan()).overrides.size).toBe(0)
+  })
+
+  it("does not duplicate notes a translator already carried across", async () => {
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "Un jour. \\f + \\fr 1:4 \\ft Note traduite\\f*")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour. \\f + \\fr 1:4 \\ft Note traduite\\f*")
+  })
+
+  it("leaves a lossless (in-app) import untouched — it carries no usfmNotes", async () => {
+    await verse("c4", "ACT 1:4")
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour, il leur ordonna.")
+  })
+
+  it("survives metadata that is not a note list rather than failing the export", async () => {
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: "not-a-list", aquillaOrigin: { kind: "import" } })
+    await translation("c4", "Un jour.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour.")
   })
 })
 

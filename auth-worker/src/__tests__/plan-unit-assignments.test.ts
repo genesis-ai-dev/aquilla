@@ -31,8 +31,8 @@ const testEnv = env as unknown as Env
 // that used to double-count.
 //
 // Audio (lane-independent by construction — cell_audio has no target_lang):
-//   g1: TWO live takes, one of them selected + approved  → recorded, validated
-//   g2: one live selected take, not approved             → recorded only
+//   g1: TWO live takes, the selected one with a vote     → recorded, validated
+//   g2: one live selected take, no votes                 → recorded only
 //   g3: one DELETED take                                 → neither
 async function seedUnit(): Promise<void> {
   await seedUser(1, "wendi")
@@ -77,7 +77,7 @@ async function seedUnit(): Promise<void> {
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, approved, deleted, event_id, created_ts) VALUES
+    `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, validator_count, deleted, event_id, created_ts) VALUES
       ('pa','f1','g1','take-1','main','r2://1',1,1,0,'e-pa',1),
       ('pa','f1','g1','take-2','main','r2://2',0,0,0,'e-pa',2),
       ('pa','f1','g2','take-3','main','r2://3',1,0,0,'e-pa',3),
@@ -147,7 +147,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       // cell — cell_audio keys on four columns where cells keys on five, so a
       // take-level join would fan every count out by the number of takes.
       recorded: 2,
-      // Only g1's SELECTED take is approved; g2's selected take is not, and
+      // Only g1's SELECTED take has a vote; g2's selected take has none, and
       // g3's only take is deleted.
       audioValidated: 1,
     })

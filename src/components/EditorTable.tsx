@@ -49,12 +49,12 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
@@ -96,6 +96,7 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -139,6 +140,9 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
+import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -149,7 +153,6 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
-import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { CellTakeBlock } from "./CellTakeBlock"
 import { fmtClock } from "./timeline/format"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
@@ -379,11 +382,31 @@ export function applyRowOverlays(
         // fell through to whole-clip transcription for every section.
         ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
         ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        // AQU-646/AQU-490: THE SECOND COPY OF THIS LIST.
+        //
+        // `mergeCellsWithAudio` rebuilds attachments field by field and so
+        // does this, and the editor's rows go through THIS one. Both are
+        // all-optional on both sides, so a field added to one and not the
+        // other is dropped silently with no type error — which is exactly
+        // what happened: the audio validation control drew an empty gutter on
+        // every line of a fully recorded file, because `role` never arrived
+        // and every take read as a source clip.
+        //
+        // `slot` and `selectedBySlot` were missing here for the same reason,
+        // which left an added-track take unreachable from the text view even
+        // after the rest of that blind spot was fixed.
+        ...(attachment.slot ? { slot: attachment.slot } : {}),
+        ...(attachment.label != null ? { label: attachment.label } : {}),
+        ...(attachment.validatorCount != null ? { validatorCount: attachment.validatorCount } : {}),
+        ...(attachment.validators ? { validators: attachment.validators } : {}),
+        ...(attachment.role ? { role: attachment.role } : {}),
+        ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
       }
     }
     next = {
       ...next,
       attachments,
+      selectedBySlot: options.audioEntry.selectedBySlot,
       selectedAudioId: options.audioEntry.selectedAudioId ?? undefined,
       selectedGeneratedVoiceAudioId: options.audioEntry.selectedGeneratedVoiceAudioId ?? undefined,
       audioTimings: options.audioEntry.audioTimings as NonNullable<CellData["audioTimings"]>,
@@ -5766,6 +5789,53 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
+  /**
+   * AQU-490: does this line have a recording ANYWHERE — on the default track
+   * or on an added one?
+   *
+   * `hasAudio` above is deliberately narrower and stays that way: it feeds the
+   * audio controller, the transcript comparison and the rail's play button,
+   * all of which are about ONE clip. This is the different question — "is
+   * there anything recorded on this line at all" — which the Recording tab and
+   * its attention dot were answering with the default track alone. A line
+   * whose only take sat on an added target-audio track therefore showed
+   * "No audio yet" while every server counter called it recorded, and Sam's
+   * every-track-must-be-validated rule cannot mean anything while the text
+   * view cannot see those tracks.
+   */
+  /**
+   * AQU-490: the selected dub takes on slots OTHER than the two named ones,
+   * for the Recording tab to list. Excludes the default track (shown by the
+   * block keyed on `selectedAudioId`), the generated voice (its own block),
+   * and the imported programme clip (role 'source', never a performance).
+   */
+  const extraTrackTakes = useMemo(() => {
+    const out: Array<{ audioId: string; label: string | null }> = []
+    const selections = slotSelections({
+      selectedBySlot: cell.selectedBySlot,
+      selectedAudioId: cell.selectedAudioId ?? null,
+      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+    })
+    for (const [slot, audioId] of Object.entries(selections)) {
+      if (slot === "recording" || slot === "generatedVoice") continue
+      const att = cell.attachments?.[audioId]
+      if (!att || att.isDeleted || (att.role ?? "dub") !== "dub") continue
+      out.push({ audioId, label: att.label ?? null })
+    }
+    return out
+  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
+  const hasAnyTrackAudio = useMemo(() => {
+    const selections = slotSelections({
+      selectedBySlot: cell.selectedBySlot,
+      selectedAudioId: cell.selectedAudioId ?? null,
+      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+    })
+    for (const audioId of Object.values(selections)) {
+      const att = cell.attachments?.[audioId]
+      if (att && !att.isDeleted && (att.role ?? "dub") === "dub") return true
+    }
+    return false
+  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -5867,15 +5937,18 @@ function EditorRow({
   // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
   // a linked heard line's take must write to the cue sibling, not to this row.
   const { session: rowSession } = useFrontierSession()
+  // AQU-490: flush-then-poke after an audio vote, shared with every other
+  // surface that can cast one.
+  const commitAudioValidation = useAudioValidationCommit(rowSession?.jwt ?? null)
 
-  // AQU-646: a recorded take IS target content. A line added into a silence may
-  // never get text — the dub is the deliverable — and it still has to be
-  // validatable and countable. `resolveTargetAudio` is the take-aware test: it
-  // matches a clip seeded with THIS cell's id, so the shared imported source
-  // clip (seeded with the file's id) can never masquerade as somebody's work.
-  // The row's `cell` already carries attachments via applyRowOverlays.
-  const hasContent =
-    Boolean(visibleTranslated && visibleTranslated.trim()) || Boolean(resolveTargetAudio(cell))
+  // TEXT, and only text. Under AQU-646 a recorded take counted as target
+  // content here, so that a line added into a silence — where the dub is the
+  // deliverable — could be validated at all: the text control was the only
+  // control there was. Audio has its own now (AQU-490), and Sam's ruling of
+  // 2026-09-22 is that the text control appears only where there is text; a
+  // line with just a recording gets just the mic. Without this, an empty cell
+  // offered a way to "validate" a translation that does not exist.
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // The automatic stage uses the smoothed server-derived estimate. Missing
   // evidence is unknown, not an endorsement-derived zero. Validation is a
@@ -6295,6 +6368,69 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
+  // AQU-490: the audio twin of emitValidationChange above. No lane — a
+  // recording is shared by every target language, so a vote on it is not
+  // per-lane and the wire carries none.
+  const emitAudioValidationChange = async (audioId: string, validated: boolean) => {
+    const kind = validated ? "cell.audio.validate" : "cell.audio.unvalidate"
+    if (!canPerform(kind, project.syncRole?.level ?? null)) {
+      console.warn("[audio-validate] aborting: role too low for", kind)
+      return false
+    }
+    if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
+      console.warn("[audio-validate] aborting: cell out of the caller's assigned scope")
+      return false
+    }
+    try {
+      const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
+      await emit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        audioId,
+        author: username,
+      })
+      // AQU-490: this handler used to emit and return, and looked fine — the
+      // control paints an optimistic vote and the underlying read never moved
+      // to contradict it. The picture was right for the wrong reason and only
+      // until the row recycled. Now the vote is flushed and every reader of
+      // this file refetches, including a timeline open beside the text view.
+      await commitAudioValidation([cell.fileId])
+      return true
+    } catch (error) {
+      console.error("[audio-validate] emit failed", error)
+      return false
+    }
+  }
+
+  const audioValidationTakeList = audioValidationTakes(
+    audioEntryFromCell(cell),
+    project,
+    { roleLevel: project.syncRole?.level ?? null, username },
+    audioBlockedReason(t),
+  )
+  // AQU-490: no switch, no project setting, no file-level gate. Audio
+  // validation sits in this gutter beside text validation wherever a line has
+  // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
+  // opt-in switch he had asked for a day earlier. The control decides for
+  // itself: a line with no recording draws an empty slot, exactly as a cell
+  // with no text carries no text control.
+  const audioValidationControl = (
+    <AudioValidationControl
+      cellRef={cellRef}
+      takes={audioValidationTakeList}
+      currentUsername={username}
+      validationRequirement={readValidationCountAudio(project)}
+      // Scope-narrowed, like the text control beside it. The project-wide
+      // answer alone left the mic live on a cell outside the reader's
+      // assignment: the tooltip invited a click, and the handler then refused
+      // it with a console warning and no explanation (adversarial review,
+      // 2026-09-22).
+      canValidate={canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)}
+      onValidationChange={emitAudioValidationChange}
+    />
+  )
+
   const cellStateLabel =
     cell.status === "validated" ? t("editor.state.validated") :
     cell.status === "empty" ? t("editor.state.empty") :
@@ -6836,6 +6972,7 @@ function EditorRow({
                 so validating keeps the reviewer's gaze on the TARGET. */}
             <div className="flex flex-1 gap-1.5">
               {validationControl}
+              {audioValidationControl}
             <EditorTargetCellWell
               onClick={(event) => {
                 if (isEditorActive) return
@@ -7541,7 +7678,7 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
+                : (hasAnyTrackAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
                   ? "emerald"
                   : undefined,
               renderContent: () => (
@@ -7595,6 +7732,36 @@ function EditorRow({
                       onCommitted={onCellCommitted}
                     />
                   )}
+                  {/* AQU-490 / AQU-646: takes on ADDED target-audio tracks.
+                      The block above shows the default track's take and the
+                      one below the generated voice; a take on any other slot
+                      had no block at all, so a line whose only recording sat
+                      on track 2 opened to an EMPTY panel — the attention dot
+                      said audio, the panel said nothing. Sam hit exactly that
+                      on 2026-09-21. Every selected dub take that is not on the
+                      two named slots gets its own block here, named by the
+                      take's label or its track. */}
+                  {extraTrackTakes.map((take) => (
+                    <CellTakeBlock
+                      key={take.audioId}
+                      project={project}
+                      owner={cell}
+                      audioId={take.audioId}
+                      timings={cell.audioTimings?.[take.audioId]}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                      header={
+                        <span className="text-[11px] text-muted-foreground">
+                          {take.label ?? t("editor.audio.addedTrackTakeHint")}
+                        </span>
+                      }
+                    />
+                  ))}
                   {hasGeneratedVoice && (
                     // A synthesized voice is nobody's performance: it can be
                     // recorded over, but not transcribed or cleaned up.
@@ -7651,7 +7818,7 @@ function EditorRow({
                       }
                     />
                   ))}
-                  {!hasAudio && !hasGeneratedVoice && !linkedTakes?.length && (
+                  {!hasAnyTrackAudio && !hasGeneratedVoice && !linkedTakes?.length && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

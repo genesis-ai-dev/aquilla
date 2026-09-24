@@ -472,8 +472,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
-    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations.",
-    "projectSettings.validation.requiredAudioDisabledNote": "Enabled once audio translations exist.",
+    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -499,6 +498,25 @@ export const projectSettings = defineNamespace({
       "Comma-separated usernames. When set, only these users' votes count toward the " +
       "threshold (AND'd with the role floor). Leave empty to allow any " +
       "sufficiently-privileged user.",
+
+    // ── AQU-490: the audio policy, beside the text policy rather than folded
+    // into it. Sam's ruling is that these are SEPARATE settings, so every
+    // label has to say which of the two it governs — "Minimum role to
+    // validate" alone, twice, would read as one rule stated twice.
+    "projectSettings.validation.minRoleAudioLabel": "Minimum role to validate recordings",
+    "projectSettings.validation.minRoleAudioDescription":
+      "Who may sign off a recording. Set separately from the text rule above — a " +
+      "project can want a higher bar for audio than for translations, or the other " +
+      "way round.",
+    "projectSettings.validation.allowSelfAudioLabel": "Allow validating your own recordings",
+    "projectSettings.validation.allowSelfAudioDescription":
+      "When off, whoever recorded a take cannot validate it — someone else has to " +
+      "listen. Takes whose recorder is not known are unaffected, so older " +
+      "recordings never become impossible to sign off.",
+    "projectSettings.validation.namedValidatorsAudioLabel": "Named recording validators",
+    "projectSettings.validation.namedValidatorsAudioDescription":
+      "When anyone is listed, only these people may validate recordings. Leave " +
+      "empty to allow anyone who meets the minimum role above.",
 
     // ── DecaySettingsSection.tsx ──
     "projectSettings.decay.summary": "Retrieval support",

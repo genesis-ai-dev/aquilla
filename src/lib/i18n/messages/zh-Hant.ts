@@ -3719,7 +3719,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.validation.requiredTextDescription": "單元格必須有這麼多位不同的驗證者，才算完全驗證通過。",
   "projectSettings.validation.requiredAudioLabel": "所需驗證者人數（音訊）",
   "projectSettings.validation.requiredAudioAppliesNote": "適用於音訊譯文。",
-  "projectSettings.validation.requiredAudioDisabledNote": "在有音訊譯文之後才會啟用。",
   "projectSettings.validation.minRoleLabel": "驗證者最低角色",
   "projectSettings.validation.minRoleDescription": "只有至少具備此角色的使用者才能投下驗證票。預設為審閱者。",
   "projectSettings.validation.allowSelfLabel": "允許自我驗證",

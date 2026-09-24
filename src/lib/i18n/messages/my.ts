@@ -3704,7 +3704,6 @@ export const my: Catalog = {
   "projectSettings.validation.requiredTextDescription": "ဆဲလ်များသည် အပြည့်အဝ စိစစ်ပြီးဟု မှတ်ယူရန် ဤမျှလောက် ကွဲပြားသော စိစစ်သူ လိုအပ်သည်။",
   "projectSettings.validation.requiredAudioLabel": "လိုအပ်သော စိစစ်သူများ (အသံ)",
   "projectSettings.validation.requiredAudioAppliesNote": "အသံဘာသာပြန်ချက်များအတွက် အကျုံးဝင်သည်။",
-  "projectSettings.validation.requiredAudioDisabledNote": "အသံဘာသာပြန်ချက်များ ရှိလာသည်နှင့် ဖွင့်ပေးမည်။",
   "projectSettings.validation.minRoleLabel": "အနည်းဆုံး စိစစ်သူ အခန်းကဏ္ဍ",
   "projectSettings.validation.minRoleDescription": "ဤအခန်းကဏ္ဍအနည်းဆုံးရှိသော အသုံးပြုသူများသာ စိစစ်မဲ ပေးနိုင်သည်။ ပုံမှန်အားဖြင့် သုံးသပ်သူ ဖြစ်သည်။",
   "projectSettings.validation.allowSelfLabel": "ကိုယ်တိုင်စိစစ်ခြင်း ခွင့်ပြုရန်",

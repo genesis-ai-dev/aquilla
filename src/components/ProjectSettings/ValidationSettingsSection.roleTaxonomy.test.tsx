@@ -39,7 +39,6 @@ function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintai
     <ValidationSettingsSection
       validationCount={2}
       validationCountAudio={2}
-      hasAnyAudioData={false}
       validationRoleFloor={validationRoleFloor}
       onChange={vi.fn()}
     />,

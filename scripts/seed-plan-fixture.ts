@@ -160,7 +160,11 @@ async function seed(db: AquillaDb): Promise<void> {
         }
         if (c.recorded) {
           audioRows.push([
-            PROJECT_ID, fileId, c.cellId, `${c.cellId}-take1`, "take",
+            // "recording", the default track's slot — the only one a recorded
+            // take on it ever lives in. This was "take", which the app reads as
+            // an ADDED track, so recording over a seeded take in the app left
+            // both selected and the line asked for two validations (0/2).
+            PROJECT_ID, fileId, c.cellId, `${c.cellId}-take1`, "recording",
             `local://${c.cellId}.webm`, 1, 0, 0, ev, NOW - DAY, 2400,
           ])
         }

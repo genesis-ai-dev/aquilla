@@ -260,6 +260,10 @@ CREATE TABLE project_settings (
     -- AQU-575: compact portfolio projections. Never load the multi-MB settings
     -- blob merely to read validationCount or targetLanes.
     validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    -- AQU-490: and the audio threshold, for the same reason — the per-member
+    -- and portfolio rollups resolve it per project on paths that must not go
+    -- near the blob.
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED,
     target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
     -- AQU-1083: do structural cells count toward progress? NULL = unset, which
     -- falls through to the org's value and then to "yes" (0083).
@@ -618,6 +622,15 @@ CREATE TABLE file_section_progress (
     -- policy shrinks its denominator.
     structural_audio_count           INTEGER NOT NULL DEFAULT 0 CHECK (structural_audio_count >= 0),
     structural_audio_validated_count INTEGER NOT NULL DEFAULT 0 CHECK (structural_audio_validated_count >= 0),
+    -- AQU-490: the audio twin of validator_histogram, and its structural
+    -- share. The bucket is the per-cell MINIMUM vote count across that cell's
+    -- selected live DUB takes — the minimum, because "every track of this line
+    -- is validated" is exactly "the least-validated one has enough votes", so
+    -- one number answers the question at any threshold. A cell with no
+    -- selected dub take is ABSENT from these, not bucketed at zero: it is not
+    -- recorded, which is a different state from recorded-and-unvalidated.
+    audio_validator_histogram            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    structural_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
     PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
@@ -677,6 +690,19 @@ CREATE TABLE cell_validators (
     PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
 );
 
+-- AQU-490: one row per (take, person). Presence IS the vote, exactly as in
+-- cell_validators. No target_lang — unlike a translation, a recording is
+-- shared by every target language, so a vote on it is not per-lane.
+CREATE TABLE cell_audio_validators (
+    project_id TEXT   NOT NULL,
+    file_id    TEXT   NOT NULL,
+    cell_id    TEXT   NOT NULL,
+    audio_id   TEXT   NOT NULL,
+    username   TEXT   NOT NULL,
+    decided_ts BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, audio_id, username)
+);
+
 CREATE TABLE cell_waivers (
     project_id TEXT NOT NULL,
     file_id    TEXT NOT NULL,
@@ -711,15 +737,34 @@ CREATE TABLE cell_audio (
     -- take must not renumber the rest. Set at attach, changed by
     -- cell.audio.rename only.
     label              TEXT,
-    -- AQU-508: audio validation, distinct from text validation (cells.validated).
-    -- A reviewer approves the *selected* clip of a cell via cell.audio.validate;
-    -- cell.audio.unvalidate clears it. The audio-validated rollup counts cells
-    -- whose selected, live clip is approved (deleted = 0 AND selected = 1 AND
-    -- approved = 1) — so re-recording (which selects a new clip) drops the cell
-    -- back to "needs re-validation" until the new take is approved.
+    -- AQU-508, SUPERSEDED BY AQU-490 (0096) AND NO LONGER READ ANYWHERE.
+    -- A single boolean could not express "this project requires two
+    -- reviewers", so validation moved to cell_audio_validators + the
+    -- validator_count below, counted against the threshold at read time the
+    -- way text has been since FRO-279. Nothing ever wrote these three, so
+    -- there was nothing to migrate; they stay until a contract migration can
+    -- drop them safely.
     approved           INTEGER NOT NULL DEFAULT 0,
     approved_by        TEXT,
     approved_ts        BIGINT,
+    -- AQU-490: votes on THIS take, denormalized from cell_audio_validators —
+    -- the audio twin of cells.endorsement_count. A COUNT, never a stamp, so a
+    -- projection rebuild cannot leave it asserting the wrong answer at the
+    -- wrong threshold (which is exactly what a stamped cells.validated does).
+    validator_count    INTEGER NOT NULL DEFAULT 0 CHECK (validator_count >= 0),
+    -- Who recorded it. The self-validation rule needs an author and this row
+    -- never had one. event_id cannot stand in: a partial re-attach — the
+    -- transcription that lands ~800ms after every recording — overwrites it
+    -- with a later author's event.
+    created_by         TEXT,
+    -- 'dub'    — somebody's translation of this line; the thing that gets
+    --            recorded, counted, and validated.
+    -- 'source' — the shared programme audio an import attached. It is
+    --            SELECTED in the recording slot on every cell of a media file
+    --            (and the generated-voice path re-selects it on purpose so a
+    --            TTS take can be heard over it), so "selected" alone can never
+    --            mean "a dub exists here".
+    role               TEXT NOT NULL DEFAULT 'dub' CHECK (role IN ('dub', 'source')),
     -- AQU-646 stage 3: where this take sits against the line it performs,
     -- relative to the line's own start. Written only by cell.audio.place.
     --
@@ -923,6 +968,9 @@ CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS 
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
+-- "Which takes have I validated?" — a per-viewer question the editor asks for a
+-- whole file at once, which the primary key's leading columns cannot answer.
+CREATE INDEX idx_cell_audio_validators_user ON cell_audio_validators(project_id, username);
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);

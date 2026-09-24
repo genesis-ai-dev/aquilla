@@ -3703,7 +3703,6 @@ export const ms: Catalog = {
   "projectSettings.validation.requiredTextDescription": "Sel memerlukan bilangan pengesah berbeza ini untuk dikira sebagai disahkan sepenuhnya.",
   "projectSettings.validation.requiredAudioLabel": "Pengesah diperlukan (audio)",
   "projectSettings.validation.requiredAudioAppliesNote": "Terpakai untuk terjemahan audio.",
-  "projectSettings.validation.requiredAudioDisabledNote": "Diaktifkan sebaik sahaja terjemahan audio wujud.",
   "projectSettings.validation.minRoleLabel": "Peranan pengesah minimum",
   "projectSettings.validation.minRoleDescription": "Hanya pengguna dengan sekurang-kurangnya peranan ini boleh mengundi pengesahan. Lalai kepada penyemak.",
   "projectSettings.validation.allowSelfLabel": "Benarkan pengesahan sendiri",

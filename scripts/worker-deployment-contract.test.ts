@@ -563,6 +563,19 @@ describe("worker deployment environment contract", () => {
     expect(scripts["deploy:aquilla:sync"]).toContain("cloudflare-version-deploy.mjs sync production")
     expect(scripts["deploy:aquilla:auth"]).toContain("cloudflare-version-deploy.mjs identity production")
 
+    // AQU-1405: every SPA deploy carries the previous build's hashed chunks
+    // forward (and republishes asset-manifest.json) BEFORE upload — otherwise a
+    // tab open across the deploy 404s the chunks its index.html names.
+    for (const [script, origin] of [
+      ["deploy:aquilla:spa", "https://aquilla.app"],
+      ["deploy:aquilla:dev:spa", "https://dev.aquilla.app"],
+    ] as const) {
+      const command = scripts[script]
+      expect(command).toContain(`node scripts/retain-previous-assets.mjs dist ${origin}`)
+      expect(command.indexOf("retain-previous-assets.mjs"))
+        .toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+    }
+
     for (const brand of ["codex", "honeycomb", "context"]) {
       const command = scripts[`deploy:${brand}`]
       expect(command).toContain("pnpm run prepare:pages-deployment-artifacts")

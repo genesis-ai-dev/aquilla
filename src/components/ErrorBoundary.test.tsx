@@ -120,20 +120,23 @@ describe("window error handlers", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Chunk-load recovery (RES-3 / audit QW-4): stale lazy chunks after a redeploy
-// get ONE automatic reload (sessionStorage-guarded), then the "App updated"
-// fallback.
+// Chunk-load recovery (RES-3 / audit QW-4 / AQU-1405): stale lazy chunks after
+// a redeploy get ONE automatic reload per failing chunk URL, then the "App
+// updated" fallback. The guard itself is unit-tested in
+// src/lib/chunk-reload.test.ts; these pin the boundary's wiring to it.
 // ---------------------------------------------------------------------------
 describe("chunk-load recovery", () => {
+  const CHUNK_URL = "/assets/app-chunk-BfoUWN3w.js"
+
   function ThrowsChunkError(): ReactNode {
-    throw new Error("Failed to fetch dynamically imported module: /assets/x.js")
+    throw new Error(`Failed to fetch dynamically imported module: ${CHUNK_URL}`)
   }
 
   beforeEach(() => {
     sessionStorage.clear()
   })
 
-  it("reloads once on the first chunk error in a session", () => {
+  it("reloads once on the first failure of a chunk", () => {
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
       value: { ...window.location, reload: reloadSpy },
@@ -145,11 +148,11 @@ describe("chunk-load recovery", () => {
       </ErrorBoundary>,
     )
     expect(reloadSpy).toHaveBeenCalledOnce()
-    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe("1")
+    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe(JSON.stringify([CHUNK_URL]))
   })
 
-  it("shows the 'App updated' fallback instead of reload-looping when the flag is set", () => {
-    sessionStorage.setItem("aq:chunk-reload-attempted", "1")
+  it("shows the 'App updated' fallback instead of reload-looping on the same chunk", () => {
+    sessionStorage.setItem("aq:chunk-reload-attempted", JSON.stringify([CHUNK_URL]))
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
       value: { ...window.location, reload: reloadSpy },
@@ -165,7 +168,7 @@ describe("chunk-load recovery", () => {
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
-  it("non-chunk errors do not consume the chunk-reload flag", () => {
+  it("non-chunk errors do not consume the chunk-reload guard", () => {
     render(
       <ErrorBoundary>
         <AlwaysThrows />

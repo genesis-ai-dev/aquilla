@@ -76,6 +76,16 @@ export interface OrgWideSettings {
    */
   countStructuralCells?: boolean
   /**
+   * AQU-1391: the org-wide default for repetition auto-propagation —
+   * validating a cell copies its translation into every other cell in the
+   * file whose source text is identical (the "repetitions" behaviour of
+   * Trados/memoQ/Matecat).
+   *
+   * Unset means ON, which is what CAT-tool users expect and what the feature
+   * shipped with. A project may override it either way.
+   */
+  autoPropagateRepetitions?: boolean
+  /**
    * AQU-1037: Minimum effective project role allowed to assign, reassign, or
    * unassign file/chapter/target-lane work and route AI changesets. Default
    * (when absent) = PROJECT_LEAD (500), preserving prior behavior.

@@ -1601,6 +1601,18 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    // AQU-1391 — the repetition badge on a source row and its tooltip.
+    "editor.repetition.badge": "Repetition ×{count}",
+    "editor.repetition.tooltip": plural({
+      one: "This source text appears {count} time in this file. Validating one fills the rest.",
+      other: "This source text appears {count} times in this file. Validating one fills the rest.",
+    }, "count"),
+    "editor.repetition.applied": plural({
+      one: "Applied to {count} repeated segment",
+      other: "Applied to {count} repeated segments",
+    }, "count"),
+    "editor.repetition.undo": "Undo",
+    "editor.repetition.undoFailed": "Couldn't undo the propagation.",
   },
   context: {
     _context: {
@@ -1619,6 +1631,36 @@ export const editor = defineNamespace({
       // AQU-646, keyed 2026-08-20. Only the two classes that require their own
       // entry — a placeholder and an accessibility name; the rest of that batch
       // inherits the namespace description above.
+      // AQU-1391. Both carry a placeholder, so both need their own entry.
+      "editor.repetition.badge": {
+        description:
+          "A compact badge on a source row saying its source text is not unique " +
+          "in this file. The multiplication sign is deliberate — it reads as " +
+          "'times N' and keeps the badge to a few characters beside the " +
+          "translation text. Keep it short; a long form will crowd the row.",
+        placeholders: {
+          count: "How many cells in this file share this source text, counting this one. Always 2 or more.",
+        },
+      },
+      "editor.repetition.tooltip": {
+        description:
+          "Hover explanation for the repetition badge. Says both the fact (the " +
+          "text recurs) and the consequence (validating one row fills the " +
+          "others), because the consequence is what the translator needs to " +
+          "know before they click validate.",
+        placeholders: {
+          count: "How many cells in this file share this source text, counting this one. Always 2 or more.",
+        },
+      },
+      "editor.repetition.applied": {
+        description:
+          "Toast confirming a validation also filled in that many other rows " +
+          "with the same source text. Paired with an Undo action, so it reads " +
+          "as a report of something already done, not a question.",
+        placeholders: {
+          count: "How many other cells received the translation. Always 1 or more.",
+        },
+      },
       "editor.row.draftSearching": {
         description:
           "Screen-reader-only live-region announcement while an AI draft is " +

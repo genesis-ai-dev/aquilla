@@ -50,6 +50,17 @@ export const settings = defineNamespace({
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
 
+    // ── RepetitionPropagationSection (AQU-1391) ──
+    "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "settings.autoPropagateRepetitions.description":
+      "When on, validating a cell copies its translation into every other cell " +
+      "in the same file whose source text is identical. The filled-in cells are " +
+      "left unvalidated so someone still checks them in context. Individual " +
+      "projects can override this.",
+    "settings.autoPropagateRepetitions.saveFailed": "Save failed",
+    "settings.autoPropagateRepetitions.blocked":
+      "Only org maintainers and owners can change this default.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":

@@ -212,6 +212,13 @@ export interface OutboxEventPayloads {
     search_query?: string
     replace_string?: string
     /**
+     * AQU-1391 / repetition provenance: the cell whose validation propagated
+     * this text here. Present only on commits the auto-propagation path
+     * emitted; the Undo that reverses them omits it, so a value carrying the
+     * tag is always one the user did not type in this cell.
+     */
+    propagated_from_cell_id?: string
+    /**
      * AQU-292 / AI provenance: when true, tags this commit as machine-drafted
      * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
      * path (useCompletion → commitCompletedCell). Human edits omit this field

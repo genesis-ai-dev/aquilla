@@ -220,6 +220,14 @@ export interface CellCommitInput {
    */
   searchQuery?: string
   replaceString?: string
+  /**
+   * AQU-1391: the cell whose validation propagated this text to a repeated
+   * source segment. Provenance only — it makes the history drawer able to say
+   * "copied from a repetition" rather than showing an authorless edit, and it
+   * lets the toast's Undo be told apart from the propagation it reverses (the
+   * undo commits carry no such tag).
+   */
+  propagatedFromCellId?: string
 }
 
 function noteTargetCellCommit(input: CellCommitInput): void {
@@ -264,6 +272,9 @@ function targetCellCommitEventInput(
       ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
+      ...(input.propagatedFromCellId !== undefined
+        ? { propagated_from_cell_id: input.propagatedFromCellId }
+        : {}),
     },
     clientTs: input.clientTs,
   }

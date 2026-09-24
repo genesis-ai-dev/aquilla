@@ -404,6 +404,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { planRepetitionPropagation, buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
@@ -4300,6 +4301,9 @@ export function ProjectWorkspace() {
     allowSelfAssignment,
     // AQU-1037: org-configured floor for assigning work to anyone.
     assignmentMinRole,
+    // AQU-1391: org default for repetition auto-propagation (a project may
+    // override it either way).
+    autoPropagateRepetitions: orgAutoPropagateRepetitions,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -10738,6 +10742,152 @@ export function ProjectWorkspace() {
     }
   }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, confirmCommitted, revalidateCells])
 
+  // AQU-1391: the effective repetition-propagation policy — this project's own
+  // answer, else its org's, else on. Same three-state shape as
+  // `countStructuralCells`: an absent project key means "inherit", so a
+  // project that has never been configured follows its org.
+  const autoPropagateRepetitions =
+    projectSettings?.settings?.autoPropagateRepetitions
+    ?? orgAutoPropagateRepetitions
+
+  // AQU-1391: which sources repeat in the OPEN file, for the "Repetition ×N"
+  // badge. Gated on the setting so a project that opted out grows no new
+  // chrome. `readAtVersion` because the React Compiler otherwise memoizes away
+  // a version-only dependency and the badge would freeze at the first render's
+  // counts (see the compiler note in CLAUDE.md).
+  const repetitionCounts = useMemo(
+    () =>
+      autoPropagateRepetitions
+        ? readAtVersion(cellStoreVersion, () => buildRepetitionCounts(cellStore.getAllCellViews()))
+        : undefined,
+    [autoPropagateRepetitions, cellStore, cellStoreVersion],
+  )
+
+  /**
+   * AQU-1391: carry a just-validated cell's translation to every repeated
+   * source segment in the open file, the way Trados/memoQ/Matecat do.
+   *
+   * Deliberately hung off the EXPLICIT validate gesture only. The commit path
+   * also auto-validates a human edit (`shouldAutoValidateHumanEdit`), and
+   * propagating from there would re-broadcast half-typed text on every idle
+   * commit — the repetitions would flicker through the author's keystrokes
+   * instead of receiving a translation they decided was done.
+   *
+   * Propagated cells land UNVALIDATED: this fills work in, it does not sign
+   * it off. The commits carry `propagatedFromCellId` so history can say where
+   * the text came from.
+   */
+  const handleCellValidated = useCallback(async (cellId: string) => {
+    if (!autoPropagateRepetitions) return
+    if (!project?.id || isReadOnly) return
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+
+    const planned = planRepetitionPropagation({
+      confirmedCellId: cellId,
+      // Fresh read at call time — no version dependency (React Compiler would
+      // memoize a versioned read away; see readAtVersion's note).
+      cells: cellStore.getAllCellViews(),
+      resolveParentId: resolveTargetCommitParentId,
+    })
+    // Never write a cell somebody else holds, or one outside the caller's
+    // assigned scope — a guaranteed 403 that would only dead-letter.
+    const commits = planned.filter(
+      (c) => !checkLockHolder(c.cellId) && isInMemberScope(myScopes, c.fileId, activeLane),
+    )
+    if (commits.length === 0) return
+
+    const commitInputs = commits.map((c) => ({
+      projectId: project.id,
+      fileId: c.fileId,
+      cellId: c.cellId,
+      parentId: c.parentId,
+      sourceEventId: c.sourceEventId,
+      value: c.value,
+      valueHtml: c.valueHtml,
+      author: currentUsername,
+      targetLang: activeLane,
+      propagatedFromCellId: cellId,
+    }))
+    for (const c of commits) {
+      applyOptimisticTargetEdit(c.cellId, { value: c.value, valueHtml: c.valueHtml })
+    }
+    let eventIds: string[]
+    try {
+      eventIds = await emitTargetCellCommits(commitInputs)
+    } catch (error) {
+      console.warn("[repetition-propagation] enqueue failed:", error)
+      for (const c of commits) {
+        applyOptimisticTargetEdit(c.cellId, {
+          value: c.previousValue,
+          valueHtml: c.previousValueHtml ?? "",
+        })
+      }
+      return
+    }
+    commits.forEach((c, i) => rememberPendingTargetCommit(c.cellId, eventIds[i], c.parentId))
+    await handleCellCommitted()
+
+    toast.add({
+      title: t("editor.repetition.applied", { count: commits.length }),
+      timeout: 10_000,
+      actionProps: {
+        children: t("editor.repetition.undo"),
+        onClick: () => {
+          void (async () => {
+            // Each undo chains on the propagation commit it reverses — that
+            // event is this cell's head now, so the CAS accepts it. No
+            // `propagatedFromCellId`: the restored text is the cell's own.
+            const undoInputs = commits.map((c, i) => ({
+              projectId: project.id,
+              fileId: c.fileId,
+              cellId: c.cellId,
+              parentId: eventIds[i],
+              sourceEventId: c.sourceEventId,
+              value: c.previousValue,
+              // Explicit '' rather than an absent key: undoing into a cell that
+              // had no rich text must CLEAR the html the propagation wrote,
+              // and an omitted field would leave it standing.
+              valueHtml: c.previousValueHtml ?? "",
+              author: currentUsername,
+              targetLang: activeLane,
+            }))
+            for (const c of commits) {
+              applyOptimisticTargetEdit(c.cellId, {
+                value: c.previousValue,
+                valueHtml: c.previousValueHtml ?? "",
+              })
+            }
+            try {
+              const undoIds = await emitTargetCellCommits(undoInputs)
+              commits.forEach((c, i) =>
+                rememberPendingTargetCommit(c.cellId, undoIds[i], eventIds[i]),
+              )
+              await handleCellCommitted()
+            } catch (error) {
+              console.warn("[repetition-propagation] undo failed:", error)
+              toast.add({ type: "error", title: t("editor.repetition.undoFailed") })
+            }
+          })()
+        },
+      },
+    })
+  }, [
+    activeLane,
+    applyOptimisticTargetEdit,
+    autoPropagateRepetitions,
+    cellStore,
+    checkLockHolder,
+    currentUsername,
+    handleCellCommitted,
+    isReadOnly,
+    myScopes,
+    project,
+    rememberPendingTargetCommit,
+    resolveTargetCommitParentId,
+    t,
+    toast,
+  ])
+
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
   const handleAgentTargetCommit = useCallback(async (
@@ -12557,6 +12707,8 @@ export function ProjectWorkspace() {
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
+            onValidated={handleCellValidated}
+            repetitionCounts={repetitionCounts}
             getPendingTargetEventId={getPendingTargetEventId}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}

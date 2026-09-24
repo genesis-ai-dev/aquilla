@@ -732,6 +732,14 @@ interface EditorTableProps {
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  /** AQU-1391: called after an EXPLICIT validate gesture lands, so the parent
+   *  can auto-propagate the confirmed translation to repeated source segments.
+   *  Not fired on unvalidate, nor by the commit path's auto-validate-on-edit —
+   *  see `handleCellValidated` in ProjectWorkspace for why. */
+  onValidated?: (cellId: string) => void | Promise<void>
+  /** AQU-1391: cellId → how many cells in this file share its normalized
+   *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
+  repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
@@ -948,6 +956,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
+  onValidated,
+  repetitionCounts,
   getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
@@ -2353,6 +2363,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           canEditSource={canEditSource}
           sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
+          onValidated={onValidated}
+          repetitionCounts={repetitionCounts}
           getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
@@ -2514,6 +2526,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onAskAiFromSelection,
     onBacktranslate,
     onCellCommitted,
+    onValidated,
+    repetitionCounts,
     onClaimCell,
     onCompleteSingle,
     onCompleteParagraph,
@@ -3336,6 +3350,12 @@ interface MemoizedRowProps {
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  /** AQU-1391: fires after an explicit validate lands; the workspace
+   *  auto-propagates the confirmed text to repeated source segments. */
+  onValidated?: (cellId: string) => void | Promise<void>
+  /** AQU-1391: cellId -> count of cells in this file sharing its normalized
+   *  source. Only repeated cells appear. */
+  repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -3519,7 +3539,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -3693,6 +3713,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
+        onValidated={onValidated}
+        repetitionCount={repetitionCounts?.get(cell.id)}
         getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
@@ -3758,6 +3780,12 @@ interface EditorRowProps {
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  /** AQU-1391: fires after an explicit validate lands; the workspace
+   *  auto-propagates the confirmed text to repeated source segments. */
+  onValidated?: (cellId: string) => void | Promise<void>
+  /** AQU-1391: how many cells in this file share THIS cell's normalized
+   *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
+  repetitionCount?: number
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
@@ -4729,7 +4757,7 @@ function EditorRow({
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
-  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -5678,6 +5706,10 @@ function EditorRow({
         targetLang: activeLane,
       })
       await onCellCommitted?.(cell.id)
+      // AQU-1391: only on the way IN. Un-validating a cell must not push its
+      // text anywhere, and the propagation runs after the commit has flushed
+      // so it reads this cell's settled head.
+      if (validated) await onValidated?.(cell.id)
       return true
     } catch (err) {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
@@ -5685,7 +5717,7 @@ function EditorRow({
       setWriteError("Couldn't save this change locally — copy your text and reload.")
       return false
     }
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, getPendingTargetEventId])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
@@ -6829,6 +6861,20 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              {/* AQU-1391: this source text is not unique in the file. It sits
+                  on the SOURCE line because that is what repeats — the badge
+                  answers "you will meet this string N times", which is what
+                  makes auto-propagation predictable rather than surprising. */}
+              {typeof repetitionCount === "number" && repetitionCount > 1 && (
+                <AppTooltip content={t("editor.repetition.tooltip", { count: repetitionCount })}>
+                  <span
+                    data-testid="source-repetition-count"
+                    className="shrink-0 rounded-sm bg-muted px-1 font-medium tabular-nums"
+                  >
+                    {t("editor.repetition.badge", { count: repetitionCount })}
+                  </span>
+                </AppTooltip>
+              )}
               <SourceTagChips metadata={cell.metadata} />
               <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
             </div>

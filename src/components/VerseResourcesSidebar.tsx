@@ -29,6 +29,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
+  adjacentPassagePaths,
   buildMapMosaic,
   formatCoordinates,
   loadEntityDetail,
@@ -37,9 +38,11 @@ import {
   osmPermalink,
   OSM_TILE_SIZE,
   passagePathFromRef,
+  prefetchPassageEntities,
   type AquiferEntityDetail,
   type AquiferEntityRef,
 } from "@/lib/aquifer/passage-resources"
+import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
 
 const OPEN_STORAGE_KEY_PREFIX = "aquilla:verse-resources:"
 
@@ -245,6 +248,16 @@ export function VerseResourcesSidebar({
         if (cancelled) return
         setEntities([])
         setError(err instanceof Error ? err.message : String(err))
+      })
+      // AQU-843: with the visible verse resolved, warm the verses either side
+      // so a scroll step renders from memory instead of a cold round-trip.
+      // Sequenced after the visible fetch on purpose — on a weak link a
+      // preload must not compete with the verse being waited on.
+      .finally(() => {
+        if (cancelled || !referencePrefetchAllowed()) return
+        for (const target of adjacentPassagePaths(debouncedPath)) {
+          prefetchPassageEntities(jwt, projectId, target)
+        }
       })
     return () => {
       cancelled = true

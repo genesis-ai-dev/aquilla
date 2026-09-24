@@ -164,6 +164,38 @@ export function fetchHelloaoChapter(
   return promise
 }
 
+/** Chapters worth warming around the one in view, clamped to the book (AQU-843).
+ *  Forward first — scrolling down is the common case. The caller reads
+ *  `numberOfChapters` off the chapter response it already has, so a preload
+ *  never gambles a request on a chapter that doesn't exist. */
+export function adjacentChapters(chapter: number, numberOfChapters: number): number[] {
+  const targets: number[] = []
+  if (chapter + 1 <= numberOfChapters) targets.push(chapter + 1)
+  if (chapter - 1 >= 1) targets.push(chapter - 1)
+  return targets
+}
+
+/**
+ * Warm one chapter into the cache so scrolling across a chapter boundary reads
+ * from memory instead of blocking on a cold fetch (AQU-843).
+ *
+ * Fire-and-forget: a warm miss is not a user-visible error, and the shared
+ * promise cache means the in-view fetch that follows joins this request rather
+ * than duplicating it.
+ */
+export function prefetchHelloaoChapter(
+  translationId: string,
+  book: string,
+  chapter: number,
+): void {
+  void fetchHelloaoChapter(translationId, book, chapter).catch(() => {})
+}
+
+/** Test seam — drops the chapter cache. */
+export function __resetHelloaoChapterCache(): void {
+  chapterCache.clear()
+}
+
 /** Flatten a verse/heading content array to plain text: strings pass through,
  *  formatted-text objects contribute their `text`, footnote refs and inline
  *  line breaks are dropped. */

@@ -357,8 +357,58 @@ export function loadEntityDetail(
   return promise
 }
 
-/** Test seam — drops both promise caches. */
+// ── Prefetch (AQU-843) ──────────────────────────────────────────────────────
+
+/** `/en/passages/RUT/1/8/` → its book, chapter and verse. */
+const PASSAGE_PATH = /^(\/[a-z]{2}\/passages\/[A-Z0-9]{2,4}\/\d+\/)(\d+)\/$/
+
+/**
+ * Sibling verse paths worth warming around the verse in view (AQU-843).
+ * Forward first — reading order. Verse 1 has no predecessor.
+ *
+ * The chapter's last verse is NOT knowable here: a passage page doesn't carry
+ * the verse count. Walking off the end is therefore left to
+ * `prefetchPassageEntities`, which remembers the miss instead of re-asking.
+ */
+export function adjacentPassagePaths(passagePath: string): string[] {
+  const m = PASSAGE_PATH.exec(passagePath)
+  if (!m) return []
+  const [, prefix, verseStr] = m
+  const verse = Number(verseStr)
+  const targets = [`${prefix}${verse + 1}/`]
+  if (verse - 1 >= 1) targets.push(`${prefix}${verse - 1}/`)
+  return targets
+}
+
+/** Paths a preload has already asked for and been refused — the end of a
+ *  chapter, mostly. Never retried: a translator parked on the last verse must
+ *  not re-spend a request on the verse after it every time the effect runs. */
+const warmMisses = new Set<string>()
+
+/**
+ * Warm one verse's entity list so scrolling onto it renders from memory rather
+ * than blocking on a cold fetch (AQU-843).
+ *
+ * Entity *details* are deliberately not warmed — they fan out up to
+ * MAX_DETAIL_LOOKUPS per verse, which is too much speculative traffic for the
+ * weak links this exists for.
+ *
+ * Fire-and-forget: already-cached paths and known misses cost nothing.
+ */
+export function prefetchPassageEntities(
+  jwt: string,
+  projectId: string,
+  passagePath: string,
+): void {
+  if (passageCache.has(passagePath) || warmMisses.has(passagePath)) return
+  loadPassageEntities(jwt, projectId, passagePath).catch(() => {
+    warmMisses.add(passagePath)
+  })
+}
+
+/** Test seam — drops both promise caches and the warm-miss memo. */
 export function __resetPassageResourceCaches(): void {
   passageCache.clear()
   detailCache.clear()
+  warmMisses.clear()
 }

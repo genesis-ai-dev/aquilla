@@ -224,7 +224,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi, scopedLanesFor } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -1904,6 +1904,16 @@ export function ProjectWorkspace() {
     },
     [projectId],
   )
+  // A member the org limited to certain lanes opens in one of them, never on
+  // the default lane when that lies outside their limit, and may switch among
+  // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
+  const scopedLanes = useMemo(
+    () => scopedLanesFor(project?.syncRole?.level, myScopes, availableLanes),
+    [project?.syncRole?.level, myScopes, availableLanes],
+  )
+  useEffect(() => {
+    if (scopedLanes && scopedLanes.length > 0 && !scopedLanes.includes(activeLane)) setActiveLane(scopedLanes[0])
+  }, [scopedLanes, activeLane, setActiveLane])
   // AQU-538 deep link: `/project/:id/editor?lane=<tag>` — PM surfaces link into the
   // editor at the lane they were viewing. Read the param ONCE per project (after
   // the lane registry loads so an unknown tag can be told apart from a
@@ -12124,6 +12134,7 @@ export function ProjectWorkspace() {
             username={currentUsername}
             activeLane={activeLane}
             lanes={availableLanes}
+            scopedLanes={scopedLanes}
             archivedLanes={project?.archivedLanes}
             onLaneChange={setActiveLane}
             defaultLaneLabel={activeTargetLanguage || "Target"}

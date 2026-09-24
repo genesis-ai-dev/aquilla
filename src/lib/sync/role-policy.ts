@@ -417,6 +417,30 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
 }
 
+/**
+ * The lanes a member below MAINTAINER may open and switch between: their own
+ * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
+ * switcher from everyone below MAINTAINER so a translator stays on the lane
+ * their assignment opens — but a member the org has LIMITED to certain lanes
+ * then opened on the default lane, often the one lane outside their limit,
+ * with no way to reach their own. A lane coordinator (AQU-581) could hand out
+ * Spanish chapters yet not open the Spanish lane to look at them.
+ *
+ * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
+ * via `canSwitchLanes`) or a member with no lane scopes (their assigned lane).
+ * A scope naming no lane the project has yields `[]`: nothing to move to.
+ */
+export function scopedLanesFor(
+  roleLevel: number | null | undefined,
+  scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
+  lanes: readonly string[],
+): string[] | null {
+  if (canSwitchLanes(roleLevel)) return null
+  const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
+  if (laneScopes.length === 0) return null
+  return lanes.filter((lane) => laneScopes.includes(lane))
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-1086: the org-configurable project-language edit floor.
 //

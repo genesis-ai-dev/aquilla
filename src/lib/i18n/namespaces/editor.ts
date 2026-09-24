@@ -254,6 +254,14 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    // AQU-515 — pericope suggestions, offered beside the division picker when
+    // the open file addresses scripture.
+    "editor.pericope.trigger": "Suggested passages",
+    "editor.pericope.heading": "Next passages to work on",
+    "editor.pericope.range": "{book} {start}–{end}",
+    "editor.pericope.agreement": "{count} of 20 Bibles break here",
+    "editor.pericope.continues": "Finishes the passage you are in",
+
     "editor.milestone.splitAria": "Split into milestones",
     "editor.milestone.splitHint":
       "Show only the cells in the current division. Use the arrows to move to the next one.",
@@ -2561,6 +2569,49 @@ export const editor = defineNamespace({
         placeholders: {
           range: MILESTONE_RANGE_PLACEHOLDER,
         },
+      },
+      "editor.pericope.trigger": {
+        description:
+          "Label of the button in the editor header that opens the list of " +
+          "suggested next passages. Sits next to the chapter picker on the same " +
+          "short toolbar row, so it has to stay about as short as the English.",
+        maxLength: 24,
+      },
+      "editor.pericope.heading": {
+        description:
+          "Heading inside that button's popover, above the two-to-four suggested " +
+          "ranges. 'Passage' is a stretch of verses a translator takes on as one " +
+          "piece of work — not a chapter and not a single verse.",
+        maxLength: 32,
+      },
+      "editor.pericope.range": {
+        description:
+          "One suggested range, e.g. 'Genesis 1:1–2:3'. Reorder the parts if the " +
+          "language puts the book name after the numbers; keep the dash between " +
+          "the two references.",
+        placeholders: {
+          book: "Full book name, already localized where a localized name exists.",
+          start: "Chapter and verse the range starts at, e.g. '1:1'.",
+          end: "Chapter and verse the range ends at, inclusive, e.g. '2:3'.",
+        },
+      },
+      "editor.pericope.agreement": {
+        description:
+          "Second line under a suggested range: how many of the 20 surveyed " +
+          "Bible translations start a new section at that point. It is a measure " +
+          "of how widely agreed the boundary is, not a quality score. The 20 is " +
+          "fixed by the dataset, so it is written into the sentence.",
+        maxLength: 40,
+        placeholders: {
+          count: "How many of the 20 translations draw this section, 1 to 20.",
+        },
+      },
+      "editor.pericope.continues": {
+        description:
+          "Shown instead of the agreement count when the suggested range starts " +
+          "at the translator's own stopping point mid-passage rather than at a " +
+          "boundary: finishing it lands them on the next natural break.",
+        maxLength: 40,
       },
       "editor.milestone.percentTranslated": {
         description:

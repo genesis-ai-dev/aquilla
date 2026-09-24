@@ -1,6 +1,7 @@
 // GET /cell-validators?fileId=&cellId=
 
 import { verifyTokenForFile } from '../auth'
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 
 export interface ValidatorsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -41,21 +42,22 @@ export async function handleValidatorsReadRequest(
   // AQU-538: validations are per target-language lane. Each row carries its
   // lane (target_lang; '' = default lane, returned as targetLang). Without a
   // ?lane= param we return every lane's validators (N=1 is byte-identical bar
-  // the additive targetLang field); an explicit ?lane=<tag> filters to it.
+  // the additive targetLang field); an explicit ?lane=<tag> dual-reads to it
+  // (prefer lane_id once backfill has populated it).
   const lane = url.searchParams.get('lane')
 
   // DELETE-on-unvalidate: a row's presence IS "active". No is_active column.
   const sql = lane === null
     ? `
-    SELECT event_id, username, decided_ts, target_lang
+    SELECT event_id, username, decided_ts, target_lang, lane_id
     FROM cell_validators
     WHERE project_id = ? AND file_id = ? AND cell_id = ?
     ORDER BY decided_ts DESC
   `
     : `
-    SELECT event_id, username, decided_ts, target_lang
+    SELECT event_id, username, decided_ts, target_lang, lane_id
     FROM cell_validators
-    WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?
+    WHERE project_id = ? AND file_id = ? AND cell_id = ? AND ${targetLaneDualReadSql()}
     ORDER BY decided_ts DESC
   `
 
@@ -64,12 +66,13 @@ export async function handleValidatorsReadRequest(
     username: string
     decided_ts: number
     target_lang: string
+    lane_id: string | null
   }
 
   const stmt = env.AQUILLA_PG.prepare(sql)
   const res = await (lane === null
     ? stmt.bind(projectId, fileId, cellId)
-    : stmt.bind(projectId, fileId, cellId, lane)
+    : stmt.bind(projectId, fileId, cellId, ...targetLaneDualReadBinds(projectId, lane))
   ).all<Row>()
 
   const validators = res.results.map((r) => ({
@@ -77,6 +80,7 @@ export async function handleValidatorsReadRequest(
     username: r.username,
     decidedTs: r.decided_ts,
     targetLang: r.target_lang ?? '',
+    laneId: r.lane_id ?? null,
   }))
 
   return Response.json({ validators })

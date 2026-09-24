@@ -1079,7 +1079,7 @@ export function ProjectWorkspace() {
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
   // sheet opens onto the files list instead of a 40px icon strip.
   useEffect(() => {
-    if (!lgUp && dockTab === null) setDockTab("files")
+    if (!lgUp && (dockTab === null || dockTab === "agent")) setDockTab("files")
   }, [lgUp, dockTab])
   // Agent editor tab is in the strip while the workbench is open. Minimize
   // and the tab's × dismiss it. Switching to a file tab leaves the surface
@@ -1131,20 +1131,22 @@ export function ProjectWorkspace() {
   }, [agentScopeFileId, activeFileId, projectFiles])
 
   useEffect(() => {
-    setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
-  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project
+    setAgentTabOpen(lgUp && (centerSurface === "agent" || readAgentTabOpen(projectId)))
+  }, [projectId, lgUp]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project/viewport
   useEffect(() => {
-    if (centerSurface === "agent") setAgentTabOpen(true)
-  }, [centerSurface])
+    if (!lgUp) setAgentTabOpen(false)
+    else if (centerSurface === "agent") setAgentTabOpen(true)
+  }, [centerSurface, lgUp])
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
   const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
   const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
+    if (!lgUp) return
     if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
-  }, [openOverlay])
+  }, [lgUp, openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
     setAgentExpandedFromDock(false)
@@ -1966,7 +1968,16 @@ export function ProjectWorkspace() {
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
   const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
-  const availableLanes = useMemo(() => ["", ...targetLanes], [targetLanes])
+  // AQU-1240: the `''` default lane IS the primary target language (it is
+  // *named* by `targetLanguage` and its cells carry `target_lang = ''`). Since
+  // slice 1 the registry (`targetLanes`) also LISTS the primary, so a naive
+  // `["", ...targetLanes]` renders the primary twice — a duplicate switcher row
+  // that reads as a second, redundant view of the same lane. Drop the primary
+  // from the registry side here; genuinely-extra lanes (French, …) stay.
+  const availableLanes = useMemo(
+    () => ["", ...targetLanes.filter((l) => !languagesEqual(l, project?.targetLanguage))],
+    [targetLanes, project?.targetLanguage],
+  )
   // If the active lane is no longer offered (removed from settings), fall back
   // to the default lane so the editor never points at a nonexistent lane.
   useEffect(() => {
@@ -11422,7 +11433,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
-      onAgentSelect={() => openAgentTab("editor")}
+      onAgentSelect={lgUp ? () => openAgentTab("editor") : undefined}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -11596,6 +11607,7 @@ export function ProjectWorkspace() {
                     jwt={jwt}
                     onJumpToAssignment={jumpToAssignment}
                     refreshKey={assignmentsRefreshKey}
+                    defaultLaneLabel={project.targetLanguage ?? ""}
                   />
                 )}
                 {/* Contextual onboarding status — self-removes once setup
@@ -11640,7 +11652,7 @@ export function ProjectWorkspace() {
                 )}
               </div>
             }
-            agentPanel={
+            agentPanel={lgUp ? (
               <AgentDockPanel
                 agent={{
                   projectId: project.id,
@@ -11662,7 +11674,7 @@ export function ProjectWorkspace() {
                 onExpand={() => openAgentTab("sidebar")}
                 expanded={centerSurface === "agent"}
               />
-            }
+            ) : undefined}
             searchPanel={
               <SearchDockPanel
                 activeFileId={activeFileId}
@@ -11731,7 +11743,7 @@ export function ProjectWorkspace() {
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
             surfaceTabs={[
-              ...(agentTabOpen && projectId
+              ...(lgUp && agentTabOpen && projectId
                 ? [{
                     id: "agent",
                     label: t("nav.dock.agentTab"),
@@ -11990,7 +12002,7 @@ export function ProjectWorkspace() {
               />
             </Suspense>
           </div>
-        ) : centerSurface === "agent" ? (
+        ) : centerSurface === "agent" && !lgUp ? null : centerSurface === "agent" ? (
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
           // same shared session as the dock tab, plus the three-pane
           // Source | Agent | Target working set from the agent-workspace branch.
@@ -12543,7 +12555,7 @@ export function ProjectWorkspace() {
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
-            onAskAiFromSelection={handleAskAiFromSelection}
+            onAskAiFromSelection={lgUp ? handleAskAiFromSelection : undefined}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}

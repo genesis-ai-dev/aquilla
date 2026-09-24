@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BATCH_SIZE, classifyFiles, isDocsOrTestOnly, planRelease, prHolds } from "./release-plan.mjs"
+import { classifyFiles, isDocsOrTestOnly, planRelease, prHolds } from "./release-plan.mjs"
 
 const pr = (
   number: number,
@@ -14,8 +14,10 @@ const authPr = (number: number, mergedAt: string) => pr(number, mergedAt, { area
 const NOW = "2026-09-24T12:00:00Z"
 const recent = "2026-09-24T10:00:00Z"
 
-// One release in QA at a time keeps QA from re-testing a moving target and
-// stops releases piling up; small batches keep each QA pass short.
+// One release in QA at a time keeps QA from re-testing a moving target. The
+// next slice cuts the instant that one closes, at whatever's ready in dev —
+// no ceiling, no wait timer — so a hotfix cherry-picked onto the closed
+// branch is already on dev by the time the next slice is cut.
 describe("planRelease", () => {
   it("never cuts while another release is waiting for QA or deploy", () => {
     const prs = Array.from({ length: 10 }, (_, i) => pr(i, recent))
@@ -24,27 +26,35 @@ describe("planRelease", () => {
     expect(plan.reason).toContain("release/2026/09/23-01")
   })
 
-  it("cuts a full ceiling of 7 as soon as it is waiting, naming the branch and sha", () => {
-    const prs = Array.from({ length: BATCH_SIZE }, (_, i) => pr(i, recent))
+  it("cuts every ready PR the instant the line is free, naming the branch and sha", () => {
+    const prs = Array.from({ length: 3 }, (_, i) => pr(i, recent))
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
     expect(plan.hold).toBe(false)
-    expect(plan.prs).toHaveLength(BATCH_SIZE)
-    expect(plan.sha).toBe(prs[BATCH_SIZE - 1].sha)
+    expect(plan.prs).toHaveLength(3)
+    expect(plan.sha).toBe(prs[2].sha)
     expect(plan.branch).toBe("release/2026/09/24-01")
   })
 
-  it("the next free suffix skips branches already cut today", () => {
-    const prs = Array.from({ length: BATCH_SIZE }, (_, i) => pr(i, recent))
-    const plan = planRelease({ openReleases: [], prs, now: NOW, usedSuffixesToday: ["01", "02"] })
-    expect(plan.branch).toBe("release/2026/09/24-03")
+  it("cuts a single ready PR immediately, with no wait", () => {
+    const plan = planRelease({ openReleases: [], prs: [pr(1, recent)], now: NOW })
+    expect(plan.cut).toBe(true)
+    expect(plan.hold).toBe(false)
+    expect(plan.prs).toHaveLength(1)
   })
 
-  it("holds a small batch until the oldest PR has waited a day", () => {
-    expect(planRelease({ openReleases: [], prs: [pr(1, recent)], now: NOW }).cut).toBe(false)
-    const waited = planRelease({ openReleases: [], prs: [pr(1, "2026-09-23T11:00:00Z")], now: NOW })
-    expect(waited.cut).toBe(true)
-    expect(waited.hold).toBe(false)
+  it("has no ceiling: a large ready run cuts as one slice", () => {
+    const prs = Array.from({ length: 200 }, (_, i) => pr(i, recent))
+    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    expect(plan.cut).toBe(true)
+    expect(plan.hold).toBe(false)
+    expect(plan.prs).toHaveLength(200)
+  })
+
+  it("the next free suffix skips branches already cut today", () => {
+    const prs = Array.from({ length: 3 }, (_, i) => pr(i, recent))
+    const plan = planRelease({ openReleases: [], prs, now: NOW, usedSuffixesToday: ["01", "02"] })
+    expect(plan.branch).toBe("release/2026/09/24-03")
   })
 
   it("does not cut an empty release", () => {
@@ -61,7 +71,7 @@ describe("planRelease", () => {
     expect(plan.areas).toEqual(["migration"])
   })
 
-  it("ships the ready run the moment a holding PR sits behind it, without waiting for the ceiling or the timer", () => {
+  it("ships the ready run the moment a holding PR sits behind it", () => {
     const prs = [pr(1, recent), pr(2, recent), migration(3, recent), pr(4, recent)]
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
@@ -80,35 +90,11 @@ describe("planRelease", () => {
   })
 
   it("does not hold on sync or auth alone, but still notes the areas", () => {
-    const prs = Array.from({ length: BATCH_SIZE }, (_, i) => (i % 2 ? syncPr(i, recent) : authPr(i, recent)))
+    const prs = Array.from({ length: 6 }, (_, i) => (i % 2 ? syncPr(i, recent) : authPr(i, recent)))
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
     expect(plan.hold).toBe(false)
     expect(plan.areas).toEqual(["auth", "sync"])
-  })
-
-  it("reports no cut and no areas while a short, non-holding batch is still waiting", () => {
-    const plan = planRelease({ openReleases: [], prs: [pr(1, recent), syncPr(2, recent)], now: NOW })
-    expect(plan.cut).toBe(false)
-    expect(plan.areas).toBeUndefined()
-    expect(plan.prs).toEqual([])
-  })
-
-  it("drains the rest of the queue once a tag lands, shipping a remainder under the ceiling", () => {
-    const prs = [pr(1, recent), pr(2, recent)]
-    const notDraining = planRelease({ openReleases: [], prs, now: NOW })
-    expect(notDraining.cut).toBe(false)
-
-    const draining = planRelease({ openReleases: [], prs, now: NOW, latestTagAt: "2026-09-24T11:00:00Z" })
-    expect(draining.cut).toBe(true)
-    expect(draining.hold).toBe(false)
-    expect(draining.prs).toHaveLength(2)
-  })
-
-  it("does not drain on a tag older than the oldest unreleased PR", () => {
-    const prs = [pr(1, recent)]
-    const plan = planRelease({ openReleases: [], prs, now: NOW, latestTagAt: "2026-09-23T00:00:00Z" })
-    expect(plan.cut).toBe(false)
   })
 })
 
@@ -167,9 +153,9 @@ describe("classifyFiles", () => {
 })
 
 // Built from the shape of 2026-09-23's real queue (29 PRs, 14 touching sync
-// or auth, 4 of those auth-worker alone, none holding on their own) to lock
-// down what a busy day actually produces: about four full slices plus one
-// short one, per the release line plan.
+// or auth, 4 of those auth-worker alone, none holding on their own): with no
+// ceiling, a busy day this size cuts as one slice the instant the line is
+// free, rather than four full slices plus a short one.
 describe("a 29-PR day shaped like 2026-09-23", () => {
   function fixture() {
     const prs = []
@@ -182,21 +168,10 @@ describe("a 29-PR day shaped like 2026-09-23", () => {
     return prs
   }
 
-  it("ships four full ceilings and one short slice, none of them holding", () => {
-    let remaining = fixture()
-    // Each slice tags right after it cuts, which drains the next one even
-    // though it is short — the queue was never empty in between.
-    let latestTagAt: string | null = null
-    const slices: number[] = []
-    while (remaining.length) {
-      const plan = planRelease({ openReleases: [], prs: remaining, now: "2026-09-24T00:00:00Z", latestTagAt })
-      expect(plan.cut).toBe(true)
-      expect(plan.hold).toBe(false)
-      const shipped = plan.prs.map((p: { number: number }) => p.number)
-      slices.push(shipped.length)
-      remaining = remaining.filter((p) => !shipped.includes(p.number))
-      latestTagAt = "2026-09-24T00:00:00Z"
-    }
-    expect(slices).toEqual([7, 7, 7, 7, 1])
+  it("ships all 29 as one slice, none of them holding", () => {
+    const plan = planRelease({ openReleases: [], prs: fixture(), now: "2026-09-24T00:00:00Z" })
+    expect(plan.cut).toBe(true)
+    expect(plan.hold).toBe(false)
+    expect(plan.prs).toHaveLength(29)
   })
 })

@@ -13,6 +13,7 @@ interface HealthRibbonProps {
   hasMajorIssue?: boolean
   hasIssue?: boolean
   className?: string
+  testId?: string
 }
 
 function description(point: HealthRibbonPoint): string {
@@ -78,6 +79,7 @@ export function HealthRibbon({
   hasMajorIssue = false,
   hasIssue = false,
   className,
+  testId = "health-ribbon",
 }: HealthRibbonProps) {
   const t = useT()
   const issueLabel = hasMajorIssue
@@ -99,7 +101,7 @@ export function HealthRibbon({
     <AppTooltip content={tooltipContent(point, issueLabel, t)} side="right" delay={200} className="max-w-xs">
       <span
         data-showcase="cell.health"
-        data-testid="health-ribbon"
+        data-testid={testId}
         data-health-stage={point.stage}
         data-health-score={score === undefined ? undefined : Math.round(score)}
         data-health-opacity={opacity.toFixed(2)}

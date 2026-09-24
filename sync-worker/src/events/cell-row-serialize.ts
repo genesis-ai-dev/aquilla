@@ -19,7 +19,7 @@ export const CELL_ROW_COLUMNS =
   "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
   "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
   "endorsement_count, start_ms, end_ms, " +
-  "medium, sequence_index, transcription, camera_state, metadata"
+  "medium, sequence_index, transcription, camera_state, metadata, lane_id"
 
 export interface CellRowRaw {
   cell_id: string
@@ -49,6 +49,8 @@ export interface CellRowRaw {
   /** JSONB — the driver hands back a parsed object, but a text executor may
    *  surface it as a string (parsed defensively in mapCellRow). */
   metadata: Record<string, unknown> | string | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
+  lane_id: string | null
 }
 
 export interface CellRowOut {
@@ -77,6 +79,9 @@ export interface CellRowOut {
   transcription: string | null
   cameraState: string | null
   metadata: Record<string, unknown> | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. Always
+   *  emitted by {@link mapCellRow}; optional on hand-built fixtures. */
+  laneId?: string | null
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -136,5 +141,6 @@ export function mapCellRow(row: CellRowRaw): CellRowOut {
     transcription: row.transcription,
     cameraState: row.camera_state,
     metadata: parseMetadata(row.metadata),
+    laneId: row.lane_id ?? null,
   }
 }

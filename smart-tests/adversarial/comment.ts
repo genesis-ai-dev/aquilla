@@ -23,7 +23,7 @@ const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\n/g, " ")
  */
 export function renderComment(input: CommentInput): string {
   const head = [MARKER, "## Adversarial Jev", "", `Commit \`${input.sha.slice(0, 8)}\` · [run log](${input.runUrl})`, ""]
-  const footer = ["", "Jev attacked this branch's preview under hostile conditions, red-team goals, and reworded goals. "
+  const footer = ["", "The adversarial suite points Jev at this branch's preview under hostile conditions, red-team goals, and reworded goals. "
     + "Verdicts come from server state, never from the agent. Advisory only: this does not block the merge. "
     + "[How it works](https://github.com/genesis-ai-dev/aquilla/blob/dev/smart-tests/adversarial/README.md)."]
   if (input.notRun) return [...head, `**NOT RUN.** ${input.notRun}`, ...footer].join("\n")

@@ -41,6 +41,7 @@ describe("PR comment", () => {
   it("says NOT RUN when the suite never started", () => {
     const text = renderComment({ ...base, notRun: "The preview never served this commit." })
     expect(text).toContain("**NOT RUN.** The preview never served this commit.")
+    expect(text).not.toContain("attacked")
   })
 
   it("shows the agent's stop reason, so a provider flake is not mistaken for an app miss", () => {

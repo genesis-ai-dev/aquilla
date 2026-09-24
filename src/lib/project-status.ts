@@ -1,4 +1,4 @@
-import { deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { deadlineStatus, latestActivityAt, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 /** User-facing project health labels — single source of truth. */
 export const PROJECT_STATUS_LABEL = {
@@ -29,10 +29,17 @@ export type PortfolioActivityStatus = "not-started" | "stalled" | "active"
  * project has a non-null `lastEditAt` even though no translation work has
  * happened. Gating on `lastEditAt == null` mislabeled those projects "Stalled"
  * once the import aged past the stale window (AQU-639).
+ *
+ * AQU-950: "has work happened recently" is `latestActivityAt`, NOT the scalar
+ * `lastEditAt`. The scalar only moves when an event writes a cell row, so a
+ * project whose team is validating or recording — real, daily work — read as
+ * idle and was flagged "Stalled". See `latestActivityAt` for why the per-lane
+ * timestamp is the honest signal.
  */
 export function portfolioActivityStatus(p: PortfolioProject, now: number): PortfolioActivityStatus {
   if (p.filledCells === 0) return "not-started"
-  if (p.lastEditAt == null || now - p.lastEditAt > STALE_MS) return "stalled"
+  const activityAt = latestActivityAt(p)
+  if (activityAt == null || now - activityAt > STALE_MS) return "stalled"
   return "active"
 }
 

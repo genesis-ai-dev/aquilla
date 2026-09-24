@@ -218,8 +218,12 @@ describe("nearly complete (AQU-1278)", () => {
     expect(planUnitIsNearlyComplete(inDubbedFile, NOW, new Set<string>())).toBe(true)
   })
 
-  it("pins AUDIO_JUDGED_ON_RECORDED true — flip it for AQU-490 and THIS test fails first", () => {
-    expect(AUDIO_JUDGED_ON_RECORDED).toBe(true)
+  // AQU-490 shipped the client half, so the constant is false and the board
+  // measures audio on what has been VALIDATED. The tripwire stays, pointing
+  // the other way: flipping BACK would silently make every recorded take
+  // count as finished work again.
+  it("pins AUDIO_JUDGED_ON_RECORDED false — audio is judged on validation now", () => {
+    expect(AUDIO_JUDGED_ON_RECORDED).toBe(false)
   })
 
   it("judges audio on recorded, so a fully recorded book with no reviewed takes qualifies", () => {
@@ -264,7 +268,11 @@ describe("the audio gate is per FILE, not per project", () => {
   it("judges the text books on text alone, so all sixty-five can be nearly complete", () => {
     const audioFiles = audioFileIds(rows)
     for (const b of books) expect(planUnitStatus(b, NOW, audioFiles)).toBe("nearly_complete")
-    expect(planSummary(rows, NOW).nearlyComplete).toBe(66)
+    // 65, not 66: since AQU-490 the episode is judged on VALIDATED takes, and
+    // this fixture's episode has none, so it drops out of the bucket the text
+    // books remain in. That is the flip working — the sixty-five text books
+    // are still judged on text alone, which is what this test is about.
+    expect(planSummary(rows, NOW).nearlyComplete).toBe(65)
   })
 
   it("would sink every one of them if audio were read project-wide", () => {
@@ -295,7 +303,11 @@ describe("a dubbing project's audio is counted against its CUE SHEET", () => {
     const { audioTotalCount: _drop, ...noSheet } = episode(CUES)
     expect(planUnitShortfall(noSheet, true).toRecord).toBe(SUBTITLES - CUES)
     expect(planUnitStatus(noSheet, NOW, new Set(["f1"]))).toBe("in_progress")
-    expect(planUnitStatus(episode(CUES), NOW, new Set(["f1"]))).toBe("nearly_complete")
+    // AQU-490: the sheet fixes the DENOMINATOR, which is what this test is
+    // about, but the episode's takes are unvalidated — so it is in progress on
+    // that count rather than nearly complete. The bug being guarded here is
+    // still guarded: toRecord above is the number that used to be wrong.
+    expect(planUnitStatus(episode(CUES), NOW, new Set(["f1"]))).toBe("in_progress")
   })
 
   it("treats an empty cue sheet as audio EXPECTED, not as a text-only file", () => {
@@ -360,8 +372,11 @@ describe("planUnitShortfall", () => {
     for (const term of [s.toTranslate, s.toValidate, s.toRecord, s.toAudioValidate, s.worst]) {
       expect(term).toBeGreaterThanOrEqual(0)
     }
-    // And it is still judged on the ninety unvalidated cells it really has.
-    expect(s.worst).toBe(90)
+    // And it is still judged on what it really has outstanding. Since AQU-490
+    // that is the hundred unvalidated TAKES rather than the ninety unvalidated
+    // cells — the worse of the two mediums, which is the whole point of
+    // `worst`.
+    expect(s.worst).toBe(100)
     expect(planUnitStatus(overRecorded, NOW, new Set(["f1"]))).toBe("in_progress")
   })
 })
@@ -397,12 +412,19 @@ describe("planShortfallParts", () => {
     expect(s.toTranslate).toBe(6)
     expect(s.toValidate).toBe(4)
     expect(s.toRecord).toBe(200)
-    expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "record"])
+    // AQU-490: "validate" here is the AUDIO term — 100 takes recorded, none
+    // signed off — which outranks the 200 still to record only because the
+    // parts list names the worse medium's blocking step first.
+    expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "validate"])
   })
 
   it("names recording on its own when the text is finished and the takes are not", () => {
+    // AQU-490 adds the second audio term: 40 takes exist and none are signed
+    // off, so the row names both the 60 still to record and the 40 waiting on
+    // a listener. Before the flip the second was unreachable.
     expect(planShortfallParts(planUnitShortfall(counts(100, 100, 100, 40, 0), true))).toEqual([
       { kind: "record", count: 60 },
+      { kind: "audio_validate", count: 40 },
     ])
   })
 
@@ -625,7 +647,9 @@ describe("planSummary", () => {
       counts(1000, 1000, 1000, 1000, 0, { fileId: "6" }),
     ]
     const s = planSummary(rows, NOW)
-    expect(s).toEqual({ total: 6, done: 1, overdue: 1, inFlight: 2, nearlyComplete: 2 })
+    // AQU-490: the fully-recorded-but-unvalidated unit moved from
+    // nearlyComplete to inFlight, which is the flip doing its job.
+    expect(s).toEqual({ total: 6, done: 1, overdue: 1, inFlight: 3, nearlyComplete: 1 })
     expect(s.done + s.overdue + s.inFlight + s.nearlyComplete).toBe(s.total)
   })
 
@@ -821,15 +845,19 @@ describe("planOpenKind — where the link lands", () => {
   })
 
   it("has nothing to point at when nothing is left", () => {
-    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100), true))).toBeNull()
+    // AQU-490: "nothing left" now includes the takes being signed off, so the
+    // fixture has to validate them too. Without the last argument this unit
+    // has a hundred recorded takes nobody has listened to, and the link
+    // correctly points at them.
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 100), true))).toBeNull()
     // …and ignores audio entirely on a file that has none.
     expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 0), false))).toBeNull()
   })
 
-  it("never asks for sign-off while audio is judged on recording", () => {
-    // AQU-490 flips `AUDIO_JUDGED_ON_RECORDED`; until then the fourth queue is
-    // unreachable, and this is the test that will start failing when it is.
-    expect(AUDIO_JUDGED_ON_RECORDED).toBe(true)
-    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 40), true))).toBeNull()
+  it("asks for sign-off once the takes are recorded — the fourth queue, AQU-490", () => {
+    // This was the dormant one. Until the client could emit a vote, pointing a
+    // reader at "takes to validate" sent them somewhere with no button.
+    expect(AUDIO_JUDGED_ON_RECORDED).toBe(false)
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 40), true))).toBe("unsigned")
   })
 })

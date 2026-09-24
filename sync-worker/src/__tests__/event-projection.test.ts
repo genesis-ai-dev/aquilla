@@ -509,8 +509,17 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
   })
 })
 
-describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalidate (AQU-508)', () => {
-  it('cell.audio.validate emits a single cell_audio approve UPDATE keyed by audio_id', () => {
+// AQU-508 shipped these two kinds as a boolean stamp on cell_audio
+// (approved / approved_by / approved_ts). No client ever emitted them, and a
+// boolean could not express "this project requires two reviewers" — so AQU-490
+// replaced the stamp with per-validator rows counted against the project's
+// threshold at READ time, the same shape text has used since FRO-279.
+//
+// The statement shapes are pinned here; the data outcomes (idempotence, the
+// out-of-order guard, trim discarding votes, fill-only authorship) live in
+// audio-validators-projection.test.ts against real Postgres.
+describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalidate (AQU-490)', () => {
+  it('cell.audio.validate inserts a validator row and re-derives the take’s count', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
@@ -518,17 +527,16 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       makeEvent('cell.audio.validate', { audioId: 'a1' }),
       stmts,
     )
-    // Audio validation touches only cell_audio — no chain head, no counters.
-    expect(touches).toEqual(['cell_audio'])
-    expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 1')
-    expect(recorded[0].sql).toContain('approved_by = ?')
-    expect(recorded[0].sql).toContain('approved_ts = ?')
-    // Bound: author, serverTs, project, file, cell, audioId.
-    expect(recorded[0].args).toEqual(['alice', 2000, 'proj-1', 'file-a', 'cell-1', 'a1'])
+    // Both tables, or a client invalidates the names and not the count.
+    expect(touches).toEqual(['cell_audio', 'cell_audio_validators'])
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain('INSERT INTO cell_audio_validators')
+    expect(recorded[0].sql).toContain('ON CONFLICT')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000])
+    expect(recorded[1].sql).toContain('SET validator_count')
   })
 
-  it('cell.audio.unvalidate clears approval (approved = 0, approver nulled)', () => {
+  it('cell.audio.unvalidate deletes the author’s own row by default', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
@@ -536,10 +544,10 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       makeEvent('cell.audio.unvalidate', { audioId: 'a1' }),
       stmts,
     )
-    expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 0')
-    expect(recorded[0].sql).toContain('approved_by = NULL')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1'])
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain('DELETE FROM cell_audio_validators')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice'])
+    expect(recorded[1].sql).toContain('SET validator_count')
   })
 
   it('is not chain-mutating', () => {
@@ -547,7 +555,11 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
     expect(isChainMutatingKind('cell.audio.unvalidate')).toBe(false)
   })
 
-  it('round-trips against real Postgres: validate sets approved=1, unvalidate clears it', async () => {
+  // The retirement, pinned. `approved` stays in the schema until a contract
+  // migration can drop it, and nothing may start writing it again: a stamp
+  // survives a threshold change and a projection rebuild replays at the
+  // default, so the column would assert the wrong answer at the wrong moment.
+  it('round-trips against real Postgres and leaves the retired approved stamp alone', async () => {
     const { db, rows } = await makeTestDb({
       cell_audio: [
         {
@@ -558,20 +570,21 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       ],
     })
 
-    const approveStmts: AquillaStatement[] = []
-    buildEventProjectionStmts(db, makeEvent('cell.audio.validate', { audioId: 'a1' }), approveStmts)
-    await db.batch(approveStmts)
-    let audio = await rows<{ approved: number; approved_by: string | null; approved_ts: number | null }>('cell_audio')
-    expect(audio[0].approved).toBe(1)
-    expect(audio[0].approved_by).toBe('alice')
-    expect(audio[0].approved_ts).toBe(2000)
+    const validateStmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('cell.audio.validate', { audioId: 'a1' }), validateStmts)
+    await db.batch(validateStmts)
+    let audio = await rows<{ validator_count: number; approved: number; approved_by: string | null }>('cell_audio')
+    expect(audio[0].validator_count).toBe(1)
+    expect(audio[0].approved).toBe(0)
+    expect(audio[0].approved_by).toBeNull()
+    expect(await rows('cell_audio_validators')).toHaveLength(1)
 
     const clearStmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('cell.audio.unvalidate', { audioId: 'a1' }), clearStmts)
     await db.batch(clearStmts)
     audio = await rows('cell_audio')
-    expect(audio[0].approved).toBe(0)
-    expect(audio[0].approved_by).toBeNull()
+    expect(audio[0].validator_count).toBe(0)
+    expect(await rows('cell_audio_validators')).toHaveLength(0)
   })
 })
 

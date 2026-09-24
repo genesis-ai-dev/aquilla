@@ -6,7 +6,7 @@
 set -euo pipefail
 
 branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "${GITHUB_REF_NAME:-}")"
-if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})$ ]]; then
+if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})(-[0-9]{2})?$ ]]; then
   echo "ABORT: tag-release requires a release/YYYY/MM/DD branch (currently on '$branch')." >&2
   exit 1
 fi
@@ -28,8 +28,38 @@ for attempt in 1 2 3; do
     next=$((10#${last##*.} + 1))
   fi
   tag="$series.$(printf '%02d' "$next")"
+  commit_sha="$(git rev-parse HEAD)"
 
-  git tag -a "$tag" -m "Production release $tag ($branch)"
+  # Generate annotated tag message with preview metadata
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  metadata_script="$script_dir/tag-metadata.mjs"
+  
+  # Find node executable (try PATH first, then common locations)
+  node_cmd="node"
+  if ! command -v node >/dev/null 2>&1; then
+    for candidate in /exec-daemon/node /usr/local/bin/node /usr/bin/node; do
+      if [ -x "$candidate" ]; then
+        node_cmd="$candidate"
+        break
+      fi
+    done
+  fi
+  
+  if [ ! -f "$metadata_script" ]; then
+    echo "WARN: tag-metadata.mjs not found at $metadata_script; using minimal tag message." >&2
+    tag_message="Production release $tag ($branch)"
+  elif ! command -v "$node_cmd" >/dev/null 2>&1; then
+    echo "WARN: node executable not found; using minimal tag message." >&2
+    tag_message="Production release $tag ($branch)"
+  elif tag_message_output="$("$node_cmd" "$metadata_script" "$tag" "$branch" "$commit_sha" 2>&1)"; then
+    tag_message="$tag_message_output"
+  else
+    # Fallback to minimal message if metadata generation fails
+    echo "WARN: metadata generation failed: $tag_message_output; using minimal tag message." >&2
+    tag_message="Production release $tag ($branch)"
+  fi
+
+  git tag -a "$tag" -m "$tag_message"
   if git push --quiet origin "refs/tags/$tag"; then
     echo "OK: tagged and pushed $tag."
     exit 0

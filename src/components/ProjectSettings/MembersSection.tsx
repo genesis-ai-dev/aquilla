@@ -37,8 +37,11 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
 import {
-  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDescription,
+  ROLE, humanRoleName, resolveRoleName, roleDescription,
 } from "@/lib/frontier/roles"
+import {
+  canManageProjectMembers, grantableProjectRoles, roleChangeBlock,
+} from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -71,16 +74,31 @@ export function MembersSection({ projectId }: { projectId: string }) {
     members, isLoading, error, rosterHidden, refresh, add, addMany, remove,
   } = useProjectMembers(projectId)
 
-  const callerMaxRole = ROLE.MAINTAINER
   const callerUsername = session?.username ?? null
   const hasJwt = Boolean(session?.jwt)
+
+  // AQU-853: derive the caller's own effective role from the roster — the
+  // same derivation SharePanel has used since AQU-285 (F-A4) — instead of
+  // assuming MAINTAINER. Without it this pane offered every reader a role
+  // picker up to Maintainer and let the server answer 403, which is exactly
+  // the "the option didn't appear / didn't work" confusion this ticket is
+  // about. `null` while the roster is still loading; the server stays the
+  // security boundary either way.
+  const callerLevel = useMemo(() => {
+    if (!callerUsername) return null
+    return members.find((m) => m.username === callerUsername)?.role.level ?? null
+  }, [members, callerUsername])
+  const canManageMembers = canManageProjectMembers(callerLevel)
 
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all")
   const [addOpen, setAddOpen] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
 
-  const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
+  const grantableRoles = useMemo(
+    () => grantableProjectRoles(callerLevel),
+    [callerLevel],
+  )
 
   const tableData = useMemo(
     () => members.filter((m) => memberMatchesFilter(m, accessFilter)),
@@ -214,6 +232,17 @@ export function MembersSection({ projectId }: { projectId: string }) {
                 <Button
                   className="ml-auto shrink-0"
                   onClick={openAddDialog}
+                  // AQU-853 AC-3: below the project_lead floor the server 403s
+                  // every grant, so the control is disabled and says why
+                  // rather than looking available and failing.
+                  disabled={!canManageMembers}
+                  title={
+                    canManageMembers
+                      ? undefined
+                      : t("projectSettings.members.roleChangeNeedsRole", {
+                          role: resolveRoleName(t, ROLE.PROJECT_LEAD),
+                        })
+                  }
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}
                 </Button>
@@ -223,9 +252,26 @@ export function MembersSection({ projectId }: { projectId: string }) {
             renderRowMenuItems={(m) => {
               const isSelf = callerUsername !== null && m.username === callerUsername
               const isLocked = m.role.source === "org" || m.role.source === "creator"
+              const block = roleChangeBlock({
+                callerLevel,
+                targetLevel: m.role.level,
+                isSelf,
+                isLocked,
+              })
+              const canChangeRole = block === null
               const canRemoveDirect =
-                !isLocked && !isSelf && m.role.source === "override"
-              const canChangeRole = !isLocked && !isSelf
+                canManageMembers && !isLocked && !isSelf && m.role.source === "override"
+              const canRevoke = canManageMembers && hasJwt && !isSelf
+              // AQU-853 AC-3: when the block is about the CALLER's own role
+              // (not about this row), say so instead of rendering nothing.
+              const roleBlockNote =
+                block === "caller-below-floor"
+                  ? t("projectSettings.members.roleChangeNeedsRole", {
+                      role: resolveRoleName(t, ROLE.PROJECT_LEAD),
+                    })
+                  : block === "target-outranks-caller"
+                    ? t("projectSettings.members.roleChangeOutranked")
+                    : null
               return (
                 <>
                   {canChangeRole && (
@@ -255,13 +301,19 @@ export function MembersSection({ projectId }: { projectId: string }) {
                       </MenuSubContent>
                     </MenuSub>
                   )}
+                  {roleBlockNote && (
+                    <MenuItem disabled className="items-start">
+                      <ShieldUser className="size-4" />
+                      <span className="whitespace-normal">{roleBlockNote}</span>
+                    </MenuItem>
+                  )}
                   {canRemoveDirect && (
                     <MenuItem onClick={() => setRemoveTarget(m)}>
                       <UserMinus className="size-4" />
                       {t("projectSettings.members.removeDirectAccess")}
                     </MenuItem>
                   )}
-                  {hasJwt && !isSelf && (
+                  {canRevoke && (
                     <>
                       {(canChangeRole || canRemoveDirect) && <MenuSeparator />}
                       <MenuItem
@@ -273,7 +325,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                       </MenuItem>
                     </>
                   )}
-                  {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
+                  {!canChangeRole && !roleBlockNote && !canRemoveDirect && !canRevoke && (
                     <MenuItem disabled>{t("projectSettings.members.noActionsAvailable")}</MenuItem>
                   )}
                 </>

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
+import { isReleaseBranch } from "./release-plan.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -153,6 +154,65 @@ describe("worker deployment environment contract", () => {
       }
     },
   )
+
+  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // day. Four checkers each decide whether a branch name counts as a release
+  // branch: the three shell scripts here, plus isReleaseBranch in
+  // release-plan.mjs. One shared table is what keeps their four regexes in
+  // step; a shared helper alone doesn't catch a script that forgot to call it.
+  describe.each([
+    ["release/2026/09/24", true],
+    ["release/2026/09/24-01", true],
+    ["release/2026/9/23", false],
+    ["release/2026/09/24-1", false],
+    ["release/2026/09/24-001", false],
+    ["release/latest", false],
+  ])("release branch name %j", (branch, accepted) => {
+    it(`isReleaseBranch returns ${accepted}`, () => {
+      expect(isReleaseBranch(branch)).toBe(accepted)
+    })
+
+    it(`verify-deploy-branch.sh ${accepted ? "accepts" : "rejects"} it as "release"`, () => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync(
+          "bash",
+          [path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh"), "release"],
+          { cwd: tempRepo, encoding: "utf8", env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch } },
+        )
+        expect(result.status === 0).toBe(accepted)
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    })
+
+    it(`tag-release.sh ${accepted ? "accepts" : "rejects"} it as the current branch`, () => {
+      // Run outside any git repo so `git symbolic-ref` fails and the script
+      // falls back to GITHUB_REF_NAME instead of this repo's real branch.
+      const result = spawnSync("bash", [path.join(REPO_ROOT, "scripts", "tag-release.sh")], {
+        cwd: tmpdir(),
+        encoding: "utf8",
+        env: { GITHUB_REF_NAME: branch, GITHUB_ACTIONS: "true" },
+      })
+      if (accepted) {
+        expect(result.stderr).not.toContain("requires a release/YYYY/MM/DD branch")
+      } else {
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("requires a release/YYYY/MM/DD branch")
+      }
+    })
+
+    it(`resolve-deployment-target.sh ${accepted ? "accepts" : "rejects"} it as a live ref`, () => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", branch],
+        { encoding: "utf8", env: {} },
+      )
+      expect(result.status === 0).toBe(accepted)
+      if (accepted) expect(result.stdout).toContain("wrangler_environment=production")
+    })
+  })
 
   it("keeps account_id above the first TOML table", () => {
     const config = readRepoFile("sync-worker", "wrangler.toml")

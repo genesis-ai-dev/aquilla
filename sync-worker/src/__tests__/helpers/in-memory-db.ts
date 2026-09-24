@@ -455,18 +455,20 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return matched
     }
 
-    // ── GET /cell-validators read route (AQU-538: per-lane) ─────────────
-    // Two shapes: all lanes (no ?lane=) or a single lane (AND target_lang = ?).
+    // ── GET /cell-validators read route (AQU-538: per-lane; AQU-1240 dual-read) ─
+    // Two shapes: all lanes (no ?lane=) or a single lane (dual-read by tag).
     if (
-      /^SELECT event_id, username, decided_ts, target_lang FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?( AND target_lang = \?)? ORDER BY decided_ts DESC/.test(
+      /^SELECT event_id, username, decided_ts, target_lang(?:, lane_id)? FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?/.test(
         normalized,
       )
     ) {
       const projectId = args[0] as string
       const fileId = args[1] as string
       const cellId = args[2] as string
-      const laneFiltered = /AND target_lang = \? ORDER BY/.test(normalized)
-      const lane = laneFiltered ? ((args[3] as string) ?? "") : null
+      const laneFiltered = normalized.includes('lane_id =') || /AND target_lang = \? ORDER BY/.test(normalized)
+      const lane = laneFiltered
+        ? ((normalized.includes('lane_id =') ? (args[4] as string) : (args[3] as string)) ?? '')
+        : null
       return db.cell_validators
         .filter(
           (v) =>
@@ -481,6 +483,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
           username: v.username,
           decided_ts: v.decided_ts,
           target_lang: v.target_lang ?? "",
+          lane_id: null,
         }))
     }
 
@@ -623,10 +626,11 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const fid = args[1] as string
       const hasSide = normalized.includes("AND side = ?")
       const inMatch = normalized.match(/AND cell_id IN \(([^)]*)\)/)
-      // AQU-538: optional lane filter — target rows only; source rows are
-      // always included. Bind order places it AFTER the cellIds list (matches
-      // the production query builder in cells-read-route.ts).
-      const hasLane = normalized.includes("AND (side = 'source' OR target_lang = ?)")
+      // AQU-538/AQU-1240: optional lane filter — target rows only; source rows
+      // are always included. Dual-read binds projectId, tag, tag after cellIds.
+      const hasLane =
+        normalized.includes("OR (lane_id IS NULL AND target_lang = ?)") ||
+        normalized.includes("AND (side = 'source' OR target_lang = ?)")
       const hasTimecodes = normalized.includes("start_ms") && normalized.includes("end_ms")
       // bind order: [pid, fid, side?, ...cellIds, lane?]
       let bindIdx = 2
@@ -639,7 +643,16 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
             return ids
           })()
         : null
-      const lane: string | null = hasLane ? (args[bindIdx++] as string) : null
+      let lane: string | null = null
+      if (hasLane) {
+        if (normalized.includes("OR (lane_id IS NULL AND target_lang = ?)")) {
+          bindIdx += 1 // projectId
+          lane = args[bindIdx++] as string
+          bindIdx += 1 // tag again
+        } else {
+          lane = args[bindIdx++] as string
+        }
+      }
       return db.cells
         .filter(
           (c) =>
@@ -1070,17 +1083,18 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
 
     // ── INSERT cell_validators (UPSERT — cell.validate, 0055) ──────────
     // AQU-538 bind order: project_id, file_id, cell_id, target_lang,
-    // event_id, username, decided_ts. Standing validation is per (cell, lane,
-    // user).
+    // event_id, username, decided_ts. AQU-1240 splice: after target_lang,
+    // laneIdResolveBinds (project_id, tag) then event_id/username/decided_ts.
     if (/^INSERT INTO cell_validators/.test(normalized)) {
+      const hasLaneId = normalized.includes('lane_id')
       const row: ValidatorRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
         target_lang: (args[3] as string) ?? "",
-        event_id: args[4] as string,
-        username: args[5] as string,
-        decided_ts: args[6] as number,
+        event_id: (hasLaneId ? args[6] : args[4]) as string,
+        username: (hasLaneId ? args[7] : args[5]) as string,
+        decided_ts: (hasLaneId ? args[8] : args[6]) as number,
       }
       const idx = db.cell_validators.findIndex(
         (v) =>

@@ -423,6 +423,17 @@ export interface EventPayloads {
     /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
     label?: string
     /**
+     * AQU-490: what this clip IS. Absent (the overwhelming majority) means a
+     * dub — somebody's translation of the line, the thing that gets recorded,
+     * counted and validated. `'source'` is the shared programme audio an
+     * import attaches, which sits SELECTED in the recording slot of every cell
+     * in a media file; without this the rule "every selected take must be
+     * validated" would hold those cells hostage to somebody validating
+     * untranslated source audio. Fill-only in the projection — an import
+     * decides it once and a later re-attach cannot change it.
+     */
+    role?: 'dub' | 'source'
+    /**
      * Non-destructive playback trim window into the clip, in ms — the clip's
      * BIRTH values only. The projection COALESCEs these, so an attach may SET a
      * window but can never clear one; changing or clearing a window afterwards
@@ -528,14 +539,24 @@ export interface EventPayloads {
   'cell.audio.remove': {
     audioId: string
   }
-  // AQU-508: reviewer approves the given clip (the cell's selected take). The
-  // audio-validated rollup counts a cell iff its selected, live clip is
-  // approved, so validating the active take marks the cell audio-validated.
+  // AQU-490 (was AQU-508): one reviewer's vote on ONE take. A cell counts as
+  // audio-validated when every SELECTED, live dub take on it has at least the
+  // project's required number of votes — so a line dubbed on two tracks needs
+  // both signed off, and re-recording drops the cell back until the new take
+  // earns its own votes. The threshold is applied when somebody reads, never
+  // stamped on the row, so changing it reprojects nothing.
   'cell.audio.validate': {
     audioId: string
   }
   'cell.audio.unvalidate': {
     audioId: string
+    /**
+     * AQU-490: whose vote to remove. Absent — and it always is, unless a
+     * maintainer is clearing up after somebody — means the caller's own. The
+     * maintainer floor for naming anyone else is enforced in route.ts, exactly
+     * as it is for the text-side `cell.unvalidate`.
+     */
+    targetUsername?: string
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────

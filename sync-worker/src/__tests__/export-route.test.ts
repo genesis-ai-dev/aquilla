@@ -208,7 +208,7 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
     const res = await handleExportSourceRequest(exportReq(await makeToken(600), "fr-CA"), env)
 
     expect(res?.status).toBe(200)
-    expect(cellBinds).toEqual([["p1", "f1", "fr-CA"]])
+    expect(cellBinds).toEqual([["p1", "f1", "p1", "fr-CA", "fr-CA"]])
   })
 
   it("emits header=0 when export has no translated verses (all fall back to source)", async () => {

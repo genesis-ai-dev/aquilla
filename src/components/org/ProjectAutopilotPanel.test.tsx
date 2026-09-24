@@ -436,7 +436,7 @@ describe("ProjectAutopilotPanel", () => {
     }))
     renderPanel()
     let panel = await screen.findByTestId("project-autopilot-panel")
-    let gate = within(panel).getByTestId("autopilot-start-gate")
+    const gate = within(panel).getByTestId("autopilot-start-gate")
     expect(within(gate).queryByText(/source and target languages/i)).not.toBeInTheDocument()
     expect(within(gate).getByRole("link", { name: "Open the translation brief" })).toBeInTheDocument()
 

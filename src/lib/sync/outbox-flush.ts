@@ -15,6 +15,7 @@ import {
   type OutboxOwnerScope,
   type OutboxRecord,
 } from "./outbox"
+import { sanitizeStoredEvents } from "./outbox-sanitize"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
@@ -165,6 +166,28 @@ function forbiddenEntriesFor(
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   if (records.length === 0) return []
+  // AQU-1368: ISOLATE A HEAD THE SERVER HAS ALREADY REFUSED.
+  //
+  // The /events INSERT is atomic, so one event the database will never accept
+  // takes its whole batch down with it — including brand-new, perfectly valid
+  // audio events that happen to be queued behind it. That is what turned a
+  // single 2026-08-15 row into five weeks of "audio can't upload" for the
+  // partner on AQU-1368: the poison sat at the head of every batch and the
+  // valid events never got a request of their own.
+  //
+  // `attempts > 0` is the right trigger because of who bumps it. Transient
+  // failures — offline, 5xx, a stale token, a timeout — go through
+  // `stampOutboxError`, which deliberately does NOT burn the budget. Only a
+  // deterministic refusal (a non-401 4xx, a malformed response, or a
+  // server-rejected event inside a 200) reaches `markOutboxAttempt`. So a
+  // non-zero count means the server saw this record and would not take it,
+  // and batching it with anything else only spreads the damage.
+  //
+  // Posting it alone costs throughput on the failure path and buys the
+  // queue's liveness: the record burns its own retries to the cap, flips to
+  // `failed`, and stops being peeked — after which the events behind it flush
+  // on their own merits.
+  if ((records[0].attempts ?? 0) > 0) return [records[0]]
   const fid = records[0].event.fileId
   // BLOCKER 2 fix: when the head record has no fileId (project-scoped comment.* event),
   // only include other no-fileId comment.* records from the same project in the batch.
@@ -422,7 +445,11 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     return { posted: 0, accepted: 0, networkError: false, authError: true, authStatus: mint.status, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const token = mint.token
-  const events: CqrsRawEvent[] = batch.map((r) => r.event)
+  // AQU-1368: repair what was stored before AQU-927's emit-time guard existed.
+  // A payload carrying `durationMs: 2403.5` is refused by the bigint column on
+  // every flush, forever; rounding it here lands the user's stranded audio
+  // instead of dead-lettering it. No-op for every event minted since that fix.
+  const events: CqrsRawEvent[] = sanitizeStoredEvents(batch.map((r) => r.event))
   const url = `${syncWorkerHttpOrigin()}/events`
   let res: Response
   try {

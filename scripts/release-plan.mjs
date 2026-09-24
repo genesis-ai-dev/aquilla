@@ -180,15 +180,28 @@ function unreleasedPrs() {
   return prs.reverse()
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+async function main() {
   const nowArg = process.argv.find((arg) => arg.startsWith("--now="))
   const now = nowArg ? nowArg.slice(6) : new Date().toISOString()
+  let prs = unreleasedPrs()
+  // Without a token this stays the git-only command: every non-docs/test PR
+  // reports walk: unknown, which holds, so cuts still happen but nothing
+  // deploys itself until the lookup can run.
+  const token = process.env.GITHUB_TOKEN
+  if (token) {
+    const { fillWalks } = await import("./release-plan-walk.mjs")
+    prs = await fillWalks(prs, { token })
+  }
   const plan = planRelease({
     openReleases: openReleaseBranches(),
-    prs: unreleasedPrs(),
+    prs,
     now,
     latestTagAt: latestTagAt(),
     usedSuffixesToday: usedSuffixesToday(now),
   })
   console.log(JSON.stringify(plan, null, 2))
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
 }

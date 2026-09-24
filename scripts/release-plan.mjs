@@ -8,6 +8,12 @@ import { pathToFileURL } from "node:url"
 export const BATCH_SIZE = 4
 export const MAX_WAIT_HOURS = 24
 
+// A release branch is release/YYYY/MM/DD, optionally with a same-day -NN suffix
+// for the Nth slice cut that date (NN starts at 01).
+export function isReleaseBranch(name) {
+  return /^release\/\d{4}\/\d{2}\/\d{2}(-\d{2})?$/.test(name)
+}
+
 const HIGH_RISK = [
   ["migration", /^db\/postgres\/(migrations|schema\.sql)/],
   ["sync", /^(sync-worker\/src\/|src\/lib\/sync\/|db\/shim\/)/],

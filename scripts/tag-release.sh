@@ -6,7 +6,7 @@
 set -euo pipefail
 
 branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "${GITHUB_REF_NAME:-}")"
-if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})$ ]]; then
+if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})(-[0-9]{2})?$ ]]; then
   echo "ABORT: tag-release requires a release/YYYY/MM/DD branch (currently on '$branch')." >&2
   exit 1
 fi

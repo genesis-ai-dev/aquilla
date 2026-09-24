@@ -28,6 +28,7 @@ import {
   applyPresenceUpdate,
   parseProjectDoClientMessage,
   PresenceDraftThrottle,
+  presenceFrameOwnerConnId,
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
   resolveConnId,
@@ -138,7 +139,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private locks = new Map<string, LockState>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
-  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcastToAll(frame))
+  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -383,7 +384,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
     this.sendTo(server, presenceSnapshot(this.presence))
-    this.broadcastToAll({ t: "presence.diff", user: stripPresenceDraft(joined) })
+    this.broadcast({ t: "presence.diff", user: stripPresenceDraft(joined) })
 
     server.addEventListener("message", (ev) => {
       const raw = typeof ev.data === "string" ? ev.data : ""
@@ -405,15 +406,30 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
   }
 
-  private broadcastToAll(msg: ProjectDoServerMessage): void {
+  private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {
     const payload = JSON.stringify(msg)
-    for (const ws of this.connections.keys()) {
+    for (const [ws, conn] of this.connections) {
+      if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
       try {
         ws.send(payload)
       } catch {
         /* swallow */
       }
     }
+  }
+
+  /**
+   * AQU-1162: broadcast, but never echo a presence frame back to the socket it
+   * describes. A typing client publishes presence roughly every 650ms and
+   * moves the cursor every ~120ms; each echo costs that same client a socket
+   * frame, a parse, a presence-store apply and a `ProjectWorkspace` shell pass
+   * — for a row every consumer then filters out as its own (`isSelfRow` in the
+   * presence store, the `currentUsername` check in `applyPresenceFrame`).
+   * Non-presence frames (locks, content, project events) are unaffected: the
+   * originator does act on those.
+   */
+  private broadcast(msg: ProjectDoServerMessage): void {
+    this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
   }
 
   // ── Inbound handling ───────────────────────────────────────────────────
@@ -432,7 +448,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       for (const m of result.emitTo) this.sendTo(conn.ws, m)
       return
     }
@@ -446,7 +462,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       return
     }
     if (msg.t === "presence.update") {
@@ -454,7 +470,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       this.presence = result.presence
       for (const m of result.emit) {
         if (m.t === "presence.draft") this.draftThrottle.push(m)
-        else this.broadcastToAll(m)
+        else this.broadcast(m)
       }
       return
     }
@@ -494,7 +510,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.locks = result.locks
     this.presence = result.presence
     this.draftThrottle.clear(conn.connId)
-    for (const m of result.emit) this.broadcastToAll(m)
+    for (const m of result.emit) this.broadcast(m)
     if (this.connections.size === 0) this.stopLeaseSweep()
   }
 
@@ -505,7 +521,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       this.sweepExpiredConnections(now)
     }, LEASE_SWEEP_INTERVAL_MS)
   }

@@ -440,6 +440,18 @@ function presenceDiff(user: PresenceState): ServerPresenceDiff {
   return { t: "presence.diff", user: stripPresenceDraft(user) }
 }
 
+/**
+ * AQU-1162: the `connId` a presence frame describes, or `undefined` for frames
+ * that aren't about one connection's presence. Callers use it to skip the
+ * socket the frame is about — a client can't act on its own presence (every
+ * consumer filters self rows back out), so echoing it is pure fan-out cost.
+ */
+export function presenceFrameOwnerConnId(msg: ProjectDoServerMessage): string | undefined {
+  if (msg.t === "presence.diff") return msg.user.connId
+  if (msg.t === "presence.draft") return msg.connId
+  return undefined
+}
+
 function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
   return {
     connId: cur.connId,

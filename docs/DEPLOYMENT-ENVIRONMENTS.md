@@ -8,7 +8,7 @@ profile or fall back from an unknown branch.
 
 | Deployment | Git branch | Wrangler profile | SPA | API host | SPA Worker | Identity Worker | Sync Worker | Neon branch | R2 snapshot bucket |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |
+| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
@@ -28,8 +28,8 @@ projection state lives only in Neon Postgres.
 | Production | `pnpm run deploy:aquilla` | `pnpm run verify:live:production` |
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
-Production and development deploy scripts refuse to run from any branch except
-`main` and `dev`, respectively. Every surface selects `production` or
+Production deploy scripts refuse to run from anything but a `release/YYYY/MM/DD`
+branch; development deploy scripts refuse anything but `dev`. Every surface selects `production` or
 `development` explicitly. The shared deployer uploads
 a version, validates its exact ID and bindings, promotes it, reapplies
 routes/triggers, and confirms the same ID owns 100% traffic before public
@@ -95,6 +95,23 @@ only as a `500 "OPENROUTER_API_KEY is not configured"` from each of those routes
 is what made the whole AI workflow unusable on `dev.aquilla.app` (AQU-762). Setting it
 on one environment does nothing for the other.
 
+## Cutting a release
+
+`dev` is the trunk and targets development. Production ships from dated release
+branches cut from `dev`; `main` is retired.
+
+1. Cut `release/YYYY/MM/DD` from `dev` (the cut date) and push it.
+2. QA tests the branch's preview.
+3. From a clean checkout of that branch, run `pnpm run deploy:aquilla`. After the
+   live checks pass, `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes
+   the tag. The date comes from the branch, NN starts at `00`, and redeploying an
+   already-tagged commit reuses its tag.
+4. Hotfix: cherry-pick onto the same release branch, push, and redeploy. It gets
+   the next NN.
+
+Prod lags `dev` by design, so migrations must be backward-compatible across one
+release (add first, remove in a later release).
+
 ## Deployment ownership
 
 Live Aquilla deployments require an explicit human/operator action. No push to
@@ -102,7 +119,7 @@ GitHub and no Cloudflare Git integration is authorized to deploy live traffic.
 The canonical full-environment entrypoints are the local commands above, run from
 a clean checkout whose HEAD exactly matches the corresponding remote branch:
 
-- `main` -> `production`
+- `release/YYYY/MM/DD` -> `production`
 - `dev` -> `development`
 
 The optional `.github/workflows/deploy-workers.yml` workflow is
@@ -111,7 +128,7 @@ identity, and sync path once GitHub-hosted runners are available, and resolves i
 through `scripts/resolve-deployment-target.sh`. Unsupported refs fail before any
 schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
-only `main`.
+only `release/*/*/*`.
 
 Cloudflare Workers Builds owns automatic compile-only pull-request previews through the
 dedicated `aquilla-web-preview` Worker. All six production/development Workers
@@ -129,7 +146,7 @@ not the full suites. QA tests the published preview; preview success does not
 certify automated test results.
 
 Every Workers Builds preview uses its branch's auth and sync code with shared
-development Hyperdrive/R2 storage, including builds of `main`. The web Worker's
+development Hyperdrive/R2 storage, including builds of release branches. The web Worker's
 single repository connection deploys all three using `wrangler preview`.
 Repository code converts slash-named branches into a stable, lowercase, hashed
 preview name. These previews never replace a live Worker. They are NOT a working
@@ -221,7 +238,7 @@ An environment change is one atomic contract change. Update and verify all of:
    that environment is deployed.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
 6. GitHub branch protection Cloudflare check contexts and the `production`
-   Environment branch policy (`main` only).
+   Environment branch policy (`release/*/*/*` only).
 7. This matrix and the Workers Builds runbook.
 8. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
 9. The live verifier for production and development before promotion.

@@ -172,6 +172,21 @@ describe("agent credits (APW is internal)", () => {
     ).toBe(2)
   })
 
+  it("does not double-count when the primary appears in both targetLanguage and targetLanes", () => {
+    // AQU-1240 slice 1: the complete registry lists the primary in targetLanes
+    // as well as targetLanguage. Billing must stay invoice-neutral via Set-dedupe.
+    expect(
+      countDistinctTargetLanes([
+        { targetLanguage: "French", targetLanes: ["French", "es"] },
+      ]),
+    ).toBe(2)
+    expect(
+      countDistinctTargetLanes([
+        { targetLanguage: "fr", targetLanes: ["FR", "es"] },
+      ]),
+    ).toBe(2)
+  })
+
   it("formats agent credits for people, never APW", () => {
     expect(formatAgentCredits(1300)).toBe("1,300")
   })

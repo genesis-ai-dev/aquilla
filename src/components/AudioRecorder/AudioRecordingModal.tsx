@@ -58,7 +58,9 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioSelect, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
+import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -240,6 +242,7 @@ function GroupedTakes({
             <TakesStrip
               chromeless
               projectId={project.id}
+              project={project}
               fileId={cell.fileId}
               cellId={cell.id}
               takes={group.takes}
@@ -1107,12 +1110,28 @@ export function AudioRecordingModal({
         })
         throw emitErr
       }
+      // AQU-490: a fresh recording validates itself, exactly as a direct human
+      // edit validates the cell (Sam's ruling — "the most directly understood
+      // by translators"). Decided HERE, on the recorder's own save path, and
+      // nowhere near emitCellAudioAttach: a denoise, the transcription's
+      // re-attach, a generated voice and an imported file all attach too, and
+      // none of them is a person saying "this is my take". At the default
+      // threshold of 1 this makes audio-validated track audio-recorded until a
+      // project raises the count or turns the audio self-validation switch
+      // off — the same trade text has always made.
+      const roleLevel = project.syncRole?.level ?? null
+      const autoValidate = shouldAutoValidateFreshRecording({
+        scopeCanValidate: audioValidationScope(project, { roleLevel, username }).canValidate,
+        allowSelfValidationAudio: project.allowSelfValidationAudio,
+        roleLevel,
+      })
+      const savedTakeId = `${result.audioId}.${result.ext}`
       // Optimistically surface the clip so the gutter mic flips to a play
       // button immediately. The bus poke below refetches the server projection,
       // but that races the outbox flush + projection and would otherwise leave
       // the icon stale until a manual reload.
       injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, {
-        audioId: `${result.audioId}.${result.ext}`,
+        audioId: savedTakeId,
         url: result.url,
         slot: targetSlot,
         mimeType: blob.type || null,
@@ -1125,8 +1144,27 @@ export function AudioRecordingModal({
         // trip) until the server projection lands and silently corrected it.
         trimStartMs: takeTrimWindow.trimStartMs ?? null,
         trimEndMs: takeTrimWindow.trimEndMs ?? null,
+        // The take's provenance, so the strip's control reads right before
+        // the projection comes back: a dub, recorded by me, and — when the
+        // rule says so — already carrying my vote.
+        role: "dub",
+        recordedBy: username,
+        validators: autoValidate ? [username] : [],
+        validatorCount: autoValidate ? 1 : 0,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
+      if (autoValidate) {
+        void emitCellAudioValidate({
+          projectId: project.id,
+          fileId: activeCell.fileId,
+          cellId: activeCell.id,
+          audioId: savedTakeId,
+          author: username,
+        }).catch((err) => {
+          // Non-blocking, as for text: the take itself already landed.
+          console.warn("[audio auto-validate] emit failed:", err)
+        })
+      }
       // THE PRE-ROLL'S OTHER HALF. Kept head audio that isn't repositioned
       // just plays everything late — the original take-shift bug in a new
       // hat — so the take is anchored preRollMs BEFORE its line: the sample

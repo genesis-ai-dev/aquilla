@@ -48,7 +48,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={["alice", "bob"]}
         onChange={vi.fn()}
       />,
@@ -65,7 +64,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={["alice", "bob", "carol", "dave"]}
         onChange={vi.fn()}
       />,
@@ -83,7 +81,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={vi.fn()}
       />,
@@ -111,7 +108,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,
@@ -135,7 +131,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,
@@ -158,7 +153,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,
@@ -180,7 +174,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,
@@ -204,7 +197,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,
@@ -239,7 +231,6 @@ describe("ValidationSettingsSection — named validators combobox", () => {
         projectId="p1"
         validationCount={2}
         validationCountAudio={2}
-        hasAnyAudioData={false}
         validationNamedUsers={[]}
         onChange={onChange}
       />,

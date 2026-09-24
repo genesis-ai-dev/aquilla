@@ -343,6 +343,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.syncFailedTooltip":
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
+    "audio.takesStrip.recordedByBadge": "{date} · {author}",
+    "audio.takesStrip.recordedByTooltip": "Recorded {datetime} by {author}",
+    "audio.takesStrip.generatedByTooltip": "Generated {datetime} by {author}",
     "audio.takesStrip.textDriftBadge": "Text changed",
     "audio.takesStrip.textDriftTooltip":
       "Recorded {date}, when this line read: “{text}”. The text has changed since — " +
@@ -1904,6 +1907,42 @@ export const audio = defineNamespace({
           "Label on the small red button shown on a take that failed to save to the " +
           "server; pressing it queues the save again. Very short — it sits inline on " +
           "a compact take row.",
+      },
+      "audio.takesStrip.recordedByBadge": {
+        description:
+          "Inline provenance stamp on a compact take row: the day the take was " +
+          "made and the person who made it, separated by a middle dot. Answers " +
+          "'when was this recorded, and by whom' at a glance while auditing a " +
+          "line's takes. The separator may be replaced with whatever punctuation " +
+          "reads naturally in the target language; keep it very short, as it " +
+          "shares one row with the take's name, length and action buttons and is " +
+          "truncated when the column is narrow.",
+        maxLength: 32,
+        placeholders: {
+          date: "Day the take was made, already formatted for the user's locale.",
+          author: "Name of the person who made the take, as recorded on the event log.",
+        },
+      },
+      "audio.takesStrip.recordedByTooltip": {
+        description:
+          "Hover title on that stamp, for a take a person RECORDED with a " +
+          "microphone. Gives the full date and time rather than just the day, " +
+          "since the badge beside it is abbreviated. Purely informational.",
+        placeholders: {
+          datetime: "Date AND time the take was recorded, already formatted for the user's locale.",
+          author: "Name of the person who recorded the take.",
+        },
+      },
+      "audio.takesStrip.generatedByTooltip": {
+        description:
+          "Hover title on that same stamp, for a take that was SYNTHESISED by a " +
+          "text-to-speech voice rather than spoken into a microphone. Same shape " +
+          "as audio.takesStrip.recordedByTooltip; the verb differs because the " +
+          "named person chose to generate the take, they did not perform it.",
+        placeholders: {
+          datetime: "Date AND time the take was generated, already formatted for the user's locale.",
+          author: "Name of the person who generated the take.",
+        },
       },
       "audio.takesStrip.textDriftBadge": {
         description:

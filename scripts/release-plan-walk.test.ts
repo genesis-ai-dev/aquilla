@@ -44,13 +44,26 @@ describe("normalizeVerdict", () => {
   })
 })
 
-function fakeGitHub({ associatedPrs = [], comments = [] } = {}) {
+interface AssociatedPr {
+  number: number
+  head: { sha: string }
+  merge_commit_sha: string
+}
+
+interface FakeComment {
+  body: string
+}
+
+function fakeGitHub({
+  associatedPrs = [],
+  comments = [],
+}: { associatedPrs?: AssociatedPr[]; comments?: FakeComment[] } = {}) {
   const calls: string[] = []
   const fetchImpl = async (url: string) => {
     calls.push(url)
     if (url.includes("/pulls")) return { ok: true, json: async () => associatedPrs }
     if (url.includes("/comments")) return { ok: true, json: async () => comments }
-    return { ok: false, status: 404 }
+    return { ok: false, status: 404, json: async () => null }
   }
   return { fetchImpl, calls }
 }

@@ -31,7 +31,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { planIsCreatorScoped, requiredRoleForChangeset } from "../lib/changeset-floor"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getAssignmentMinRoleForProject } from "../services/org-permissions"
-import { ROLE, type AuthUser, type Env } from "../types"
+import { type AuthUser, type Env } from "../types"
 import { buildChangeDetails } from "../lib/changeset-approval-changes"
 
 const changesetApprovals = new Hono<AuthHonoEnv>()

@@ -11,11 +11,9 @@ schema change is additive or non-blocking; the one hard-to-reverse step
   manually with `pnpm neon:apply:<env>` (NOT automatic on merge/deploy —
   `deploy-workers.yml` only runs `neon:status`, a drift *check*).
 - **Backfill** (`scripts/neon-backfill-lanes.ts`) is a **data** script, not a
-  migration. It inserts the `lanes` rows per project, fills `lane_id` on the
-  eight content tables, then writes `project_member_lane_roles` (one row per
-  person per lane they can already see). Idempotent, resumable, dry-run by
-  default. Runs *between* applying the additive migrations and deploying the
-  PR2 workers. The grant phase does not clobber a row that is already there.
+  migration. It inserts the `lanes` rows per project and fills `lane_id` on the
+  eight content tables. Idempotent, resumable, dry-run by default. Runs *between*
+  applying the additive migrations and enforcing anything.
 - **Verify** (`scripts/neon-verify-lanes.ts`) is read-only; it reports
   `nulls`/`orphans` per table and, with `--require-complete`, exits non-zero if
   any `lane_id` is still NULL.
@@ -60,25 +58,10 @@ it is NULL. Safe to sit here indefinitely.
 
 ## 2. Backfill dev
 
-Run this from the PR2 branch (`Luke-Lane-Updates-2`), after §1 and before the
-PR2 deploy. `dev` does not contain the grant phase until PR2 is merged. The
-script only needs the PR1 tables (`0091`, `0096`–`0102`) applied. It does not
-need `0104`–`0111`.
-
 ```
-pnpm neon:backfill:lanes:dev              # DRY RUN — lane plan and grant plan
-pnpm neon:backfill:lanes:dev --apply      # writes lanes, fills lane_id, inserts grants
+pnpm neon:backfill:lanes:dev              # DRY RUN — prints the lane plan
+pnpm neon:backfill:lanes:dev --apply      # writes lanes + fills lane_id
 ```
-
-Read the dry run before `--apply`. A `WARN` line is a lane scope that matched
-no lane or more than one. That scope is not granted. A member whose every
-scope was skipped would see no target lane once the read wall is on. Fix the
-scope or accept that before deploying PR2 workers. Members with no lane scope
-get one row per target lane that exists at backfill time. Maintainer and
-above, and platform admins, get no rows (their role already sees every lane).
-
-A grant stores `lanes.id`. The product shows `lanes.name`. One language string
-does not open two lanes. A re-run does not change a grant someone edited later.
 
 Big single project? Scope + bound it:
 
@@ -111,22 +94,12 @@ fix by finishing the backfill, then apply again.
   via a non-blocking validated CHECK so the lock window stays short. Each file
   fails and rolls back if that table still has a NULL.
 
-PR2's dev and prod wrangler blocks set `LANE_READ_WALL=1` on **both** the sync
-worker and the auth worker. `pnpm deploy:aquilla:dev:api` is what turns the
-read wall on. `neon:status` does not look at grant rows. Do not deploy those
-workers until §2 `--apply` has finished in this environment and every `WARN`
-line is either fixed or accepted. An empty grant table plus the flag hides
-every target lane from everyone below Maintainer.
-
-Local `wrangler dev` and e2e do not set the flag.
-
 ```
-# after PR2 is merged to dev, verify --require-complete passed, AND the grant
-# phase of §2 has been applied:
+# after PR2 is merged to dev, and verify --require-complete passed:
 pnpm neon:apply:dev           # 0103, then 0104..0111
 pnpm neon:status:dev          # clean
 pnpm neon:verify:lanes:dev --require-complete
-pnpm deploy:aquilla:dev:api   # this deploy turns the read wall on
+pnpm deploy:aquilla:dev:api
 ```
 
 ## 5. Prod
@@ -135,11 +108,10 @@ Repeat §1 → §4 against prod, in order, only after dev is green:
 
 ```
 pnpm neon:status:prod && pnpm neon:apply:prod         # first: 0096_lanes … 0102_fk only (PR1)
-pnpm neon:backfill:lanes:prod                         # dry run; read WARN lines
-pnpm neon:backfill:lanes:prod --apply                 # lanes, lane_id, and grants
+pnpm neon:backfill:lanes:prod --apply
 pnpm neon:verify:lanes:prod --require-complete        # must pass before PR2 apply
 pnpm neon:apply:prod                                  # then: 0103 + 0104..0111
-pnpm deploy:aquilla:... (prod equivalents)            # turns the read wall on
+pnpm deploy:aquilla:... (prod equivalents)
 ```
 
 ## 6. Rollback notes
@@ -148,9 +120,7 @@ pnpm deploy:aquilla:... (prod equivalents)            # turns the read wall on
   needed. Dual-read tolerates NULL `lane_id`.
 - `VALIDATE CONSTRAINT` (0103): to undo, `ALTER TABLE t VALIDATE`→ there is no
   "invalidate"; drop+re-add `NOT VALID` if ever required (not expected).
-- Backfill: additive only (`lane_id IS NULL` guarded; grants use
-  `ON CONFLICT DO NOTHING`). Re-running is safe and does not edit a grant
-  that is already present.
+- Backfill: additive only (`lane_id IS NULL` guarded); re-running is safe.
 - The hard-to-reverse step is `SET NOT NULL` (`0104`–`0111`). It is gated:
   the migration fails if any `lane_id` is still NULL, and it must not be
   applied until `--require-complete` is green.
@@ -158,7 +128,13 @@ pnpm deploy:aquilla:... (prod equivalents)            # turns the read wall on
 ## 7. What is NOT in this rollout
 
 - **AQU-730 write wall** (the allow→deny flip on `enforceScopes`): still last.
-  The read wall turns on with the PR2 worker deploy, and only after §2 has
-  written grants. New lanes created after the backfill do not auto-grant.
+  The grant substrate ships in PR1. The **read** wall is now on this branch
+  but dark. Set `LANE_READ_WALL=1` on the sync worker and the auth worker
+  only after `project_member_lane_roles` is backfilled in that environment.
+  Until then every member still sees every lane. Turning it on against an
+  empty grant table hides every target lane from everyone below Maintainer.
+- **Grant backfill** is not in this branch. It has to run before the flag.
+  A grant row stores `lanes.id`. The product shows `lanes.name`, which may
+  be the same text as the language. One row is one lane. A language match
+  does not grant a second lane. New lanes after the backfill do not auto-grant.
 - **Default-lane elimination** (`''` → tag) and rename/BLANK UX: later slices.
-  Lane names stay whatever the lane backfill already wrote.

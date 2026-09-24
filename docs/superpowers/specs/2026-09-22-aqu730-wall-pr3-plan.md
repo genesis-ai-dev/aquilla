@@ -1,14 +1,9 @@
 # AQU-730 read/write wall — PR3 implementation plan (fast-follow)
 
-**Status (2026-09-23, later):** Slice A (grant backfill) is phase 2 of
-`scripts/neon-backfill-lanes.ts` on `Luke-Lane-Updates-2`. Slice B and Slice C
-are wired. Dev and prod wrangler set `LANE_READ_WALL=1` on the sync worker and
-the auth worker. Deploy those workers only after the backfill `--apply` has
-run in that environment. Local and e2e leave the flag unset. Slice D
-(write-wall deny) is still not done.
-
-The notes under "Current state" are the pre-wiring snapshot. Routes call the
-wall now, and `project_member_lane_roles.lane` stores `lanes.id`.
+**Status (2026-09-23):** the read wall (Slice B) and the settings metadata
+filter (Slice C) are on `Luke-Lane-Updates-2`, behind `LANE_READ_WALL`.
+The flag is off. Slice A (grant backfill) and Slice D (write-wall deny flip)
+are not done — do not turn the flag on until Slice A has run.
 
 PR3 wires the AQU-730 wall that already ships **dormant** in PR1 (grant table
 `0091`, `laneGrants` token mint, `resolveVisibleLanes` authority + `LaneScopedRead`

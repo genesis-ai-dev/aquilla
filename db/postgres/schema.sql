@@ -1167,9 +1167,7 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
 -- of the scopes model above); role >= 600 cascades to every lane. Effective
 -- role in a lane = max(base project role, grant role_level) — grants only
 -- elevate, never demote. kind='file' scopes stay in project_member_scopes.
--- Grant rows are written by scripts/neon-backfill-lanes.ts (phase 2). The read
--- wall is LANE_READ_WALL on the deployed workers, after that backfill. The
--- write wall (enforceScopes allow→deny) is still off.
+-- Backfill/enforcement land later and MUST follow AQU-1240 (no default lane).
 CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     project_id TEXT    NOT NULL,
     user_id    BIGINT  NOT NULL,

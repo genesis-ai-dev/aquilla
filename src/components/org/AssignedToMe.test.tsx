@@ -37,8 +37,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: vi.fn(async () => [
-    { id: "pa", name: "John" },
-    { id: "pb", name: "Mark" },
+    { id: "pa", name: "John", targetLanguage: "Bambara" },
+    { id: "pb", name: "Mark", targetLanguage: "French" },
   ]),
 }))
 vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
@@ -96,10 +96,10 @@ describe("AssignedToMe", () => {
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
-  // AQU-538 (§3.5): a lane-pinned assignment shows a lane chip and deep-links
-  // into the project at that lane (?lane=<tag>); the default lane ('') does not.
+  // AQU-729 / AQU-538 (§3.5): every assignment shows its lane; named lanes use
+  // the tag, the default lane ('') uses the project's target language label.
   // AQU-690: when fileId is present, open that file in the editor.
-  it("renders a lane chip and navigates with ?lane= for a lane-pinned assignment", async () => {
+  it("renders lane chips and navigates with ?lane= for a lane-pinned assignment", async () => {
     mockGetMy.mockResolvedValue([
       { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
       { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
@@ -107,8 +107,8 @@ describe("AssignedToMe", () => {
     renderInbox()
 
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
-    // The lane chip renders the tag for the pinned lane only.
     expect(screen.getByText("es")).toBeInTheDocument()
+    expect(screen.getByText("French")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("John scope"))
     expect(navigate).toHaveBeenCalledWith("/project/pa/editor/file/f1?lane=es")

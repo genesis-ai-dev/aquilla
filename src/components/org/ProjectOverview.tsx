@@ -2299,6 +2299,7 @@ export function ProjectOverview() {
                         files={project?.files ?? []}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
+                        targetLang={selectedLaneTag ?? ""}
                         roleLevel={project?.syncRole?.level ?? 0}
                         allowSelfAssignment={orgSettings.allowSelfAssignment}
                         assignmentMinRole={orgSettings.assignmentMinRole}

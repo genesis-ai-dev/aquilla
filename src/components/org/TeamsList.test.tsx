@@ -18,7 +18,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ sess
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
 const listTeamsPage = vi.fn()

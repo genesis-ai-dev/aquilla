@@ -1,6 +1,9 @@
 export const BATCH_SIZE: number
 export const MAX_WAIT_HOURS: number
 
+/** True for `release/YYYY/MM/DD`, optionally with a same-day `-NN` slice suffix. */
+export function isReleaseBranch(name: string): boolean
+
 export type RiskTier = "low" | "high"
 
 /** Path-based risk classification of one PR's changed files. */

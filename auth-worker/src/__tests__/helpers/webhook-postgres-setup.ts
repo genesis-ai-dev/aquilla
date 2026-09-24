@@ -3,6 +3,7 @@ import { URL } from "node:url"
 import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { makePostgres } from "../../../../db/shim/postgres"
+import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
 import { env, pg } from "./pg-test-env"
 
 // Never reset aquilla_dev or the primary agent's test database.
@@ -22,6 +23,7 @@ beforeAll(async () => {
   created = true
   await db.exec(readFileSync(new URL(
     "../../../../db/postgres/schema.sql", import.meta.url), "utf8"))
+  await installTestLaneFill((sql) => db.exec(sql))
   env.AQUILLA_PG = db
 })
 

@@ -16,6 +16,7 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { ensureProjectLaneStmts } from "./lanes"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -119,6 +120,14 @@ export async function createProjectShared(
     )
   }
 
+  // AQU-1240 slice 6: every new project gets a source lane + a default target
+  // lane in the same batch as the project row, so the first cell write can
+  // resolve lane_id. Languages from settingsSeed name the rows; otherwise they
+  // land as placeholders and a later settings PATCH promotes the names.
+  stmts.push(
+    ...ensureProjectLaneStmts(db, input.projectId, { settings: seed }),
+  )
+
   if (stmts.length > 1) {
     const [projectResult] = await db.batch(stmts)
     return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
@@ -182,12 +191,25 @@ export function normalizeSettings(
   if (next.validationCount != null) {
     next.validationCount = validationThreshold(next)
   }
+  // AQU-490: the audio threshold gets the same treatment, and needs it more.
+  // It has been a writable settings key since AQU-508 with nothing clamping
+  // it, so a hand-written or old client value reaches the blob verbatim — and
+  // the histogram it is compared against only has buckets up to 15, so an
+  // unclamped 999 would make every recording permanently unvalidated with no
+  // way to see why.
+  if (next.validationCountAudio != null) {
+    next.validationCountAudio = clampThreshold(next.validationCountAudio)
+  }
   return next
 }
 
-function validationThreshold(settings: Record<string, unknown>): number {
-  const value = Math.floor(Number(settings.validationCount))
+function clampThreshold(raw: unknown): number {
+  const value = Math.floor(Number(raw))
   return Number.isFinite(value) ? Math.min(15, Math.max(1, value)) : 1
+}
+
+function validationThreshold(settings: Record<string, unknown>): number {
+  return clampThreshold(settings.validationCount)
 }
 
 function validationProjectionStmts(
@@ -376,6 +398,9 @@ export async function updateProjectSettingsShared(
   const oldThreshold = validationThreshold(current.settings)
   const newThreshold = validationThreshold(normalizedSettings)
   const thresholdChanged = oldThreshold !== newThreshold
+  const laneStmts = ensureProjectLaneStmts(db, input.projectId, {
+    settings: normalizedSettings,
+  })
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a
   // racing writer can't sneak past us.
@@ -393,6 +418,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
+      stmts.push(...laneStmts)
       await db.batch(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
@@ -423,6 +449,7 @@ export async function updateProjectSettingsShared(
         db, input.projectId, newThreshold, newVersion, newSettingsJson,
       ))
     }
+    stmts.push(...laneStmts)
     // H3: catch DB errors on the version-guarded UPDATE (e.g. a projection
     // statement failing) and return the discriminated `error` result rather than
     // letting the exception propagate uncaught. The caller (auth-worker route /

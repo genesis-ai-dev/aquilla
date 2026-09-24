@@ -100,6 +100,30 @@ describe('0095 derives the book rows an old projection never wrote', () => {
 
     await t.pg.exec(MIGRATION)
 
+    // AQU-490: the two audio histograms are deliberately NOT part of this
+    // parity claim, and cannot be. 0096 adds those columns and runs AFTER this
+    // migration, so the statement below has no such columns to select when it
+    // actually executes; they take their '{}' default and the progress
+    // backfill computes them, which is the discipline 0096's header states —
+    // an aggregate the projection already knows how to derive never gets a
+    // second, hand-written definition in SQL.
+    const derivable = (row: Row) => {
+      const { audio_validator_histogram: _a, structural_audio_validator_histogram: _s, ...rest } = row
+      return rest
+    }
+    const derived = await bookRows(t)
+    expect(byKey(derived.map(derivable))).toEqual(byKey(projected.map(derivable)))
+
+    // And the part that is left undone is left undone honestly: empty, not
+    // wrong. A stale non-empty histogram here would read as "nobody has
+    // validated any of this" on a book that is fully signed off.
+    for (const row of derived) {
+      expect(row.audio_validator_histogram).toEqual({})
+      expect(row.structural_audio_validator_histogram).toEqual({})
+    }
+
+    // The backfill closes the gap: one recompute and the rows match in full.
+    await t.db.batch(fullProgressRecomputeStmts(t.db, PROJECT, 'bible', 500))
     expect(byKey(await bookRows(t))).toEqual(byKey(projected))
   })
 

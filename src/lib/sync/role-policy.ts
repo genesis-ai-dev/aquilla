@@ -72,6 +72,16 @@ const REQUIRED_ROLE: Record<string, number> = {
   // line a recording belongs to, for everyone.
   "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
+  // AQU-490: REVIEWER, unlike every audio kind above it. Recording a take is
+  // translator work; signing one off is review work, so these two sit with
+  // cell.validate rather than with their audio neighbours.
+  //
+  // Listing them is not cosmetic: `canPerform` FAILS OPEN on a kind it does
+  // not know, so without these a commenter's vote would sail into the outbox
+  // to be 403'd by the server — the control muted for nobody and the write
+  // rejected for everyone below the floor.
+  "cell.audio.validate": ROLE.REVIEWER,
+  "cell.audio.unvalidate": ROLE.REVIEWER,
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,

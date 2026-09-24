@@ -10,14 +10,16 @@
 // a backfill script untouched. The migration commands keep their fixed shape:
 // `neon-migrate` takes the command word and nothing else.
 
-export type NeonTargetCommand = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity"
+export type NeonTargetCommand = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity" | "backfill-lanes"
 
 export function scriptFor(command: NeonTargetCommand): string {
   return command === "backfill-progress"
     ? "scripts/neon-backfill-progress.ts"
     : command === "backfill-activity"
       ? "scripts/neon-backfill-activity.ts"
-      : "scripts/neon-migrate.ts"
+      : command === "backfill-lanes"
+        ? "scripts/neon-backfill-lanes.ts"
+        : "scripts/neon-migrate.ts"
 }
 
 /**

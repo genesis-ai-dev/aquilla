@@ -660,6 +660,17 @@ export function AssignModal({
               </FieldDescription>
             </Field>
           )}
+          {/* AQU-581: a lane delegate scoped to one language of a multi-language
+              project has nothing to choose, but still needs to see which
+              language the work lands in — hiding the picker hid that too. */}
+          {laneItems.length === 1 && (
+            <Field>
+              <FieldLabel>{t("dialog.assign.laneLabel")}</FieldLabel>
+              <p data-testid="assign-modal-lane-fixed" className="text-sm">
+                {laneItems[0].label}
+              </p>
+            </Field>
+          )}
 
           {scopeKind === "books" && (
             <Field>

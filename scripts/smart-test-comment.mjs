@@ -84,7 +84,7 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
         lines.push(UNAVAILABLE, "", NOT_A_FINDING, "", unqualified.length > 0
           ? `The oracle self-test did not pass (${unqualified.length} of ${selfTests.length}: ${unqualified.map(escape).join("; ")}), so every journey verdict in this run is unqualified.`
           : `No journey reached a verdict (0 of ${suite.planned.length} planned).`,
-          "", "Per-journey rows are withheld deliberately: an unqualified run's rows read like product findings. This needs whoever owns the runner, not the author of this pull request.")
+          "", "Per-journey rows are withheld deliberately: an unqualified run's rows read like product findings. Start with the runner and the stack it builds, not with this pull request's diff.")
       } else {
         lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
           "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,

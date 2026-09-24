@@ -36,10 +36,6 @@ import {
   isCellFieldKind,
   validateCellFieldCommand,
   type CellFieldCommand,
-  type SetSourceCommand,
-  type SetTimingCommand,
-  type SetTrackOverrideCommand,
-  type SetTranscriptionCommand,
 } from './commands-cell-fields'
 import {
   MEMBERSHIP_FLOOR,

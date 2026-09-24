@@ -5,8 +5,6 @@
 import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"
 
-export const BATCH_SIZE = 7
-export const MAX_WAIT_HOURS = 24
 export const HOLD_NUDGE_HOURS = 4
 
 // A release branch is release/YYYY/MM/DD, optionally with a same-day -NN
@@ -79,7 +77,15 @@ function cutSlice({ base, slice, reason, hold, now, usedSuffixesToday }) {
 
 // prs must already be sorted oldest merged first. Each PR needs number, sha,
 // mergedAt, areas, and walk (see classifyFiles and the walk lookup).
-export function planRelease({ openReleases, prs, now, latestTagAt = null, usedSuffixesToday = [] }) {
+//
+// One release is in flight at a time. The moment it closes (tagged or
+// deleted), the next slice cuts immediately at whatever's ready in dev —
+// there's no ceiling and no wait timer. Waiting for a ceiling or a clock
+// only means a hotfix cherry-picked onto the closed branch has to be
+// re-cherry-picked onto every slice cut before dev catches up; cutting at
+// dev's current head the instant the line is free means dev already carries
+// the fix, so the next slice just picks it up.
+export function planRelease({ openReleases, prs, now, usedSuffixesToday = [] }) {
   const base = { openReleases, prCount: prs.length }
   if (openReleases.length) {
     return { ...base, cut: false, hold: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [] }
@@ -91,7 +97,7 @@ export function planRelease({ openReleases, prs, now, latestTagAt = null, usedSu
 
   // The oldest waiting PR itself holds: cut it alone, immediately. Everything
   // behind it has to wait for production order, so the human gate has to
-  // appear at once, not after the ceiling or the 24-hour timer.
+  // appear at once.
   if (oldest.holds) {
     return cutSlice({ base, slice: [oldest], reason: "oldest unreleased PR holds", hold: true, now, usedSuffixesToday })
   }
@@ -100,36 +106,9 @@ export function planRelease({ openReleases, prs, now, latestTagAt = null, usedSu
   for (const pr of decorated) {
     if (pr.holds) break
     run.push(pr)
-    if (run.length >= BATCH_SIZE) break
   }
 
-  // A holding PR sits right behind a non-empty run: ship the ready run now.
-  // This slice cuts immediately — it does not wait on the ceiling, the
-  // 24-hour timer, or draining, since those exist for a slice still filling
-  // its queue, not one closed early by a hold behind it.
-  const nextAfterRun = decorated[run.length]
-  if (nextAfterRun?.holds) {
-    return cutSlice({ base, slice: run, reason: `${run.length} ready PR(s), next PR holds`, hold: false, now, usedSuffixesToday })
-  }
-
-  if (run.length >= BATCH_SIZE) {
-    return cutSlice({ base, slice: run, reason: `${run.length} unreleased PRs`, hold: false, now, usedSuffixesToday })
-  }
-
-  const oldestMergedAt = Date.parse(oldest.mergedAt)
-  const waitedHours = (Date.parse(now) - oldestMergedAt) / 3_600_000
-  if (waitedHours >= MAX_WAIT_HOURS) {
-    return cutSlice({ base, slice: run, reason: `oldest unreleased PR waited ${Math.floor(waitedHours)}h`, hold: false, now, usedSuffixesToday })
-  }
-
-  // Draining: a production tag landed after the oldest unreleased PR merged.
-  // The usual cause is the previous slice just deployed and the rest of the
-  // queue should follow, without waiting out the ceiling or the timer again.
-  if (latestTagAt && Date.parse(latestTagAt) > oldestMergedAt) {
-    return cutSlice({ base, slice: run, reason: `draining, tagged ${latestTagAt}`, hold: false, now, usedSuffixesToday })
-  }
-
-  return { ...base, cut: false, hold: false, reason: `${run.length}/${BATCH_SIZE} PRs, oldest waited ${Math.floor(waitedHours)}h`, prs: [] }
+  return cutSlice({ base, slice: run, reason: `${run.length} ready PR(s), no release in flight`, hold: false, now, usedSuffixesToday })
 }
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim()
@@ -152,11 +131,6 @@ function usedSuffixesToday(now) {
   return releaseRefs()
     .filter((branch) => branch.startsWith(`${prefix}-`))
     .map((branch) => branch.slice(prefix.length + 1))
-}
-
-function latestTagAt() {
-  const tags = lines(git("tag", "--list", "20*", "--sort=-creatordate", "--format=%(creatordate:iso-strict)"))
-  return tags[0] ?? null
 }
 
 function unreleasedPrs() {
@@ -187,7 +161,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     openReleases: openReleaseBranches(),
     prs: unreleasedPrs(),
     now,
-    latestTagAt: latestTagAt(),
     usedSuffixesToday: usedSuffixesToday(now),
   })
   console.log(JSON.stringify(plan, null, 2))

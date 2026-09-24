@@ -43,7 +43,7 @@ API or the DOM state directly) so the next walk is conclusive. Do not hand the
 item to a human to "just look at it". Every inconclusive result that reaches
 QA is re-checking we chose not to automate.
 
-## 2. Cutting a release: small slices, one in flight
+## 2. Cutting a release: one in flight, no ceiling
 
 The release bot runs on a schedule (a 15-minute poll, plus once right after
 every deploy so a finished slice doesn't sit idle) and does only this:
@@ -53,8 +53,7 @@ every deploy so a finished slice doesn't sit idle) and does only this:
    `reason`, `branch`, `sha`, `areas`, and the PRs in the slice. Do not
    second-guess it; the rules are in code on purpose.
 3. If `cut` is false, stop. Post nothing, except a once-only warning for a
-   held branch with no tag after 4 hours, or a queue behind an in-flight
-   release that has grown past 7.
+   held branch with no tag after 4 hours.
 4. If `cut` is true, create the named `branch` at the named `sha` — not the
    tip of `dev` — push it, and post the release notes below where QA watches.
 5. If `hold` is false, run `pnpm run deploy:aquilla` from a clean checkout of
@@ -67,9 +66,12 @@ The plan's rules:
   waiting for QA or deploy; no new cut happens until it ships or is deleted.
   New merges roll into the next release instead of piling onto this one. The
   release branch is the freeze; `dev` keeps moving.
-- **Small slices.** Cut at 7 unreleased PRs, when the oldest has waited 24
-  hours, or when the queue is draining (a tag just landed and more PRs are
-  waiting). Small slices make each QA pass short and each rollback cheap.
+- **No queue, no ceiling.** The instant the in-flight release closes, the
+  next slice cuts at whatever's ready in `dev` right then — however many PRs
+  that is. Waiting for a fixed count or a clock only means a hotfix
+  cherry-picked onto the closed branch has to be re-cherry-picked onto every
+  slice cut before `dev` catches up; cutting immediately means `dev` already
+  carries the fix.
 - **A PR holds** when it touches a migration or the deploy machinery itself
   (see `HOLDING_AREAS` in `scripts/release-plan.mjs`), or when its walk is
   anything other than `PASS` or `none`. The oldest waiting PR holding cuts it

@@ -39,6 +39,8 @@ function AuthDialogBody({
 }) {
   const t = useT()
   const [mode, setMode] = useState<AuthMode>("login")
+  // AQU-1345: the identifier sign-up refused, carried into the sign-in form.
+  const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
   const titles: Record<AuthMode, string> = {
     login: isAdditional ? t("nav.account.addTitle") : t("nav.account.loginTitle"),
     signup: t("nav.account.signupTitle"),
@@ -53,6 +55,7 @@ function AuthDialogBody({
             onSuccess={onDone}
             onForgotPassword={() => setMode("forgot")}
             returnTo={returnTo}
+            initialUsername={loginPrefill}
           />
           <p className="text-center text-sm text-muted-foreground">
             {t("nav.account.newToFrontier")}{" "}
@@ -68,7 +71,13 @@ function AuthDialogBody({
       )}
       {mode === "signup" && (
         <div className="space-y-4">
-          <FrontierSignupForm onSuccess={onDone} />
+          <FrontierSignupForm
+            onSuccess={onDone}
+            onSwitchToLogin={(identifier) => {
+              setLoginPrefill(identifier)
+              setMode("login")
+            }}
+          />
           <p className="text-center text-sm text-muted-foreground">
             {t("auth.join.alreadyHaveAccount")}{" "}
             <button

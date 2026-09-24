@@ -60,6 +60,8 @@ export function JoinPage() {
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
+  // AQU-1345: the identifier sign-up refused, carried into the sign-in form.
+  const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
   const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
 
   // Fetch invite preview (public). Try the multi-project endpoint first — it
@@ -350,6 +352,7 @@ export function JoinPage() {
                     <FrontierLoginForm
                       onSuccess={() => {}}
                       onForgotPassword={() => setAuthMode("forgot")}
+                      initialUsername={loginPrefill}
                     />
                     <p className="text-center text-xs text-muted-foreground">
                       {t("auth.login.newHerePrefix")}{" "}
@@ -376,7 +379,14 @@ export function JoinPage() {
                           : t("auth.join.emailUnboundNote")}
                       </p>
                     )}
-                    <FrontierSignupForm onSuccess={() => {}} initialEmail={boundEmail} />
+                    <FrontierSignupForm
+                      onSuccess={() => {}}
+                      initialEmail={boundEmail}
+                      onSwitchToLogin={(identifier) => {
+                        setLoginPrefill(identifier)
+                        setAuthMode("login")
+                      }}
+                    />
                     <p className="text-center text-xs text-muted-foreground">
                       {t("auth.join.alreadyHaveAccount")}{" "}
                       <button

@@ -39,6 +39,9 @@ export function SignInStep({
   // Default new visitors to signup; the loop's "joiner" path is rare here
   // (joiners arrive via invite links, not the onboarding wizard).
   const [mode, setMode] = useState<Mode>("signup")
+  // AQU-1345: carried over when sign-up refuses an identity that already
+  // exists, so the sign-in form opens with that identifier already filled in.
+  const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
 
   if (loading) {
     return <div className="flex min-h-40 items-center justify-center"><Spinner /></div>
@@ -95,12 +98,19 @@ export function SignInStep({
       </div>
 
       {mode === "signup" && (
-        <FrontierSignupForm onSuccess={onSignupComplete ?? (() => onNext())} />
+        <FrontierSignupForm
+          onSuccess={onSignupComplete ?? (() => onNext())}
+          onSwitchToLogin={(identifier) => {
+            setLoginPrefill(identifier)
+            setMode("login")
+          }}
+        />
       )}
       {mode === "login" && (
         <FrontierLoginForm
           onSuccess={onLoginComplete ?? onNext}
           onForgotPassword={() => setMode("forgot")}
+          initialUsername={loginPrefill}
         />
       )}
       {mode === "forgot" && (

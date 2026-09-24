@@ -68,6 +68,8 @@ export const auth = defineNamespace({
     "auth.signup.checklistNotContainsEmail": "Does not contain your email",
     "auth.signup.submitCreating": "Creating account…",
     "auth.signup.submitDefault": "Create account",
+    "auth.signup.identityTaken":
+      "An account with this username or email already exists. If you already use Codex, sign in with those credentials — your account and projects come across automatically.",
 
     // --- Reset password (/reset-password) ----------------------------------
     "auth.resetPassword.title": "Reset your password",
@@ -342,6 +344,18 @@ export const auth = defineNamespace({
           "naming the act of registering a new account. Distinct from " +
           "auth.login.createAccountLink, which is the link that merely opens this " +
           "form from the sign-in page; this one actually creates the account.",
+      },
+      "auth.signup.identityTaken": {
+        description:
+          "Form-level message shown when account creation is refused because the " +
+          "username or email is already spoken for (AQU-1345). Deliberately says " +
+          "the SAME thing whether the identity already exists in this app or only " +
+          "in Codex, the companion product whose accounts are migrated on first " +
+          "sign-in — the sign-up form must not become a way to tell which system " +
+          "owns a name. Not an error to correct so much as a redirection: the way " +
+          "forward is to sign in instead, which is what the companion " +
+          "auth.login.submitDefault button beneath it does. 'Codex' is a product name " +
+          "— never translate it.",
       },
       "auth.signup.failedWithDetail": {
         description:

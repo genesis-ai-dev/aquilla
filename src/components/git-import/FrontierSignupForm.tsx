@@ -133,24 +133,49 @@ interface FrontierSignupFormProps {
   onSuccess: (session: FrontierSession) => void | Promise<void>
   /** Prefills invite-bound signup forms without overriding user edits. */
   initialEmail?: string | null
+  /**
+   * AQU-1345: leave for the sign-in form carrying the identifier that was
+   * refused. Present only on surfaces that actually host both forms; where it
+   * is absent the redirection copy still renders, just without the shortcut.
+   */
+  onSwitchToLogin?: (identifier: string) => void
 }
 
-export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFormProps) {
+export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin }: FrontierSignupFormProps) {
   const { register } = useFrontierSession()
   const t = useT()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const emailEditedRef = useRef(false)
+  /**
+   * AQU-1345: the identifier a 409 was refused for, or null when the last
+   * submit failed some other way. Held separately from `submitError` because
+   * this is not a field to correct — it is a different route through the
+   * product, and it renders as copy plus an action rather than as a field error.
+   */
+  const [takenIdentifier, setTakenIdentifier] = useState<string | null>(null)
 
   const form = useForm({
     defaultValues: { username: "", email: initialEmail ?? "", password: "" },
     validators: { onSubmit: buildSignupSchema(t) },
     onSubmit: async ({ value }) => {
       clearSubmitError()
+      setTakenIdentifier(null)
       try {
         const session = await register(value.username.trim(), value.email.trim(), value.password)
         await onSuccess(session)
       } catch (err) {
+        // A 409 from /register is only ever "this identity is taken" — the
+        // worker collapses the Neon-duplicate and the legacy-Codex-reservation
+        // branches onto one byte-identical body precisely so neither the client
+        // nor an attacker can tell them apart (auth-worker/src/routes/auth.ts).
+        // So branch on the STATUS, never on the English detail text: the copy
+        // must be word-for-word the same either way, and it has to stay right
+        // when the surrounding UI is running in another language.
+        if (err instanceof FrontierAuthError && err.status === 409) {
+          setTakenIdentifier(value.username.trim() || value.email.trim())
+          return
+        }
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.signup.failedGeneric"))
       }
     },
@@ -264,6 +289,25 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
         />
       </FieldGroup>
       {submitError && <FieldError>{submitError}</FieldError>}
+      {takenIdentifier !== null && (
+        <div
+          role="alert"
+          data-testid="signup-identity-taken"
+          className="flex flex-col items-start gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm"
+        >
+          <p>{t("auth.signup.identityTaken")}</p>
+          {onSwitchToLogin && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onSwitchToLogin(takenIdentifier)}
+            >
+              {t("auth.login.submitDefault")}
+            </Button>
+          )}
+        </div>
+      )}
       <Button type="submit" form="signup-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
         {form.state.isSubmitting ? t("auth.signup.submitCreating") : t("auth.signup.submitDefault")}

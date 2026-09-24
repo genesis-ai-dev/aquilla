@@ -164,7 +164,13 @@ UI chrome that used to be one smoke file per click is covered under
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
-- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
+- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
+  copy with word-for-word identical wording whichever datastore reserved the identity,
+  and the Sign in action carries the typed identifier into the login field
+  (`FrontierSignupForm.identityTaken.test.tsx`, `FrontierLoginForm.prefill.test.tsx`).
+  The migration itself on that subsequent login is unchanged by that work and stays
+  covered where it already was.
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)

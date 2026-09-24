@@ -37,6 +37,7 @@
 // to this project AND org, live project role >= VIEWER. A credential scoped
 // to another project gets `scope_denied` 403.
 
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { handleHealthRollupRequest } from "../events/health-rollup-route"
 import { handleProgressReadRequest, type FileProgressResponse } from "../events/progress-read-route"
 import { handleConceptsReadRequest } from "../events/concepts-read-route"
@@ -322,12 +323,14 @@ async function loadScanCells(
         "FROM cells s " +
         "LEFT JOIN cells t " +
         "  ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         `WHERE s.project_id = ? AND s.side = 'source' AND s.file_id IN (${placeholders}) ` +
         "ORDER BY s.file_id, s.cell_id " +
         "LIMIT ?",
     )
-    .bind(lane, projectId, ...fileIds, MAX_SCAN_CELLS)
+    .bind(...targetLaneDualReadBinds(projectId, lane), projectId, ...fileIds, MAX_SCAN_CELLS)
     .all<ScanCellRow>()
 
   return (res.results ?? []).map((row) => ({

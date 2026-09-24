@@ -36,7 +36,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|verify-lanes>")
   process.exit(1)
 }
 
@@ -48,7 +48,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "verify-lanes") return value
   usage()
 }
 
@@ -225,8 +225,9 @@ async function main() {
   const command = parseCommand(process.argv[3])
   const env = await resolvePgEnv(target)
 
-  // Everything after the command reaches a backfill script as its own flags
-  // (`--missing-books`); see `neon-target-args.ts` for why that ever failed.
+  // Everything after the command reaches a backfill or verify script as its
+  // own flags (`--missing-books`, `--apply`, `--require-complete`). See
+  // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
   const passthrough = process.argv.slice(4)
   const args = childArgs(command, passthrough)
   console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${env.NEON_PG_HOST}`)

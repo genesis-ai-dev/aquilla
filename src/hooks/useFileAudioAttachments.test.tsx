@@ -102,3 +102,64 @@ describe("mergeCellsWithAudio — trim windows (AQU-646)", () => {
     expect(merged.attachments?.["rec.webm"]).not.toHaveProperty("trimEndMs")
   })
 })
+
+// AQU-490: the same guard for the validation fields, and for the same reason.
+// This merge rebuilds every attachment FIELD BY FIELD rather than spreading
+// it, and every field on both sides is optional — so one left out of the list
+// is dropped between the server and the editor with no type error anywhere.
+// The symptom would be a gutter reading "nobody has validated this" on a take
+// two people signed off, and nothing in any log.
+describe("mergeCellsWithAudio — validation fields (AQU-490)", () => {
+  it("forwards the vote count, the validators, the role and the recorder", () => {
+    const cell = { id: "cell-3", fileId: "f1" } as CellData
+    const entry: CellAudioEntry = {
+      attachments: {
+        "rec.webm": {
+          ...recording("rec.webm"),
+          validatorCount: 2,
+          validators: ["ana", "bo"],
+          role: "dub",
+          recordedBy: "cy",
+        },
+      },
+      selectedAudioId: "rec.webm",
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+    const [merged] = mergeCellsWithAudio([cell], new Map([["cell-3", entry]]))
+    expect(merged.attachments?.["rec.webm"]).toMatchObject({
+      validatorCount: 2,
+      validators: ["ana", "bo"],
+      role: "dub",
+      recordedBy: "cy",
+    })
+  })
+
+  // The source clip has to survive the trip too, because it is what stops the
+  // editor counting the imported programme audio as somebody's dub.
+  it("forwards role=source", () => {
+    const cell = { id: "cell-4", fileId: "f1" } as CellData
+    const entry: CellAudioEntry = {
+      attachments: { "src.wav": { ...recording("src.wav"), role: "source" } },
+      selectedAudioId: "src.wav",
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+    const [merged] = mergeCellsWithAudio([cell], new Map([["cell-4", entry]]))
+    expect(merged.attachments?.["src.wav"]?.role).toBe("source")
+  })
+
+  // A count of 0 is a real answer — "recorded, nobody has listened" — and must
+  // not be dropped the way an absent field is. `!= null`, never truthiness.
+  it("keeps a vote count of zero", () => {
+    const cell = { id: "cell-5", fileId: "f1" } as CellData
+    const entry: CellAudioEntry = {
+      attachments: { "rec.webm": { ...recording("rec.webm"), validatorCount: 0 } },
+      selectedAudioId: "rec.webm",
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+    const [merged] = mergeCellsWithAudio([cell], new Map([["cell-5", entry]]))
+    expect(merged.attachments?.["rec.webm"]?.validatorCount).toBe(0)
+  })
+})

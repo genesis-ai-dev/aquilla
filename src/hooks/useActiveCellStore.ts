@@ -650,19 +650,15 @@ export class CellStore {
    */
   private applyOwnTake(cell: CellData): void {
     if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
+    // ONLY the flag, since 2026-09-22. This used to flip an empty line's
+    // status to unvalidated/validated as well, so that a dub with no text
+    // counted as translated in the status bar and file progress — the
+    // workaround from before audio had its own validation. Sam's ruling now
+    // that it does: a line with no text is not translated text, and its
+    // progress lives on the audio bar. The flag stays, because navigation
+    // ("next unfinished") and the empty-target rule still need to know a
+    // silent line is deliberately silent.
     cell.hasOwnTake = true
-    if (cell.status !== "empty") return
-    // Read the row, not the view: `deriveStatus` answers "empty" for a target
-    // row with no text even when it IS validated, which is exactly the row an
-    // empty commit plus a validation produces.
-    const validated = this.targetById.get(cell.id)?.validated ?? false
-    cell.status = validated ? "validated" : "unvalidated"
-    cell.validationStatus = deriveValidationStatus(
-      cell.status,
-      cell.activeValidators,
-      this.ctx.username,
-      this.ctx.requiredValidations,
-    )
   }
 
   getCellBacktranslationState(

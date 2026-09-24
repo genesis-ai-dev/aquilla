@@ -166,6 +166,10 @@ function eventLabel(kind: CqrsEventKind, t: TFunction): string {
       return t("nav.outbox.eventSelectAudio")
     case "cell.audio.remove":
       return t("nav.outbox.eventRemoveAudio")
+    case "cell.audio.validate":
+      return t("nav.outbox.eventValidateAudio")
+    case "cell.audio.unvalidate":
+      return t("nav.outbox.eventUnvalidateAudio")
     default:
       return kind
   }
@@ -213,9 +217,14 @@ function getPreview(rec: OutboxRecord, t: TFunction): { preview: string; fullTex
         preview: t("nav.outbox.previewEditRef", { id: shortId((p?.editEventId as string) ?? undefined) }),
         fullText: null,
       }
+    // AQU-490 adds the last two: a vote names a TAKE and carries no slot, so
+    // they share this preview and fall back to its slotless form rather than
+    // reaching `default:` and rendering a blank row.
     case "cell.audio.attach":
     case "cell.audio.select":
-    case "cell.audio.remove": {
+    case "cell.audio.remove":
+    case "cell.audio.validate":
+    case "cell.audio.unvalidate": {
       const slot = typeof p?.slot === "string" ? (p.slot as string) : null
       return { preview: slot ? t("nav.outbox.previewAudioSlot", { slot }) : t("nav.outbox.previewAudio"), fullText: null }
     }
@@ -265,7 +274,10 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
     for (const { rec } of rows) {
       const k = rec.event.kind
       if (k === "target.cell.commit" || k === "target.cell.create" || k === "source.cell.commit" || k === "source.cell.create") counts.edits += 1
-      else if (k === "cell.validate" || k === "cell.unvalidate") counts.validation += 1
+      // AQU-490: audio validation counts as validation here too — a queue of
+      // pending sign-offs reads the same whichever kind they are.
+      else if (k === "cell.validate" || k === "cell.unvalidate"
+        || k === "cell.audio.validate" || k === "cell.audio.unvalidate") counts.validation += 1
       else if (k.startsWith("comment.")) counts.comments += 1
       else counts.other += 1
     }

@@ -47,7 +47,8 @@ async function rows(db: { prepare: (s: string) => { bind: (...a: unknown[]) => {
   const r = await db
     .prepare(
       `SELECT section_key, target_lang, total_count, filled_count, audio_count,
-              audio_validated_count, last_edit_at
+              audio_validated_count, last_edit_at,
+              validator_histogram, audio_validator_histogram
          FROM file_section_progress
         WHERE project_id = ? AND file_id = ? AND scope = ?
         ORDER BY section_key, target_lang`,
@@ -62,6 +63,8 @@ async function rows(db: { prepare: (s: string) => { bind: (...a: unknown[]) => {
     audio_count: number
     audio_validated_count: number
     last_edit_at: number | null
+    validator_histogram: Record<string, number>
+    audio_validator_histogram: Record<string, number>
   }>
 }
 
@@ -160,44 +163,73 @@ describe("audio counts", () => {
     cell_id: "g1",
     selected: 0,
     deleted: 0,
-    approved: 0,
+    role: "dub",
+    validator_count: 0,
     duration_ms: 1000,
     ...over,
   })
 
-  it("counts a cell as having audio on any live take, matching the portfolio", async () => {
-    // The org portfolio counts audio cells on `deleted = 0` alone — recording
-    // is what counts, not selecting. Per-unit rows must agree or the tiles and
-    // the board would contradict each other.
+  // AQU-490 moved both halves of the audio definition, and these first two
+  // tests are where that is pinned.
+  //
+  // "Recorded" used to be `deleted = 0` alone — any live take, selecting
+  // irrelevant. That reads correctly until an imported media file attaches the
+  // shared programme audio to every cell, at which point the whole file
+  // reports fully recorded: on this machine's audio-first-test a 127-cell file
+  // did exactly that while 19 cells in the entire project had a dub. So the
+  // test is now a SELECTED take whose role is 'dub'.
+  //
+  // The word "selected" does no work on real data — across 10,957 cells with a
+  // live dub here, none had all of them unselected, because attaching selects
+  // — but it must be in the definition anyway, because the histogram buckets
+  // the minimum over selected dub takes. If the two sets could differ, a cell
+  // could sit in the denominator and never reach the numerator, and audio
+  // could never read 100%.
+  it("counts a cell as recorded only when a dub take is selected", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }), cell({ cell_id: "g2", canonical_ref: "GEN 1:2" })],
       cell_audio: [audioSeed({ selected: 0 })],
     })
     await recompute(db)
     const book = (await rows(db, "book"))[0]
-    expect(book.audio_count).toBe(1)
+    expect(book.audio_count).toBe(0)
     expect(book.audio_validated_count).toBe(0)
   })
 
-  it("counts validated audio only when the SELECTED take is approved", async () => {
+  // The source clip, and the reason cell_audio.role exists at all. It is
+  // selected in the recording slot on every cell of an imported media file,
+  // so without the role test this cell would read as recorded and — worse —
+  // would have to be validated by somebody before the cell could count.
+  it("ignores an imported source clip, however it is selected", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [audioSeed({ selected: 1, role: "source", validator_count: 0 })],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_count).toBe(0)
+    expect(book.audio_validator_histogram).toEqual({})
+  })
+
+  it("counts validated audio only when the SELECTED take has a vote", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
       cell_audio: [
-        audioSeed({ audio_id: "a1", selected: 1, approved: 1 }),
-        audioSeed({ audio_id: "a2", selected: 0, approved: 0 }),
+        audioSeed({ audio_id: "a1", selected: 1, validator_count: 1 }),
+        audioSeed({ audio_id: "a2", selected: 0, validator_count: 0 }),
       ],
     })
     await recompute(db)
     expect((await rows(db, "book"))[0].audio_validated_count).toBe(1)
   })
 
-  it("drops validation when an approved take is no longer selected", async () => {
-    // Re-recording selects a fresh take; the old approval must stop counting.
+  it("drops validation when a validated take is no longer selected", async () => {
+    // Re-recording selects a fresh take; the old votes must stop counting.
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
       cell_audio: [
-        audioSeed({ audio_id: "a1", selected: 0, approved: 1 }),
-        audioSeed({ audio_id: "a2", selected: 1, approved: 0 }),
+        audioSeed({ audio_id: "a1", selected: 0, validator_count: 1 }),
+        audioSeed({ audio_id: "a2", selected: 1, validator_count: 0 }),
       ],
     })
     await recompute(db)
@@ -209,7 +241,7 @@ describe("audio counts", () => {
   it("ignores deleted takes entirely", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
-      cell_audio: [audioSeed({ selected: 1, approved: 1, deleted: 1 })],
+      cell_audio: [audioSeed({ selected: 1, validator_count: 1, deleted: 1 })],
     })
     await recompute(db)
     expect((await rows(db, "book"))[0].audio_count).toBe(0)
@@ -218,7 +250,7 @@ describe("audio counts", () => {
   it("reports the same audio totals on file, section and book rows", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }), cell({ cell_id: "g2", canonical_ref: "GEN 1:2" })],
-      cell_audio: [audioSeed({ cell_id: "g1", selected: 1, approved: 1 })],
+      cell_audio: [audioSeed({ cell_id: "g1", selected: 1, validator_count: 1 })],
     })
     await recompute(db)
     for (const scope of ["file", "section", "book"]) {
@@ -226,6 +258,156 @@ describe("audio counts", () => {
       expect(r?.audio_count, scope).toBe(1)
       expect(r?.audio_validated_count, scope).toBe(1)
     }
+  })
+})
+
+// AQU-490: the audio histogram. Same encoding as the text one — bucket -> how
+// many cells sit in it — but the bucketed number is the MINIMUM vote count
+// across the cell's selected dub takes, which is what turns "every track is
+// validated" into a single comparison.
+describe("audio validator histogram", () => {
+  const take = (over: Record<string, unknown>) => ({
+    project_id: P, file_id: F, audio_id: "a1", cell_id: "g1",
+    selected: 1, deleted: 0, role: "dub", validator_count: 0, duration_ms: 1000,
+    ...over,
+  })
+
+  it("buckets each cell by its vote count, on every scope", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g2", canonical_ref: "GEN 1:2" }),
+        cell({ cell_id: "g3", canonical_ref: "GEN 1:3" }),
+      ],
+      cell_audio: [
+        take({ cell_id: "g1", validator_count: 0 }),
+        take({ cell_id: "g2", validator_count: 1 }),
+        take({ cell_id: "g3", validator_count: 2 }),
+      ],
+    })
+    await recompute(db)
+    for (const scope of ["file", "section", "book"]) {
+      const r = (await rows(db, scope)).find((x) => x.target_lang === "")
+      expect(r?.audio_validator_histogram, scope).toEqual({ "0": 1, "1": 1, "2": 1 })
+    }
+  })
+
+  // THE MULTI-TRACK RULE. Two tracks sound together, so the cell is only as
+  // validated as its least-validated track — six cells in this machine's dev
+  // database already carry more than one selected take.
+  it("buckets a multi-track cell by its WEAKEST track", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        take({ audio_id: "a1", slot: "recording", validator_count: 3 }),
+        take({ audio_id: "a2", slot: "track-2", validator_count: 1 }),
+      ],
+    })
+    await recompute(db)
+    expect((await rows(db, "book"))[0].audio_validator_histogram).toEqual({ "1": 1 })
+  })
+
+  // THE DEFAULT TRACK IS ONE TRACK, not two. It alone owns two slots, and only
+  // one of them ever sounds — the client's resolveTargetAudio prefers the
+  // recording slot and falls through to the generated voice. Counting both
+  // asked a line to validate the same track twice, and the silent one, which
+  // nobody can hear to judge, held the whole line down. Sam found it on a
+  // two-track line reading "of 3" with two chips on screen (2026-09-21).
+  it("counts the default track once when a take and a generated voice are both selected", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        take({ audio_id: "a1", slot: "recording", validator_count: 2 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 0 }),
+      ],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_count).toBe(1)
+    // 2, not 0: the recording is what sounds, and it is fully signed off.
+    expect(book.audio_validator_histogram).toEqual({ "2": 1 })
+  })
+
+  // The other half of the same rule: with nothing in the recording slot the
+  // generated voice IS what sounds, so it is the take to judge.
+  it("falls through to the generated voice when the recording slot holds no dub", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        // The imported programme clip, selected in the recording slot exactly
+        // as an import leaves it — this is the shape the TTS path creates.
+        take({ audio_id: "src", slot: "recording", role: "source", validator_count: 0 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 1 }),
+      ],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_count).toBe(1)
+    expect(book.audio_validator_histogram).toEqual({ "1": 1 })
+  })
+
+  // And an ADDED track is still its own track, so the weakest-track rule keeps
+  // biting across real tracks — this is the case the fix must not swallow.
+  it("still takes the weakest track when the second one is an added track", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [
+        take({ audio_id: "a1", slot: "recording", validator_count: 2 }),
+        take({ audio_id: "a2", slot: "generatedVoice", voice_id: "preset-narrator", validator_count: 5 }),
+        take({ audio_id: "a3", slot: "track-2", validator_count: 1 }),
+      ],
+    })
+    await recompute(db)
+    expect((await rows(db, "book"))[0].audio_validator_histogram).toEqual({ "1": 1 })
+  })
+
+  // A cell with no dub is NOT RECORDED, which is a different state from
+  // recorded-and-unvalidated. Bucketing it at 0 would make an unrecorded file
+  // indistinguishable from a recorded one nobody has listened to, and would
+  // put cells in the denominator that can never reach the numerator.
+  it("leaves cells with no selected dub take out of the histogram entirely", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }), cell({ cell_id: "g2", canonical_ref: "GEN 1:2" })],
+      cell_audio: [take({ cell_id: "g1", validator_count: 0 })],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book"))[0]
+    expect(book.audio_validator_histogram).toEqual({ "0": 1 })
+    expect(book.audio_count).toBe(1)
+  })
+
+  it("caps a runaway vote count at the top bucket", async () => {
+    const { db } = await makeTestDb({
+      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],
+      cell_audio: [take({ validator_count: 40 })],
+    })
+    await recompute(db)
+    expect((await rows(db, "book"))[0].audio_validator_histogram).toEqual({ "15": 1 })
+  })
+
+  // THE DUPLICATE-KEY TRAP. The audio buckets deliberately live in their own
+  // CTE: folding audio_validator_bucket into the text histogram's GROUP BY
+  // splits each text bucket across several rows and feeds jsonb_object_agg the
+  // same key twice. This asserts the text histogram is untouched by cells that
+  // differ only in their audio.
+  it("leaves the text histogram alone", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1", side: "target", target_lang: "", value: "x", endorsement_count: 2 }),
+        cell({ cell_id: "g2", canonical_ref: "GEN 1:2", side: "target", target_lang: "", value: "y", endorsement_count: 2 }),
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g2", canonical_ref: "GEN 1:2" }),
+      ],
+      cell_audio: [
+        take({ cell_id: "g1", validator_count: 0 }),
+        take({ cell_id: "g2", validator_count: 5 }),
+      ],
+    })
+    await recompute(db)
+    const book = (await rows(db, "book")).find((x) => x.target_lang === "")
+    // Both cells sit in text bucket 2; the audio split must not halve it.
+    expect(book?.validator_histogram).toEqual({ "2": 2 })
+    expect(book?.audio_validator_histogram).toEqual({ "0": 1, "5": 1 })
   })
 })
 

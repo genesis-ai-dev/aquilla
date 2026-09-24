@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { SelectionBar } from "./SelectionBar"
-import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
+import { emitCellValidate, emitCellUnvalidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
@@ -17,6 +17,7 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -25,6 +26,8 @@ vi.mock("@/lib/sync/events-emit", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/sync/events-emit")>()),
   emitCellValidate: vi.fn(() => Promise.resolve("validate-event")),
   emitCellUnvalidate: vi.fn(() => Promise.resolve("unvalidate-event")),
+  emitCellAudioValidate: vi.fn(() => Promise.resolve("audio-validate-event")),
+  emitCellAudioUnvalidate: vi.fn(() => Promise.resolve("audio-unvalidate-event")),
 }))
 
 function makeProject(roleLevel: number | null): ProjectRecord {
@@ -146,6 +149,7 @@ function renderBar(
   cells: CellData[] = CELLS,
   myScopes: MemberScope[] = [],
   activeLane = "",
+  extra: Partial<React.ComponentProps<typeof SelectionBar>> = {},
 ) {
   return renderWithTooltips(
     <SelectionBar
@@ -156,8 +160,39 @@ function renderBar(
       activeLane={activeLane}
       myScopes={myScopes}
       completeBatch={vi.fn()}
+      {...extra}
     />,
   )
+}
+
+// AQU-490: the file's audio, in the shape the workspace hands down. Until
+// 2026-09-21 no test here passed it at all, which is why a suite of 30 stayed
+// green over a button that could never appear.
+function audioMap(over: Partial<AudioAttachmentOut> = {}): Map<string, CellAudioEntry> {
+  const take: AudioAttachmentOut = {
+    audioId: "take-1",
+    url: "frontier-audio://take-1.webm",
+    slot: "recording",
+    mimeType: "audio/webm",
+    voiceId: null,
+    referenceAudioId: null,
+    durationMs: 1000,
+    label: null,
+    trimStartMs: null,
+    trimEndMs: null,
+    role: "dub",
+    validatorCount: 0,
+    validators: [],
+    recordedBy: "bob",
+    ...over,
+  }
+  return new Map([["cell-1", {
+    attachments: { [take.audioId]: take },
+    selectedBySlot: { [take.slot]: take.audioId },
+    selectedAudioId: take.audioId,
+    selectedGeneratedVoiceAudioId: null,
+    audioTimings: {},
+  }]])
 }
 
 describe("SelectionBar — viewer suppression (AQU-365)", () => {
@@ -212,7 +247,7 @@ describe("SelectionBar — viewer suppression (AQU-365)", () => {
  */
 describe("SelectionBar — bulk Validate eligibility messaging", () => {
   function validateButton() {
-    return screen.getByRole("button", { name: /Validate/i })
+    return screen.getByRole("button", { name: /^Validate text/i })
   }
 
   it("enables Validate for a translated, human-touched, not-yet-validated cell", async () => {
@@ -330,14 +365,14 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
     const onValidationCommitted = vi.fn()
     renderWithCommitted(onValidationCommitted, [makeCell({ id: "cell-1", translated: "bonjour" })])
 
-    fireEvent.click(screen.getByRole("button", { name: /Validate/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(1)
     expect(onValidationCommitted).toHaveBeenCalledTimes(1)
     vi.restoreAllMocks()
   })
 
-  it("fires onValidationCommitted after a bulk 'Remove my validations'", () => {
+  it("fires onValidationCommitted after a bulk 'Remove my text validations'", () => {
     vi.mocked(emitCellUnvalidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     const onValidationCommitted = vi.fn()
@@ -347,7 +382,7 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
       "fr",
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Remove my validations/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
 
     expect(emitCellUnvalidate).toHaveBeenCalledTimes(1)
     expect(emitCellUnvalidate).toHaveBeenCalledWith(
@@ -366,12 +401,105 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
       makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
     ])
 
-    const btn = screen.getByRole("button", { name: /Validate/i })
+    const btn = screen.getByRole("button", { name: /^Validate text/i })
     expect(btn).toBeDisabled()
     fireEvent.click(btn)
 
     expect(emitCellValidate).not.toHaveBeenCalled()
     expect(onValidationCommitted).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-490 — bulk validating recordings
+// ---------------------------------------------------------------------------
+
+describe("SelectionBar — Validate recordings", () => {
+  const selectBoth = () =>
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+
+  it("offers the action, with a count, when the selection holds a validatable take", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+    const button = screen.getByRole("button", { name: /^validate audio/i })
+    expect(button).toBeEnabled()
+    expect(button).toHaveTextContent("1")
+    vi.restoreAllMocks()
+  })
+
+  // Sam's call, 2026-09-21: the Audio view is where recordings are worked on,
+  // so this is the one validation that view offers. It used to sit inside the
+  // text-only branch, which made it unreachable there.
+  it("offers it in the Audio view too, where the text actions do not appear", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap(), audioMode: true })
+    expect(screen.getByRole("button", { name: /^validate audio/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^validate$/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  // A FILE with no audio shows no audio buttons at all, so a text-only project
+  // never grows two controls it can do nothing with. This is the only case
+  // where they are absent.
+  it("shows neither audio button on a file with no recordings", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: new Map() })
+    expect(screen.queryByRole("button", { name: /^validate audio/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /remove my audio validations/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  // THE REPORTED BUG. Validating everything used to make the button vanish —
+  // the very click that emptied it also hid the way back. It now stays put and
+  // goes dark, with its opposite lighting up (Sam, 2026-09-22).
+  it("stays visible but disabled once every take already carries my vote", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", {
+      audioByCellId: audioMap({ validatorCount: 1, validators: ["alice"] }),
+    })
+    const validate = screen.getByRole("button", { name: /^validate audio/i })
+    expect(validate).toBeDisabled()
+    expect(validate).not.toHaveTextContent("1")
+    const remove = screen.getByRole("button", { name: /remove my audio validations/i })
+    expect(remove).toBeEnabled()
+    expect(remove).toHaveTextContent("1")
+    vi.restoreAllMocks()
+  })
+
+  it("offers the opposite action only when I have a vote to take back", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+    expect(screen.getByRole("button", { name: /remove my audio validations/i })).toBeDisabled()
+    vi.restoreAllMocks()
+  })
+
+  // Somebody else's vote is not mine to withdraw.
+  it("will not offer to remove a validation that is not mine", () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", {
+      audioByCellId: audioMap({ validatorCount: 1, validators: ["bob"] }),
+    })
+    expect(screen.getByRole("button", { name: /remove my audio validations/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^validate audio/i })).toBeEnabled()
+    vi.restoreAllMocks()
+  })
+
+  it("withdraws my vote and says how many it took back", async () => {
+    selectBoth()
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", {
+      audioByCellId: audioMap({ validatorCount: 1, validators: ["alice"] }),
+    })
+    fireEvent.click(screen.getByRole("button", { name: /remove my audio validations/i }))
+    await vi.waitFor(() => expect(emitCellAudioUnvalidate).toHaveBeenCalledTimes(1))
+    expect(emitCellAudioUnvalidate).toHaveBeenCalledWith(expect.objectContaining({
+      cellId: "cell-1", audioId: "take-1", author: "alice",
+    }))
+    // No lane and no target user: a recording is shared by every language, and
+    // an absent target means "my own vote".
+    const arg = vi.mocked(emitCellAudioUnvalidate).mock.calls[0][0] as unknown as Record<string, unknown>
+    expect(arg).not.toHaveProperty("targetLang")
+    expect(arg).not.toHaveProperty("targetUsername")
     vi.restoreAllMocks()
   })
 })

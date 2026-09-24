@@ -28,6 +28,7 @@ import {
   peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
+  OUTBOX_MAX_ATTEMPTS,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -1204,6 +1205,129 @@ describe("flushOutboxBatch", () => {
     expect(rows[0].attempts).toBe(0) // no budget burn
     expect(rows[0].lastError).toMatchObject({ status: 0, reason: "request timed out" })
     expect(rows[0].status).toBe("pending")
+  })
+
+  // ── AQU-1368: pre-AQU-927 events poisoned with fractional ms ─────────────
+
+  it("AQU-1368: a STORED event with durationMs 2403.5 is rounded on the way out and flushes clean", async () => {
+    // The partner's exact row (lin184, minted 2026-08-15, three days before
+    // AQU-927's emit guard shipped). It cannot be fixed at emit time — it is
+    // already in IndexedDB — so the flush boundary has to repair it.
+    await enqueueOutboxEvent(
+      makeEvent("poison", "f1", {
+        kind: "cell.audio.attach",
+        payload: { audioId: "a1", durationMs: 2403.5 },
+      } as unknown as Partial<CqrsRawEvent<"target.cell.commit">>),
+    )
+
+    let posted: CqrsRawEvent[] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      posted = JSON.parse(init.body as string).events
+      // The server only accepts it BECAUSE the value arrived integral — this
+      // is the whole point of the fix, so the mock refuses a fractional one
+      // exactly as Postgres does.
+      const bad = posted.find((e) => !Number.isInteger(
+        (e.payload as { durationMs?: number }).durationMs,
+      ))
+      if (bad) {
+        return jsonResponse({
+          accepted: [],
+          rejected: [{
+            id: bad.id,
+            status: 500,
+            reason: 'DB batch failed: PostgresError: invalid input syntax for type bigint: "2403.5"',
+          }],
+        })
+      }
+      return jsonResponse({ accepted: posted.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect((posted[0].payload as { durationMs: number }).durationMs).toBe(2404)
+    expect(result.accepted).toBe(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("AQU-1368: an unfixable head is posted ALONE on its next attempt, so valid events behind it are not dragged down", async () => {
+    // A poison event the sanitizer cannot rescue (not a millisecond field at
+    // all), plus a fresh valid audio event queued behind it. The /events
+    // INSERT is atomic, so batching them together means the valid one dies
+    // with the poison on every flush — the five-week outage in AQU-1368.
+    await enqueueOutboxEvent(makeEvent("poison", "f1"))
+    await enqueueOutboxEvent(makeEvent("valid", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      bodies.push(events)
+      // Postgres refuses the whole batch when any member is bad.
+      if (events.some((e) => e.id === "poison")) {
+        return jsonResponse({
+          accepted: [],
+          rejected: events.map((e) => ({
+            id: e.id,
+            status: 500,
+            reason: "DB batch failed: PostgresError: invalid input syntax for type bigint",
+          })),
+        })
+      }
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+
+    // Round 1 batches both, and both are refused together.
+    await flushOutboxBatch(deps)
+    expect(bodies[0].map((e) => e.id)).toEqual(["poison", "valid"])
+
+    // Round 2: the head has a burnt attempt, so it goes out on its own.
+    await flushOutboxBatch(deps)
+    expect(bodies[1].map((e) => e.id)).toEqual(["poison"])
+
+    // Keep flushing: the poison burns its own budget to the cap, flips to
+    // `failed`, stops being peeked — and the valid event finally lands.
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS + 1; i++) await flushOutboxBatch(deps)
+
+    expect(bodies.some((b) => b.length === 1 && b[0].id === "valid")).toBe(true)
+    const rows = await peekOutboxBatch(10)
+    expect(rows.find((r) => r.id === "valid")).toBeUndefined()
+    expect(rows.find((r) => r.id === "poison")?.status).toBe("failed")
+  })
+
+  it("AQU-1368: a transient failure does NOT trigger single-event isolation (no throughput regression)", async () => {
+    // Offline/5xx/timeouts go through stampOutboxError and never burn the
+    // attempt budget, so a normal blip must leave full batching intact.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    let firstCall = true
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string).events)
+      if (firstCall) {
+        firstCall = false
+        return new Response("Internal Server Error", { status: 500 })
+      }
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+    await flushOutboxBatch(deps)
+    await flushOutboxBatch(deps)
+
+    expect(bodies[1].map((e) => e.id)).toEqual(["e1", "e2"])
+    expect(await outboxPendingCount()).toBe(0)
   })
 })
 

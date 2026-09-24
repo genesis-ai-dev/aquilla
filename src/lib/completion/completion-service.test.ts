@@ -1712,3 +1712,49 @@ describe("activeProjectIdFromPath", () => {
     expect(activeProjectIdFromPath("/projects/archived")).toBeNull()
   })
 })
+
+describe("unreviewed in-run draft context (AQU-1386)", () => {
+  const base = {
+    sourceLanguage: "English",
+    targetLanguage: "French",
+    systemPrompt: "Translate.",
+    examples: [],
+  }
+
+  it("labels a carried draft as unreviewed in the batch prompt", () => {
+    // A multi-call batch carries its own earlier drafts forward. They must be
+    // distinguishable from approved translations in the prompt, or the model
+    // treats unreviewed machine output as the project's settled style.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [
+        { source: "approved src", target: "approved tgt" },
+        { source: "drafted src", target: "drafted tgt", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: approved tgt")
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("labels a carried draft in the single-cell prompt too", () => {
+    const [, user] = buildPrompt({
+      ...base,
+      sourceText: "live source",
+      precedingContext: [{ source: "drafted src", target: "drafted tgt", draft: true }],
+    })
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("renders an unflagged row exactly as before", () => {
+    // Every existing call site omits `draft`, so the rendered prompt must be
+    // byte-identical for them.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [{ source: "approved src", target: "approved tgt" }],
+    })
+    expect(user.content).toContain("Source: approved src\nTranslation: approved tgt")
+    expect(user.content).not.toContain("unreviewed")
+  })
+})

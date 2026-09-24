@@ -49,6 +49,9 @@ import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footn
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
+import { fixedSlices, packSelectionIntoCalls, type GroupingCell } from "@/lib/completion/draft-grouping"
+import { isMeaningUnitDraftingEnabled } from "@/lib/completion/seams-flag"
+import type { PrecedingContextEntry } from "@/lib/completion/prompt-build"
 import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
@@ -65,7 +68,7 @@ import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
-import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
+import { mergeInRunDraftContext, gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/lib/completion/translate-as-read"
 import {
@@ -82,6 +85,19 @@ import {
 // review unit; larger files still run, but are split into independently
 // reviewable chunks.
 const MAX_CELLS_PER_CALL = 10
+
+/** AQU-1386: the view of a cell the seam/unit machinery needs. `text` is the
+ *  EFFECTIVE source, so a media section contributes its transcript rather than
+ *  its filename — the same rule the rest of the drafting path follows. */
+function toGroupingCell(cell: CellData): GroupingCell {
+  return {
+    id: cell.id,
+    fileId: cell.fileId,
+    sourceEventId: cell.sourceEventId ?? null,
+    text: effectiveSourceText(cell),
+    ref: cell.cellLabel ?? null,
+  }
+}
 
 // AQU-620: a "regenerate" request re-drafts a cell that already has a
 // prediction. The project's configured temperature is tuned low for a stable
@@ -552,10 +568,28 @@ export function useCompletion(
     const cells = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
     if (cells.length === 0) return
 
-    const chunks: CellData[][] = []
-    for (let i = 0; i < cells.length; i += MAX_CELLS_PER_CALL) {
-      chunks.push(cells.slice(i, i + MAX_CELLS_PER_CALL))
-    }
+    // AQU-1386: pack whole drafting units into calls instead of slicing every
+    // MAX_CELLS_PER_CALL cells, so a sentence straddling the boundary goes out
+    // in ONE call. Seams come from the file, never from the selection — see
+    // src/lib/completion/draft-grouping.ts.
+    //
+    // Off by default until the shadow eval clears (seams-flag.ts). The flag-off
+    // path calls the same fixed-slice helper the old inline loop was, so
+    // "grouping disabled" is literally today's behaviour, not a re-derivation.
+    const groupingEnabled = isMeaningUnitDraftingEnabled()
+    const corpusCells = getAllCells()
+    const selectedById = new Map(cells.map((c) => [c.id, c]))
+    const chunks: CellData[][] = groupingEnabled
+      ? packSelectionIntoCalls(
+          cells.map(toGroupingCell),
+          corpusCells.map(toGroupingCell),
+          MAX_CELLS_PER_CALL,
+        )
+        .map((ids) => ids
+          .map((id) => selectedById.get(id))
+          .filter((c): c is CellData => c !== undefined))
+        .filter((chunk) => chunk.length > 0)
+      : fixedSlices(cells, MAX_CELLS_PER_CALL)
 
     posthog.capture("ai batch translation started", {
       provider,
@@ -565,6 +599,7 @@ export function useCompletion(
       cell_count: cells.length,
       chunk_count: chunks.length,
       max_cells_per_call: MAX_CELLS_PER_CALL,
+      meaning_units: groupingEnabled,
     })
 
     // AQU-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
@@ -572,9 +607,12 @@ export function useCompletion(
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
     memMark(`completeBatch.start(${cells.length}c)`)
-    const corpusCells = getAllCells()
 
     const fallbackQueue: CellData[] = []
+    // AQU-1386 §3: this run's own drafts, carried into the NEXT call's
+    // discourse window. Run-scoped by construction — it is a local, so it
+    // cannot outlive the run or reach another one.
+    const inRunDrafts: PrecedingContextEntry[] = []
 
     try {
       for (const chunk of chunks) {
@@ -642,9 +680,25 @@ export function useCompletion(
           }
         }
 
-        const precedingContext = gatherPrecedingContext(
+        // AQU-1386 §3: the approved discourse window, then whatever THIS run
+        // has already drafted immediately before this chunk. Without the
+        // second part, every chunk after the first starts its discourse cold —
+        // `corpusCells` was read once before the loop, and gatherPrecedingContext
+        // only admits validated targets, so call N+1 could never see call N.
+        //
+        // In-run only. `inRunDrafts` is a local that dies with the run: nothing
+        // is persisted, and the rule that unapproved text never becomes a
+        // retrieval EXAMPLE is untouched — these rows are labelled as
+        // unreviewed drafts in the prompt and excluded from the example pool
+        // below, exactly like the approved window is.
+        const approvedContext = gatherPrecedingContext(
           corpusCells,
           chunk[0].id,
+          draftContext.precedingTargetCells,
+        )
+        const precedingContext: PrecedingContextEntry[] = mergeInRunDraftContext(
+          approvedContext,
+          inRunDrafts,
           draftContext.precedingTargetCells,
         )
         // The global examples are one bounded pool across passage retrieval
@@ -801,6 +855,24 @@ export function useCompletion(
           } else {
             fallbackQueue.push(cell)
           }
+        }
+
+        // Carry this chunk's fresh drafts into the next call's discourse
+        // window (AQU-1386 §3), marked unreviewed so the prompt weighs them
+        // below approved translations.
+        for (const draft of preparedDrafts) {
+          inRunDrafts.push({
+            source: effectiveSourceText(draft.cell),
+            target: draft.text,
+            draft: true,
+          })
+        }
+        // Only the tail is ever read, so keep only the tail: a 1000-cell run
+        // would otherwise hold the whole file's source and target text here
+        // for the run's duration.
+        const draftWindow = Math.max(0, draftContext.precedingTargetCells)
+        if (inRunDrafts.length > draftWindow) {
+          inRunDrafts.splice(0, inRunDrafts.length - draftWindow)
         }
 
         // AQU-1145: a model response is already a bounded, coherent package.

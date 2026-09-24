@@ -106,6 +106,7 @@
     "deploy:honeycomb": "npm run build:honeycomb && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
     "prepare": "husky",
+    "seams:eval": "tsx scripts/seam-eval.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",

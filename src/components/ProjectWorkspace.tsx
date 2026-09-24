@@ -38,6 +38,7 @@ import {
   type CompletedCellDraft,
   type CommitCompletedCellsResult,
 } from "@/hooks/useCompletion"
+import { useSeamClassification } from "@/hooks/useSeamClassification"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
@@ -5135,6 +5136,16 @@ export function ProjectWorkspace() {
     commitCompletedCells,
     styleInstructionsFor,
   )
+
+  // AQU-1386: classify the open file's cell seams in the background so
+  // drafting can group whole thoughts into one call. No-op while the
+  // meaning-unit flag is off, and nothing on the drafting path waits on it.
+  useSeamClassification({
+    projectId: project?.id,
+    fileId: activeFileId ?? undefined,
+    identityToken: frontierSession?.jwt,
+    getCells: getActiveCells,
+  })
 
   const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
 

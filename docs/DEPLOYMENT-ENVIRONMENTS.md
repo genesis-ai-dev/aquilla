@@ -100,17 +100,26 @@ on one environment does nothing for the other.
 `dev` is the trunk and targets development. Production ships from dated release
 branches cut from `dev`; `main` is retired.
 
-1. Cut `release/YYYY/MM/DD` from `dev` (the cut date) and push it.
+1. `node scripts/release-plan.mjs` decides whether to cut, and names the
+   branch and the `dev` sha to cut it from — not necessarily the tip of `dev`
+   at cut time. A release branch may carry the plain cut date,
+   `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
+   date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
+   for how a slice is built and when it deploys itself versus waiting for a
+   person).
 2. QA tests the branch's preview.
-3. From a clean checkout of that branch, run `pnpm run deploy:aquilla`. After the
-   live checks pass, `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes
-   the tag. The date comes from the branch, NN starts at `00`, and redeploying an
-   already-tagged commit reuses its tag. The annotated tag message includes the
-   release branch, deployed commit SHA, GitHub commit/checks URLs, and the Workers
-   Builds preview URL for that release branch, tying the production tag back to the
-   QA preview artifact.
-4. Hotfix: cherry-pick onto the same release branch, push, and redeploy. It gets
-   the next NN.
+3. From a clean checkout of that branch, checked out by name (not a detached
+   HEAD — the branch guard and the tag script both need it), run
+   `pnpm run deploy:aquilla`. After the live checks pass,
+   `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes the tag. The
+   date comes from the branch, NN starts at `00` and counts verified
+   production deploys in that date's series independently of the branch's own
+   `-NN` suffix, and redeploying an already-tagged commit reuses its tag. The
+   annotated tag message includes the release branch, deployed commit SHA,
+   GitHub commit/checks URLs, and the Workers Builds preview URL for that
+   release branch, tying the production tag back to the QA preview artifact.
+4. Hotfix: cherry-pick onto the branch that was deployed, push, and redeploy.
+   It gets the next NN in that date's tag series.
 
 Prod lags `dev` by design, so migrations must be backward-compatible across one
 release (add first, remove in a later release).

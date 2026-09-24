@@ -182,12 +182,25 @@ export function normalizeSettings(
   if (next.validationCount != null) {
     next.validationCount = validationThreshold(next)
   }
+  // AQU-490: the audio threshold gets the same treatment, and needs it more.
+  // It has been a writable settings key since AQU-508 with nothing clamping
+  // it, so a hand-written or old client value reaches the blob verbatim — and
+  // the histogram it is compared against only has buckets up to 15, so an
+  // unclamped 999 would make every recording permanently unvalidated with no
+  // way to see why.
+  if (next.validationCountAudio != null) {
+    next.validationCountAudio = clampThreshold(next.validationCountAudio)
+  }
   return next
 }
 
-function validationThreshold(settings: Record<string, unknown>): number {
-  const value = Math.floor(Number(settings.validationCount))
+function clampThreshold(raw: unknown): number {
+  const value = Math.floor(Number(raw))
   return Number.isFinite(value) ? Math.min(15, Math.max(1, value)) : 1
+}
+
+function validationThreshold(settings: Record<string, unknown>): number {
+  return clampThreshold(settings.validationCount)
 }
 
 function validationProjectionStmts(

@@ -3719,7 +3719,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.validation.requiredTextDescription": "单元格必须有这么多位不同的验证者，才算完全验证通过。",
   "projectSettings.validation.requiredAudioLabel": "所需验证者人数（音频）",
   "projectSettings.validation.requiredAudioAppliesNote": "适用于音频译文。",
-  "projectSettings.validation.requiredAudioDisabledNote": "在有音频译文之后才会激活。",
   "projectSettings.validation.minRoleLabel": "验证者最低角色",
   "projectSettings.validation.minRoleDescription": "只有至少具备此角色的用户才能投下验证票。默认为审阅者。",
   "projectSettings.validation.allowSelfLabel": "允许自我验证",

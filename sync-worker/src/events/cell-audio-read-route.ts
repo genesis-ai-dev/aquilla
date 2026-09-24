@@ -49,13 +49,27 @@ export async function handleCellAudioReadRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
+  // AQU-490: the votes come back in the SAME statement, aggregated in a
+  // lateral rather than joined. A plain join to cell_audio_validators would
+  // return one row per (take, validator) and every take with two validators
+  // would arrive twice — which the collapse below would quietly tolerate,
+  // since it keys attachments by audio_id and the last row would simply win.
+  // The bug would surface as nothing at all until somebody read a duration.
   const res = await env.AQUILLA_PG.prepare(
-    `SELECT cell_id, audio_id, slot, url, mime_type, voice_id, reference_audio_id,
-            duration_ms, label, trim_start_ms, trim_end_ms, target_offset_ms,
-              timings_json, selected, created_ts
-       FROM cell_audio
-      WHERE project_id = ? AND file_id = ? AND deleted = 0
-      ORDER BY created_ts ASC`,
+    `SELECT a.cell_id, a.audio_id, a.slot, a.url, a.mime_type, a.voice_id,
+            a.reference_audio_id, a.duration_ms, a.label, a.trim_start_ms,
+            a.trim_end_ms, a.target_offset_ms, a.timings_json, a.selected,
+            a.created_ts, a.validator_count, a.role, a.created_by,
+            COALESCE(v.names, ARRAY[]::text[]) AS validators
+       FROM cell_audio a
+       LEFT JOIN LATERAL (
+         SELECT ARRAY_AGG(cav.username ORDER BY cav.decided_ts DESC) AS names
+           FROM cell_audio_validators cav
+          WHERE cav.project_id = a.project_id AND cav.file_id = a.file_id
+            AND cav.cell_id = a.cell_id AND cav.audio_id = a.audio_id
+       ) v ON TRUE
+      WHERE a.project_id = ? AND a.file_id = ? AND a.deleted = 0
+      ORDER BY a.created_ts ASC`,
   )
     .bind(projectId, fileId)
     .all<AudioRowRaw>()

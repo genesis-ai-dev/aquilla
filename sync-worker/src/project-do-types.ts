@@ -19,6 +19,16 @@ export type OutboxEventKind =
   | "cell.audio.attach"
   | "cell.audio.select"
   | "cell.audio.remove"
+  // This union had drifted behind the client's outbox grammar, which is the
+  // real one (src/lib/sync/outbox-types.ts) — four audio kinds were already
+  // missing. It types one descriptive field on a wire frame rather than
+  // gating anything, so nothing broke; caught while adding AQU-490's pair.
+  | "cell.audio.rename"
+  | "cell.audio.trim"
+  | "cell.audio.place"
+  | "cell.audio.measure"
+  | "cell.audio.validate"
+  | "cell.audio.unvalidate"
   | "file.create"
 
 export interface OutboxRawEvent {

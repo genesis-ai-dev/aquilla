@@ -28,7 +28,12 @@ function progress(fileId: string, scope: string, key: string, over: Record<strin
   return {
     project_id: P, file_id: fileId, scope, section_key: key, target_lang: "",
     total_count: 0, filled_count: 0, validator_histogram: "{}",
-    audio_count: 0, audio_validated_count: 0, last_edit_at: null,
+    // AQU-490: audioValidatedCount is read from this histogram at the
+    // project's threshold, not from the stored column beside it — a stored
+    // verdict is fixed at "one vote" and would contradict the board the
+    // moment a project asked for two.
+    audio_count: 0, audio_validated_count: 0, audio_validator_histogram: "{}",
+    last_edit_at: null,
     revision: 5, updated_at: TS,
     ...over,
   }
@@ -241,14 +246,21 @@ describe("GET .../plan — caching and auth", () => {
       file_section_progress: [progress("f1", "file", "")],
     })
     const etag = (await get(db)).headers.get("ETag")!
-    expect(etag).toContain(":s2")
+    expect(etag).toContain(":s3")
 
     // And the marker is load-bearing: a caller holding the same key from
     // before the shape changed does NOT get a 304.
-    const previousShape = etag.replace(":s2", "")
+    const previousShape = etag.replace(":s3", "")
     expect(previousShape).not.toBe(etag)
     const res = await get(db, { headers: { "If-None-Match": previousShape } })
     expect(res.status).toBe(200)
+
+    // AQU-490: nor does one from the shape immediately before this — the live
+    // case at deploy. audioValidatedCount kept its name and its type and
+    // changed its question, which nothing else in the key can express.
+    const s2Era = etag.replace(":va1:s3", ":s2")
+    expect(s2Era).not.toBe(etag)
+    expect((await get(db, { headers: { "If-None-Match": s2Era } })).status).toBe(200)
   })
 
   it("moves when the validation threshold or the headings policy changes", async () => {
@@ -283,6 +295,16 @@ describe("GET .../plan — caching and auth", () => {
     expect(excluded).not.toBe(raised)
     expect(excluded).toContain(":nostruct")
     expect((await get(db, { headers: { "If-None-Match": raised } })).status).toBe(200)
+
+    // AQU-490: and the AUDIO threshold, for the same reason. Every unit's
+    // audioValidatedCount is read from the audio histogram against it, so
+    // raising it changes the board with no data write to move any clock.
+    await db.prepare("UPDATE project_settings SET settings = ? WHERE project_id = ?")
+      .bind(JSON.stringify({ validationCount: 2, countStructuralCells: false, validationCountAudio: 2 }), P).run()
+    const audioRaised = (await get(db)).headers.get("ETag")!
+    expect(audioRaised).not.toBe(excluded)
+    expect(audioRaised).toContain(":va2:")
+    expect((await get(db, { headers: { "If-None-Match": excluded } })).status).toBe(200)
   })
 
   it("moves when a cue sheet is REMOVED, which changes every audio number", async () => {
@@ -400,7 +422,9 @@ describe("the headings policy reaches the audio numbers too", () => {
           structural_count: 2, structural_filled_count: 2,
           structural_validator_histogram: JSON.stringify({ "1": 2 }),
           audio_count: 12, audio_validated_count: 12,
+          audio_validator_histogram: JSON.stringify({ "1": 12 }),
           structural_audio_count: 2, structural_audio_validated_count: 2,
+          structural_audio_validator_histogram: JSON.stringify({ "1": 2 }),
         }),
       ],
     })
@@ -453,6 +477,10 @@ describe("audio comes from the linked cue sheet", () => {
         progress("ep1", "file", "", { total_count: 646, filled_count: 600 }),
         progress("cues1", "file", "", {
           total_count: 548, audio_count: 548, audio_validated_count: 12,
+          // AQU-490: and the histogram it is read from — which on a dubbing
+          // unit must come off the SHEET's row (ps), like the counts beside
+          // it, and not the anchor's lane row.
+          audio_validator_histogram: JSON.stringify({ "0": 536, "1": 12 }),
         }),
       ],
     })

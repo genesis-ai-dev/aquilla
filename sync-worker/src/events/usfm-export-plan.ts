@@ -22,6 +22,7 @@
 
 import { removedCellsForFile } from './removed-cells'
 import type { UsfmEdits } from '../lib/usfm-lossless'
+import { readUsfmNotes, reattachUsfmNotes } from '../lib/usfm-notes'
 
 /** How far an added cell may sit from a verse before we give up walking. Two
  *  cells added in a row chain through each other, so a handful of hops is
@@ -79,7 +80,7 @@ export async function buildUsfmExportPlan(
   //    (project_id, file_id, cell_id) and inherits its addressability.
   const cells = await db
     .prepare(
-      `SELECT s.canonical_ref AS canonical_ref, t.value AS value
+      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, s.metadata AS source_metadata
          FROM cells t
          JOIN cells s
            ON s.project_id = t.project_id
@@ -95,10 +96,22 @@ export async function buildUsfmExportPlan(
           AND t.value <> ''${validatedPredicate}`,
     )
     .bind(projectId, fileId, lane)
-    .all<{ canonical_ref: string; value: string }>()
+    .all<{ canonical_ref: string; value: string; source_metadata: unknown }>()
 
+  // AQU-1295: a content-only (agent) import parked the verse's footnotes,
+  // endnotes and crossrefs in `source.metadata.usfmNotes` so the agent would
+  // draft from marker-free text. Substituting the translation replaces the
+  // whole verse span, so without re-attaching them here every note on a
+  // TRANSLATED verse leaves the file — silently, and only visible once someone
+  // proofreads the typeset book. An untranslated verse needs nothing: it has no
+  // override, so its original span is emitted whole, notes included.
+  //
+  // In-app imports are lossless — their markers are still in the cell text and
+  // they carry no `usfmNotes` — so this is a no-op for them.
   const overrides = new Map<string, string>()
-  for (const row of cells.results ?? []) overrides.set(row.canonical_ref, row.value)
+  for (const row of cells.results ?? []) {
+    overrides.set(row.canonical_ref, reattachUsfmNotes(row.value, readUsfmNotes(row.source_metadata)))
+  }
 
   const edits: UsfmEdits = {}
 

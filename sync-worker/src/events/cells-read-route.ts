@@ -74,7 +74,7 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
-import { grantedLaneIds, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
+import { targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -691,8 +691,7 @@ export async function handleCellsReadRequest(
   // lane". Below Maintainer the response is cut to granted lanes. The token
   // is already verified above; 600+ and platform stay unrestricted (token "").
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
-  const laneIds = await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes)
-  const visibility = laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))
+  const visibility = visibilityCacheToken(visibleLanes)
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -845,8 +844,10 @@ export async function handleCellsReadRequest(
           deltaBinds.push(...targetLaneDualReadBinds(projectId, laneFilter))
         }
         const deltaWall = targetVisibilityClause({
-          laneIds,
+          visible: visibleLanes,
+          projectId,
           sideExpr: "side",
+          targetLangExpr: "target_lang",
           laneIdExpr: "lane_id",
         })
         if (deltaWall) {
@@ -933,8 +934,10 @@ export async function handleCellsReadRequest(
     binds.push(...targetLaneDualReadBinds(projectId, laneFilter))
   }
   const wall = targetVisibilityClause({
-    laneIds,
+    visible: visibleLanes,
+    projectId,
     sideExpr: "side",
+    targetLangExpr: "target_lang",
     laneIdExpr: "lane_id",
   })
   if (wall) {

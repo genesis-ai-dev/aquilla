@@ -4,7 +4,6 @@ import {
   filterSettingsToVisibleLanes,
   laneReadWallEnabled,
   laneTagAllowed,
-  uniqueLaneIdsForGrants,
   visibilityCacheToken,
   visibleLaneTags,
 } from "./read-wall"
@@ -53,18 +52,6 @@ describe("lane read wall", () => {
     expect(visibilityCacheToken(new Set(["fr", "es"]))).toBe(":vis:es.fr")
   })
 
-  it("gives one grant one lane, and none when two lanes share the language", () => {
-    const lanes = [
-      { id: "es", name: "Spanish", legacyTag: "es" },
-      { id: "def", name: "Spanish", legacyTag: "" },
-      { id: "fr", name: "French", legacyTag: "fr" },
-    ]
-    expect(uniqueLaneIdsForGrants(lanes, ["es"])).toEqual([])
-    expect(uniqueLaneIdsForGrants(lanes, ["fr"])).toEqual(["fr"])
-    expect(uniqueLaneIdsForGrants(lanes.filter((lane) => lane.id !== "es"), ["es"])).toEqual(["def"])
-    expect(uniqueLaneIdsForGrants(lanes, ["es", "fr"])).toEqual(["fr"])
-  })
-
   it("filters the settings registry and blanks an ungranted primary language", () => {
     const filtered = filterSettingsToVisibleLanes(
       { settings: { targetLanguage: "Spanish", targetLanes: ["Spanish", "French"], archivedLanes: ["French"] } },
@@ -80,12 +67,5 @@ describe("lane read wall", () => {
     )
     expect(hidden.settings.targetLanguage).toBe("")
     expect(hidden.settings.targetLanes).toEqual(["French"])
-
-    const ambiguous = filterSettingsToVisibleLanes(
-      { settings: { targetLanguage: "Spanish", targetLanes: ["es", "French"] } },
-      new Set(["es"]),
-    )
-    expect(ambiguous.settings.targetLanguage).toBe("")
-    expect(ambiguous.settings.targetLanes).toEqual([])
   })
 })

@@ -1,53 +1,39 @@
 /**
  * AQU-730: SQL for the read wall. See src/lib/lanes/read-wall.ts.
  *
- * A grant resolves to one lane. `es` sees the single lane named Spanish.
- * If two lanes share that language, the grant sees neither of them — we do
- * not hand one grant two lanes. Source rows are always kept.
+ * A restricted caller sees a target row when its target_lang is a granted
+ * tag, or its lane's legacy_tag / name is. The default lane (legacy_tag '')
+ * stays visible to someone granted that lane's name ("Spanish"), which is
+ * how the lane is labeled. Source rows are always kept.
  */
 
 import type { SyncTokenClaims } from "../auth"
+import { languageSurfaceForms } from "../../../src/lib/language-normalize"
 import {
-  laneMatchesGrant,
   laneReadWallEnabled,
-  uniqueLaneIdsForGrants,
+  laneTagAllowed,
   visibleLaneTags,
-  type LaneIdentity,
   type VisibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+
+/** Grant tags plus the names and codes that mean the same language. */
+function matchForms(tags: Iterable<string>): string[] {
+  const forms = new Set<string>()
+  for (const tag of tags) {
+    for (const form of languageSurfaceForms(tag)) {
+      if (form !== "") forms.add(form)
+    }
+  }
+  return [...forms]
+}
 
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
 
-async function targetLanes(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
-        WHERE project_id = ? AND role = 'target'`,
-    )
-    .bind(projectId)
-    .all<{ id: string; name: string; legacy_tag: string | null }>()
-  return results.map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
-}
-
 /**
- * Lane ids this caller may read. `null` means every lane (wall off, or
- * Maintainer / platform). An empty list means no target lane.
- */
-export async function grantedLaneIds(
-  db: AquillaDb,
-  projectId: string,
-  visible: VisibleLaneTags,
-): Promise<readonly string[] | null> {
-  if (visible === null) return null
-  if (visible.size === 0) return []
-  return uniqueLaneIdsForGrants(await targetLanes(db, projectId), visible)
-}
-
-/**
- * Progress asks for one lane tag. Allowed when that tag is exactly one lane
- * and that lane is among the caller's grants. A tag that matches two lanes
- * is refused.
+ * Progress and first-open ask for one lane tag. `''` is the default lane; a
+ * grant of that lane's name (the string `targetLanguage` was copied into)
+ * counts, because the tag on the row is empty and the name is the language.
  */
 export async function canReadRequestedLane(
   db: AquillaDb,
@@ -56,12 +42,21 @@ export async function canReadRequestedLane(
   lane: string,
 ): Promise<boolean> {
   if (visible === null) return true
-  const lanes = await targetLanes(db, projectId)
-  const granted = visible.size === 0 ? [] : uniqueLaneIdsForGrants(lanes, visible)
-  if (granted.length === 0) return false
-  const matches = lanes.filter((row) => laneMatchesGrant(row, lane))
-  if (matches.length !== 1) return false
-  return granted.includes(matches[0]!.id)
+  if (laneTagAllowed(visible, lane)) return true
+  if (lane !== "" || visible.size === 0) return false
+  const lowered = matchForms(visible)
+  if (lowered.length === 0) return false
+  const placeholders = lowered.map(() => "?").join(", ")
+  const row = await db
+    .prepare(
+      `SELECT 1 AS ok FROM lanes
+        WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+          AND lower(name) IN (${placeholders})
+        LIMIT 1`,
+    )
+    .bind(projectId, ...lowered)
+    .first<{ ok: number }>()
+  return row != null
 }
 
 export function visibleLanesForRead(
@@ -78,22 +73,48 @@ export function visibleLanesForRead(
 
 /**
  * Extra AND-clause, or null when the caller may see every lane.
- * `laneIds === null` is unrestricted. An empty list hides every target row.
- * `sideExpr` omitted means every row is a target row (validators).
+ * `sideExpr` omitted means every row is a target row (progress, validators).
  */
 export function targetVisibilityClause(args: {
-  laneIds: readonly string[] | null
+  visible: VisibleLaneTags
+  projectId: string
   sideExpr?: string
+  targetLangExpr: string
   laneIdExpr: string
 }): { sql: string; binds: unknown[] } | null {
-  if (args.laneIds === null) return null
-  if (args.laneIds.length === 0) {
+  if (args.visible === null) return null
+  const tags = matchForms(args.visible)
+  if (tags.length === 0) {
     return args.sideExpr
       ? { sql: `AND ${args.sideExpr} = 'source'`, binds: [] }
       : { sql: "AND FALSE", binds: [] }
   }
-  const ph = args.laneIds.map(() => "?").join(", ")
-  const match = `${args.laneIdExpr} IN (${ph})`
-  if (!args.sideExpr) return { sql: `AND ${match}`, binds: [...args.laneIds] }
-  return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds: [...args.laneIds] }
+  const ph = tags.map(() => "?").join(", ")
+  const lowered = tags
+  const match = `(
+    lower(${args.targetLangExpr}) IN (${ph})
+    OR ${args.laneIdExpr} IN (
+      SELECT id FROM public.lanes
+      WHERE project_id = ? AND role = 'target'
+        AND (lower(COALESCE(legacy_tag, '')) IN (${ph}) OR lower(name) IN (${ph}))
+    )
+    OR (
+      ${args.targetLangExpr} = ''
+      AND EXISTS (
+        SELECT 1 FROM public.lanes
+        WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+          AND lower(name) IN (${ph})
+      )
+    )
+  )`
+  const binds: unknown[] = [
+    ...tags,
+    args.projectId,
+    ...lowered,
+    ...lowered,
+    args.projectId,
+    ...lowered,
+  ]
+  if (!args.sideExpr) return { sql: `AND ${match}`, binds }
+  return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds }
 }

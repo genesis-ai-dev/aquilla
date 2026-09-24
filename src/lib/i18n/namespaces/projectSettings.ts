@@ -32,47 +32,75 @@ export const projectSettings = defineNamespace({
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
     "projectSettings.create.dialogTitle": "Create New Project",
-    // AQU-832: no separate create.nameLabel/sourceLanguageLabel/targetLanguageLabel —
-    // this dialog reuses projectSettings.info.{nameLabel,sourceLanguageLabel,
-    // targetLanguageLabel} (the settings-page Project Info card's field labels)
-    // rather than minting Title-Case-vs-sentence-case duplicates of the same word.
+    // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
+    // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
+    // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
-    "projectSettings.create.targetLanguagesLabel": "Target language(s)",
+    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.additionalTargetPlaceholder": "Add another…",
+    "projectSettings.create.addTargetLanguageAction": "Add another language",
+    "projectSettings.create.bulkTargetLanguagesHint":
+      "That's all {max} boxes. Add any remaining languages here, separated by commas.",
+    "projectSettings.create.bulkTargetLanguagesPlaceholder":
+      "Swahili, Yoruba, Hausa, zh-Hant…",
+    "projectSettings.create.bulkTargetLanguagesCount": plural({
+      one: "Adds {count} more lane.",
+      other: "Adds {count} more lanes.",
+    }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
       "Any label works — a BCP-47 tag, a language name, or a register description " +
       "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self-contained",
-    "projectSettings.create.shapeSelfContained": "{name} — owns its source and target.",
-    "projectSettings.create.shapeSourceOnlyName": "Source-only",
-    "projectSettings.create.shapeSourceOnly":
-      "{name} — a canonical source others link against. No target.",
-    "projectSettings.create.shapeLinkedTargetName": "Linked target",
-    "projectSettings.create.shapeLinkedTarget":
-      "{name} — reads source from another project; owns only its target.",
+    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContained": plural({
+      one: "{name} — this project owns both its source and its target.",
+      other: "{name} — this project owns both its source and its targets.",
+    }),
+    "projectSettings.create.shapeLinkedTargetName": plural({
+      one: "Linked Target",
+      other: "Linked Targets",
+    }),
+    "projectSettings.create.shapeLinkedTarget": plural({
+      one:
+        "{name} — this project reads its source from another project and owns only its target.",
+      other:
+        "{name} — this project reads its source from another project and owns only its targets.",
+    }),
+    // Mode is implied by shape (self-contained → optional clone; linked-target → live).
+    // These intros replace the old clone/live radio pair under Advanced.
+    "projectSettings.create.cloneModeName": "Cloned",
+    "projectSettings.create.cloneIntro":
+      "Do you want to import a {mode} copy of another project? This will create a " +
+      "one-time snapshot and then remain independent.",
+    "projectSettings.create.liveModeName": "live",
+    "projectSettings.create.liveIntro":
+      "You are creating a {mode} copy. Your new project will be connected to the " +
+      "upstream project, and fixes in the upstream project will automatically " +
+      "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
-    "projectSettings.create.linkModeLabel": "Clone or live?",
-    // AQU-832: no separate create.linkModeLiveName/linkModeCloneName — reuses
-    // projectSettings.sourceLink.modeLive/modeClone (the Source Link card's
-    // mode badges), the same "Live"/"Clone" vocabulary this dialog is choosing.
-    "projectSettings.create.linkModeLive":
-      "{name} — stays subscribed; upstream fixes propagate here automatically.",
-    "projectSettings.create.linkModeClone":
-      "{name} — one-time snapshot; this project becomes independent immediately.",
-    "projectSettings.create.linkConsumesLabel": "What should become this project's source?",
-    "projectSettings.create.linkConsumesSourceName": "Its source",
-    "projectSettings.create.linkConsumesSource":
-      "{name} — sibling-translation case (this project translates the same original " +
-      "text). For same-org sibling languages, a target lane on the upstream project " +
-      "is the recommended shape instead.",
-    "projectSettings.create.linkConsumesTargetName": "Its translations",
+    "projectSettings.create.linkConsumesLabel":
+      "Which corpus should become this project's source?",
+    "projectSettings.create.linkConsumesSourceName": "Its Source",
+    "projectSettings.create.linkConsumesSource": plural({
+      one:
+        "{name} — sibling-translation case (this project translates the same original " +
+        "text). For same-org sibling languages, a target lane on the upstream project " +
+        "is the recommended shape instead.",
+      other:
+        "{name} — sibling-translation case (this project translates the same original " +
+        "text). For same-org sibling languages, target lanes on the upstream project " +
+        "are the recommended shape instead.",
+    }),
+    "projectSettings.create.linkConsumesTargetName": "One of its Targets",
     "projectSettings.create.linkConsumesTarget":
-      "{name} — chain case (this project translates the upstream project's target, " +
-      "e.g. French → Chaluba).",
+      "{name} — chain case (this project translates one of the upstream project's " +
+      "targets, e.g. French → Chaluba).",
+    "projectSettings.create.validationLinkConsumesRequired":
+      "Choose which corpus should become this project's source",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
@@ -833,51 +861,107 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.create.targetLanguagesLabel": {
         description:
-          "Field label above the target-language input when the chosen project shape " +
-          "is self-contained (multiple target lanes allowed).",
+          "Field label above the target-language boxes in the create dialog. " +
+          "Always 'Target Language(s)' — the parenthetical covers one or many " +
+          "lanes without swapping the label as boxes fill.",
+      },
+      "projectSettings.create.shapeLinkedTargetName": {
+        description:
+          "Bold name of the linked-target project-shape radio. Inflects with how " +
+          "many target-language lanes the user has filled in on this create pass " +
+          "('Linked Target' vs 'Linked Targets'). Count is not shown as a numeral.",
+      },
+      "projectSettings.create.additionalTargetPlaceholder": {
+        description:
+          "Placeholder in the second and subsequent target-language boxes of the " +
+          "create dialog, where the first box carries the full example placeholder.",
+      },
+      "projectSettings.create.addTargetLanguageAction": {
+        description:
+          "Label of the button under the target-language boxes in the create dialog " +
+          "that appends one more empty box (one per additional target lane).",
+      },
+      "projectSettings.create.bulkTargetLanguagesHint": {
+        description:
+          "Field description above the comma-separated overflow field in the create " +
+          "dialog, shown once the per-lane boxes have hit their limit and the plus " +
+          "button has been replaced.",
+        placeholders: {
+          max: "The number of individual target-language boxes the dialog allows before switching to the overflow field.",
+        },
+      },
+      "projectSettings.create.bulkTargetLanguagesPlaceholder": {
+        description:
+          "Placeholder in the comma-separated target-language overflow field, showing " +
+          "the expected comma-delimited shape.",
+      },
+      "projectSettings.create.bulkTargetLanguagesCount": {
+        description:
+          "Count of extra target lanes recognised in the comma-separated overflow " +
+          "field, shown beneath it as live feedback. Reflects lanes that would " +
+          "actually be created, after duplicates and the overall cap are applied.",
+        placeholders: {
+          count: "How many extra target lanes the overflow field currently contributes; governs the plural form.",
+        },
       },
       "projectSettings.create.languageHintAriaLabel": {
         description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
-          "One of three radio-option descriptions under 'Advanced: project shape'. " +
+          "One of two radio-option descriptions under 'Advanced: project shape'. " +
           "The bold name is a separate translated+styled placeholder so word order " +
-          "can move per locale.",
+          "can move per locale. Inflects 'target'/'targets' from the filled " +
+          "target-language count (not shown as a numeral).",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeSelfContainedName and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.shapeSourceOnly": {
-        description: "Second project-shape radio-option description; see shapeSelfContained.",
-        placeholders: {
-          name: "The bold shape name, already translated via projectSettings.create.shapeSourceOnlyName and wrapped in <strong> by the caller.",
-        },
-      },
       "projectSettings.create.shapeLinkedTarget": {
-        description: "Third project-shape radio-option description; see shapeSelfContained.",
+        description:
+          "Second project-shape radio-option description; see shapeSelfContained. " +
+          "Inflects 'target'/'targets' from the filled target-language count.",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeLinkedTargetName and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.linkModeLive": {
+      "projectSettings.create.cloneModeName": {
         description:
-          "Radio-option description for the 'live' link mode, shown only when shape " +
-          "is 'linked-target'.",
+          "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
+          "snapshot copy, not a live link.",
+      },
+      "projectSettings.create.cloneIntro": {
+        description:
+          "Explanatory line under the Self Contained shape radio: offers an optional " +
+          "one-time clone from an upstream project. The bold mode name is a separate " +
+          "translated+styled placeholder so word order can move per locale.",
         placeholders: {
-          name: "The bold mode name, already translated via projectSettings.sourceLink.modeLive and wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.cloneModeName " +
+            "and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.linkModeClone": {
-        description: "Radio-option description for the 'clone' link mode; see linkModeLive.",
+      "projectSettings.create.liveModeName": {
+        description:
+          "The emphasized mode word in projectSettings.create.liveIntro — a live-linked " +
+          "copy that stays connected to the upstream project.",
+      },
+      "projectSettings.create.liveIntro": {
+        description:
+          "Explanatory line under the Linked Target shape radio: states that this " +
+          "create is a live-linked copy. The bold mode name is a separate translated+styled " +
+          "placeholder so word order can move per locale.",
         placeholders: {
-          name: "The bold mode name, already translated via projectSettings.sourceLink.modeClone and wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.liveModeName " +
+            "and wrapped in <strong> by the caller.",
         },
       },
       "projectSettings.create.linkConsumesSource": {
         description:
           "Radio-option description for 'consumes source' (sibling-translation case) " +
-          "in the linked-target advanced flow.",
+          "in the advanced create flow. Inflects 'a target lane' vs 'target " +
+          "lanes' from how many target languages the user has entered.",
         placeholders: {
           name: "The bold option name, already translated via projectSettings.create.linkConsumesSourceName and wrapped in <strong> by the caller.",
         },
@@ -887,6 +971,12 @@ export const projectSettings = defineNamespace({
         placeholders: {
           name: "The bold option name, already translated via projectSettings.create.linkConsumesTargetName and wrapped in <strong> by the caller.",
         },
+      },
+      "projectSettings.create.validationLinkConsumesRequired": {
+        description:
+          "Inline validation error when Advanced linking is active (linked-target, or " +
+          "self-contained with an upstream picked) but the user has not chosen " +
+          "whether to consume the upstream source or one of its targets.",
       },
       "projectSettings.create.extraLanguagesRemoveAriaLabel": {
         description: "Accessible name of the small x button on a chip removing one extra target language from the create-dialog's list.",

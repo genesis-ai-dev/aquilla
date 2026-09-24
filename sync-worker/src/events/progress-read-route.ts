@@ -1,5 +1,6 @@
 import { verifyTokenForProject } from '../auth'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { walkAnchorChain } from './cells-read-route'
 
@@ -525,12 +526,14 @@ export async function readFirstOpenCell(
         `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed`)
     }
   }
+  // AQU-1240 slice 7: the lane join dual-reads (lane_id once backfilled,
+  // target_lang while it is still NULL) like every other hot read here.
   const targetJoin = wantsText
     ? `LEFT JOIN cells t
          ON t.project_id = s.project_id AND t.file_id = s.file_id
-        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?`
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND ${targetLaneDualReadSql('t')}`
     : ''
-  if (wantsText) binds.push(lane)
+  if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
   if (unit) binds.push(unit, `${unit} %`)
 
@@ -625,11 +628,11 @@ export async function handleProgressReadRequest(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND t.target_lang = ?
+            AND ${targetLaneDualReadSql('t')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             AND ${chapterKeySql('s')} = ?
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
-      ).bind(lane, projectId, fileId, sectionKey).all<{
+      ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         cell_id: string
         canonical_ref: string | null
         target_value: string
@@ -640,8 +643,9 @@ export async function handleProgressReadRequest(
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
         `SELECT revision, updated_at FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ? AND target_lang = ?`,
-      ).bind(projectId, fileId, sectionKey, lane).first<{
+          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ?
+            AND ${targetLaneDualReadSql()}`,
+      ).bind(projectId, fileId, sectionKey, ...targetLaneDualReadBinds(projectId, lane)).first<{
         revision: number | string | bigint
         updated_at: number | string | bigint | null
       }>(),
@@ -712,9 +716,9 @@ export async function handleProgressReadRequest(
                 audio_validator_histogram, structural_audio_validator_histogram,
                 updated_at
            FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
+          WHERE project_id = ? AND file_id = ? AND ${targetLaneDualReadSql()}`,
       )
-      .bind(projectId, fileId, lane)
+      .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
       .all<ProgressRow>(),
     readValidationCount(env.AQUILLA_PG, projectId),
     readValidationCountAudio(env.AQUILLA_PG, projectId),

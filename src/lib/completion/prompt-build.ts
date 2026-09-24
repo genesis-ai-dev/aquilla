@@ -67,6 +67,32 @@ export interface PromptRule {
  */
 export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
 
+/**
+ * One row of the immediate discourse window.
+ *
+ * `draft` marks a target this same run produced and NOBODY has reviewed
+ * (AQU-1386 §3). Batch drafting sends several calls in sequence; without this,
+ * call N+1 could not see call N's output at all and every chunk started its
+ * discourse cold. Carrying it forward is what keeps connectives and participant
+ * reference consistent across a long file.
+ *
+ * It is labelled in the prompt rather than silently mixed in, because the model
+ * should weigh an unreviewed draft less than an approved translation. The rule
+ * that unapproved text never becomes a retrieval EXAMPLE is untouched: this is
+ * in-run context only, is never persisted, and never crosses runs.
+ */
+export interface PrecedingContextEntry {
+  source: string
+  target: string
+  /** In-run, unreviewed draft — labelled as such in the rendered prompt. */
+  draft?: boolean
+}
+
+/** Prompt label for one discourse-window row. */
+export function precedingContextLabel(entry: PrecedingContextEntry): string {
+  return entry.draft ? "Translation (unreviewed draft)" : "Translation"
+}
+
 function normalizedExampleSource(source: string): string {
   return source.trim().replace(/\s+/g, " ").toLowerCase()
 }
@@ -224,7 +250,7 @@ export interface BuildPromptOptions {
    *  discourse window. Rendered last (closest to the live source) because it is
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
    *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Extra task instruction appended to the system prompt after the rules
    *  block. Must be placeholder-free — it is appended AFTER the
    *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
@@ -286,7 +312,7 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
   // the model is about to translate. Skip blank pairs. (D4)
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      user += `Source: ${ctx.source}\n${precedingContextLabel(ctx)}: ${ctx.target}\n\n`
     }
   }
   if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`

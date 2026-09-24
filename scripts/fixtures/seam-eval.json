@@ -1,0 +1,78 @@
+{
+  "readme": [
+    "Labelled seam fixture for scripts/seam-eval.ts (AQU-1386).",
+    "",
+    "Each document is an ordered run of cells from ONE file. `labels` holds one",
+    "boolean per seam (length = cells.length - 1): true when the two cells belong",
+    "in the same drafting unit, false when the boundary is real.",
+    "",
+    "Sources are deliberately public-domain or synthetic. The EBL files Cleiton",
+    "flagged (including the exercise-5 split) are Biblica's and are NOT in this",
+    "repo: whoever has access adds them as a `source: \"ebl\"` document before the",
+    "thresholds in DEFAULT_SEAM_THRESHOLDS are treated as final. The eval prints",
+    "a per-source breakdown so a missing source is visible rather than silently",
+    "averaged away.",
+    "",
+    "`level` is the optional 0-4 boundary level (AQU-1387/AQU-1388 ground truth);",
+    "it is not scored by this ticket."
+  ],
+  "documents": [
+    {
+      "id": "web-luke-5",
+      "source": "bible",
+      "note": "World English Bible (public domain), Luke 5:1-11. Verse cells: sentences routinely span verse boundaries, which is the case that will never be fixed upstream.",
+      "cells": [
+        { "id": "v1", "ref": "LUK 5:1", "text": "Now while the multitude pressed on him and heard the word of God, he was standing by the lake of Gennesaret." },
+        { "id": "v2", "ref": "LUK 5:2", "text": "He saw two boats standing by the lake, but the fishermen had gone out of them and were washing their nets." },
+        { "id": "v3", "ref": "LUK 5:3", "text": "He entered into one of the boats, which was Simon's, and asked him to put out a little from the land. He sat down and taught the multitudes from the boat." },
+        { "id": "v4", "ref": "LUK 5:4", "text": "When he had finished speaking, he said to Simon, \"Put out into the deep and let down your nets for a catch.\"" },
+        { "id": "v5", "ref": "LUK 5:5", "text": "Simon answered him, \"Master, we worked all night and caught nothing; but at your word I will let down the net.\"" },
+        { "id": "v6", "ref": "LUK 5:6", "text": "When they had done this, they caught a great multitude of fish, and their net was breaking." },
+        { "id": "v7", "ref": "LUK 5:7", "text": "They beckoned to their partners in the other boat, that they should come and help them. They came and filled both boats, so that they began to sink." },
+        { "id": "v8", "ref": "LUK 5:8", "text": "But Simon Peter, when he saw it, fell down at Jesus' knees, saying, \"Depart from me, for I am a sinful man, Lord.\"" },
+        { "id": "v9", "ref": "LUK 5:9", "text": "For he was amazed, and all who were with him, at the catch of fish which they had caught;" },
+        { "id": "v10", "ref": "LUK 5:10", "text": "and so also were James and John, sons of Zebedee, who were partners with Simon. Jesus said to Simon, \"Don't be afraid. From now on you will be catching people alive.\"" },
+        { "id": "v11", "ref": "LUK 5:11", "text": "When they had brought their boats to land, they left everything, and followed him." }
+      ],
+      "labels": [false, false, false, false, false, false, false, true, true, false],
+      "levels": [1, 2, 1, 1, 1, 1, 1, 0, 0, 2],
+      "labelNote": "v9 ends on a semicolon and v10 opens with 'and so also were' — one sentence split across three verse cells. Everything else is a clean sentence boundary."
+    },
+    {
+      "id": "exercise-split",
+      "source": "prose",
+      "note": "Synthetic workbook modelled on the EBL shape described in AQU-1386: numbered exercises whose prompt text is split mid-sentence by the importer. NOT Biblica's file.",
+      "cells": [
+        { "id": "e1", "style": "h2", "text": "Exercise 4" },
+        { "id": "e2", "text": "Read the passage aloud, then answer the questions below in your own words." },
+        { "id": "e3", "text": "1. What did the fisherman do when he heard" },
+        { "id": "e4", "text": "the teacher's instruction?" },
+        { "id": "e5", "text": "2. Why was he surprised by what happened next?" },
+        { "id": "e6", "style": "h2", "text": "Exercise 5" },
+        { "id": "e7", "text": "Write two sentences describing what you would have done, and" },
+        { "id": "e8", "text": "explain your reasoning to a partner." }
+      ],
+      "labels": [true, false, true, false, false, true, true],
+      "levels": [2, 3, 0, 2, 4, 2, 0],
+      "labelNote": "e3/e4 and e7/e8 are the mid-sentence splits. The heading seams (e5->e6) must NOT join even though e6 is short and e7 opens mid-thought — that is the section_break veto."
+    },
+    {
+      "id": "plain-prose",
+      "source": "prose",
+      "note": "Public-domain prose (Aesop) chunked at sentence boundaries — the control. A classifier that joins here is over-grouping.",
+      "cells": [
+        { "id": "p1", "text": "A Crow was sitting on a branch of a tree with a piece of cheese in her beak." },
+        { "id": "p2", "text": "A Fox observed her and set his wits to work to discover some way of getting the cheese." },
+        { "id": "p3", "text": "Coming and standing under the tree he looked up and said, \"What a noble bird I see above me!\"" },
+        { "id": "p4", "text": "Her beauty is without equal, the hue of her plumage exquisite." },
+        { "id": "p5", "text": "If only her voice is as sweet as her looks are fair, she ought without doubt to be Queen of the Birds." },
+        { "id": "p6", "text": "The Crow was hugely flattered by this, and just to show the Fox that she could sing she gave a loud caw." },
+        { "id": "p7", "text": "Down came the cheese, of course, and the Fox, snatching it up, said," },
+        { "id": "p8", "text": "\"You have a voice, madam, I see: what you want is wits.\"" }
+      ],
+      "labels": [false, false, true, true, false, false, true],
+      "levels": [1, 1, 1, 1, 1, 1, 0],
+      "labelNote": "p3-p5 are one continuous speech (p4 and p5 only resolve against p3), and p7 ends on a comma before the quotation in p8."
+    }
+  ]
+}

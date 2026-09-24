@@ -73,6 +73,10 @@ export interface ProjectWideSettings {
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /** AQU-490: the audio twins. Separate keys, never fallbacks for each other. */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-1068: who may add and remove cells in this project's files?
    *

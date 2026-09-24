@@ -310,6 +310,37 @@ export function fileCountersRecomputeStmt(
 }
 
 /**
+ * AQU-490: re-derive one take's vote count from `cell_audio_validators`.
+ *
+ * A COUNT rather than an increment, so replaying the log twice cannot drift it
+ * — the same property that makes `cells.endorsement_count` safe where a stamped
+ * `cells.validated` is not. Every writer of a validator row runs this
+ * afterwards, which is now exactly two: validate and unvalidate. Trim used to
+ * be the third and no longer touches votes at all.
+ */
+export function audioValidatorCountRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  audioId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `UPDATE cell_audio
+          SET validator_count = (
+            SELECT COUNT(*) FROM cell_audio_validators v
+             WHERE v.project_id = cell_audio.project_id
+               AND v.file_id    = cell_audio.file_id
+               AND v.cell_id    = cell_audio.cell_id
+               AND v.audio_id   = cell_audio.audio_id
+          )
+        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+    )
+    .bind(projectId, fileId, cellId, audioId)
+}
+
+/**
  * The same counters for every file in a project, in one statement — or, with
  * `fileIds`, for just those files (AQU-557: POST /migrate/finalize names the
  * files a push touched so a wide project is not rescanned on every chunk).
@@ -438,7 +469,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1525,8 +1556,8 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+              timings_json, selected, deleted, event_id, created_ts, role, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1540,7 +1571,24 @@ case 'cell.audio.attach': {
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
-              event_id           = excluded.event_id`,
+              event_id           = excluded.event_id,
+              -- AQU-490: created_by is FILL-ONLY, and deliberately so. A
+              -- re-attach is routine — the transcription lands ~800ms after
+              -- every recording, trims persist, timings refresh — and each
+              -- carries the author of whoever triggered it. Assigning it here
+              -- would hand a take's authorship to the last person who touched
+              -- it, which on a project with self-validation off would then
+              -- refuse the real recorder permission to validate their own take.
+              created_by         = COALESCE(cell_audio.created_by, excluded.created_by),
+              -- role is NOT NULL (pre-0096 rows defaulted to 'dub'), so it
+              -- cannot be COALESCEd into place. It may only ever be PROMOTED to
+              -- 'source': a re-import is authoritative and repairs a row the
+              -- rollout's filename heuristic missed, while a routine re-attach
+              -- — which always binds 'dub' because it says nothing about role —
+              -- must never demote the shared programme audio to a dub and gate
+              -- every cell of that file on somebody validating it.
+              role               = CASE WHEN excluded.role = 'source' THEN 'source'
+                                        ELSE cell_audio.role END`,
           )
           .bind(
             event.projectId,
@@ -1561,6 +1609,11 @@ case 'cell.audio.attach': {
             p.timings ? JSON.stringify(p.timings) : null,
             event.id,
             event.serverTs,
+            // AQU-490: 'source' only when the attach says so — an import
+            // declaring the shared programme audio. Everything else is a dub,
+            // which is what the default and every historical row mean.
+            p.role === 'source' ? 'source' : 'dub',
+            event.author,
           ),
       )
       // AQU-646: an attach may carry the ASR transcript of a media segment.
@@ -1650,6 +1703,22 @@ case 'cell.audio.attach': {
             p.audioId,
           ),
       )
+      // A TRIM KEEPS ITS VOTES (Sam, 2026-09-21, reversing his earlier call).
+      // This used to delete the take's validator rows on the reasoning that
+      // trimming changes what a validator heard. It is the same take: no new
+      // audio_id is minted, the samples are untouched, and only the playback
+      // window moves — usually by a fraction of a second, to clip a breath.
+      // Making a reviewer re-listen to a whole line for that is not a rule
+      // anyone would defend out loud. Denoise is the genuinely derived case
+      // and is unaffected: it mints a `dn-` id and attaches it, so its take
+      // starts unvalidated for free.
+      //
+      // Dropping the delete also makes this handler honest with the rollup
+      // set below it. `cell.audio.trim` is deliberately absent from
+      // AUDIO_ROLLUP_KINDS because trim "changes no count" — yet it has been
+      // zeroing validator_count with no progress recompute behind it, so the
+      // board went on reporting a trimmed line as validated. Now that is true
+      // rather than merely unnoticed.
       return ['cell_audio']
     }
 
@@ -1779,36 +1848,67 @@ case 'cell.audio.attach': {
 
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate': {
-      // AQU-508: audio validation, distinct from the text-side cell.validate.
-      // A reviewer approves (or withdraws approval of) one clip — the cell's
-      // selected take. Approval is keyed by audio_id, so re-recording (which
-      // attaches + selects a new clip) leaves the old take approved but no
-      // longer selected; the rollup requires selected = 1, so the cell drops
-      // back to "needs re-validation" until the new take is approved.
+      // AQU-490: one vote per person per TAKE, counted against the project's
+      // threshold when somebody reads — the same shape as the text-side
+      // cell.validate, and for the same reason: a boolean could not say "this
+      // project needs two reviewers", and a stamped boolean goes stale the
+      // moment the threshold moves or the projection is rebuilt.
+      //
+      // The vote is keyed by audio_id, so re-recording (which attaches and
+      // selects a NEW take) leaves the old take's votes intact but no longer
+      // counted — every rollup reads the cell's SELECTED takes, so the cell
+      // drops back to needing validation until the new one earns its own.
       const p = event.payload as EventPayloads['cell.audio.validate']
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
       if (event.kind === 'cell.audio.validate') {
+        // Presence IS the vote (no is_active column), so a repeat validate is
+        // an upsert that only moves the timestamp forward. The decided_ts
+        // guard keeps an out-of-order replay from winding it back.
         stmts.push(
           db
             .prepare(
-              `UPDATE cell_audio SET approved = 1, approved_by = ?, approved_ts = ?
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              `INSERT INTO cell_audio_validators (
+                 project_id, file_id, cell_id, audio_id, username, decided_ts
+               ) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(project_id, file_id, cell_id, audio_id, username)
+               DO UPDATE SET decided_ts = excluded.decided_ts
+                 WHERE excluded.decided_ts > cell_audio_validators.decided_ts`,
             )
-            .bind(event.author, event.serverTs, event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.audioId,
+              event.author,
+              event.serverTs,
+            ),
         )
       } else {
+        // A maintainer may strip somebody else's vote by naming them; anyone
+        // else removes their own. The role gate lives in route.ts — by the
+        // time an event reaches the projection the question is settled.
+        const up = event.payload as EventPayloads['cell.audio.unvalidate']
+        const targetUsername =
+          typeof up.targetUsername === 'string' && up.targetUsername.trim()
+            ? up.targetUsername.trim()
+            : event.author
         stmts.push(
           db
             .prepare(
-              `UPDATE cell_audio SET approved = 0, approved_by = NULL, approved_ts = NULL
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              `DELETE FROM cell_audio_validators
+                WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                  AND audio_id = ? AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(event.projectId, event.fileId, event.cellId, p.audioId, targetUsername),
         )
       }
-      return ['cell_audio']
+      // Re-derive the take's count from the table rather than incrementing it,
+      // so a replay is idempotent — the same reason cells.endorsement_count is
+      // a COUNT and not a running total.
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
     }
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']

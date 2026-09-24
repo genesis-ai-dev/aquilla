@@ -137,7 +137,11 @@ describe("a person's progress reads in percentages, the counts on hover", () => 
         "950 of 950 translated", "950 of 950 validated",
         "500 of 950 recorded", "0 of 950 validated",
       ])
-    expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent("450 takes to record")
+    // AQU-490: the second audio term, which was unreachable until a client
+    // could emit a vote. This person has 500 recorded takes nobody has
+    // listened to, and the row now says so instead of calling them finished.
+    expect(screen.getByTestId("plan-assignment-left-a1"))
+      .toHaveTextContent("450 to record · 500 takes to validate")
   })
 
   it("draws no audio bar for a text-only file", () => {

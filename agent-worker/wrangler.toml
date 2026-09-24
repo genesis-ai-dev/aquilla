@@ -101,7 +101,7 @@ name = "aquilla-agent-sandbox"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.production.build]
-command = "bash ../scripts/verify-deploy-branch.sh main"
+command = "bash ../scripts/verify-deploy-branch.sh release"
 
 [env.production.observability]
 enabled = true

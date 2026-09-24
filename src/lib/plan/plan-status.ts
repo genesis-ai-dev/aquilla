@@ -98,17 +98,20 @@ export function planNearlyCompleteThreshold(totalCount: number): number {
  * Audio is judged on RECORDED rather than validated, and the audio-validated
  * term is suppressed in the words as well as the rule.
  *
- * `cell.audio.validate` exists server-side (AQU-508) and NO CLIENT EMITS IT —
- * there is no recording-review UI, so `audioValidatedCount` is zero on every
- * project in existence. Measuring it would put every audio book permanently out
- * of reach of this group, and would make every row read "1,213 takes to
- * validate". AQU-490 is the open client half.
+ * `cell.audio.validate` existed server-side (AQU-508) with NO CLIENT EMITTING
+ * IT, so `audioValidatedCount` was zero on every project in existence.
+ * Measuring it then would have put every audio book permanently out of reach
+ * of this group and made every row read "1,213 takes to validate".
  *
- * WHEN AQU-490 LANDS THIS FLIPS, and nothing will fail to tell you: the numbers
- * would simply keep measuring the wrong thing. `plan-status.test.ts` pins both
- * arms of this constant so the flip has a test waiting for it.
+ * AQU-490 SHIPPED THE CLIENT HALF, so this flipped to false: the board now
+ * measures audio on what has been VALIDATED, as it has always measured text.
+ *
+ * Expect the numbers to fall on the day it lands, and expect that to be
+ * correct rather than a regression. A project with a thousand recorded takes
+ * and nobody yet asked to listen to them genuinely has a thousand takes to
+ * validate; the board said otherwise only because there was no way to say so.
  */
-export const AUDIO_JUDGED_ON_RECORDED = true
+export const AUDIO_JUDGED_ON_RECORDED = false
 
 /** Stable id for a unit — the storage key, and the React key. */
 export function planUnitId(u: Pick<PlanUnit, "fileId" | "sectionKey">): string {

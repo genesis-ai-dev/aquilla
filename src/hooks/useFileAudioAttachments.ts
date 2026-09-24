@@ -453,6 +453,17 @@ export function mergeCellsWithAudio(
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."
         ...(a.syncFailed ? { syncFailed: true as const } : {}),
+        // AQU-490. THESE MUST BE LISTED. This merge rebuilds every attachment
+        // field by field rather than spreading it, so a field nobody adds here
+        // is dropped on the way to the editor — silently, with no type error,
+        // because every one of them is optional on both sides. The symptom
+        // would be a gutter reading "nobody has validated this" on a take the
+        // server says two people signed off, and nothing at all in a log.
+        ...(a.label != null ? { label: a.label } : {}),
+        ...(a.validatorCount != null ? { validatorCount: a.validatorCount } : {}),
+        ...(a.validators ? { validators: a.validators } : {}),
+        ...(a.role ? { role: a.role } : {}),
+        ...(a.recordedBy != null ? { recordedBy: a.recordedBy } : {}),
       }
     }
     return {

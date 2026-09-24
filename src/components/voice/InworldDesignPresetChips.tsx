@@ -12,7 +12,6 @@ import {
 const PRESET_LABEL_KEY = {
   agent: "audio.newVoice.designPresetAgent",
   narrator: "audio.newVoice.designPresetNarrator",
-  companion: "audio.newVoice.designPresetCompanion",
   instructor: "audio.newVoice.designPresetInstructor",
   pirate: "audio.newVoice.designPresetPirate",
 } as const satisfies Record<InworldDesignPresetId, MessageKey>

@@ -121,8 +121,14 @@ export const nav = defineNamespace({
       "untranslated",
     ),
     "nav.workspaceActions.completeAll.confirmLabel": "Draft all",
-    "nav.workspaceActions.batchValidate.label": "Batch validate…",
-    "nav.workspaceActions.batchValidate.title": "Batch validate",
+    "nav.workspaceActions.batchValidate.label": "Batch validate text…",
+    "nav.workspaceActions.batchValidateAudio.label": "Batch validate audio…",
+    "nav.workspaceActions.batchValidateAudio.title": "Validate every take in this file?",
+    "nav.workspaceActions.batchValidateAudio.description": plural({
+      one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
+      other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
+    }),
+    "nav.workspaceActions.batchValidate.title": "Batch validate text",
     "nav.workspaceActions.batchValidate.description": plural(
       {
         one:
@@ -361,6 +367,8 @@ export const nav = defineNamespace({
     "nav.outbox.eventAttachAudio": "Attach audio",
     "nav.outbox.eventSelectAudio": "Select audio",
     "nav.outbox.eventRemoveAudio": "Remove audio",
+    "nav.outbox.eventValidateAudio": "Validate recording",
+    "nav.outbox.eventUnvalidateAudio": "Unvalidate recording",
     "nav.outbox.previewEditRef": "→ edit {id}",
     "nav.outbox.previewAudioSlot": "{slot} slot",
     "nav.outbox.previewAudio": "audio",
@@ -738,6 +746,24 @@ export const nav = defineNamespace({
           "cells as validated in bulk. Trailing ellipsis marks it as opening a " +
           "confirmation, per this catalog's convention.",
         maxLength: 24,
+      },
+      "nav.workspaceActions.batchValidateAudio.label": {
+        description:
+          "Menu item that adds the current user's validation to every recording "
+          + "in the open file. SEPARATE from the text action beside it — signing "
+          + "off a translation says nothing about whether anyone has listened to "
+          + "its recording. The word is 'validate', never 'approve'.",
+        maxLength: 26,
+      },
+      "nav.workspaceActions.batchValidateAudio.title": {
+        description: "Confirmation dialog title for the bulk recording validation above.",
+      },
+      "nav.workspaceActions.batchValidateAudio.description": {
+        description:
+          "Confirmation body for bulk recording validation. Says how many takes "
+          + "will be signed off, and that text-to-speech takes are left out — "
+          + "those are reviewed one at a time, like AI-drafted text.",
+        placeholders: { takes: "How many recordings this will validate." },
       },
       "nav.workspaceActions.batchValidate.title": {
         description: "Heading of the confirmation dialog for the action above.",
@@ -1367,6 +1393,8 @@ export const nav = defineNamespace({
       "nav.outbox.eventAttachAudio": { description: "Row title for attaching an audio recording to a cell." },
       "nav.outbox.eventSelectAudio": { description: "Row title for choosing which attached audio take is active." },
       "nav.outbox.eventRemoveAudio": { description: "Row title for removing an attached audio recording." },
+      "nav.outbox.eventValidateAudio": { description: "Row title for marking one audio take validated. The word is 'validate', never 'approve' (AQU-290 glossary)." },
+      "nav.outbox.eventUnvalidateAudio": { description: "Row title for withdrawing a validation from one audio take." },
       "nav.outbox.previewEditRef": {
         description:
           "Fallback row preview for validate/unvalidate events, which have no text " +

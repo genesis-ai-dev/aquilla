@@ -170,6 +170,7 @@ interface QualityBody {
 interface TermsBody {
   projectId: string
   fileId: string | null
+  lane?: string
   scannedCells: number
   conceptCount: number
   flaggedCellCount: number
@@ -405,5 +406,41 @@ describe("external quality reads (AQU-1231)", () => {
     expect(body.scannedCells).toBe(5)
     // file-y's cell is untranslated, so occurrences are unchanged.
     expect(body.data[0].totalOccurrences).toBe(3)
+  })
+
+  it("term scan dual-reads lane_id over a disagreeing target_lang", async () => {
+    await testDb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-tgt-es', 'proj-a', 'target', 'Spanish', 'es', 'es', 0)`,
+    )
+    await testDb.pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count)
+       VALUES ('proj-a', 'file-x', 'dual-id', 'source', 'the grace dual-id', 'evt-s-dual-id', 1000, 3),
+              ('proj-a', 'file-x', 'dual-tag', 'source', 'the grace dual-tag', 'evt-s-dual-tag', 1000, 3),
+              ('proj-a', 'file-x', 'dual-fr', 'source', 'the grace french', 'evt-s-dual-fr', 1000, 3)`,
+    )
+    await testDb.pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, word_count)
+       VALUES ('proj-a', 'file-x', 'dual-id', 'target', 'xx', 'lane-tgt-es', 'merced dual-id', 'evt-t-dual-id', 2000, 2),
+              ('proj-a', 'file-x', 'dual-tag', 'target', 'es', NULL, 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3),
+              ('proj-a', 'file-x', 'dual-fr', 'target', 'fr', NULL, 'grâce', 'evt-t-dual-fr', 2000, 1)`,
+    )
+
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=es", tokenA),
+      env(testDb),
+    )
+    expect(res?.status).toBe(200)
+    const body = (await res!.json()) as TermsBody
+    expect(body.lane).toBe("es")
+    const grace = body.data[0]
+    expect(grace.conceptId).toBe("concept-grace")
+    // Default-lane c1–c3 and the fr-only row have no es-lane target, so they
+    // are untranslated for this scan. dual-id matches by lane_id; dual-tag by
+    // target_lang fallback.
+    expect(grace.totalOccurrences).toBe(2)
+    expect(grace.consistentCount).toBe(1)
+    expect(grace.flaggedCells.map((c) => c.cellId)).toEqual(["dual-id"])
+    expect(grace.renderingUsage).toEqual([{ rendering: "gracia", cellIds: ["dual-tag"] }])
   })
 })

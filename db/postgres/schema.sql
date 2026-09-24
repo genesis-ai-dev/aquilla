@@ -581,6 +581,9 @@ CREATE TABLE cells (
     -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
     -- add-a-language flow; the projection treats the value as opaque.
     target_lang       TEXT NOT NULL DEFAULT '',
+    -- AQU-1240 v2: opaque lane this row belongs to (see lanes(id)). Additive and
+    -- nullable until the backfill populates it and reads cut over from target_lang.
+    lane_id           TEXT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
@@ -597,6 +600,7 @@ CREATE TABLE file_section_progress (
     scope               TEXT NOT NULL,
     section_key         TEXT NOT NULL DEFAULT '',
     target_lang         TEXT NOT NULL DEFAULT '',
+    lane_id             TEXT, -- AQU-1240 v2: additive; see lanes(id)
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -644,6 +648,7 @@ CREATE TABLE file_section_progress (
 );
 
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
+CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
 -- AQU-1094/1095: per-unit planning metadata — the target date a manager plans
 -- against and the explicit mark that a unit is finished. section_key is '' for
@@ -684,6 +689,7 @@ CREATE TABLE cell_validators (
     file_id     TEXT NOT NULL,
     cell_id     TEXT NOT NULL,
     target_lang TEXT NOT NULL DEFAULT '',
+    lane_id     TEXT, -- AQU-1240 v2: additive; see lanes(id)
     event_id    TEXT NOT NULL,
     username    TEXT NOT NULL,
     decided_ts  BIGINT NOT NULL,
@@ -886,6 +892,7 @@ CREATE TABLE assignments (
     -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
     -- the PK — assignment_id stays the key; a lane is a property of the unit.
     target_lang      TEXT NOT NULL DEFAULT '',
+    lane_id          TEXT, -- AQU-1240 v2: additive; see lanes(id)
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -962,12 +969,14 @@ CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 CREATE INDEX assignment_cells_by_file ON assignment_cells(file_id, cell_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
+CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
+CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.
 CREATE INDEX idx_cell_audio_validators_user ON cell_audio_validators(project_id, username);
@@ -977,6 +986,8 @@ CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cel
 -- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
 -- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
 CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
+-- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
+CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
@@ -1147,6 +1158,55 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
     PRIMARY KEY (project_id, user_id, kind, value)
 );
 
+-- Per-lane role grants (0091_project_member_lane_roles.sql, AQU-730). The third
+-- permission tier (org -> project -> LANE), REPLACING the kind='lane' rows of
+-- project_member_scopes with an ADDITIVE, LEVELED grant model: a row grants
+-- (project,user) access to one lane at role_level. Below Maintainer (600),
+-- access to a lane REQUIRES a grant here (no grant = no access — the inversion
+-- of the scopes model above); role >= 600 cascades to every lane. Effective
+-- role in a lane = max(base project role, grant role_level) — grants only
+-- elevate, never demote. kind='file' scopes stay in project_member_scopes.
+-- Backfill/enforcement land later and MUST follow AQU-1240 (no default lane).
+CREATE TABLE IF NOT EXISTS project_member_lane_roles (
+    project_id TEXT    NOT NULL,
+    user_id    BIGINT  NOT NULL,
+    lane       TEXT    NOT NULL,
+    role_level INTEGER NOT NULL,
+    granted_by BIGINT,
+    granted_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (project_id, user_id, lane)
+);
+CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
+    ON project_member_lane_roles(project_id, user_id);
+
+-- First-class lanes with opaque IDs (0096_lanes.sql, AQU-1240 v2). Replaces the
+-- implicit '' default lane. role='source' (one per project, not lane-addressable)
+-- or 'target' (one per distinct target_lang value, incl. '' = default lane).
+-- id is an opaque 8-hex app-generated value; PRIMARY KEY is (project_id, id).
+-- name is NOT unique (UI disambiguates); lang_code is BCP-47 (NULL=placeholder);
+-- legacy_tag is the immutable cutover target_lang ('' for default, NULL for
+-- source) that makes rename-safe replay resolve history by tag, never by name.
+-- position / archived_at are additive (display order / soft-archive).
+CREATE TABLE IF NOT EXISTS lanes (
+    id          TEXT        NOT NULL,   -- opaque 8-hex, app-generated (see src/lib/lanes/lane-id.ts)
+    project_id  TEXT        NOT NULL,
+    role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
+    name        TEXT        NOT NULL,
+    lang_code   TEXT,
+    legacy_tag  TEXT,
+    position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
+    archived_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_project_source
+    ON lanes(project_id) WHERE role = 'source';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_project_legacy_tag
+    ON lanes(project_id, legacy_tag) WHERE role = 'target';
+CREATE INDEX IF NOT EXISTS idx_lanes_project
+    ON lanes(project_id);
+
 -- AQU-533 Agent API: immutable changeset execution plans (0055). External
 -- callers submit domain commands; prepare compiles them into a staged plan
 -- with server-computed preconditions, effect summary, and content digest.
@@ -1280,6 +1340,7 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
     target_lang     TEXT NOT NULL DEFAULT '',
+    lane_id         TEXT, -- AQU-1240 v2: additive; see lanes(id)
     member_path     TEXT NOT NULL DEFAULT '',
     profile_id      TEXT NOT NULL,
     profile_version TEXT NOT NULL,
@@ -1459,6 +1520,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   start_cell_id text NOT NULL,      -- endpoint UUIDs, never ordinals
   end_cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '',
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   construal text NOT NULL,          -- L2: situation/participants/tenor/moves markdown
   ambiguity_register jsonb NOT NULL DEFAULT '[]',
   l1_summary text,                  -- ≤1600 chars, injected into draft prompts
@@ -1527,6 +1589,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   project_id text NOT NULL,
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   status text NOT NULL DEFAULT 'running'
     CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
@@ -1599,6 +1662,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   file_id text NOT NULL,
   cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card
@@ -1954,3 +2018,18 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 );
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
+
+-- AQU-1240 slice 8 (part 1): composite FK from every lane_id-bearing table to
+-- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
+-- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
+-- schema.sql apply must create the referenced table first. Mirrors migration
+-- 0102 — NOT VALID (instant, still enforced on new writes). The post-backfill
+-- cutover VALIDATEs these and adds SET NOT NULL.
+ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;

@@ -8,6 +8,8 @@
  * Public API (other agents depend on this shape — do NOT rename).
  */
 
+import { tokenize } from "./tokenize"
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 export interface BtSeed {
@@ -93,12 +95,15 @@ type CooccurrenceMap = Map<string, Map<string, Alignment>>
 
 // ── Tokenization ─────────────────────────────────────────────────────────────
 
-const TOKEN_RE = /[\p{L}\p{N}]+/gu
-
-/** Split a string into lowercase tokens, preserving leading whitespace info. */
-function tokenize(s: string): string[] {
-  return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
-}
+/**
+ * AQU-1190: shared with `interlinear.ts` so the gloss and the alignment it is
+ * read against cannot disagree about where a word ends.
+ *
+ * This module's own copy of the regex was `[\p{L}\p{N}]+` — no `\p{M}` — so
+ * every pointed-Hebrew word was shredded into single consonants and the
+ * statistical gloss for a Macula/OSHB source was built over fragments rather
+ * than words. See `./tokenize` for the rule and the other scripts it affects.
+ */
 
 // ── Model building ────────────────────────────────────────────────────────────
 

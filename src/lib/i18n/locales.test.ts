@@ -73,6 +73,57 @@ describe("Malay is offered under its real code, not Patani Malay's (AQU-1306)", 
   })
 })
 
+describe("Indonesian (AQU-869)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const indonesian = LOCALES.find((l) => l.code === "id")
+    expect(indonesian).toBeDefined()
+    expect(indonesian?.englishName).toBe("Indonesian")
+    expect(indonesian?.nativeName).toBe("Bahasa Indonesia")
+    expect(indonesian?.dir).toBe("ltr")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    // Same bar as every other locale: registering the code is not the
+    // deliverable, the strings are. An empty catalog falls back to English per
+    // key and would look, from the switcher alone, exactly like a working one.
+    expect(Object.keys(CATALOGS.id ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("is Indonesian, not Malay wearing an Indonesian label (AQU-1306)", () => {
+    // `id` and `ms` are close relatives, so the cheap way to produce this
+    // catalog would have been to transform the Malay one. The UI register is
+    // where that shortcut shows: these pairs mean the same thing and differ by
+    // language, so Malay forms appearing under `id` mean the wrong language
+    // shipped — the exact defect AQU-1306 was filed for, under a new code.
+    const id = CATALOGS.id ?? {}
+    const values = Object.values(id).filter((v): v is string => typeof v === "string")
+    const joined = values.join("\n").toLowerCase()
+    for (const malayOnly of ["muat naik", "muat turun", "pratonton", "tetapan", "projek"]) {
+      expect(joined).not.toContain(malayOnly)
+    }
+    expect(id["common.save"]).toBe("Simpan")
+    expect(id["common.delete"]).toBe("Hapus")
+    expect(id["common.preview"]).toBe("Pratinjau")
+    expect(id["common.project"]).toBe("Proyek")
+    expect(id["nav.settings"]).toBe("Pengaturan")
+    expect(id["common.comments"]).toBe("Komentar")
+  })
+  it("addresses the reader as `Anda`, never `kamu`", () => {
+    // One register throughout. `kamu` is the familiar form; a Bible-translation
+    // team reading their own tooling should not be addressed like a child.
+    const values = Object.values(CATALOGS.id ?? {}).filter((v): v is string => typeof v === "string")
+    expect(values.filter((v) => /\bkamu\b/i.test(v))).toEqual([])
+    expect(values.some((v) => /\bAnda\b/.test(v))).toBe(true)
+  })
+  it("migrates the retired `in` code instead of dropping it to English", () => {
+    // `in` is Indonesian's pre-1989 ISO 639-1 code. It shares no primary subtag
+    // with `id`, so without the alias the subtag branch cannot save it.
+    expect(LOCALE_ALIASES.in).toBe("id")
+    expect(normalizeLocale("in")).toBe("id")
+    expect(detectInitialLocale("in", "en-US")).toBe("id")
+    expect(normalizeLocale("id")).toBe("id")
+    expect(normalizeLocale("id-ID")).toBe("id")
+  })
+})
+
 describe("Simplified Chinese (AQU-978)", () => {
   it("is registered as a selectable LTR locale under its script subtag", () => {
     const zhHans = LOCALES.find((l) => l.code === "zh-Hans")

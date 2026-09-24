@@ -408,6 +408,8 @@ export const editor = defineNamespace({
     "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
     "editor.bibles.searchLabel": "Search Bible versions",
     "editor.bibles.failedToLoad": "Failed to load: {error}",
+    "editor.bibles.retryVersion": "Retry {version}",
+    "editor.bibles.retryVersions": "Retry loading versions",
     "editor.bibles.loadingVersions": "Loading versions…",
     "editor.bibles.noMatches": "No matches.",
     "editor.bibles.closePicker": "Close picker",
@@ -430,6 +432,10 @@ export const editor = defineNamespace({
     "editor.resources.openExternal": "Open the full article",
     "editor.resources.openExternalAria": "Open the full article about {entity}",
     "editor.resources.attribution": "Reference data from the",
+
+    // — Shared failure state for the reference side panels (AQU-849) ————————
+    "editor.resourcePane.crashed":
+      "This panel stopped responding. Retry to reload it — your work is untouched.",
 
     // — Translation-notes reference sidebar ——————————————————————————
     "editor.tn.title": "Translation Notes",
@@ -3244,6 +3250,22 @@ export const editor = defineNamespace({
           error: "Raw failure reason from the network layer; not translated.",
         },
       },
+      "editor.bibles.retryVersion": {
+        description:
+          "Screen-reader name of the Retry button shown under one pinned " +
+          "translation whose text failed to load. The visible label is the shared " +
+          "'Retry'; this names which translation it retries. Imperative.",
+        placeholders: {
+          version:
+            "The translation's identifier, e.g. 'BSB'. A code — never translate the " +
+            "substituted value.",
+        },
+      },
+      "editor.bibles.retryVersions": {
+        description:
+          "Screen-reader name of the Retry button beside the picker's 'could not " +
+          "fetch the list of translations' error. Imperative.",
+      },
       "editor.bibles.loadingVersions": {
         description:
           "Status text while the list of available translations is being fetched.",
@@ -3365,6 +3387,13 @@ export const editor = defineNamespace({
           "is followed immediately by links whose text is each data source's proper " +
           "name, which is not translated — so this string ends mid-phrase on purpose " +
           "and the names cannot be moved in front of it.",
+      },
+      "editor.resourcePane.crashed": {
+        description:
+          "Shown in place of a reference side panel (Parallel Bibles, Verse " +
+          "Resources) when the panel itself hit an unexpected error. Sits above a " +
+          "Retry button that reloads just that panel, so the second sentence must " +
+          "not suggest reloading the page. Reassure that nothing was lost.",
       },
       "editor.tn.title": {
         description:

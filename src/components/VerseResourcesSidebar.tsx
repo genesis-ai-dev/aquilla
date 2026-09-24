@@ -26,6 +26,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { ErrorBoundary } from "./ErrorBoundary"
+import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -201,7 +203,20 @@ function EntityCard({
   )
 }
 
-export function VerseResourcesSidebar({
+/** Pane-local crash boundary — a render throw here must not take the workspace
+ *  down until the translator reloads the page (AQU-849). */
+export function VerseResourcesSidebar(props: VerseResourcesSidebarProps) {
+  return (
+    <ErrorBoundary
+      label="verse-resources-sidebar"
+      fallback={(reset) => <ResourcePaneCrash onRetry={reset} />}
+    >
+      <VerseResourcesSidebarBody {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function VerseResourcesSidebarBody({
   projectId,
   trackedRef,
   getJwt,
@@ -213,6 +228,8 @@ export function VerseResourcesSidebar({
   const [entities, setEntities] = useState<AquiferEntityRef[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [details, setDetails] = useState<Map<string, DetailState>>(new Map())
+  // Retry re-arms the lookup without a page reload; see ParallelBiblesSidebar.
+  const [retryNonce, setRetryNonce] = useState(0)
 
   // Hold the last verse-scoped ref so headings and chapter rows don't blank the
   // panel as the translator scrolls past them.
@@ -249,7 +266,7 @@ export function VerseResourcesSidebar({
     return () => {
       cancelled = true
     }
-  }, [open, debouncedPath, projectId, getJwt])
+  }, [open, debouncedPath, projectId, getJwt, retryNonce])
 
   // Load each listed entity's header (gloss / coordinates / image), capped.
   useEffect(() => {
@@ -346,9 +363,11 @@ export function VerseResourcesSidebar({
               {t("editor.resources.scrollHint")}
             </p>
           ) : error ? (
-            <p className="p-4 text-xs text-destructive">
-              {t("editor.resources.failedToLoad", { error })}
-            </p>
+            <ResourcePaneError
+              className="p-4"
+              message={t("editor.resources.failedToLoad", { error })}
+              onRetry={() => setRetryNonce((n) => n + 1)}
+            />
           ) : entities === null ? (
             <div
               className="flex items-center justify-center p-4 text-muted-foreground"

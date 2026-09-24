@@ -16,6 +16,7 @@ import {
   fetchHelloaoChapter,
   fetchHelloaoTranslations,
   flattenHelloaoContent,
+  HelloaoChapterNotFoundError,
   type HelloaoTranslation,
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
@@ -24,6 +25,8 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { ErrorBoundary } from "./ErrorBoundary"
+import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -102,7 +105,21 @@ interface VersionVerses {
   error?: string
 }
 
-export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
+/** A render throw inside the pane stays inside the pane (AQU-849) — without
+ *  this the nearest boundary is AppShell's, which takes the whole workspace
+ *  down until the translator reloads the page. */
+export function ParallelBiblesSidebar(props: ParallelBiblesSidebarProps) {
+  return (
+    <ErrorBoundary
+      label="parallel-bibles-sidebar"
+      fallback={(reset) => <ResourcePaneCrash onRetry={reset} />}
+    >
+      <ParallelBiblesSidebarBody {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
   const t = useT()
   const [pinned, setPinned] = useState<string[]>(() => readPinnedVersions())
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -111,6 +128,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
   const [query, setQuery] = useState("")
   // (version id, book, chapter) → loaded verses, rebuilt as the chapter changes
   const [chapterData, setChapterData] = useState<Map<string, VersionVerses>>(new Map())
+  // Bumped by the inline Retry buttons. A lookup that failed while the reader
+  // stays on one verse has nothing else to re-trigger its effect, which is why
+  // a dead pane used to need a page reload (AQU-849).
+  const [retryNonce, setRetryNonce] = useState(0)
 
   // Hold the last parseable ref so headings / unrefed rows don't blank the panel.
   const lastParsedRef = useRef<{ book: string; chapter: number; verse: number | null } | null>(null)
@@ -130,6 +151,8 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
 
   // Load the translations list lazily: when the picker opens, or when the
   // panel is open with pinned versions (so cards show names, not raw ids).
+  // `translationsErr` guards against a retry loop (setting it re-runs this
+  // effect); clearing it from Retry is what re-arms the fetch.
   const needTranslations = pickerOpen || (open && pinned.length > 0)
   useEffect(() => {
     if (!needTranslations || translations || translationsErr) return
@@ -172,11 +195,14 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
         })
         .catch((err) => {
           if (cancelled) return
+          // A version that simply doesn't carry this chapter is an absence, not
+          // a failure: it lands as an empty chapter and renders "no text".
+          const missing = err instanceof HelloaoChapterNotFoundError
           setChapterData((prev) => {
             const next = new Map(prev)
             next.set(`${versionId}/${book}/${chapter}`, {
               verses: new Map(),
-              error: err instanceof Error ? err.message : String(err),
+              error: missing ? undefined : err instanceof Error ? err.message : String(err),
             })
             return next
           })
@@ -185,7 +211,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     return () => {
       cancelled = true
     }
-  }, [open, debouncedChapterKey, pinned])
+  }, [open, debouncedChapterKey, pinned, retryNonce])
 
   function pinVersion(id: string) {
     setPinned((prev) => {
@@ -324,7 +350,21 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                     </Button>
                   </div>
                   {data?.error ? (
-                    <p className="mt-1 text-xs text-destructive">{data.error}</p>
+                    <ResourcePaneError
+                      className="mt-1"
+                      message={data.error}
+                      // Drop the latched failure first, so the retry shows the
+                      // spinner rather than the error it is clearing.
+                      onRetry={() => {
+                        setChapterData((prev) => {
+                          const next = new Map(prev)
+                          next.delete(`${versionId}/${tracked.book}/${tracked.chapter}`)
+                          return next
+                        })
+                        setRetryNonce((n) => n + 1)
+                      }}
+                      retryLabel={t("editor.bibles.retryVersion", { version: versionId })}
+                    />
                   ) : !data ? (
                     <div className="mt-1 flex items-center text-muted-foreground" aria-label={t("common.loading")}>
                       <Spinner className="size-3.5" />
@@ -362,7 +402,15 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
               />
             </InputGroup>
             {translationsErr ? (
-              <p className="mt-2 text-xs text-destructive">{t("editor.bibles.failedToLoad", { error: translationsErr })}</p>
+              <ResourcePaneError
+                className="mt-2"
+                message={t("editor.bibles.failedToLoad", { error: translationsErr })}
+                onRetry={() => {
+                  setTranslationsErr(null)
+                  setRetryNonce((n) => n + 1)
+                }}
+                retryLabel={t("editor.bibles.retryVersions")}
+              />
             ) : !translations ? (
               <p className="mt-2 text-xs text-muted-foreground">{t("editor.bibles.loadingVersions")}</p>
             ) : (

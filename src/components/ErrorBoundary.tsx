@@ -162,6 +162,16 @@ interface Props {
    * nested inside bounded chrome (e.g. AppShell's main content card) rather
    * than at the app root. */
   compact?: boolean
+  /**
+   * AQU-849: render a local fallback instead of the full-screen recovery UI.
+   * Used by side panels, where a render throw must stay inside the panel and
+   * must not push the user into a page reload — calling `reset` clears the
+   * boundary so the subtree remounts and refetches in place.
+   */
+  fallback?: (reset: () => void) => ReactNode
+  /** Names this boundary in crash telemetry, so ops can tell which surface
+   * threw (the 2026-08-10 pane crash was reported with no error text). */
+  label?: string
 }
 
 interface State {
@@ -183,6 +193,7 @@ export class ErrorBoundary extends Component<Props, State> {
     posthog.captureException(error, {
       properties: {
         source: "react_error_boundary",
+        boundary: this.props.label ?? "root",
         componentStack: info.componentStack,
       },
     })
@@ -195,8 +206,19 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.reload()
   }
 
+  /** Clears the boundary so the subtree remounts — the in-place recovery a
+   * panel-level fallback offers instead of a page reload. */
+  private handleReset = () => {
+    this.setState({ hasError: false, isChunkError: false })
+  }
+
   render() {
     if (this.state.hasError) {
+      // A stale-chunk error is only fixable by reloading, so local fallbacks
+      // still defer to the full recovery screen for that one case.
+      if (this.props.fallback && !this.state.isChunkError) {
+        return this.props.fallback(this.handleReset)
+      }
       return (
         <ErrorFallback
           onReload={this.handleReload}

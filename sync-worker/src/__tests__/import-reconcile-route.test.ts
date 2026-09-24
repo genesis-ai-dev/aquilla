@@ -318,4 +318,90 @@ describe('POST /import/reconcile', () => {
       .toMatchObject({ value: 'Original', event_id: 'source-initial' })
     expect((await rows<any>('events')).map((event) => event.id)).not.toContain('file-reimport-conflict')
   })
+
+  it('populates cells.lane_id from seeded lanes on reconcile insert', async () => {
+    const auth = await token()
+    const { db } = await makeTestDb()
+    const sourceLaneId = 'src00001'
+    const targetLaneId = 'tgt00001'
+
+    // Seed lanes after bulk import: that path also resolves lane_id when lanes
+    // already exist, so seeding first would not prove the reconcile INSERT.
+    const initial = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'file-genesis-event',
+          name: 'Genesis',
+          fileType: 'usfm',
+          role: 'source',
+          kind: 'usfm',
+          bookCode: 'GEN',
+          importFormat: 'usfm',
+          parserVersion: 'builtin:usfm-lossless@1',
+          importManifest: { version: 1, profileId: 'builtin:usfm-lossless', profileVersion: '1' },
+        },
+        cells: [{
+          id: 'source-old-1', cellId: 'durable-1', value: 'Old verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }],
+      }),
+    })
+    expect((await handleBulkImportRequest(initial, env(db)))?.status).toBe(200)
+
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'source', ?, ?, NULL, 0)`,
+    ).bind(sourceLaneId, PROJECT_ID, 'Source', 'en').run()
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'target', ?, ?, ?, 1)`,
+    ).bind(targetLaneId, PROJECT_ID, 'French', 'fr', 'fr').run()
+
+    const request = new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'file-reimport-event', name: 'Genesis',
+          fileType: 'usfm', role: 'source', kind: 'usfm', bookCode: 'GEN',
+          importFormat: 'usfm', parserVersion: 'builtin:usfm-lossless@1',
+          importManifest: { version: 1, profileId: 'builtin:usfm-lossless', profileVersion: '1', unitCount: 2 },
+        },
+        cells: [{
+          id: 'source-new-1', cellId: 'parser-1', value: 'Updated verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }, {
+          id: 'source-new-3', cellId: 'parser-3', anchorCellId: 'parser-1',
+          value: 'New verse three', type: 'verse', canonicalRef: 'GEN 1:3', sequenceIndex: 1,
+          metadata: importMetadata('scripture:GEN 1:3', 1),
+        }],
+        targets: [{
+          id: 'target-imported-3', cellId: 'parser-3', parentId: 'source-new-3',
+          value: 'Nouvelle traduction', targetLang: 'fr',
+        }],
+      }),
+    })
+    const response = await handleImportReconcileRequest(request, env(db))
+    const responseBody = await response?.json() as Record<string, unknown>
+    if (response?.status !== 200) throw new Error(JSON.stringify(responseBody))
+    expect(responseBody).toMatchObject({ added: 1, importedTargets: 1 })
+
+    const { results } = await db.prepare(
+      `SELECT side, target_lang, lane_id FROM cells WHERE project_id = ? AND file_id = ?`,
+    ).bind(PROJECT_ID, FILE_ID).all<{ side: string; target_lang: string; lane_id: string | null }>()
+    const source = results.filter((row) => row.side === 'source')
+    const target = results.filter((row) => row.side === 'target' && row.target_lang === 'fr')
+    expect(source).toHaveLength(2)
+    expect(target).toHaveLength(1)
+    for (const row of source) expect(row.lane_id).toBe(sourceLaneId)
+    for (const row of target) expect(row.lane_id).toBe(targetLaneId)
+  }, 120_000)
 })

@@ -263,11 +263,15 @@ export async function proposeSceneBrief(
 
   const row = await db
     .prepare(
+      // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+      // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
+      // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
       `INSERT INTO scene_briefs
           (id, project_id, file_id, start_cell_id, end_cell_id, target_lang,
            construal, ambiguity_register, l1_summary, l1_generated_at,
-           l1_model_id, status, provenance, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?)
+           l1_model_id, status, provenance, created_by, lane_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?,
+               (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
        RETURNING ${BRIEF_COLS}`,
     )
     .bind(
@@ -288,6 +292,8 @@ export async function proposeSceneBrief(
       input.l1ModelId ?? null,
       input.provenance ?? null,
       input.createdBy ?? null,
+      input.projectId,
+      input.targetLang ?? "",
     )
     .first<SceneBriefRow>()
   if (!row) return { status: "validation_failed", message: "failed to insert scene brief" }

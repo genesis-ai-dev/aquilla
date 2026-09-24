@@ -229,8 +229,10 @@ export interface ProjectWideSettings {
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
   /**
-   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
-   * Opaque BCP-47-ish tags; order = display order.
+   * Complete target-language lane registry, including the project's primary
+   * lane (the same tag as `targetLanguage`). There is no implicit '' default
+   * lane — every lane is an explicit entry. Opaque BCP-47-ish tags; order =
+   * display order (primary first).
    */
   targetLanes?: string[]
   /**

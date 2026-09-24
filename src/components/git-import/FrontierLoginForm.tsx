@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { useNavigate } from "react-router-dom"
@@ -32,20 +32,29 @@ export function FrontierLoginForm({
   onSuccess,
   onForgotPassword,
   returnTo,
+  initialUsername,
 }: {
   onSuccess: (session: FrontierSession) => void | Promise<void>
   onForgotPassword?: () => void
   /** If provided, navigate here after a successful login. */
   returnTo?: string
+  /**
+   * AQU-1345: prefills the identifier field, e.g. when sign-up refused the
+   * name and sent the reader here instead. Adopted the same way the sign-up
+   * form adopts `initialEmail` — a later value lands, but never over an edit
+   * the reader has already made.
+   */
+  initialUsername?: string | null
 }) {
   const { login } = useFrontierSession()
   const t = useT()
   const navigate = useNavigate()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+  const usernameEditedRef = useRef(false)
 
   const form = useForm({
-    defaultValues: { username: "", password: "" },
+    defaultValues: { username: initialUsername ?? "", password: "" },
     validators: { onSubmit: loginSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
@@ -62,6 +71,12 @@ export function FrontierLoginForm({
       }
     },
   })
+
+  useEffect(() => {
+    if (!usernameEditedRef.current && initialUsername) {
+      form.setFieldValue("username", initialUsername)
+    }
+  }, [form, initialUsername])
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -101,7 +116,10 @@ export function FrontierLoginForm({
                   name={field.name}
                   value={field.state.value}
                   onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
+                  onChange={(e) => {
+                    usernameEditedRef.current = true
+                    field.handleChange(e.target.value)
+                  }}
                   aria-invalid={invalid}
                   autoComplete="username"
                 />

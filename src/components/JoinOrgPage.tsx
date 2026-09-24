@@ -62,6 +62,8 @@ export function JoinOrgPage() {
   const [error, setError] = useState<string | null>(null)
   const [orgName, setOrgName] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
+  // AQU-1345: the identifier sign-up refused, carried into the sign-in form.
+  const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
   const [preview, setPreview] = useState<OrgInvitePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(true)
   const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
@@ -253,9 +255,15 @@ export function JoinOrgPage() {
             : "Create an account to accept your invitation."}
         </p>
         {authMode === "login" ? (
-          <FrontierLoginForm onSuccess={() => {}} />
+          <FrontierLoginForm onSuccess={() => {}} initialUsername={loginPrefill} />
         ) : (
-          <FrontierSignupForm onSuccess={() => {}} />
+          <FrontierSignupForm
+            onSuccess={() => {}}
+            onSwitchToLogin={(identifier) => {
+              setLoginPrefill(identifier)
+              setAuthMode("login")
+            }}
+          />
         )}
         <button
           type="button"

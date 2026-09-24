@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto"
+
 /**
  * Where the adversarial suite may run. The guard runs in the launcher and
  * again in the Playwright config, before any browser opens.
+ * "preview" is one pull request's full-stack Cloudflare preview. It serves
+ * that branch's code on development storage.
  */
-export type TargetKind = "local" | "dev" | "prod-canary"
+export type TargetKind = "local" | "dev" | "preview" | "prod-canary"
 
 export interface TargetUrls {
   baseURL: string
@@ -10,7 +14,7 @@ export interface TargetUrls {
   syncBase: string
 }
 
-const DEPLOYED: Record<Exclude<TargetKind, "local">, TargetUrls> = {
+const DEPLOYED: Record<Exclude<TargetKind, "local" | "preview">, TargetUrls> = {
   dev: {
     baseURL: "https://dev.aquilla.app",
     identityBase: "https://api.dev.aquilla.app/identity",
@@ -25,15 +29,36 @@ const DEPLOYED: Record<Exclude<TargetKind, "local">, TargetUrls> = {
 
 export function targetKind(env: NodeJS.ProcessEnv): TargetKind {
   const kind = env.ADVERSARIAL_TARGET ?? "local"
-  if (kind !== "local" && kind !== "dev" && kind !== "prod-canary") {
-    throw new Error(`Unknown ADVERSARIAL_TARGET "${kind}"; use local, dev, or prod-canary`)
+  if (kind !== "local" && kind !== "dev" && kind !== "preview" && kind !== "prod-canary") {
+    throw new Error(`Unknown ADVERSARIAL_TARGET "${kind}"; use local, dev, preview, or prod-canary`)
   }
   return kind
 }
 
+const PREVIEW_HOST = "blue-darkness-7674.workers.dev"
+
+/** Same alias as scripts/cloudflare-pr-preview.mjs workersBuildPreviewAlias; a test keeps them equal. */
+export function previewAlias(branch: string): string {
+  const value = branch.trim()
+  if (!value) throw new Error("A preview target needs its branch name")
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    .slice(0, 30).replace(/-+$/g, "") || "branch"
+  return `ci-${slug}-${createHash("sha256").update(value).digest("hex").slice(0, 8)}`
+}
+
+/** One branch's preview origins, as scripts/cloudflare-stack-preview.mjs deploys them. */
+export function previewUrls(branch: string): TargetUrls {
+  const origin = (surface: string) => `https://${previewAlias(branch)}-aquilla-${surface}-preview.${PREVIEW_HOST}`
+  return {
+    baseURL: origin("web"),
+    identityBase: `${origin("auth")}/identity`,
+    syncBase: `${origin("sync")}/sync`,
+  }
+}
+
 /** The env the shared e2e helpers read, for one deployed target. */
-export function targetEnv(kind: Exclude<TargetKind, "local">): Record<string, string> {
-  const urls = DEPLOYED[kind]
+export function targetEnv(kind: Exclude<TargetKind, "local">, branch = ""): Record<string, string> {
+  const urls = kind === "preview" ? previewUrls(branch) : DEPLOYED[kind]
   return {
     E2E_BASE_URL: urls.baseURL,
     VITE_FRONTIER_BASE: urls.identityBase,
@@ -71,7 +96,7 @@ export function assertAdversarialTarget(env: NodeJS.ProcessEnv): TargetKind {
     }
     return kind
   }
-  const expected = DEPLOYED[kind]
+  const expected = kind === "preview" ? previewUrls(env.ADVERSARIAL_PREVIEW_BRANCH ?? "") : DEPLOYED[kind]
   for (const key of Object.keys(expected) as (keyof TargetUrls)[]) {
     if (urls[key] !== expected[key]) {
       throw new Error(`${kind} target expects ${key}=${expected[key]}, got ${urls[key] || "nothing"}`)

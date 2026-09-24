@@ -1,14 +1,25 @@
-# Adversarial Jev suite against the deployed dev build (smart-tests/adversarial).
-# It needs no local stack, so a hosted runner is enough. Advisory: it files
-# Linear Triage tickets and never gates a merge or a release.
+# Adversarial Jev suite (smart-tests/adversarial). Advisory: never a merge
+# or release gate.
 #
-# Requires secrets ADVERSARIAL_USER_1..3 (username:password on dev),
-# TYPESAFE_API_KEY, TEXT_MODEL_API_KEY, and LINEAR_API_KEY. Without
-# LINEAR_API_KEY findings are printed and kept as artifacts only.
+# pr:      attacks the PR branch's own full-stack preview once it serves the
+#          head commit, then updates one sticky PR comment. Files no tickets:
+#          a PR's findings belong to its author.
+# nightly: attacks the deployed dev build and files Linear Triage tickets.
+#
+# Repository secrets: ADVERSARIAL_USER_1..3 (username:password on dev
+# storage), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only
+# in the `adversarial-nightly` environment, restricted to the dev branch,
+# so no pull-request workflow can read it.
 
-name: Adversarial Jev (dev)
+name: Adversarial Jev
 
 on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    # 09:00 UTC daily, after the overnight dev merges settle.
+    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -23,33 +34,129 @@ on:
         description: Run only the model-free health gate
         type: boolean
         default: false
-  schedule:
-    # 09:00 UTC daily, after the overnight dev merges settle.
-    - cron: "0 9 * * *"
-
-concurrency:
-  group: adversarial-jev
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
+env:
+  ADVERSARIAL_USER_1: ${{ secrets.ADVERSARIAL_USER_1 }}
+  ADVERSARIAL_USER_2: ${{ secrets.ADVERSARIAL_USER_2 }}
+  ADVERSARIAL_USER_3: ${{ secrets.ADVERSARIAL_USER_3 }}
+  TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+  TYPESAFE_URL: ${{ vars.TYPESAFE_URL || 'https://openrouter.ai/api/alpha/decisions' }}
+  TYPESAFE_MODEL: ${{ vars.TYPESAFE_MODEL || 'typesafe/jev-1.13' }}
+  TEXT_MODEL_API_KEY: ${{ secrets.TEXT_MODEL_API_KEY }}
+  TEXT_MODEL: ${{ vars.TEXT_MODEL || 'inception/mercury-2.5' }}
+  # Always explicit: an unset base URL once sent the key to the wrong provider (#716).
+  TEXT_MODEL_BASE_URL: ${{ vars.TEXT_MODEL_BASE_URL || 'https://openrouter.ai/api/v1' }}
+  TEXT_MODEL_REASONING: ${{ vars.TEXT_MODEL_REASONING || 'none' }}
+
 jobs:
-  adversarial:
+  pr:
+    # Fork and Dependabot PRs get no secrets; never run PR code with them.
+    if: >-
+      github.event_name == 'pull_request'
+      && !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: adversarial-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     env:
-      ADVERSARIAL_USER_1: ${{ secrets.ADVERSARIAL_USER_1 }}
-      ADVERSARIAL_USER_2: ${{ secrets.ADVERSARIAL_USER_2 }}
-      ADVERSARIAL_USER_3: ${{ secrets.ADVERSARIAL_USER_3 }}
-      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
-      TYPESAFE_URL: ${{ vars.TYPESAFE_URL || 'https://openrouter.ai/api/alpha/decisions' }}
-      TYPESAFE_MODEL: ${{ vars.TYPESAFE_MODEL || 'typesafe/jev-1.13' }}
-      TEXT_MODEL_API_KEY: ${{ secrets.TEXT_MODEL_API_KEY }}
-      TEXT_MODEL: ${{ vars.TEXT_MODEL || 'inception/mercury-2.5' }}
-      # Always explicit: an unset base URL once sent the key to the wrong provider (#716).
-      TEXT_MODEL_BASE_URL: ${{ vars.TEXT_MODEL_BASE_URL || 'https://openrouter.ai/api/v1' }}
-      TEXT_MODEL_REASONING: ${{ vars.TEXT_MODEL_REASONING || 'none' }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install pinned Jev
+        run: |
+          python3 -m venv "$RUNNER_TEMP/smart-tools"
+          "$RUNNER_TEMP/smart-tools/bin/pip" install uv==0.9.9
+          "$RUNNER_TEMP/smart-tools/bin/uv" sync --project smart-tests --frozen
+      - name: Wait for this commit's preview build
+        id: preview
+        run: |
+          # Cloudflare reports the preview build as a check run on the head commit.
+          # A failed build means nothing to attack; say so at once instead of waiting.
+          for _ in $(seq 1 75); do
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs" \
+              -q '.check_runs[] | select(.name | startswith("Workers Builds: aquilla-web-preview")) | .status + ":" + (.conclusion // "")' | head -1)
+            case "$conclusion" in
+              completed:success) echo "state=ready" >> "$GITHUB_OUTPUT"; exit 0 ;;
+              completed:*) echo "state=failed" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            esac
+            sleep 20
+          done
+          echo "state=timeout" >> "$GITHUB_OUTPUT"
+      - name: Attack this branch's preview
+        id: attack
+        if: steps.preview.outputs.state == 'ready'
+        continue-on-error: true
+        run: |
+          set +e
+          pnpm test:adversarial --target preview --branch "$HEAD_REF" --wait-for-sha "$HEAD_SHA" --no-report
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+      - name: Update the PR comment
+        if: always()
+        env:
+          ATTACK_CODE: ${{ steps.attack.outputs.code }}
+          PREVIEW_STATE: ${{ steps.preview.outputs.state }}
+        run: |
+          set -euo pipefail
+          # One comment per head: a run for an older commit must not overwrite a newer one.
+          current=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
+          if [ "$current" != "$HEAD_SHA" ]; then echo "Head moved to $current; not posting."; exit 0; fi
+          results=$(ls -td smart-tests/results/adv-*/ 2>/dev/null | head -1 || true)
+          if [ "$PREVIEW_STATE" = "failed" ]; then
+            body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "This commit's Cloudflare preview build failed, so there was nothing to attack.")
+          elif [ "$PREVIEW_STATE" != "ready" ]; then
+            body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "This commit's preview build did not finish within 25 minutes.")
+          elif [ "$ATTACK_CODE" = "3" ]; then
+            body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "The preview never served this commit within 25 minutes.")
+          elif [ -n "$results" ] && [ -f "$results/suite.json" ]; then
+            body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" "$results")
+          else
+            body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "The suite failed before producing evidence; see the run log.")
+          fi
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            -q '.[] | select(.body | startswith("<!-- aquilla-adversarial -->")) | .id' | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: adversarial-evidence-pr-${{ github.event.pull_request.number }}
+          path: smart-tests/results/adv-*
+          retention-days: 14
+
+  nightly:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: adversarial-nightly
+    concurrency:
+      group: adversarial-nightly
+      cancel-in-progress: false
+    env:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -65,15 +172,19 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/smart-tools"
           "$RUNNER_TEMP/smart-tools/bin/pip" install uv==0.9.9
           "$RUNNER_TEMP/smart-tools/bin/uv" sync --project smart-tests --frozen
-      - name: Adversarial suite
+      - name: Attack dev
+        env:
+          MODE: ${{ inputs.mode }}
+          REPEAT_EACH: ${{ inputs.repeat_each || '1' }}
+          CANARY_ONLY: ${{ inputs.canary_only }}
         run: |
-          args=(--target dev --repeat-each "${{ inputs.repeat_each || '1' }}")
-          if [ -n "${{ inputs.mode }}" ]; then args+=(--mode "${{ inputs.mode }}"); fi
-          if [ "${{ inputs.canary_only }}" = "true" ]; then args+=(--canary-only); fi
+          args=(--target dev --repeat-each "$REPEAT_EACH")
+          if [ -n "$MODE" ]; then args+=(--mode "$MODE"); fi
+          if [ "$CANARY_ONLY" = "true" ]; then args+=(--canary-only); fi
           pnpm test:adversarial "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: adversarial-evidence
+          name: adversarial-evidence-nightly
           path: smart-tests/results/adv-*
           retention-days: 14

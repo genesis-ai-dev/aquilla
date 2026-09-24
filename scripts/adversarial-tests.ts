@@ -3,10 +3,11 @@ import { existsSync } from "node:fs"
 import { loadEnvFile } from "node:process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { assertAdversarialTarget, targetEnv, type TargetKind } from "../smart-tests/adversarial/target"
+import { assertAdversarialTarget, targetEnv, targetUrls, type TargetKind } from "../smart-tests/adversarial/target"
 
 /*
- * pnpm test:adversarial [--target local|dev|prod-canary] [--attack <id>] [--mode <mode>]
+ * pnpm test:adversarial [--target local|dev|preview|prod-canary] [--attack <id>] [--mode <mode>]
+ *   [--branch <name> --wait-for-sha <sha>]   (preview only)
  *   [--repeat-each N] [--workers N] [--no-report] [--loop] [--canary-only]
  */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -20,7 +21,8 @@ const flag = (name: string) => {
 }
 const kind = (flag("target") ?? process.env.ADVERSARIAL_TARGET ?? "local") as TargetKind
 process.env.ADVERSARIAL_TARGET = kind
-if (kind !== "local") Object.assign(process.env, targetEnv(kind))
+if (kind === "preview") process.env.ADVERSARIAL_PREVIEW_BRANCH = flag("branch") ?? process.env.ADVERSARIAL_PREVIEW_BRANCH ?? ""
+if (kind !== "local") Object.assign(process.env, targetEnv(kind, process.env.ADVERSARIAL_PREVIEW_BRANCH))
 if (args.includes("--no-report")) process.env.ADVERSARIAL_NO_REPORT = "1"
 if (flag("workers")) process.env.ADVERSARIAL_WORKERS = flag("workers")
 // The local stack's URLs exist only once e2e-up boots it; the config guards that case.
@@ -62,6 +64,31 @@ function runOnce(): Promise<number> {
     child.on("error", () => resolve(1))
     child.on("exit", (code) => resolve(code ?? 1))
   })
+}
+
+/**
+ * A preview alias serves the branch's latest successful build, which can lag
+ * the PR head. Attacking an older build would report on the wrong code, so
+ * wait for version.json to name the expected commit. Exit 3 means "not run".
+ */
+async function waitForPreview(sha: string): Promise<boolean> {
+  const deadline = Date.now() + Number(process.env.ADVERSARIAL_PREVIEW_WAIT_MS ?? 25 * 60_000)
+  const url = `${targetUrls(process.env).baseURL}/version.json`
+  while (Date.now() < deadline) {
+    const served = await fetch(url, { cache: "no-store" })
+      .then(async (response) => response.ok ? (await response.json() as { sha?: string }).sha ?? "" : "")
+      .catch(() => "")
+    if (served && sha.startsWith(served)) return true
+    console.log(`[adversarial] preview serves ${served || "nothing"}; waiting for ${sha.slice(0, 7)}`)
+    await new Promise((resolve) => setTimeout(resolve, 20_000))
+  }
+  return false
+}
+
+const expectedSha = flag("wait-for-sha")
+if (kind === "preview" && expectedSha && !await waitForPreview(expectedSha)) {
+  console.error(`[adversarial] The preview never served ${expectedSha}; nothing was run.`)
+  process.exit(3)
 }
 
 let stopping = false

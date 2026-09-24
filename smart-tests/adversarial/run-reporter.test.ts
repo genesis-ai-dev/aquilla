@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { harnessHealth, type Recorded } from "./run-reporter"
+import { harnessHealth, type Recorded } from "./health"
 
 const verdict = (value: string): Recorded["evidence"] =>
   ({ outcome: { verdict: value, reason: "", checks: {} }, projects: [] })

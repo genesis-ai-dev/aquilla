@@ -105,7 +105,10 @@ branches cut from `dev`; `main` is retired.
 3. From a clean checkout of that branch, run `pnpm run deploy:aquilla`. After the
    live checks pass, `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes
    the tag. The date comes from the branch, NN starts at `00`, and redeploying an
-   already-tagged commit reuses its tag.
+   already-tagged commit reuses its tag. The annotated tag message includes the
+   release branch, deployed commit SHA, GitHub commit/checks URLs, and the Workers
+   Builds preview URL for that release branch, tying the production tag back to the
+   QA preview artifact.
 4. Hotfix: cherry-pick onto the same release branch, push, and redeploy. It gets
    the next NN.
 

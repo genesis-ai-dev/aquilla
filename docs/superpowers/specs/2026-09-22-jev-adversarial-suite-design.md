@@ -376,6 +376,23 @@ Where the build differs from the design above, and why:
 - **`--canary-only`** runs the health gate alone, needing no model keys.
 - The launcher refuses attacks unless `TYPESAFE_URL` and
   `TEXT_MODEL_BASE_URL` are explicit, after the #716 key incident.
+- **Sign-off oracle.** The projection keeps one validator row per
+  reviewer and cell, and a repeated validate updates it. Double sign-off
+  is therefore judged by the stored validators (`/cell-validators`), not
+  by repeated `cell.validate` events in the log.
+- **Observed input** requires every intended input to have appeared in
+  the DOM, so an agent that stops halfway is inconclusive, not a product
+  failure.
+
+### Local evidence (2026-09-24, owned e2e stack, one worker)
+
+Three full catalogue runs drove oracle fixes; none found a product bug.
+The final run: 14 passed, 4 inconclusive, 0 product failures, 2.9 minutes,
+76 model calls, about $0.017. Three inconclusive runs were the text
+helper returning no value (the provider flake #729 also saw); one had
+the first reviewer declare done after the second had already signed off.
+The canary passed both checks. No dev run yet: it needs the three dev
+accounts.
 
 ## Deferred: long-lived explorers on Agent Substrate
 

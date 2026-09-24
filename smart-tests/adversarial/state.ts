@@ -91,7 +91,7 @@ export async function seedFixture(
 
 /** Authoritative state of the given projects, each read as a user who may see it. */
 export async function readSnapshot(entries: { projectId: string; reader: PersistedSession }[]): Promise<Snapshot> {
-  const snapshot: Snapshot = { projects: [], files: [], cells: [], comments: [], histories: {} }
+  const snapshot: Snapshot = { projects: [], files: [], cells: [], comments: [], histories: {}, validators: {} }
   for (const { projectId, reader } of entries) {
     const project = await fetch(`${identity()}/api/v2/projects/${projectId}`, {
       headers: { Authorization: `Bearer ${reader.jwt}` },
@@ -118,6 +118,11 @@ export async function readSnapshot(entries: { projectId: string; reader: Persist
         snapshot.cells.push({ fileId: file.fileId, cellId: row.cellId, side: row.side, value: row.value,
           validated: row.validated, eventId: row.eventId })
         if (row.side !== "target") continue
+        const fileToken = await mintSyncToken(reader.jwt, projectId, file.fileId)
+        const { validators } = await json<{ validators: { username: string }[] }>(await fetch(
+          `${sync()}/cell-validators?fileId=${file.fileId}&cellId=${encodeURIComponent(row.cellId)}`,
+          { headers: { Authorization: `Bearer ${fileToken}` } }), "validators read")
+        snapshot.validators[row.cellId] = validators.map((entry) => entry.username)
         const history = await readCellHistory(reader.jwt, ref, row.cellId)
         snapshot.histories[row.cellId] = history.reverse().map((event) => ({
           kind: event.kind, author: event.author,

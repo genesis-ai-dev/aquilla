@@ -13,35 +13,54 @@ import { readRunContext, readSnapshot, seedFixture } from "./state"
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** What the agent must visibly have attempted, derived from the contract itself. */
-async function sawIntendedInput(page: Page, attack: Attack, contract: Contract, action: AgentAction): Promise<boolean> {
-  if (attack.observe === "any-action") return ["click", "fill", "select"].includes(action.kind)
+/**
+ * The inputs the agent must visibly attempt, one group per requirement.
+ * A group is seen when any of its (cell, value) pairs shows in the DOM.
+ */
+function inputGroups(contract: Contract): [string, string][][] {
+  return contract.required.flatMap((req) => req.kind === "target-value"
+    ? [req.oneOf.map((value): [string, string] => [req.cellId, value])]
+    : req.kind === "any-target-value" ? [req.cellIds.map((cellId): [string, string] => [cellId, req.value])] : [])
+}
+
+/**
+ * Which intended inputs this action made visible. The attempt counts as
+ * observed only when every group was seen: an agent that finished half its
+ * goal and then stopped must not have the missing half blamed on the product.
+ */
+async function newlySeen(page: Page, attack: Attack, contract: Contract, action: AgentAction, seen: Set<number>): Promise<void> {
+  if (attack.observe === "any-action") {
+    if (["click", "fill", "select"].includes(action.kind)) seen.add(0)
+    return
+  }
   if (attack.observe === "pressed") {
-    if (action.kind !== "click") return false
+    if (action.kind !== "click") return
     for (const req of contract.required) {
       if (req.kind !== "validated" && req.kind !== "no-duplicate-validation") continue
-      if (await validationButton(page, req.cellId).getAttribute("aria-pressed").catch(() => null) === "true") return true
+      if (await validationButton(page, req.cellId).getAttribute("aria-pressed").catch(() => null) === "true") seen.add(0)
     }
-    return false
+    return
   }
-  if (action.kind !== "fill") return false
+  if (action.kind !== "fill") return
   if (attack.observe === "target-text") {
-    for (const req of contract.required) {
-      const pairs = req.kind === "target-value" ? req.oneOf.map((value) => [req.cellId, value])
-        : req.kind === "any-target-value" ? req.cellIds.map((cellId) => [cellId, req.value]) : []
-      for (const [cellId, value] of pairs) {
+    const groups = inputGroups(contract)
+    for (const [index, group] of groups.entries()) {
+      for (const [cellId, value] of group) {
         const text = await page.locator(`[data-cell-id="${cellId}"]`).first().innerText().catch(() => "")
-        if (text.includes(value)) return true
+        if (text.includes(value)) seen.add(index)
       }
     }
-    return false
+    return
   }
   // input-value: read the DOM, never the policy's own report of what it typed.
   const wanted = contract.required.flatMap((req) => req.kind === "project-name" || req.kind === "file-name"
     ? [req.value] : req.kind === "comment-once" ? [req.body] : [])
-  return await page.locator("input, textarea").evaluateAll((elements, values) => elements.some((element) =>
-    values.includes((element as HTMLInputElement).value)), wanted)
+  if (await page.locator("input, textarea").evaluateAll((elements, values) => elements.some((element) =>
+    values.includes((element as HTMLInputElement).value)), wanted)) seen.add(0)
 }
+
+const groupCount = (attack: Attack, contract: Contract) =>
+  attack.observe === "target-text" ? Math.max(1, inputGroups(contract).length) : 1
 
 function countErrors(page: Page, counters: { server: number; page: number }) {
   page.on("pageerror", () => { counters.page++ })
@@ -86,9 +105,15 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
   const counters = { server: 0, page: 0 }
   const mutator = createMutator(attack.mutator)
   const editorPath = editorUrl(main.seeded)
-  const startPath = attack.journey === "project-rename" || attack.decoy ? "/app" : editorPath
+  // A decoy attack starts inside the project the agent may only view, so the
+  // UI's permission handling is exercised instead of an early refusal.
+  const startPath = decoy ? editorUrl(decoy.seeded) : attack.journey === "project-rename" ? "/app" : editorPath
   const agents: (AgentRun | null)[] = [null, null]
   const observed = [false, secondGoal === null]
+  const seen = [new Set<number>(), new Set<number>()]
+  // Two agents share one contract; each needs only its own input seen.
+  const needed = secondGoal ? 1 : groupCount(attack, contract)
+  let mutated = false
   let after: Snapshot
   let outcome: AdversarialOutcome
   let error: string | null = null
@@ -100,17 +125,22 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
       if (!entry) continue
       countErrors(entry.page, counters)
       await entry.page.goto(startPath)
-      if (startPath === editorPath) {
-        await targetSurface(entry.page, main.seeded.cellIds[0]).waitFor({ state: "visible", timeout: 30_000 })
+      const firstCell = decoy ? decoy.seeded.cellIds[0] : main.seeded.cellIds[0]
+      if (startPath !== "/app") {
+        await targetSurface(entry.page, firstCell).waitFor({ state: "visible", timeout: 30_000 })
       }
     }
     await mutator.setup(handle)
     const drive = (index: number, page: Page, text: string) => runJev(page, text, {
       onEvidence: (value) => { agents[index] = value },
       onAction: async (action) => {
-        if (observed[index] || !await sawIntendedInput(page, attack, contract, action)) return false
-        observed[index] = true
-        return index === 0 ? (await mutator.onInput(handle)).stop : false
+        if (observed[index]) return false
+        await newlySeen(page, attack, contract, action, seen[index])
+        observed[index] = seen[index].size >= needed
+        // The condition fires at the first intended input, mid-goal.
+        if (index !== 0 || mutated || seen[index].size === 0) return false
+        mutated = true
+        return (await mutator.onInput(handle)).stop
       },
     })
     await Promise.all([
@@ -149,7 +179,8 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
     projects: readers.map(({ projectId, reader }) => ({ projectId, owner: reader.username })),
     jevRevision: JEV_REVISION,
     agents: agents.map((agent) => agent && { status: agent.status, elapsedMs: agent.elapsedMs,
-      actions: agent.actions, modelCalls: agent.modelCalls }),
+      actions: agent.actions, modelCalls: agent.modelCalls,
+      errors: agent.steps.filter((step) => step.operation === "ERROR") }),
   }
   await testInfo.attach("smart-testing-evidence", { body: JSON.stringify(evidence), contentType: "application/json" })
   return outcome

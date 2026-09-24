@@ -11,6 +11,7 @@ const before: Snapshot = {
   ],
   comments: [],
   histories: { c1: [], c2: [] },
+  validators: { c1: [], c2: [] },
 }
 const edited = (value: string, cellId = "c1"): Snapshot => ({
   ...before,
@@ -71,12 +72,13 @@ describe("adversarial invariant oracle", () => {
     expect(verifyInvariants(before, extra, { allowed: [], required: [] }, seen).diffs).toContain("file g appeared")
   })
 
-  it("accepts a toggle but rejects two live sign-offs by one reviewer", () => {
-    const history = (kinds: string[]) => ({ ...before, histories: { ...before.histories,
-      c1: kinds.map((kind) => ({ kind, author: "adv1", value: null })) } })
+  it("judges double sign-off by stored validators, not by repeated log events", () => {
     const contract: Contract = { allowed: [], required: [{ kind: "no-duplicate-validation", cellId: "c1" }] }
-    expect(verifyInvariants(before, history(["cell.validate", "cell.unvalidate"]), contract, seen).checks.requirementsMet).toBe(true)
-    expect(verifyInvariants(before, history(["cell.validate", "cell.validate"]), contract, seen).checks.requirementsMet).toBe(false)
+    const repeatedLog = { ...before, validators: { c1: ["adv1"] }, histories: { c1: [
+      { kind: "cell.validate", author: "adv1", value: null }, { kind: "cell.validate", author: "adv1", value: null }] } }
+    expect(verifyInvariants(before, repeatedLog, contract, seen).checks.requirementsMet).toBe(true)
+    const countedTwice = { ...before, validators: { c1: ["adv1", "adv1"] } }
+    expect(verifyInvariants(before, countedTwice, contract, seen).checks.requirementsMet).toBe(false)
   })
 
   it("requires both concurrent edits in the audit log, so a silently dropped edit is caught", () => {

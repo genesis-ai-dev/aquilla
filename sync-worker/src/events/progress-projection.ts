@@ -128,11 +128,11 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
        last_edit_at = excluded.last_edit_at,
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id),
        structural_audio_count = excluded.structural_audio_count,
        structural_audio_validated_count = excluded.structural_audio_validated_count,
        audio_validator_histogram = excluded.audio_validator_histogram,
-       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram,
-       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`
+       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram`
 
 // AQU-1278 appended the structural audio pair at the TAIL rather than beside
 // the audio columns it belongs with, and that is load-bearing: three of the six

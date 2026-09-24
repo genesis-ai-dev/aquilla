@@ -4,6 +4,9 @@ import type {
   WorkerSurface,
 } from "./cloudflare-deployment-manifest.mjs"
 
+// Re-exported at runtime by verify-worker-deployment.mjs; declared here so TS importers see it too.
+export { DEPLOYMENT_MANIFEST } from "./cloudflare-deployment-manifest.mjs"
+
 export interface WorkerDeployment {
   versions?: Array<{
     version_id?: string

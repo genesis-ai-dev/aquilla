@@ -24,7 +24,9 @@ vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 
 const fetchArchivedProjects = vi.fn()
 const fetchOrgDeletedFiles = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchArchivedProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
     projects: await fetchArchivedProjects(...a),

@@ -268,6 +268,66 @@ export async function getMyAssignments(
   }))
 }
 
+/** An open assignment the caller handed out, with who it went to. */
+export interface GivenAssignment {
+  assignmentId: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+}
+
+/**
+ * AQU-581: the open assignments `userId` created in one project, newest
+ * first — the list a lane coordinator removes their own mistakes from.
+ */
+export async function getAssignmentsGivenBy(
+  env: Env,
+  projectId: string,
+  userId: number,
+): Promise<GivenAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id, a.assignee_user_id AS assignee_user_id,
+            u.username AS username, a.scope_label AS scope_label,
+            a.target_lang AS target_lang,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+      WHERE a.project_id = ? AND a.created_by = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number | string
+      username: string | null
+      scope_label: string
+      target_lang: string | null
+      cells_total: number
+      cells_done: number
+      file_id: string | null
+    }>()
+
+  return (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    fileId: r.file_id,
+    assigneeUserId: Number(r.assignee_user_id),
+    username: r.username,
+    scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
+    cellsTotal: Number(r.cells_total),
+    cellsDone: Number(r.cells_done),
+  }))
+}
+
 /** One of the caller's open assignments, with its project name (org-wide inbox). */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string

@@ -224,7 +224,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canOpenAssignUi, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -388,6 +388,7 @@ import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
+import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
@@ -5486,6 +5487,11 @@ export function ProjectWorkspace() {
     assignmentMinRole,
     laneDelegate,
   )
+  // AQU-581: assign access that comes from the lane-coordinator setting alone
+  // (below the org's floor) — such a member gets a "Handed out by you" list,
+  // since the org's Team workload panel, where leads remove work, is closed to them.
+  const isLaneCoordinator =
+    currentRoleLevel < assignmentMinRole && laneDelegateLanes(laneDelegate).length > 0
   // AQU-496: the caller's own Frontier user id, resolved from the project
   // member list by username — used to lock AssignModal's assignee picker to
   // "self" in self-assign mode. Null if the roster hasn't loaded yet or the
@@ -11276,6 +11282,16 @@ export function ProjectWorkspace() {
                     jwt={jwt}
                     onJumpToAssignment={jumpToAssignment}
                     refreshKey={assignmentsRefreshKey}
+                  />
+                )}
+                {/* AQU-581: a lane coordinator's own hand-outs, so they can take one back. */}
+                {project?.id && jwt && isLaneCoordinator && (
+                  <ProjectHandedOut
+                    projectId={project.id}
+                    jwt={jwt}
+                    author={currentUsername ?? ""}
+                    refreshKey={assignmentsRefreshKey}
+                    onRemoved={() => setAssignmentsRefreshKey((k) => k + 1)}
                   />
                 )}
                 {/* Contextual onboarding status — self-removes once setup

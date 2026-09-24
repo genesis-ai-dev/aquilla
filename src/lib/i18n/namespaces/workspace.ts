@@ -290,6 +290,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -1300,6 +1302,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +

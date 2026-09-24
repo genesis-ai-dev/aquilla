@@ -6,10 +6,14 @@ import { connectionRequest } from "@/lib/sync/agent-connect"
 import { pickSelectOption } from "@/test-utils/select"
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" }, loading: false }) }))
 vi.mock("@/lib/sync/agent-connect", () => ({ connectionRequest: vi.fn() }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjectsResult: async () => ({ ok: true, projects: [
-  { id: "p", name: "Project", role: { level: 700 } },
-  { id: "helper", name: "Contributor project", role: { level: 400 } },
-] }) }))
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: async () => ({ ok: true, projects: [
+    { id: "p", name: "Project", role: { level: 700 } },
+    { id: "helper", name: "Contributor project", role: { level: 400 } },
+  ] }),
+}))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: async () => [
   { id: 1, name: "Come and See", role: { level: 700 } },
   { id: 2, name: "Guest org", role: { level: 100 } },

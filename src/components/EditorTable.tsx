@@ -252,8 +252,8 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
  *  equal fractions of the row whatever the content is; the cell surfaces then
  *  break the token with `break-words` (see EditorCellSurface). */
 type EditorGridCols =
-  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
-  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -1880,8 +1880,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
   const gridCols: EditorGridCols = castGutter
-    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+    ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -2314,7 +2314,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className={`grid ${gridCols} border-t border-border/60 ps-2.5 pe-4`}>
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
-            <div className="flex items-center py-1">
+            <div className="col-span-full flex items-center py-1 md:col-span-1">
               {castGutter && <div className="me-2 w-10 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5">
@@ -2623,34 +2623,41 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {renderChapterNavigation()}
-        <div className={cn("grid gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
+        <div className={cn(
+            "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
+            castGutter
+              ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+              : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
+          )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
               gutter-width away from the side; otherwise the track is
               unlabeled (select + badges + number). */}
           {castGutter ? (
-            <div data-testid="table-source-header" className="flex items-center gap-2">
+            <div data-testid="table-source-header" className="hidden items-center gap-2 md:flex">
               {t("editor.column.source")}
               {project.sourceLanguage && (
-                <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
+                <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
                   {project.sourceLanguage}
                 </Badge>
               )}
             </div>
           ) : (
-            <div aria-hidden="true" />
+            <div aria-hidden="true" className="hidden md:block" />
           )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
-          <div className="flex items-center gap-2 ps-2">
-            {castGutter ? null : audioLens ? t("editor.column.controls") : t("editor.column.source")}
+          <div className="col-start-1 flex min-w-0 flex-wrap items-center gap-1 ps-1 md:col-auto md:gap-2 md:ps-2">
+            {castGutter ? (
+              <span className="md:hidden">{audioLens ? t("editor.column.controls") : t("editor.column.source")}</span>
+            ) : audioLens ? t("editor.column.controls") : t("editor.column.source")}
             {!castGutter && !audioLens && project.sourceLanguage && (
-              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
+              <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
               </Badge>
             )}
           </div>
-          <div data-testid="table-target-header" className="relative flex items-center gap-2 ps-6 pe-2">
+          <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -2700,7 +2707,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                     aria-label={t("editor.lane.activeAria")}
                     className={cn(
                       badgeVariants({ variant: "secondary" }),
-                      "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                      "max-w-full min-w-0 gap-1 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
                     )}
                   >
                     {/* AQU-583: on the default lane with no project target set,
@@ -2738,13 +2745,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 data-testid="edit-target-language"
                 onClick={onEditTargetLanguage}
                 aria-label={project.targetLanguage ? t("editor.lane.changeTargetLanguage") : t("editor.lane.setTargetLanguage")}
-                className="flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex max-w-full min-w-0 items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground whitespace-normal break-words transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {project.targetLanguage || t("editor.lane.setTargetLanguage")}
                 <Languages className="h-2.5 w-2.5" />
               </button>
             ) : project.targetLanguage ? (
-              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
+              <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
                 {project.targetLanguage}
               </Badge>
             ) : null}
@@ -6505,7 +6512,7 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 ps-2.5 pe-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-x-2 gap-y-1.5 ps-2.5 pe-2 py-2 transition-colors duration-150 ease-out md:gap-y-2 md:pe-4",
           // The mic-permission help is anchored in the action rail. While it
           // is open, this row must become its own higher stacking layer and
           // allow the popover to escape the row; otherwise neighbouring rows
@@ -6554,13 +6561,22 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
+        {healthCalculationsEnabled && (
+          <HealthRibbon
+            point={healthRibbonPoint}
+            hasMajorIssue={hasMajorInfraction}
+            hasIssue={hasAnyIssue}
+            className="top-0 bottom-0 md:hidden"
+            testId="health-ribbon-mobile"
+          />
+        )}
         {/* Combined left gutter — select sits near the left edge (row uses
             ps-2.5); ms-2 opens space before the badge stack, then a tight
             gap to the verse number. Fixed track keeps Source header-aligned. */}
-        <div className="flex h-full items-start self-stretch py-1.5">
+        <div className="row-span-2 flex h-full flex-col items-center self-stretch py-1.5 md:row-span-1 md:flex-row md:items-start">
           {castGutter && (
-            <div className="me-2 flex w-10 shrink-0 flex-col items-center">
-              <div className="mb-1 h-4 shrink-0" aria-hidden />
+            <div className="flex w-10 shrink-0 flex-col items-center md:me-2">
+              <div className="mb-1 hidden h-4 shrink-0 md:block" aria-hidden />
               {/* 32px circles centered ON THE VERSE NUMBER (Sam 2026-08-07):
                   same spacer + first-line box as the number column, so the
                   circle's midpoint rides the number's midpoint; the circle
@@ -6599,7 +6615,7 @@ function EditorRow({
                    the SelectionBar ("X selected" pill) appears for discoverability.
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
           <div className="flex w-5 shrink-0 flex-col items-center">
-            <div className="mb-1 h-4 shrink-0" aria-hidden />
+            <div className="mb-1 hidden h-4 shrink-0 md:block" aria-hidden />
             <AppTooltip content={isMultiSelected ? t("editor.row.selectedTooltip") : t("editor.row.selectTooltip")} side="right">
               <button
                 type="button"
@@ -6626,7 +6642,7 @@ function EditorRow({
             </AppTooltip>
           </div>
           {/* Badges + verse number — ms-2 opens space after the select. */}
-          <div className="ms-2 flex min-w-0 flex-1 items-start gap-0.5">
+          <div className="flex min-w-0 flex-col items-center gap-0.5 md:ms-2 md:flex-1 md:flex-row md:items-start">
             {/* Spacer is a sibling of the badge stack (not inside it) so
                 gap-0.5 only spaces stacked badges — a lone badge stays
                 level with the select control, which has no flex gap. */}
@@ -6634,7 +6650,7 @@ function EditorRow({
               data-testid="gutter-status-badges"
               className="flex w-5 shrink-0 flex-col items-center"
             >
-              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              <div className="mb-1 hidden h-4 shrink-0 md:block" aria-hidden />
               <div className="flex flex-col items-center gap-0.5">
                 {(isStaleSource || isUpstreamStaleSource) && hasContent && (
                   <StaleSourceIndicator
@@ -6683,8 +6699,8 @@ function EditorRow({
               </div>
             </div>
             {/* Verse / line number (severity tint). */}
-            <div className="flex min-w-0 flex-1 flex-col items-center">
-              <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
+            <div className="order-first flex min-w-0 flex-col items-center md:order-last md:flex-1">
+              <div data-testid="gutter-strip-spacer" className="mb-1 hidden h-4 md:block" aria-hidden />
               <div className="flex w-full items-start justify-center">
                 {numberPill}
               </div>
@@ -6702,7 +6718,7 @@ function EditorRow({
           // this huge row let the React Compiler serve a stale voice, so a
           // freshly-picked voice didn't stick in the trigger).
           <div
-            className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
+            className={cn("col-start-2 flex flex-col transition-opacity md:col-auto", isSynthBusy && "opacity-70")}
             dir="ltr"
           >
             <CellVoicePanel
@@ -6733,7 +6749,7 @@ function EditorRow({
               // overflow its area on an unbreakable token; min-w-0 lets it
               // shrink and break-words (inherited by the text below) breaks the
               // token instead of blowing the column out.
-              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity] md:col-auto",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -6934,7 +6950,7 @@ function EditorRow({
         <EditorTargetCellColumn
           data-showcase="editor.target"
           className={cn(
-            "relative flex flex-col ps-3 pe-9 transition-opacity",
+            "relative col-start-2 flex flex-col border-t border-border/60 bg-muted/25 pt-1 transition-opacity md:col-auto md:border-t-0 md:bg-transparent md:pt-0",
             isSynthBusy && "opacity-70",
           )}
           fontSize={targetFontSize}
@@ -6944,6 +6960,7 @@ function EditorRow({
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
+              className="hidden md:block"
             />
           ) : undefined}
           header={(
@@ -7278,7 +7295,7 @@ function EditorRow({
             scroll container, the sticky header's stacking context wins (rows
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
-        <div className="pointer-events-none absolute end-2 top-0.5 z-20 flex">
+        <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-2 md:top-0.5">
           <div
             className="pointer-events-auto"
             // AQU-354: track focus landing on / leaving a rail control so the

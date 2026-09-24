@@ -97,6 +97,32 @@ describe("full-stack Cloudflare previews", () => {
     expect(run).toHaveBeenCalledTimes(3)
   })
 
+  it("sweeps stale previews after the secret check and before the first upload; a sweep failure never blocks the deploy", async () => {
+    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name }))) }
+    const order: string[] = []
+    const run = vi.fn(async (_command: string, args: string[]) => {
+      order.push(args.includes("base-config") ? "secrets" : "upload")
+      if (args.includes("base-config")) return secrets
+      throw new Error("backend upload failed")
+    })
+    const cleanup = vi.fn(async () => {
+      order.push("sweep")
+      throw new Error("sweep exploded")
+    })
+    await expect(deployStackPreview({ env, run, cleanup })).rejects.toThrow("backend upload failed")
+    expect(order).toEqual(["secrets", "secrets", "sweep", "upload"])
+    expect(cleanup).toHaveBeenCalledWith(expect.objectContaining({
+      env, currentAlias: previewName, workers: [PREVIEW_WORKERS.sync, PREVIEW_WORKERS.auth, PREVIEW_WORKERS.web],
+    }))
+  })
+
+  it("does not sweep when the secret check already failed", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "[]" })
+    const cleanup = vi.fn()
+    await expect(deployStackPreview({ env, run, cleanup })).rejects.toThrow("Previews Base is missing")
+    expect(cleanup).not.toHaveBeenCalled()
+  })
+
   it("refuses to deploy a stack without its signing secrets", async () => {
     const run = vi.fn().mockResolvedValue({ stdout: "[]" })
     await expect(deployStackPreview({ env, run })).rejects.toThrow("Previews Base is missing")

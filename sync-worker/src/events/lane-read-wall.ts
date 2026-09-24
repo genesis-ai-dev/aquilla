@@ -8,24 +8,12 @@
  */
 
 import type { SyncTokenClaims } from "../auth"
-import { languageSurfaceForms } from "../../../src/lib/language-normalize"
 import {
   laneReadWallEnabled,
   laneTagAllowed,
   visibleLaneTags,
   type VisibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
-
-/** Grant tags plus the names and codes that mean the same language. */
-function matchForms(tags: Iterable<string>): string[] {
-  const forms = new Set<string>()
-  for (const tag of tags) {
-    for (const form of languageSurfaceForms(tag)) {
-      if (form !== "") forms.add(form)
-    }
-  }
-  return [...forms]
-}
 
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
@@ -44,8 +32,7 @@ export async function canReadRequestedLane(
   if (visible === null) return true
   if (laneTagAllowed(visible, lane)) return true
   if (lane !== "" || visible.size === 0) return false
-  const lowered = matchForms(visible)
-  if (lowered.length === 0) return false
+  const lowered = [...visible].map((tag) => tag.toLowerCase())
   const placeholders = lowered.map(() => "?").join(", ")
   const row = await db
     .prepare(
@@ -83,16 +70,16 @@ export function targetVisibilityClause(args: {
   laneIdExpr: string
 }): { sql: string; binds: unknown[] } | null {
   if (args.visible === null) return null
-  const tags = matchForms(args.visible)
+  const tags = [...args.visible]
   if (tags.length === 0) {
     return args.sideExpr
       ? { sql: `AND ${args.sideExpr} = 'source'`, binds: [] }
       : { sql: "AND FALSE", binds: [] }
   }
   const ph = tags.map(() => "?").join(", ")
-  const lowered = tags
+  const lowered = tags.map((tag) => tag.toLowerCase())
   const match = `(
-    lower(${args.targetLangExpr}) IN (${ph})
+    ${args.targetLangExpr} IN (${ph})
     OR ${args.laneIdExpr} IN (
       SELECT id FROM public.lanes
       WHERE project_id = ? AND role = 'target'

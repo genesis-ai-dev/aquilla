@@ -158,29 +158,3 @@ export function normalizeLanguageTag(tag: string | undefined | null): string {
 export function languagesEqual(a: string | undefined | null, b: string | undefined | null): boolean {
   return normalizeLanguageTag(a) === normalizeLanguageTag(b)
 }
-
-/**
- * Every surface form that `languagesEqual` treats as the same language:
- * the original tag, its canonical code, the English name, the 2-letter code,
- * and ISO 639-2 aliases. SQL `IN` lists use this so a grant of `es` matches a
- * lane named Spanish. Unknown tags come back as themselves, lowercased.
- * An empty tag is only itself — it is the default lane, not a language.
- */
-export function languageSurfaceForms(tag: string): string[] {
-  const raw = tag.trim()
-  if (!raw) return [""]
-  const forms = new Set<string>()
-  forms.add(raw.toLowerCase())
-  const canonical = normalizeLanguageTag(raw)
-  if (canonical) forms.add(canonical)
-  for (const [name, code] of Object.entries(ENGLISH_TO_CODE)) {
-    if (code === canonical) forms.add(name)
-  }
-  for (const [two, code] of Object.entries(TWO_TO_THREE)) {
-    if (code === canonical) forms.add(two)
-  }
-  for (const [alias, code] of Object.entries(ISO2_ALIAS)) {
-    if (code === canonical) forms.add(alias)
-  }
-  return [...forms]
-}

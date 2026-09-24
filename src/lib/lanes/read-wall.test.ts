@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { languageSurfaceForms } from "../language-normalize"
 import {
   filterSettingsToVisibleLanes,
   laneReadWallEnabled,
@@ -22,13 +21,6 @@ describe("lane read wall", () => {
     expect(visibleLaneTags({ enabled: false, role: 400 })).toBeNull()
     const none = visibleLaneTags({ enabled: true, role: 400 })
     expect(none).toEqual(new Set())
-  })
-
-  it("treats es, spa, and Spanish as one grant", () => {
-    expect(languageSurfaceForms("es").sort()).toEqual(["es", "spa", "spanish"])
-    expect(languageSurfaceForms("Spanish").sort()).toEqual(["es", "spa", "spanish"])
-    expect(languageSurfaceForms("")).toEqual([""])
-    expect(languageSurfaceForms("Telugu")).toEqual(["telugu"])
   })
 
   it("ignores a grant below viewer and keeps a viewer grant", () => {

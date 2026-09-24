@@ -1,4 +1,5 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
 // AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
 // when auth-worker's per-unit assignment read started needing them. They are
@@ -130,7 +131,8 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        structural_audio_count = excluded.structural_audio_count,
        structural_audio_validated_count = excluded.structural_audio_validated_count,
        audio_validator_histogram = excluded.audio_validator_histogram,
-       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram`
+       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram,
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`
 
 // AQU-1278 appended the structural audio pair at the TAIL rather than beside
 // the audio columns it belongs with, and that is load-bearing: three of the six
@@ -138,7 +140,12 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // column inserted anywhere but the end shifts every later value one slot to the
 // left in half of them — silently, with no SQL error, because the types line up.
 // AQU-490's histogram pair is appended for the same reason. Add at the tail.
-const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+//
+// AQU-1240's `lane_id` sits beside `target_lang` instead because it is NOT a
+// summary column: no `UNION ALL` arm carries it. Each INSERT … SELECT below
+// resolves it inline (laneIdResolveFromColSql) right after the lane column, so
+// the column list and every SELECT agree on its position by construction.
+const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
        audio_count, audio_validated_count, last_edit_at,
@@ -218,7 +225,9 @@ export function fileProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, 'file', '', summary.lane, summary.total_count, summary.filled_count,
+     SELECT ?, ?, 'file', '', summary.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summary.lane')},
+            summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
                  FROM buckets WHERE buckets.lane = summary.lane),
@@ -253,7 +262,7 @@ export function fileProgressRecomputeStmt(
     projectId, fileId,
     projectId, fileId,
     projectId, fileId, projectId,
-    projectId, fileId, updatedAt,
+    projectId, fileId, projectId, updatedAt,
   )
 }
 
@@ -310,7 +319,7 @@ export function sectionsProgressRecomputeStmt(
     projectId, fileId,           // paired
   ]
   if (uniqueCellIds.length > 0) binds.push(projectId, fileId, ...uniqueCellIds)
-  binds.push(projectId, fileId, projectId, projectId, fileId, updatedAt)
+  binds.push(projectId, fileId, projectId, projectId, fileId, projectId, updatedAt)
 
   return db.prepare(
     `WITH lanes AS (
@@ -412,6 +421,7 @@ export function sectionsProgressRecomputeStmt(
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
      SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             summaries.structural_count, summaries.structural_filled_count,
@@ -585,6 +595,7 @@ export function fullProgressRecomputeStmts(
          ${PROGRESS_INSERT_COLUMNS_SQL}
        )
        SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+              ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               summaries.structural_count, summaries.structural_filled_count,
@@ -612,7 +623,7 @@ export function fullProgressRecomputeStmts(
       projectId, fileId,
       projectId, fileId,
       projectId, fileId, projectId,
-      projectId, fileId, updatedAt,
+      projectId, fileId, projectId, updatedAt,
     ),
     db.prepare(
       // Prune sections/books whose cells are gone, and every book row once the

@@ -100,6 +100,49 @@ function countWords(text: string): number {
   return trimmed ? trimmed.split(/\s+/).length : 0
 }
 
+/**
+ * AQU-1358: read the upstream file a target copy was mirrored from, as
+ * recorded by `withUpstreamFileId`. Returns null for legacy rows written
+ * before the marker existed, and for meta that is absent, malformed, or holds
+ * a non-string/empty value — callers treat null as "fall back to name".
+ */
+export function readUpstreamFileId(meta: string | null): string | null {
+  if (!meta) return null
+  try {
+    const parsed = JSON.parse(meta) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    const value = (parsed as Record<string, unknown>).upstreamFileId
+    return typeof value === "string" && value ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * AQU-1358: stamp `upstreamFileId` into a mirrored file's `meta` JSON so a
+ * later snapshot finds its own previous copy by upstream identity rather than
+ * by display name — which changes when the upstream file is renamed, making
+ * the name lookup miss and mint a duplicate.
+ *
+ * Absent or unparseable legacy meta degrades to a fresh object rather than
+ * throwing: this runs inside the best-effort snapshot loop, and losing a
+ * malformed meta blob is strictly better than losing the file row.
+ */
+export function withUpstreamFileId(meta: string | null, upstreamFileId: string): string {
+  let parsed: Record<string, unknown> = {}
+  if (meta) {
+    try {
+      const candidate = JSON.parse(meta) as unknown
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        parsed = candidate as Record<string, unknown>
+      }
+    } catch {
+      // fall through to {}
+    }
+  }
+  return JSON.stringify({ ...parsed, upstreamFileId })
+}
+
 export interface SourceLinkProject {
   id: string
   name: string
@@ -242,10 +285,17 @@ export async function emitLinkSourceEvent(
  * returns the upstream-id → target-id map so `snapshotSourceCells` can
  * rewrite `file_id` on the cell rows it copies.
  *
- * Idempotent across re-runs by NAME (not id) within one target project — a
- * second clone/detach snapshot updates the previously-created copy in place
- * rather than creating a duplicate file, keyed on (project_id, name) since
- * that's the only stable cross-run identifier available once ids differ.
+ * Idempotent across re-runs within one target project — a second clone/detach
+ * snapshot updates the previously-created copy in place rather than creating a
+ * duplicate file.
+ *
+ * AQU-1358: the match is keyed on the UPSTREAM FILE ID, recorded in the
+ * target copy's `meta.upstreamFileId` the first time it is written, and falls
+ * back to (project_id, name) only for rows created before that marker existed.
+ * Keying on name alone is what minted duplicates: rename a file upstream and
+ * the name lookup misses, so the next snapshot created a SECOND target row
+ * beside the one it should have renamed. Upstream id is stable across renames,
+ * so the re-run now renames in place and stays a no-op for untouched files.
  *
  * Best-effort: returns an empty map on any failure (matches
  * `snapshotSourceCells`'s defensive posture — missing/legacy schema must not
@@ -287,16 +337,40 @@ export async function snapshotSourceFiles(
     return fileIdMap
   }
 
+  // AQU-1358: the target's existing files, read once and matched in JS rather
+  // than with `meta::jsonb ->> …` in SQL — `files.meta` is TEXT, so a single
+  // malformed legacy blob would make the cast throw and (inside this
+  // best-effort loop) silently drop that file from the snapshot.
+  const byUpstreamId = new Map<string, string>()
+  const byName = new Map<string, string>()
+  try {
+    const existingRows = await env.AQUILLA_PG.prepare(
+      `SELECT id, name, meta FROM files WHERE project_id = ?`,
+    )
+      .bind(args.targetProjectId)
+      .all<{ id: string; name: string; meta: string | null }>()
+    for (const row of existingRows.results ?? []) {
+      const upstreamId = readUpstreamFileId(row.meta)
+      if (upstreamId != null) byUpstreamId.set(upstreamId, row.id)
+      // Legacy rows only — a row that already carries the marker must never be
+      // reachable by name, or a rename would match the WRONG row.
+      else if (!byName.has(row.name)) byName.set(row.name, row.id)
+    }
+  } catch (err) {
+    console.warn("snapshotSourceFiles: existing-file scan failed:", err)
+  }
+
   for (const file of files) {
     try {
-      const existing = await env.AQUILLA_PG.prepare(
-        `SELECT id FROM files WHERE project_id = ? AND name = ?`,
-      )
-        .bind(args.targetProjectId, file.name)
-        .first<{ id: string }>()
+      // Upstream id first (survives renames), name only as the legacy
+      // fallback for target rows written before the marker existed.
+      const existingId = byUpstreamId.get(file.id) ?? byName.get(file.name)
 
-      const targetFileId = existing?.id ?? crypto.randomUUID()
+      const targetFileId = existingId ?? crypto.randomUUID()
       const eventId = makeEventId()
+      // Stamp the upstream id so the next run matches by identity rather than
+      // by name, including after the upstream file is renamed.
+      const targetMeta = withUpstreamFileId(file.meta, file.id)
       await env.AQUILLA_PG.prepare(
         `INSERT INTO files (
            id, project_id, name, role, kind, book_code,
@@ -322,9 +396,13 @@ export async function snapshotSourceFiles(
           args.authorUsername,
           now,
           now,
-          file.meta ?? "{}",
+          targetMeta,
         )
         .run()
+      // Claim the row for this upstream file so a later upstream file sharing
+      // the old name can't also match it via the legacy name fallback.
+      byUpstreamId.set(file.id, targetFileId)
+      if (byName.get(file.name) === targetFileId) byName.delete(file.name)
       fileIdMap.set(file.id, targetFileId)
     } catch (err) {
       console.warn(`snapshotSourceFiles: insert failed for ${file.id}:`, err)

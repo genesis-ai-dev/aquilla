@@ -60,6 +60,11 @@ const LANE_KINDS_SOURCE = [
   'cell.retime',
   'cast.assign',
   'file.create',
+  // AQU-1358: an upstream rename is lane-relevant. Without it the freshness
+  // probe never sees the rename (head stays at the cursor, mirrorSync returns
+  // NOOP) and the delta never pulls the file id in, so the downstream copy
+  // keeps the old name forever.
+  'file.rename',
 ] as const
 
 /** AQU-477: additional lane-relevant kinds for `consumes: 'target'` links —
@@ -819,15 +824,23 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   for (const upstreamFileId of deltaFileIdList) {
     downstreamFileIdOf.set(upstreamFileId, deterministicDownstreamFileId(downstreamProjectId, upstreamFileId))
   }
+  // AQU-1358: the downstream's CURRENT name comes back alongside the id, so a
+  // file the delta already knows can be classified three ways rather than two:
+  // new (mirror it), renamed upstream (re-mirror to refresh the name), or
+  // unchanged (emit nothing — this is what keeps a re-sync idempotent and
+  // stops repeated syncs minting duplicate rows/events for files A and B when
+  // only file C is new).
   let existingDownstreamFileIdSet = new Set<string>()
+  const downstreamNameOf = new Map<string, string>() // downstream file id -> its current name
   if (deltaFileIdList.length > 0) {
     const downstreamIds = deltaFileIdList.map((id) => downstreamFileIdOf.get(id)!)
     const placeholders = downstreamIds.map(() => '?').join(', ')
     const existingFiles = await db
-      .prepare(`SELECT id FROM files WHERE project_id = ? AND id IN (${placeholders})`)
+      .prepare(`SELECT id, name FROM files WHERE project_id = ? AND id IN (${placeholders})`)
       .bind(downstreamProjectId, ...downstreamIds)
-      .all<{ id: string }>()
+      .all<{ id: string; name: string }>()
     existingDownstreamFileIdSet = new Set(existingFiles.results.map((r) => r.id))
+    for (const r of existingFiles.results) downstreamNameOf.set(r.id, r.name)
   }
   const newUpstreamFileIds = deltaFileIdList.filter(
     (upstreamFileId) => !existingDownstreamFileIdSet.has(downstreamFileIdOf.get(upstreamFileId)!),
@@ -844,18 +857,42 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   const persistedForProjection: PersistedEvent[] = []
   let skippedHashEqual = 0
 
-  // 1. file.mirror for new upstream files. `fileId` in the event envelope +
-  // payload is the DOWNSTREAM's deterministic id, never the upstream's raw
-  // id (files.id global-PK constraint — see deterministicDownstreamFileId).
-  if (newUpstreamFileIds.length > 0) {
-    const newFilePlaceholders = newUpstreamFileIds.map(() => '?').join(', ')
+  // 1. file.mirror for new upstream files, and (AQU-1358) for already-mirrored
+  // files whose upstream name has since changed — file.mirror's projection is
+  // an idempotent upsert that refreshes `name` on conflict, so a rename needs
+  // no new event kind, only an event that is actually emitted. `fileId` in the
+  // event envelope + payload is the DOWNSTREAM's deterministic id, never the
+  // upstream's raw id (files.id global-PK constraint — see
+  // deterministicDownstreamFileId).
+  const renamedUpstreamFileIds: string[] = []
+  if (deltaFileIdList.length > 0) {
+    const filePlaceholders = deltaFileIdList.map(() => '?').join(', ')
     const upstreamFiles = await db
-      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${newFilePlaceholders})`)
-      .bind(upstreamProjectId, ...newUpstreamFileIds)
+      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
+      .bind(upstreamProjectId, ...deltaFileIdList)
       .all<{ id: string; name: string; meta: string | null }>()
     for (const f of upstreamFiles.results) {
       const downstreamFileId = downstreamFileIdOf.get(f.id) ?? deterministicDownstreamFileId(downstreamProjectId, f.id)
-      const eventId = deterministicMirrorEventId(downstreamProjectId, `file:${f.id}`)
+      const isNew = !existingDownstreamFileIdSet.has(downstreamFileId)
+      const renamed = !isNew && downstreamNameOf.get(downstreamFileId) !== f.name
+      // Already mirrored under the same name — nothing to say. Most delta
+      // files land here (they were only dragged in by their cells' events),
+      // and skipping them is what makes repeated syncs a no-op instead of a
+      // fresh copy.
+      if (!isNew && !renamed) continue
+      if (renamed) renamedUpstreamFileIds.push(f.id)
+      // Key a rename on the NEW NAME so each distinct rename gets its own
+      // event-log row. (The projection runs regardless — it is built from
+      // persistedForProjection unconditionally, while only the events INSERT
+      // dedupes on the PK — so reusing `file:<id>` would still land the name;
+      // it would just drop the audit row.) Keeping it deterministic means a
+      // replay of the same rename is still an exact id-replay, and keeping it
+      // distinct from `file:<id>` leaves the create-time id every existing
+      // downstream already carries untouched.
+      const eventId = deterministicMirrorEventId(
+        downstreamProjectId,
+        renamed ? `file:${f.id}:name:${contentHash(f.name)}` : `file:${f.id}`,
+      )
       const payload: EventPayloads['file.mirror'] = {
         fileId: downstreamFileId,
         name: f.name,
@@ -972,7 +1009,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     cellsMirrored++
   }
 
-  const filesMirrored = newUpstreamFileIds.length
+  // AQU-1358: renamed files are mirrored too (name refresh), so they count —
+  // otherwise a rename-only delta folds to totalMirrors === 0 and the whole
+  // emit is discarded as an empty fold below.
+  const filesMirrored = newUpstreamFileIds.length + renamedUpstreamFileIds.length
   const totalMirrors = cellsMirrored + filesMirrored
 
   if (totalMirrors === 0) {
@@ -1043,7 +1083,7 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   for (const c of folded.values()) {
     touchedFiles.add(downstreamFileIdOf.get(c.fileId) ?? deterministicDownstreamFileId(downstreamProjectId, c.fileId))
   }
-  for (const upstreamFileId of newUpstreamFileIds) {
+  for (const upstreamFileId of [...newUpstreamFileIds, ...renamedUpstreamFileIds]) {
     touchedFiles.add(downstreamFileIdOf.get(upstreamFileId)!)
   }
   for (const fileId of touchedFiles) {

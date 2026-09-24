@@ -74,13 +74,10 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
-import { targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
-  /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
-  LANE_READ_WALL?: string
 }
 
 interface CellRowRaw {
@@ -597,8 +594,8 @@ async function fetchWatermarks(
  *  though MAX(server_seq) did not move; epoch likewise so they MISS after the
  *  project was wiped and re-created under the same ids (AQU-943), where
  *  MAX(server_seq) can even move BACKWARDS. */
-function makeEtag(fileId: string, w: Watermarks, visibility = ""): string {
-  return `"${fileId}:${w.epoch}:${w.rebuiltSeq}:${w.maxSeq}${visibility}"`
+function makeEtag(fileId: string, w: Watermarks): string {
+  return `"${fileId}:${w.epoch}:${w.rebuiltSeq}:${w.maxSeq}"`
 }
 
 /** The watermark advertised to clients as `maxServerSeq` (their next `?since=`
@@ -687,11 +684,6 @@ export async function handleCellsReadRequest(
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
   const laneFilter = qLane && qLane.length > 0 ? qLane : null
-  // AQU-730: when the wall is on, "no lane param" is no longer "every target
-  // lane". Below Maintainer the response is cut to granted lanes. The token
-  // is already verified above; 600+ and platform stay unrestricted (token "").
-  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
-  const visibility = visibilityCacheToken(visibleLanes)
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -756,7 +748,7 @@ export async function handleCellsReadRequest(
     const watermarks = await fetchWatermarks(env.AQUILLA_PG, projectId, fileId)
     maxServerSeq = advertisedSeq(watermarks)
     projectEpoch = watermarks.epoch
-    etag = makeEtag(fileId, watermarks, visibility)
+    etag = makeEtag(fileId, watermarks)
     if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
       return new Response(null, { status: 304, headers: cacheHeaders(etag) })
     }
@@ -843,17 +835,6 @@ export async function handleCellsReadRequest(
           deltaParts.push(sourceOrTargetLaneSql())
           deltaBinds.push(...targetLaneDualReadBinds(projectId, laneFilter))
         }
-        const deltaWall = targetVisibilityClause({
-          visible: visibleLanes,
-          projectId,
-          sideExpr: "side",
-          targetLangExpr: "target_lang",
-          laneIdExpr: "lane_id",
-        })
-        if (deltaWall) {
-          deltaParts.push(deltaWall.sql)
-          deltaBinds.push(...deltaWall.binds)
-        }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
           .all<CellRowRaw>()
@@ -932,17 +913,6 @@ export async function handleCellsReadRequest(
   if (laneFilter !== null) {
     parts.push(sourceOrTargetLaneSql())
     binds.push(...targetLaneDualReadBinds(projectId, laneFilter))
-  }
-  const wall = targetVisibilityClause({
-    visible: visibleLanes,
-    projectId,
-    sideExpr: "side",
-    targetLangExpr: "target_lang",
-    laneIdExpr: "lane_id",
-  })
-  if (wall) {
-    parts.push(wall.sql)
-    binds.push(...wall.binds)
   }
   const sql = parts.join(" ")
 

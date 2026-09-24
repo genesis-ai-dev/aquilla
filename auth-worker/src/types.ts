@@ -106,11 +106,6 @@ export interface Env {
   DISCORD_INVITE_URL?: string
 
   ENVIRONMENT?: string
-  /**
-   * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
-   * members below Maintainer. Leave unset until lane grants are backfilled.
-   */
-  LANE_READ_WALL?: string
 
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy

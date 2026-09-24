@@ -13,6 +13,14 @@
  * whose catalog is a different language than the code names is therefore a bug,
  * and a worse one than having no entry at all — see `LOCALE_ALIASES` (AQU-1306).
  *
+ * Indonesian (`id`, AQU-869) and Malay (`ms`) are listed separately and their
+ * catalogs are translated separately. They are close relatives, which is exactly
+ * why the temptation to derive one from the other has to be named and refused:
+ * the UI register is where they diverge most (`unggah`/`muat naik`,
+ * `pratinjau`/`pratonton`, `hapus`/`padam`, `berkas`/`fail`, `mengunduh`/`memuat
+ * turun`), so a Malay-derived `id` catalog would read as Malay to an Indonesian
+ * speaker and repeat AQU-1306 under a new code.
+ *
  * Chinese ships as two script-subtag locales: `zh-Hans` (AQU-978) and `zh-Hant`
  * (AQU-976). `normalizeLocale()` prefers an exact match, so each script gets its
  * own catalog (`zh-TW`/`zh-CN` region codes are not exact matches — they fall
@@ -39,6 +47,7 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "th", englishName: "Thai", nativeName: "ไทย", dir: "ltr" },
   { code: "my", englishName: "Burmese", nativeName: "မြန်မာ", dir: "ltr" },
   { code: "ms", englishName: "Malay", nativeName: "Bahasa Melayu", dir: "ltr" },
+  { code: "id", englishName: "Indonesian", nativeName: "Bahasa Indonesia", dir: "ltr" },
   { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
   { code: "zh-Hans", englishName: "Simplified Chinese", nativeName: "简体中文", dir: "ltr" },
   { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
@@ -66,9 +75,16 @@ export const DEFAULT_LOCALE = "en"
  * switcher. Drop the `mfa` entry when a genuine Pattani Malay catalog — authored
  * and signed off by Pattani Malay speakers, not machine-derived from `ms` — is
  * registered under `mfa` again.
+ *
+ * `in` is Indonesian's pre-1989 ISO 639-1 code (AQU-869). It was never offered
+ * by this app, but the JVM and older Android builds still emit it, so it can
+ * arrive in a stored preference or an `Accept-Language` header. Without the
+ * alias the primary-subtag branch would not save it — `in` shares no subtag with
+ * `id` — and an Indonesian speaker would silently land on English.
  */
 export const LOCALE_ALIASES: Readonly<Record<string, string>> = {
   mfa: "ms",
+  in: "id",
 }
 
 export function isSupportedLocale(code: string): boolean {

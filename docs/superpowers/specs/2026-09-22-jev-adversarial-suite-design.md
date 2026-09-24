@@ -1,6 +1,7 @@
 # Jev adversarial suite — design
 
-Date: 2026-09-22. Status: approved design, awaiting implementation plan.
+Date: 2026-09-22. Status: implemented on `ryder/jev-adversarial-suite` (2026-09-24).
+See "Implementation notes" at the end for where the build differs from this design.
 Tracker parent: AQU-1330 (agent-navigability findings) and AQU-1338 (smart
 testing). Builds on the merged smart-test harness (`smart-tests/`, PR #716)
 and the sign-off journey (PR #729).
@@ -96,7 +97,7 @@ interface AdversarialTarget {
   it (project create → sync token → `/import` → `/import {complete}`),
   reusing the markdown/USFM parser path so fixture cells equal real
   imports. There is no org-delete API, so cleanup archives every project
-  in the org (`DELETE /api/v2/projects/:id/archive`) and leaves the empty
+  in the org (`POST /api/v2/projects/:id/archive`; `DELETE` restores) and leaves the empty
   org; the org name carries the run id so a human can find it. Cleanup is
   skipped when any test produced `product_failure`, so the evidence org
   stays reproducible. Members of the second and third users are added
@@ -346,6 +347,35 @@ a whole under stress. The adversarial suite fills that gap, keyed by the
 `scripts/release-plan.mjs` as a hold signal is a later decision, and
 should wait until the suite has run cleanly for a while, so a flaky
 attack cannot block a release.
+
+## Implementation notes (2026-09-24)
+
+Where the build differs from the design above, and why:
+
+- **One oracle.** Every attack uses `verifyInvariants` over full
+  snapshots, plus a fresh-browser read-back for target edits. The
+  cooperative oracles (`verifyEdit` and the rest) are not called
+  directly; the snapshot oracle covers their checks and more.
+- **Who owns what.** User 1 creates the run org and owns ordinary
+  fixtures. Users 1 and 2 are **not** org members otherwise; user 2 gets
+  a project role per attack. Viewer-only attacks and decoys are owned
+  by user 3 in its personal org, because an org owner holds owner
+  rights on every project in the org, which would void a viewer test.
+- **Health gate** is a Playwright project dependency: the `attacks`
+  project depends on `canary`, so a failed canary skips every attack.
+- **prod-canary** runs only the model-free canary, never an attack.
+- **Auto-validation.** A human target edit validates the cell when the
+  project allows self-validation (`src/lib/review/auto-validation.ts`).
+  An allowed edit therefore also allows that cell's validation flag to
+  change, and `fuzz.edit.chained` requires no duplicate live sign-off
+  instead of a final validated state.
+- **Dropped:** `redteam.delete-and-edit`. Whether a soft-deleted file's
+  cells should stay readable is not settled, so its oracle would invent
+  a rule. `redteam.wipe-file` became `redteam.viewer-wipe-file`: a
+  contributor may legitimately clear translations, a viewer may not.
+- **`--canary-only`** runs the health gate alone, needing no model keys.
+- The launcher refuses attacks unless `TYPESAFE_URL` and
+  `TEXT_MODEL_BASE_URL` are explicit, after the #716 key incident.
 
 ## Deferred: long-lived explorers on Agent Substrate
 

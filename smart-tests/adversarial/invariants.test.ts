@@ -59,6 +59,13 @@ describe("adversarial invariant oracle", () => {
     expect(verifyInvariants(before, edited("fixed"), editC1, { ...seen, serverErrors: 1 }).verdict).toBe("product_failure")
   })
 
+  it("lets an allowed edit auto-validate its own cell, but not a neighbour", () => {
+    const flag = (snapshot: Snapshot, cellId: string): Snapshot => ({ ...snapshot, cells: snapshot.cells.map((cell) =>
+      cell.cellId === cellId && cell.side === "target" ? { ...cell, validated: true } : cell) })
+    expect(verifyInvariants(before, flag(edited("fixed"), "c1"), editC1, seen).verdict).toBe("passed")
+    expect(verifyInvariants(before, flag(edited("fixed"), "c2"), editC1, seen).diffs).toContain("cell f/c2/target validation changed")
+  })
+
   it("flags files that appear or disappear", () => {
     const extra = { ...before, files: [...before.files, { projectId: "p", fileId: "g", name: "x", deleted: false }] }
     expect(verifyInvariants(before, extra, { allowed: [], required: [] }, seen).diffs).toContain("file g appeared")

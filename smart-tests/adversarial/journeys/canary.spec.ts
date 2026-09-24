@@ -40,7 +40,17 @@ test("canary: a scripted real edit passes the oracle", async ({ browser }, testI
     await page.goto(editorUrl(seeded))
     const workspace = new Workspace(page)
     await workspace.waitForEditor(seeded.cellIds[0])
-    await workspace.editCell(0, expected)
+    // Replace the seeded translation the way Jev's fill does: select all, then type.
+    await workspace.activateTargetCell(0)
+    await page.keyboard.press("ControlOrMeta+a")
+    await page.keyboard.type(expected)
+    // Leave the editor open until the idle commit reaches the server.
+    for (const deadline = Date.now() + 20_000; Date.now() < deadline;) {
+      const stored = (await readSnapshot(readers)).cells
+        .find((cell) => cell.cellId === seeded.cellIds[0] && cell.side === "target")?.value
+      if (stored === expected) break
+      await new Promise((resolve) => setTimeout(resolve, 1_000))
+    }
   } finally {
     await context.close()
   }

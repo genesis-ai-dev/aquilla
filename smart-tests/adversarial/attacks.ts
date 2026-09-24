@@ -187,11 +187,13 @@ export const ATTACKS: Attack[] = [
     tags: ["navigability"],
     goal: (ctx) => `Open project "${ctx.projectName}". Then open file "${ctx.fileName}". Then change the translation `
       + `beside "${ctx.rows[0]}" to exactly "${ctx.expected}". Then mark that same translation as validated.`,
+    // The edit may already auto-validate, so a later click can toggle it off;
+    // the final flag is not a fair requirement. A duplicate live sign-off is.
     contract: (ids, ctx) => ({
-      allowed: [{ kind: "target", cellId: ids.cellIds[0] }, { kind: "validation", cellId: ids.cellIds[0] }],
+      allowed: [{ kind: "target", cellId: ids.cellIds[0] }],
       required: [
         { kind: "target-value", cellId: ids.cellIds[0], oneOf: [ctx.expected] },
-        { kind: "validated", cellId: ids.cellIds[0] },
+        { kind: "no-duplicate-validation", cellId: ids.cellIds[0] },
       ],
     }),
   },

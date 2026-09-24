@@ -80,7 +80,9 @@ export function unexpectedChanges(before: Snapshot, after: Snapshot, contract: C
     if ((now.value !== cell.value || now.eventId !== cell.eventId) && !targetAllowed) {
       diffs.push(`cell ${key} changed`)
     }
-    if (now.validated !== cell.validated
+    // A human target edit auto-validates when the project allows self-validation
+    // (src/lib/review/auto-validation.ts), so an allowed edit also covers that flag.
+    if (now.validated !== cell.validated && !targetAllowed
       && !allows(contract, { kind: "validation", cellId: cell.cellId })) {
       diffs.push(`cell ${key} validation changed`)
     }

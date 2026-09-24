@@ -30,6 +30,10 @@ const canaryOnly = args.includes("--canary-only") || kind === "prod-canary"
 if (!canaryOnly && (!process.env.TYPESAFE_API_KEY || !process.env.TEXT_MODEL_API_KEY)) {
   throw new Error("Attacks need TYPESAFE_API_KEY and TEXT_MODEL_API_KEY (see smart-tests/README.md)")
 }
+// An unset text-provider URL once sent the OpenRouter key to another provider (#716).
+if (!canaryOnly && (!process.env.TYPESAFE_URL || !process.env.TEXT_MODEL_BASE_URL)) {
+  throw new Error("Set TYPESAFE_URL and TEXT_MODEL_BASE_URL explicitly (see smart-tests/README.md)")
+}
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 const attack = flag("attack")

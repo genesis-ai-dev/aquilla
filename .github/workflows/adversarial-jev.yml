@@ -1,0 +1,79 @@
+# Adversarial Jev suite against the deployed dev build (smart-tests/adversarial).
+# It needs no local stack, so a hosted runner is enough. Advisory: it files
+# Linear Triage tickets and never gates a merge or a release.
+#
+# Requires secrets ADVERSARIAL_USER_1..3 (username:password on dev),
+# TYPESAFE_API_KEY, TEXT_MODEL_API_KEY, and LINEAR_API_KEY. Without
+# LINEAR_API_KEY findings are printed and kept as artifacts only.
+
+name: Adversarial Jev (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Attack mode filter (condition, redteam, fuzz, or empty for all)
+        type: string
+        default: ""
+      repeat_each:
+        description: Repeats per attack
+        type: string
+        default: "1"
+      canary_only:
+        description: Run only the model-free health gate
+        type: boolean
+        default: false
+  schedule:
+    # 09:00 UTC daily, after the overnight dev merges settle.
+    - cron: "0 9 * * *"
+
+concurrency:
+  group: adversarial-jev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  adversarial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ADVERSARIAL_USER_1: ${{ secrets.ADVERSARIAL_USER_1 }}
+      ADVERSARIAL_USER_2: ${{ secrets.ADVERSARIAL_USER_2 }}
+      ADVERSARIAL_USER_3: ${{ secrets.ADVERSARIAL_USER_3 }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      TYPESAFE_URL: ${{ vars.TYPESAFE_URL || 'https://openrouter.ai/api/alpha/decisions' }}
+      TYPESAFE_MODEL: ${{ vars.TYPESAFE_MODEL || 'typesafe/jev-1.13' }}
+      TEXT_MODEL_API_KEY: ${{ secrets.TEXT_MODEL_API_KEY }}
+      TEXT_MODEL: ${{ vars.TEXT_MODEL || 'inception/mercury-2.5' }}
+      # Always explicit: an unset base URL once sent the key to the wrong provider (#716).
+      TEXT_MODEL_BASE_URL: ${{ vars.TEXT_MODEL_BASE_URL || 'https://openrouter.ai/api/v1' }}
+      TEXT_MODEL_REASONING: ${{ vars.TEXT_MODEL_REASONING || 'none' }}
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install pinned Jev
+        run: |
+          python3 -m venv "$RUNNER_TEMP/smart-tools"
+          "$RUNNER_TEMP/smart-tools/bin/pip" install uv==0.9.9
+          "$RUNNER_TEMP/smart-tools/bin/uv" sync --project smart-tests --frozen
+      - name: Adversarial suite
+        run: |
+          args=(--target dev --repeat-each "${{ inputs.repeat_each || '1' }}")
+          if [ -n "${{ inputs.mode }}" ]; then args+=(--mode "${{ inputs.mode }}"); fi
+          if [ "${{ inputs.canary_only }}" = "true" ]; then args+=(--canary-only); fi
+          pnpm test:adversarial "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: adversarial-evidence
+          path: smart-tests/results/adv-*
+          retention-days: 14

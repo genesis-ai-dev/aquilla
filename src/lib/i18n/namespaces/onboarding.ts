@@ -714,6 +714,27 @@ export const onboarding = defineNamespace({
           "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
         placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
       },
+      "onboarding.connect.account": {
+        description:
+          "Line at the top of the agent-consent page naming the Aquilla account the approval would be granted under, so the human can spot that they are signed in as the wrong user before authorizing an agent.",
+        placeholders: {
+          username: "The signed-in user's own Aquilla username. Not translated — a user-chosen account name, shown verbatim.",
+        },
+      },
+      "onboarding.connect.agent": {
+        description:
+          "Line on the agent-consent page naming the agent that is asking for access. The warning immediately below it (onboarding.connect.unverified) tells the human this name is self-reported, so keep this string a plain statement of the name rather than an endorsement of it.",
+        placeholders: {
+          name: "The display name the agent supplied when it started the connection request. Not translated, not verified by Aquilla, and chosen by whoever ran the agent.",
+        },
+      },
+      "onboarding.connect.confirm": {
+        description:
+          "Label of the checkbox the human must tick before the 'Authorize agent' button becomes enabled on the agent-consent page. It is the anti-phishing step of the device flow: the human asserts that they started this request and that the code on screen is the same one their agent is displaying.",
+        placeholders: {
+          code: "The connection code the human typed into the 'Connection code' field, in XXXX-XXXX form (uppercase letters and digits, with the ambiguous 0/1/I/O omitted). Not translated — echoed back verbatim so it can be compared character by character with the code the agent shows.",
+        },
+      },
       "onboarding.apiTokens.revokeWarning": {
         description:
           "Confirmation-dialog warning when revoking an API token. Rendered immediately after the bold token name, so it starts with the parenthesised prefix.",

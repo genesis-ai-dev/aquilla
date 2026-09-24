@@ -31,6 +31,9 @@ export interface AudioResult {
   lfsMiss: number
   failed: number
   events: number
+  /** Notebook names (one per book) that lost at least one take to an unresolved
+   *  LFS oid, so the failure names the book instead of only counting takes. */
+  missingOidFiles?: string[]
 }
 
 interface CopyUnit {
@@ -45,6 +48,31 @@ interface CellPlan {
   cellId: string
   fileId: string
   selected: string | null
+}
+
+/** "MAT: 812, MRK: 3" — the books that lost takes, worst first, so the operator
+ *  can see WHICH book is incomplete without re-running the migration. */
+function describeMissingOid(byFile: Map<string, number>): string {
+  return [...byFile.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([file, count]) => `${file}: ${count}`)
+    .join(", ")
+}
+
+/** The one error every incomplete outcome raises, so a shortfall of any kind
+ *  keeps the job failed (and audio_applied_sha un-advanced) instead of being
+ *  reported only as a count on a successful result. */
+function incompleteAudio(result: AudioResult, byFile: Map<string, number>): Error {
+  const parts: string[] = []
+  if (result.missingOid > 0) {
+    parts.push(
+      `${result.missingOid} attachments have no LFS object id (${describeMissingOid(byFile)})`,
+    )
+  }
+  if (result.lfsMiss > 0 || result.failed > 0) {
+    parts.push(`${result.lfsMiss} LFS objects missing, ${result.failed} copy failures`)
+  }
+  return new Error(`audio copy incomplete: ${parts.join("; ")}`)
 }
 
 function readNotebook(file: string): CodexNotebookFile | undefined {
@@ -81,6 +109,10 @@ export async function migrateProjectAudio(
   const units: CopyUnit[] = []
   const cells: CellPlan[] = []
   let missingOid = 0
+  // Per-notebook tally of takes whose bytes we could not locate. A book whose
+  // attachments all fail to resolve contributes no CopyUnits at all, so without
+  // this it leaves no trace anywhere in the result (AQU-1373).
+  const missingOidByFile = new Map<string, number>()
   const targetDir = path.join(dir, "files/target")
 
   if (fs.existsSync(targetDir)) {
@@ -93,6 +125,9 @@ export async function migrateProjectAudio(
       for (const cell of target.cells) {
         const plan = planCellAudio(cell, oidIndex)
         missingOid += plan.missingOid.length
+        if (plan.missingOid.length > 0) {
+          missingOidByFile.set(relPath, (missingOidByFile.get(relPath) ?? 0) + plan.missingOid.length)
+        }
         if (plan.copies.length === 0) continue
         cells.push({ cellId: cell.metadata.id, fileId, selected: plan.selectedAquillaAudioId })
         for (const copy of plan.copies) {
@@ -108,6 +143,7 @@ export async function migrateProjectAudio(
     }
   }
 
+  const missingOidFiles = [...missingOidByFile.keys()].sort()
   const result: AudioResult = {
     total: units.length,
     copied: 0,
@@ -115,10 +151,11 @@ export async function migrateProjectAudio(
     lfsMiss: 0,
     failed: 0,
     events: 0,
+    ...(missingOidFiles.length > 0 ? { missingOidFiles } : {}),
   }
   if (deps.dryRun) return result
   if (units.length === 0) {
-    if (missingOid > 0) throw new Error(`audio copy incomplete: ${missingOid} attachments have no LFS object id`)
+    if (missingOid > 0) throw incompleteAudio(result, missingOidByFile)
     return result
   }
 
@@ -159,8 +196,15 @@ export async function migrateProjectAudio(
     await deps.sync.ingest(projectId, events.slice(offset, offset + 300))
   }
   result.events = events.length
-  if (result.lfsMiss > 0 || result.failed > 0) {
-    throw new Error(`audio copy incomplete: ${result.lfsMiss} LFS objects missing, ${result.failed} copy failures`)
+  // Everything that DID land is ingested first (the events are deterministic, so
+  // a retry is a no-op) — but any shortfall still fails the stage. A book whose
+  // takes all failed oid resolution contributes zero CopyUnits, so it used to
+  // slip past a guard that only fired when the WHOLE project copied nothing:
+  // the job went `done`, audio_applied_sha advanced, and the book was never
+  // retried. That is how a partner ends up with Luke and Mark but no Matthew
+  // (AQU-1373).
+  if (result.missingOid > 0 || result.lfsMiss > 0 || result.failed > 0) {
+    throw incompleteAudio(result, missingOidByFile)
   }
   return result
 }

@@ -60,6 +60,45 @@ function authHeaders(jwt: string): HeadersInit {
  * someone else's scopes) and on any network error — callers should treat a
  * null the same as "couldn't determine scopes", not "unscoped".
  */
+/** The caller's own scopes, plus whether the project's org lets lane-limited
+ *  members assign work (`null` when the server didn't say — an older server). */
+export interface MyScopeGrant {
+  scopes: MemberScope[]
+  allowScopedLaneAssignment: boolean | null
+}
+
+/**
+ * GET the caller's OWN scopes (`me`). Unlike `fetchMemberScopes`, this also
+ * returns `allowScopedLaneAssignment`: a guest — a project member outside the
+ * org — can't read the org's settings, so this is how the client learns the
+ * lane-assignment setting for them (AQU-581 review). `null` on failure.
+ */
+export async function fetchMyScopeGrant(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = AUTH_API_URL,
+): Promise<MyScopeGrant | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/me/scopes`,
+      { headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      console.warn(`[member-scopes] fetchMyScopeGrant ${projectId} → HTTP ${res.status}`)
+      return null
+    }
+    const body = (await res.json()) as { scopes?: MemberScope[]; allowScopedLaneAssignment?: unknown }
+    return {
+      scopes: body.scopes ?? [],
+      allowScopedLaneAssignment:
+        typeof body.allowScopedLaneAssignment === "boolean" ? body.allowScopedLaneAssignment : null,
+    }
+  } catch (err) {
+    console.warn("[member-scopes] fetchMyScopeGrant failed:", err)
+    return null
+  }
+}
+
 export async function fetchMemberScopes(
   jwt: string,
   projectId: string,

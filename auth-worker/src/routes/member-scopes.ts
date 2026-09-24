@@ -62,6 +62,29 @@ export interface MemberScope {
   value: string
 }
 
+/**
+ * Whether the project's org lets lane-limited members assign work to others
+ * (`allowScopedLaneAssignment`, AQU-581). It rides on the caller's OWN scopes
+ * response because a GUEST — a project member outside the org, the natural
+ * shape of an outside mentor — can't read the org's settings (403), so the
+ * client read the setting as off and hid "Assign work" the server would have
+ * allowed. A boolean policy about the caller themselves; nothing else leaks.
+ * Fail-safe: no org, no row, or unreadable settings → false.
+ */
+async function loadLaneAssignmentAllowed(env: AuthHonoEnv["Bindings"], projectId: string): Promise<boolean> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT s.settings FROM projects p JOIN org_settings s ON s.org_id = p.org_id WHERE p.id = ?",
+  )
+    .bind(projectId)
+    .first<{ settings: string }>()
+  if (!row) return false
+  try {
+    return (JSON.parse(row.settings) as { allowScopedLaneAssignment?: unknown })?.allowScopedLaneAssignment === true
+  } catch {
+    return false
+  }
+}
+
 async function loadScopes(
   env: AuthHonoEnv["Bindings"],
   projectId: string,
@@ -102,6 +125,11 @@ memberScopes.get(
     }
 
     const scopes = await loadScopes(c.env, projectId, targetUserId)
+    // A member asking about THEMSELVES also learns whether the org lets
+    // lane-limited members assign work — see loadLaneAssignmentAllowed.
+    if (rawUserId === "me") {
+      return c.json({ scopes, allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId) })
+    }
     return c.json({ scopes })
   },
 )

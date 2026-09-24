@@ -390,7 +390,7 @@ import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { useMyScopes } from "@/hooks/useMyScopes"
+import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
@@ -1337,7 +1337,8 @@ export function ProjectWorkspace() {
   )
   // AQU-633: the current user's own lane/file scopes, so bulk validate skips
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
-  const myScopes = useMyScopes(project?.id ?? null)
+  const myScopeGrant = useMyScopeGrant(project?.id ?? null)
+  const myScopes = myScopeGrant.scopes
 
   // AQU-538: the active target lane. Declared here (above useActiveCellStore)
   // because the store's cell list is lane-filtered on this value. Persisted
@@ -5474,8 +5475,10 @@ export function ProjectWorkspace() {
   // paired with THIS caller's own lane scopes. Memoized on the two halves so
   // the object identity doesn't churn the memos downstream of canAssignWork.
   const laneDelegate = useMemo(
-    () => ({ allowScopedLaneAssignment, scopes: myScopes }),
-    [allowScopedLaneAssignment, myScopes],
+    // The server's answer wins when it has one: a GUEST can't read the org's
+    // settings, so for them the org-settings value is always "off".
+    () => ({ allowScopedLaneAssignment: myScopeGrant.allowScopedLaneAssignment ?? allowScopedLaneAssignment, scopes: myScopes }),
+    [allowScopedLaneAssignment, myScopeGrant.allowScopedLaneAssignment, myScopes],
   )
   const canAssignWork = canOpenAssignUi(
     currentRoleLevel,

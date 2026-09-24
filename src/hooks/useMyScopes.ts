@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "./useFrontierSession"
-import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { fetchMyScopeGrant, type MemberScope, type MyScopeGrant } from "@/lib/sync/member-scopes"
 
 /**
  * AQU-633: the CURRENT user's own lane/file scopes for a project, so the editor
@@ -22,10 +22,23 @@ import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
  * safe — the server stays authoritative either way.
  */
 export function useMyScopes(projectId: string | null): MemberScope[] {
+  return useMyScopeGrant(projectId).scopes
+}
+
+const EMPTY_GRANT: MyScopeGrant = { scopes: [], allowScopedLaneAssignment: null }
+
+/**
+ * The caller's own scopes AND whether the project's org lets lane-limited
+ * members assign work, from one request. The second half is how a GUEST (a
+ * project member outside the org, e.g. an outside mentor) learns the setting:
+ * they can't read the org's settings, so the org-settings read says "off"
+ * (AQU-581 review). `allowScopedLaneAssignment` is `null` until known.
+ */
+export function useMyScopeGrant(projectId: string | null): MyScopeGrant {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
 
-  const [scopes, setScopes] = useState<MemberScope[]>([])
+  const [grant, setGrant] = useState<MyScopeGrant>(EMPTY_GRANT)
   const aliveRef = useRef(true)
   useEffect(() => {
     aliveRef.current = true
@@ -37,12 +50,11 @@ export function useMyScopes(projectId: string | null): MemberScope[] {
   useEffect(() => {
     let cancelled = false
     // Resolve asynchronously (never a synchronous setState in the effect body):
-    // when any input is missing, this collapses to [] and also resets stale
-    // scopes on a project/account switch.
+    // when any input is missing, this collapses to the empty grant and also
+    // resets stale scopes on a project/account switch.
     const load = async () => {
-      const next =
-        !jwt || !projectId ? [] : ((await fetchMemberScopes(jwt, projectId, "me")) ?? [])
-      if (!cancelled && aliveRef.current) setScopes(next)
+      const next = !jwt || !projectId ? EMPTY_GRANT : ((await fetchMyScopeGrant(jwt, projectId)) ?? EMPTY_GRANT)
+      if (!cancelled && aliveRef.current) setGrant(next)
     }
     void load()
     return () => {
@@ -50,5 +62,5 @@ export function useMyScopes(projectId: string | null): MemberScope[] {
     }
   }, [jwt, projectId])
 
-  return scopes
+  return grant
 }

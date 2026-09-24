@@ -41,6 +41,8 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -99,6 +101,18 @@ export function CellTakeBlock({
 
   const selectedAudioId = audioId ?? owner.selectedAudioId ?? undefined
   const attachment = selectedAudioId ? owner.attachments?.[selectedAudioId] : undefined
+  // AQU-490. This block shows ONE take, so the control gets one — but built
+  // through the same adapter the gutter uses, so the project's role floor,
+  // allowlist and self-validation rule all apply identically here.
+  const audioValidation = useAudioValidation({
+    project,
+    fileId: owner.fileId,
+    cellId: owner.id,
+    username,
+    onCommitted,
+    jwt: session?.jwt ?? null,
+  })
+  const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 
   // The same synthetic-cell shape EditorTable already uses (and
   // CombinedBoundaryEditor / CellVoicePanel before it): useCellAudio reads only
@@ -197,6 +211,17 @@ export function CellTakeBlock({
         />
       )}
       <div className="flex flex-wrap items-center gap-1.5">
+        {validationTakes.length > 0 && (
+          <AudioValidationControl
+            cellRef={owner.context?.trim() || owner.id}
+            takes={validationTakes}
+            currentUsername={username}
+            validationRequirement={audioValidation.validationRequirement}
+            canValidate={audioValidation.canValidate}
+            onValidationChange={audioValidation.onValidationChange}
+            variant="inline"
+          />
+        )}
         <Button
           type="button"
           size="xs"

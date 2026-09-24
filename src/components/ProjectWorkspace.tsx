@@ -175,6 +175,7 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -182,7 +183,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -231,7 +232,6 @@ import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/l
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
@@ -402,7 +402,10 @@ import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
+import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
   setVisibleCellIds as setEditorViewportVisibleCellIds,
@@ -2588,6 +2591,16 @@ export function ProjectWorkspace() {
         voiceId: att.voiceId ?? null,
         referenceAudioId: att.referenceAudioId ?? null,
         durationMs: att.durationMs ?? null,
+        // AQU-490: the overlay REPLACES the attachment rather than merging
+        // into it, so a field omitted here is a field the editor stops seeing
+        // for as long as the shadow lives. Both are optional, so leaving them
+        // out compiles clean and fails silently — the trap this file's own
+        // comment warns about. Until 2026-09-21 the omission happened to match
+        // the server, which discarded votes on trim; now that trim keeps them,
+        // dropping them here would flicker the line to unvalidated on every
+        // drag of the crop handle.
+        ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
+        ...(att.validators ? { validators: att.validators } : {}),
         trimStartMs: trims.trimStartMs ?? null,
         trimEndMs: trims.trimEndMs ?? null,
       }, trimP)
@@ -8426,6 +8439,30 @@ export function ProjectWorkspace() {
     editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
+  /**
+   * AQU-490: the same file's audio, read UNCONDITIONALLY, for the two bulk
+   * audio-validation actions alone.
+   *
+   * A second read of one file looks redundant and is not. The map above is
+   * deliberately gated — it feeds the timeline, the seek context, attachment
+   * warming and the transcribe/synth counts, none of which the text lens wants
+   * — and widening it would make "Transcribe all" and "Synth all" appear in a
+   * lens where they have never been offered. Sam's call when shown the
+   * trade (2026-09-21): keep those hidden, so audio validation gets its own
+   * read rather than dragging four other surfaces along with it.
+   *
+   * Bulk validation cannot be gated the same way, because the selection island
+   * and the whole-file action both live in the TEXT lens, where the gated map
+   * is empty — which is exactly why both of them silently offered nothing.
+   *
+   * It costs no extra request: useFileAudioAttachments coalesces per
+   * project/file at module level, so this, the map above and EditorTable's own
+   * read share one fetch.
+   */
+  const { byCellId: audioValidationByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    activeFileId,
+  )
 
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
   // a dub with no text counts as translated work in the status bar, file
@@ -8438,8 +8475,20 @@ export function ProjectWorkspace() {
   const ownTakeCellIds = useMemo(() => {
     const ids = new Set<string>()
     for (const [cellId, entry] of workspaceAudioByCellId) {
-      const selected = entry.selectedAudioId
-      if (selected && audioIdSeededWith(selected, cellId)) ids.add(cellId)
+      // AQU-490: EVERY slot, not just `recording`.
+      //
+      // This read `entry.selectedAudioId` — the default track alone — so a
+      // line whose only take sits on an added target-audio track was invisible
+      // to the text view while every server counter called it recorded. The
+      // board said the line was done and the editor showed nothing on it, and
+      // "go to first unrecorded" walked straight past it.
+      //
+      // It matters more now than it did: Sam's rule is that EVERY track
+      // holding a chosen take must be validated, which cannot mean anything
+      // while the text view cannot see the tracks.
+      for (const selected of Object.values(slotSelections(entry))) {
+        if (selected && audioIdSeededWith(selected, cellId)) { ids.add(cellId); break }
+      }
     }
     return ids
   }, [workspaceAudioByCellId])
@@ -8503,6 +8552,39 @@ export function ProjectWorkspace() {
     return { untranscribed, unsynthesized: synthTargets.length }
   }, [activeFileId, batchAudioCells, audioCueCells, synthTargets])
 
+  /**
+   * AQU-490: takes this viewer could still validate — the number the bulk
+   * audio action offers and then does. Counted the same way the action counts,
+   * through the same adapter, so the menu cannot promise work the run skips.
+   * Generated voices are excluded here as they are there: a TTS take is the
+   * AI-draft analogue and is signed off one at a time.
+   *
+   * SEPARATE from `audioCounts` above, and reading the ungated map, because
+   * this number has to be true in the text lens — that is where both bulk
+   * surfaces live. Folding it back in would drag the transcribe and synth
+   * counts into that lens with it, which is the thing Sam asked to avoid.
+   */
+  const validatableTakes = useMemo(() => {
+    if (!activeFileId) return 0
+    const holders =
+      audioCueCells ??
+      mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), audioValidationByCellId)
+    let count = 0
+    for (const c of holders) {
+      for (const take of audioValidationTakes(
+        audioEntryFromCell(c),
+        project ?? {},
+        { roleLevel: project?.syncRole?.level ?? null, username: currentUsername },
+        () => "",
+      )) {
+        if (take.canValidate && !take.isGenerated && !take.validators.includes(currentUsername)) {
+          count++
+        }
+      }
+    }
+    return count
+  }, [activeFileId, cellStoreVersion, getActiveCells, audioValidationByCellId, audioCueCells, project, currentUsername])
+
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
   // to yet will have an instant waveform.
@@ -8524,8 +8606,10 @@ export function ProjectWorkspace() {
     activeFileId,
     fileProgress,
     canExportByOrgPolicy,
-    audioCounts,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
+    // The registry reads one shape; the two halves are counted apart only
+    // because they read different maps (see validatableTakes above).
+    audioCounts: { ...audioCounts, validatableTakes },
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -8588,8 +8672,12 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
+      // AQU-490: the SAME predicate the selection toolbar uses. This path used
+      // to carry neither of its two guards — see bulk-validation.ts.
       const eligible = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+        (c) =>
+          c.fileId === activeFileId
+          && isBulkValidatableByMe(c, currentUsername, myScopes, activeLane),
       )
       // AQU-586: cap how many eligible cells one batch-validate processes.
       // 0/undefined = validate all eligible (unchanged default behavior).
@@ -8612,6 +8700,74 @@ export function ProjectWorkspace() {
         await refreshOutboxPending()
         revalidateAuditStats()
         for (const cell of validatable) revalidateCell(cell.id)
+      })()
+    },
+    // AQU-490: bulk audio validation — a SEPARATE action beside the text one,
+    // per Sam. Never combined: a reviewer signing off translations has not
+    // listened to the recordings, and one button doing both would collect
+    // sign-off nobody meant to give.
+    runBatchValidateAudio: () => {
+      if (!project?.id || !activeFileId) return
+      if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
+      const scope = audioValidationScope(project, {
+        roleLevel: project.syncRole?.level ?? null,
+        username: currentUsername,
+      })
+      if (!scope.canValidate) return
+      // The UNGATED map: this action runs from the text lens, where the
+      // workspace-wide one is empty by design, and reading that one here is
+      // why the run found nothing to do (AQU-490, 2026-09-21).
+      // THE CUE SIBLING, exactly as the count above already does. On a file
+      // with an audio-cue sibling the takes live on the heard lines, not the
+      // subtitle rows, so the menu counted takes on one set of cells and the
+      // run iterated the other — promising "validate N recordings" and then
+      // returning silently with nothing done. runTranscribeAll documents
+      // having shipped this same failure once already (adversarial review,
+      // 2026-09-22). No `activeFileId` filter either: the cells the takes are
+      // on belong to the sibling file, and `commitAudioValidation` takes a
+      // set of files precisely for that.
+      const cells = audioCueCells
+        ?? mergeCellsWithAudio(getActiveCells(), audioValidationByCellId)
+      const targets: Array<{ fileId: string; cellId: string; audioId: string }> = []
+      for (const cell of cells) {
+        if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue
+        for (const take of audioValidationTakes(
+          audioEntryFromCell(cell),
+          project,
+          { roleLevel: project.syncRole?.level ?? null, username: currentUsername },
+          () => "",
+        )) {
+          // Skips, per Sam's ruling: already mine, out of scope, no take, and
+          // a GENERATED voice — the AI-draft analogue, which a person must
+          // choose to sign off one at a time rather than sweep up in a batch.
+          if (!take.canValidate) continue
+          if (take.isGenerated) continue
+          if (take.validators.includes(currentUsername)) continue
+          targets.push({ fileId: cell.fileId, cellId: cell.id, audioId: take.audioId })
+        }
+      }
+      if (targets.length === 0) return
+      void (async () => {
+        for (const target of targets) {
+          await emitCellAudioValidate({
+            projectId: project.id,
+            fileId: target.fileId,
+            cellId: target.cellId,
+            audioId: target.audioId,
+            author: currentUsername,
+          })
+        }
+        await refreshOutboxPending()
+        // EVERY file the run touched, not just the open one. On a file with an
+        // audio-cue sibling the takes live on the heard lines, so poking only
+        // `activeFileId` left the file that actually changed stale — the same
+        // shape runTranscribeAll already guards against. The flush lives in
+        // the shared commit so every audio-validation path orders it the same
+        // way (AQU-490, 2026-09-22).
+        await commitAudioValidation(
+          targets.map((target) => target.fileId),
+          { getTokenForFile: getTokenForProjectFile },
+        )
       })()
     },
     runImportIntoFile: () => {
@@ -8721,7 +8877,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioCueCells, t])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11609,6 +11765,7 @@ export function ProjectWorkspace() {
                   username={currentUsername}
                   activeLane={activeLane}
                   myScopes={myScopes}
+                  audioByCellId={audioValidationByCellId}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}

@@ -175,6 +175,20 @@ Rules:
 - If nothing checkable is found, return []`
 
 /**
+ * AQU-1254: what pass 1 actually produced. The candidate list alone cannot tell
+ * "this document has no checkable rules" apart from "the model's answer was cut
+ * off mid-array" — both arrive as a short (or empty) list — and the dialog has
+ * to say something different in each case.
+ */
+export interface CandidateExtraction {
+  candidates: string[]
+  /** Pass-1 chunks the document was split into. */
+  chunkCount: number
+  /** Chunks whose pass-1 response was not a complete JSON array. */
+  truncatedChunks: number
+}
+
+/**
  * Run pass 1 over the whole document, one request per chunk, merging and
  * de-duplicating the candidates. `onChunk` reports (done, total) so the dialog
  * can show progress through a long guide instead of appearing to hang.
@@ -185,10 +199,11 @@ export async function extractCandidates(
   session: FrontierSession | null = null,
   onLlmCall?: UsageCallback,
   onChunk?: (done: number, total: number) => void,
-): Promise<string[]> {
+): Promise<CandidateExtraction> {
   const chunks = chunkDocument(docText)
   const seen = new Set<string>()
   const candidates: string[] = []
+  let truncatedChunks = 0
 
   for (let i = 0; i < chunks.length; i++) {
     const userMessage = `Extract all verifiable translation rules and conventions from this document:\n\n${chunks[i]}`
@@ -213,7 +228,10 @@ export async function extractCandidates(
       provider: settings.provider || "frontier",
     })
 
-    for (const candidate of parseCandidates(response)) {
+    const parsed = parseCandidatesDetailed(response)
+    if (parsed.truncated) truncatedChunks++
+
+    for (const candidate of parsed.candidates) {
       const key = candidateKey(candidate)
       if (!key || seen.has(key)) continue
       seen.add(key)
@@ -223,23 +241,49 @@ export async function extractCandidates(
     onChunk?.(i + 1, chunks.length)
   }
 
-  return candidates
+  return { candidates, chunkCount: chunks.length, truncatedChunks }
+}
+
+export interface ParsedCandidates {
+  candidates: string[]
+  /**
+   * The response was not a complete JSON array, so anything the model wrote
+   * after the cut is gone. True even when `candidates` is non-empty: the
+   * entries before the cut survive, the ones after it never arrived.
+   */
+  truncated: boolean
 }
 
 export function parseCandidates(raw: string): string[] {
+  return parseCandidatesDetailed(raw).candidates
+}
+
+/**
+ * AQU-1254: `parseCandidates` with the reason the list came out the length it
+ * did. A caller that only sees `[]` cannot distinguish a document with nothing
+ * checkable in it from an answer that was cut off before the first complete
+ * entry, and telling a user their style guide has "no rules" when extraction
+ * was actually truncated is the bug this pins.
+ */
+export function parseCandidatesDetailed(raw: string): ParsedCandidates {
   let cleaned = raw.trim()
   cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")
   const start = cleaned.indexOf("[")
-  if (start === -1) return []
+  // No array at all: the model answered with prose or nothing. Not a cut-off
+  // array — there is no evidence any candidate was lost.
+  if (start === -1) return { candidates: [], truncated: false }
 
   const end = cleaned.lastIndexOf("]")
   if (end > start) {
     try {
       const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1))
       if (Array.isArray(parsed)) {
-        return parsed
-          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-          .map((x) => x.trim())
+        return {
+          candidates: parsed
+            .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+            .map((x) => x.trim()),
+          truncated: false,
+        }
       }
     } catch {
       // Malformed — fall through and salvage what completed.
@@ -249,7 +293,7 @@ export function parseCandidates(raw: string): string[] {
   // AQU-466: pass 1 hitting its output cap on a long guide leaves the array
   // unterminated. Strict parsing returned [] — a real style guide imported as
   // zero rules, with no error to explain it. Salvage the complete entries.
-  return salvageStrings(cleaned.slice(start))
+  return { candidates: salvageStrings(cleaned.slice(start)), truncated: true }
 }
 
 /**
@@ -416,26 +460,39 @@ export interface ExtractionProgress {
   chunksDone?: number
 }
 
+/**
+ * AQU-1254: the rules plus how completely they were extracted. An empty `rules`
+ * with `truncatedChunks > 0` is a cut-off answer, not an empty document, and
+ * the two get different copy in the import dialog.
+ */
+export interface DocumentExtraction {
+  rules: RuleSuggestion[]
+  /** Pass-1 chunks the document was split into. */
+  chunkCount: number
+  /** Chunks whose pass-1 answer was cut off, losing the candidates after the cut. */
+  truncatedChunks: number
+}
+
 export async function extractRulesFromDocument(
   docText: string,
   settings: CompletionSettings,
   session: FrontierSession | null = null,
   onProgress?: (p: ExtractionProgress) => void,
   onLlmCall?: UsageCallback,
-): Promise<RuleSuggestion[]> {
+): Promise<DocumentExtraction> {
   // Pass 1 — one request per chunk of the document.
   onProgress?.({ phase: "extracting", candidateCount: 0, structuredCount: 0 })
-  const candidates = await extractCandidates(
+  const { candidates, chunkCount, truncatedChunks } = await extractCandidates(
     docText,
     settings,
     session,
     onLlmCall,
-    (chunksDone, chunkCount) => {
+    (chunksDone, total) => {
       onProgress?.({
         phase: "extracting",
         candidateCount: 0,
         structuredCount: 0,
-        chunkCount,
+        chunkCount: total,
         chunksDone,
       })
     },
@@ -454,5 +511,5 @@ export async function extractRulesFromDocument(
     })
   }
 
-  return results
+  return { rules: results, chunkCount, truncatedChunks }
 }

@@ -295,6 +295,10 @@ export const rules = defineNamespace({
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
     "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
+    "rules.importDialog.extractionIncomplete":
+      "Extraction was cut off before a single complete rule came back, so nothing could be imported — this does not mean the document has no rules. Import one section at a time to get through it.",
+    "rules.importDialog.extractionPartial":
+      "Extraction was cut off partway, so these are not all of the document's rules. Import the remaining sections separately to catch the rest.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
     "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
@@ -708,6 +712,14 @@ export const rules = defineNamespace({
         description:
           "Error from checkInputSize() (rule-extractor.ts) when a pasted/loaded document exceeds the 200 KB extraction limit.",
         placeholders: { kb: "The document's size in KB, whole number." },
+      },
+      "rules.importDialog.extractionIncomplete": {
+        description:
+          "Error shown instead of noRulesFound when the LLM's extraction answer was cut off by its output cap before any complete rule came back. The distinction matters: noRulesFound says the DOCUMENT has nothing checkable in it, this says the EXTRACTION failed to finish. Keep the two clearly different in translation.",
+      },
+      "rules.importDialog.extractionPartial": {
+        description:
+          "Warning above the review list when extraction was cut off but some rules did come back, so the list under it is incomplete rather than everything the document contains.",
       },
       "rules.suggestFromEdits.stats.repeated": {
         description:

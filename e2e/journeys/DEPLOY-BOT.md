@@ -39,9 +39,12 @@ Do not push a branch or post a comment. Stop and say why in one line.
   **except** a once-only warning if `openReleases` names a branch whose
   HEAD has carried no calver tag for more than
   `HOLD_NUDGE_HOURS` (4) hours — that means a held or forgotten release is
-  stuck, and a person should look. Check the branch's tag timestamp before
-  warning a second time for the same branch; do not repeat the nudge every
-  poll.
+  stuck, and a person should look. Post the warning as a commit comment on
+  that release branch's **current HEAD** (`git rev-parse origin/<branch>`,
+  not the original `plan.sha` — a hotfix cherry-pick may have moved it):
+  one line, the branch name and how long it's been open. Check for an
+  existing warning comment on that same commit before posting a second one
+  for the same branch; do not repeat the nudge every poll.
 - The named `branch` already exists on `origin`. The plan computes a fresh
   `-NN` suffix from `usedSuffixesToday`, so this means two bot runs raced,
   or a person already cut by hand. Do not overwrite it or push a `-NN+1`

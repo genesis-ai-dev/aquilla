@@ -2710,11 +2710,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       "max-w-full min-w-0 gap-1 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
                     )}
                   >
-                    {/* AQU-583: on the default lane with no project target set,
-                        `project.targetLanguage` is empty — prompt to set one
-                        rather than showing a blank pill. A named lane always
-                        has a tag. */}
-                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    {/* Default lane: the project target language, or a prompt when
+                        it is unset (AQU-583). Any other lane: that lane's own
+                        label. The pill used to keep showing the project
+                        language after the switch. */}
+                    {(activeLane
+                      ? activeLane
+                      : project.targetLanguage) || t("editor.lane.setTargetLanguage")}
                     <ChevronDown className="h-2.5 w-2.5" />
                   </button>
                 }

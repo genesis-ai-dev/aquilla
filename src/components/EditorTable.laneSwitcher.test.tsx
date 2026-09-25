@@ -103,7 +103,7 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(level: number, targetLanguage = "fr") {
+function renderTable(level: number, targetLanguage = "fr", activeLane = "") {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -112,7 +112,7 @@ function renderTable(level: number, targetLanguage = "fr") {
           project={makeProject(level, targetLanguage)}
           cellStore={makeStore()}
           username="tester"
-          activeLane=""
+          activeLane={activeLane}
           lanes={["", "es"]}
           onLaneChange={() => {}}
           defaultLaneLabel="fr"
@@ -158,5 +158,12 @@ describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
     const switcher = await screen.findByTestId("lane-switcher")
     expect(switcher).toBeInTheDocument()
     expect(switcher).toHaveTextContent("Set target language")
+  })
+
+  it("shows the active lane on the trigger, not the project target language", async () => {
+    renderTable(ROLE.MAINTAINER, "fr", "es")
+    const switcher = await screen.findByTestId("lane-switcher")
+    expect(switcher).toHaveTextContent("es")
+    expect(switcher).not.toHaveTextContent("fr")
   })
 })

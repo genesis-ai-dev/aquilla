@@ -190,6 +190,29 @@ describe("affix list hygiene", () => {
     expect(group).not.toContain("(?:|")
     expect(() => new RegExp(group, "u")).not.toThrow()
   })
+
+  // WHY (AQU-1272): the alternation is ordered, so a shorter affix listed first
+  // wins the match. Length was counted on the RAW string, marks included, so a
+  // one-letter affix carrying a vowel point plus an accent (3 code points)
+  // sorted ahead of a two-letter one and got preferred over it. Letters are
+  // what an affix is; sort on those.
+  it("orders affixes by letter count, not by raw code-point length", () => {
+    const src = termToRegexSource("ארץ", {
+      foldMarks: false,
+      // Two letters, no marks vs. one letter with two combining marks
+      // (sheva + pashta accent) — 3 code points for 1 letter.
+      prefixes: ["וה", "וְ֙"],
+      suffixes: [],
+      maxAffixes: 2,
+    })
+    expect(src).not.toBeNull()
+    const group = src as string
+    const twoLetters = group.indexOf("וה")
+    const oneLetterManyMarks = group.indexOf("וְ֙")
+    expect(twoLetters).toBeGreaterThanOrEqual(0)
+    expect(oneLetterManyMarks).toBeGreaterThanOrEqual(0)
+    expect(twoLetters).toBeLessThan(oneLetterManyMarks)
+  })
 })
 
 describe("forms and exclusions", () => {

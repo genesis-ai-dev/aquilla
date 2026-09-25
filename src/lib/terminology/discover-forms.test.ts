@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { countConceptOccurrences, discoverForms } from "./discover-forms"
+import { countConceptOccurrences, discoverForms, previewConceptMatches } from "./discover-forms"
 
 const cells = [
   { id: "c1", original: "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָֽרֶץ׃" },
@@ -40,5 +40,34 @@ describe("discoverForms", () => {
   it("countConceptOccurrences counts cells with a live match", () => {
     expect(countConceptOccurrences(cells, concept, project)).toBe(3)
     expect(countConceptOccurrences(cells, { ...concept, match: { excludedForms: ["והארץ"] } }, project)).toBe(1)
+  })
+})
+
+// WHY (AQU-1272): the add-concept preview shows both the forms and the count
+// and recomputed each with its own walk of the file. One pass now yields both,
+// so the count it reports must stay the number `countConceptOccurrences` gives —
+// otherwise the cheaper preview would quietly say something different.
+describe("previewConceptMatches", () => {
+  it("returns the same forms and cell count as the two separate passes", () => {
+    for (const match of [
+      undefined,
+      { excludedForms: ["והארץ"] },
+      { excludedForms: ["וְהָאָ֗רֶץ"] },
+      { forms: ["אֶ֔רֶץ"] },
+    ]) {
+      const c = { ...concept, ...(match ? { match } : {}) }
+      const preview = previewConceptMatches(cells, c, project)
+      expect(preview.forms).toEqual(discoverForms(cells, c, project))
+      expect(preview.cellCount).toBe(countConceptOccurrences(cells, c, project))
+    }
+  })
+
+  it("counts no cells when every match is excluded", () => {
+    const only = [{ id: "x", original: "וְהָאָ֗רֶץ" }]
+    const c = { ...concept, match: { excludedForms: ["והארץ"] } }
+    const preview = previewConceptMatches(only, c, project)
+    expect(preview.forms).toHaveLength(1)
+    expect(preview.forms[0].excluded).toBe(true)
+    expect(preview.cellCount).toBe(0)
   })
 })

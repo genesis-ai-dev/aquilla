@@ -4,22 +4,19 @@
  * Props:
  *   sourceTerm  — the source-side token the user is hovering / querying
  *   concepts    — the subscribed concept set to search (provided by caller)
+ *   termMatching — the project's affix inventory / fold defaults, so which
+ *                 concepts the surface resolves to is the shared matcher's
+ *                 verdict rather than a substring test (AQU-1272)
  *   onViewConcept — opens the matching concept in Terminology
  */
 
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
+import { conceptsForSourceSurface } from "@/lib/terminology/source-lookup"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-function normalizeLookupTerm(value: string): string {
-  return value
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Single rendering row within the popover
@@ -126,6 +123,8 @@ export interface TermLookupPopoverProps {
   sourceTerm: string
   /** Full concept set to search (caller provides, from subscribed termbases). */
   concepts: Concept[]
+  /** Project affix inventory + fold defaults feeding the shared matcher. */
+  termMatching?: TermMatchingSettings
   /** Opens a matching concept in the Terminology page. */
   onViewConcept?: (conceptId: string) => void
   /** The trigger element — whatever the caller wraps. */
@@ -146,6 +145,7 @@ export interface TermLookupPopoverProps {
 export function TermLookupPopover({
   sourceTerm,
   concepts,
+  termMatching,
   onViewConcept,
   children,
   triggerIsNativeButton = false,
@@ -156,17 +156,9 @@ export function TermLookupPopover({
   const t = useT()
   const isControlled = open !== undefined
 
-  // The highlighted token keeps its visible punctuation, but punctuation at
-  // either edge does not belong to the terminology entry's source term.
-  const normalizedSourceTerm = normalizeLookupTerm(sourceTerm)
-  const matches = concepts.filter(
-    (concept) => {
-      if (concept.status !== "active" || !normalizedSourceTerm) return false
-      const normalizedConceptTerm = normalizeLookupTerm(concept.sourceTerm)
-      return normalizedConceptTerm.includes(normalizedSourceTerm) ||
-        normalizedSourceTerm.includes(normalizedConceptTerm)
-    },
-  )
+  // AQU-1272: the shared matcher decides, so a prefixed or differently pointed
+  // occurrence resolves to its entry like it does for chips and enforcement.
+  const matches = conceptsForSourceSurface(sourceTerm, concepts, termMatching)
 
   // No matches → just render trigger with no popover decoration
   if (matches.length === 0) {

@@ -76,6 +76,10 @@ export function TermFormsSection({
           className="h-7 text-xs"
           onKeyDown={(e) => {
             if (e.key !== "Enter") return
+            // AQU-1272: an IME composes with Enter. Committing the form on that
+            // keystroke would add the half-composed reading and swallow the
+            // confirmation — exactly the languages this field exists for.
+            if (e.nativeEvent.isComposing) return
             e.preventDefault()
             const value = e.currentTarget.value.trim()
             if (!value) return

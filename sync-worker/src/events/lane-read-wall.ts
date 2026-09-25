@@ -17,7 +17,7 @@ import {
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
 
-async function targetLanes(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
+export async function loadTargetLanes(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
       `SELECT id, name, legacy_tag FROM lanes
@@ -54,7 +54,7 @@ export async function canReadRequestedLane(
 ): Promise<boolean> {
   if (visible === null) return true
   if (visible.size === 0) return false
-  const matches = lanesForRequestedTag(await targetLanes(db, projectId), lane)
+  const matches = lanesForRequestedTag(await loadTargetLanes(db, projectId), lane)
   if (matches.length !== 1) return false
   return visible.has(matches[0]!.id)
 }

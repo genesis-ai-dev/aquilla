@@ -1169,7 +1169,8 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
 -- elevate, never demote. kind='file' scopes stay in project_member_scopes.
 -- Grant rows are written by scripts/neon-backfill-lanes.ts (phase 2). The read
 -- wall is LANE_READ_WALL on the deployed workers, after that backfill. The
--- write wall (enforceScopes allow→deny) is still off.
+-- write wall (enforceScopes allow→deny) is on when LANE_READ_WALL is on
+-- (AQU-1415). It reads laneGrants. File scopes stay in project_member_scopes.
 CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     project_id TEXT    NOT NULL,
     user_id    BIGINT  NOT NULL,

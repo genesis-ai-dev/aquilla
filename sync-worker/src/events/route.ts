@@ -369,6 +369,8 @@ export interface EventsRouteEnv {
   EMAIL_FROM?: string
   /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
   BASE_URL?: string
+  /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
+  LANE_READ_WALL?: string
 }
 
 interface AcceptedEntry {
@@ -1055,7 +1057,7 @@ export async function handleEventsWriteRequest(
 
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache, env.LANE_READ_WALL)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',

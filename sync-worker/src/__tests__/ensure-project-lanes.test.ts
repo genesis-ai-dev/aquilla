@@ -7,6 +7,10 @@ import { createProjectShared, updateProjectSettingsShared } from "../../../db/sh
 import {
   ensureProjectLanes,
   ensureProjectLaneStmts,
+  insertTargetLane,
+  listProjectLanes,
+  renameTargetLane,
+  setTargetLaneArchived,
 } from "../../../db/shared/lanes"
 import {
   BLANK_LANE_PLACEHOLDER,
@@ -198,5 +202,45 @@ describe("updateProjectSettingsShared promotes placeholder lanes", () => {
     expect(rows.find((r) => r.role === "source")?.name).toBe("English")
     expect(rows.find((r) => r.role === "target" && r.legacy_tag === "")?.name).toBe("Spanish")
     expect(rows.find((r) => r.legacy_tag === "French")?.name).toBe("French")
+  })
+})
+
+describe("rename and archive a target lane", () => {
+  it("renames without touching the legacy tag, and refuses a duplicate name", async () => {
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: { targetLanguage: "Spanish", targetLanes: ["Yoruba"] },
+    })
+    const before = await listProjectLanes(t.db, PROJECT)
+    const yoruba = before.find((lane) => lane.legacyTag === "Yoruba")
+    expect(yoruba).toBeTruthy()
+    const renamed = await renameTargetLane(t.db, PROJECT, yoruba!.id, "Yoruba Team")
+    expect(renamed.status).toBe("ok")
+    if (renamed.status === "ok") {
+      expect(renamed.lane.name).toBe("Yoruba Team")
+      expect(renamed.lane.legacyTag).toBe("Yoruba")
+    }
+    const duplicate = await renameTargetLane(t.db, PROJECT, yoruba!.id, "Spanish")
+    expect(duplicate.status).toBe("duplicate")
+  })
+
+  it("archives an extra lane and refuses the default lane", async () => {
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: { targetLanguage: "Spanish", targetLanes: ["French"] },
+    })
+    const rows = await listProjectLanes(t.db, PROJECT)
+    const french = rows.find((lane) => lane.legacyTag === "French")!
+    const blank = rows.find((lane) => lane.legacyTag === "")!
+    expect((await setTargetLaneArchived(t.db, PROJECT, blank.id, true)).status).toBe("default_lane")
+    const archived = await setTargetLaneArchived(t.db, PROJECT, french.id, true)
+    expect(archived.status).toBe("ok")
+    if (archived.status === "ok") expect(archived.lane.archivedAt).toBeTruthy()
+    await insertTargetLane(t.db, PROJECT, {
+      id: "aabbccdd",
+      name: "Yoruba Team",
+      langCode: "yo",
+      legacyTag: "aabbccdd",
+    })
+    const created = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "aabbccdd")
+    expect(created).toMatchObject({ name: "Yoruba Team", legacyTag: "aabbccdd", langCode: "yo" })
   })
 })

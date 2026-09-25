@@ -34,7 +34,14 @@ export function displayLanes(p: PortfolioProject): PortfolioLane[] {
  * show their tag. `fallbackLabel` is the localized "no target set" placeholder
  * (`org.projectOverview.laneDefaultFallback`) — callers with a `t` should pass
  * it so non-English UIs don't leak the English literal. */
-export function laneChipLabel(lane: string, defaultLaneLabel: string, fallbackLabel = "Default"): string {
+export function laneChipLabel(
+  lane: string,
+  defaultLaneLabel: string,
+  fallbackLabel = "Default",
+  name?: string | null,
+): string {
+  const named = name?.trim()
+  if (named) return named
   if (lane) return lane
   return defaultLaneLabel.trim() || fallbackLabel
 }

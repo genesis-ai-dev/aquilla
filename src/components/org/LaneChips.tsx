@@ -46,7 +46,7 @@ function LaneChip({
   // accessible name they are noise a screen reader linearises away anyway, and
   // they leak into any assertion on that name.
   const pctDisplay = bidiIsolate(pctPlain)
-  const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))
+  const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
   const tooltip = t("org.laneChips.tooltip", { label, pct: pctDisplay })
   return (
     <AppTooltip content={tooltip}>

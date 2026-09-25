@@ -20,6 +20,7 @@ import {
   SOURCE_LANE_PLACEHOLDER,
   type ProjectLaneInputs,
 } from "../../src/lib/lanes/backfill-plan"
+import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
@@ -144,4 +145,141 @@ export async function ensureProjectLanes(
     dataTargetTags: opts?.dataTargetTags,
   })
   if (stmts.length > 0) await db.batch(stmts)
+}
+
+export interface ProjectLaneRecord {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
+}
+
+interface LaneSqlRow {
+  id: string
+  role: string
+  name: string
+  lang_code: string | null
+  legacy_tag: string | null
+  position: number
+  archived_at: string | null
+}
+
+function toLaneRecord(row: LaneSqlRow): ProjectLaneRecord {
+  return {
+    id: row.id,
+    role: row.role === "source" ? "source" : "target",
+    name: row.name,
+    langCode: row.lang_code,
+    legacyTag: row.legacy_tag,
+    position: row.position,
+    archivedAt: row.archived_at,
+  }
+}
+
+/** Target and source rows, display order. Ids are for selection, not for the screen. */
+export async function listProjectLanes(
+  db: AquillaDb,
+  projectId: string,
+): Promise<ProjectLaneRecord[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, role, name, lang_code, legacy_tag, position, archived_at
+         FROM lanes
+        WHERE project_id = ?
+        ORDER BY position, id`,
+    )
+    .bind(projectId)
+    .all<LaneSqlRow>()
+  return results.map(toLaneRecord)
+}
+
+export type RenameLaneResult =
+  | { status: "ok"; lane: ProjectLaneRecord }
+  | { status: "not_found" }
+  | { status: "empty" | "too_long" | "duplicate" }
+
+/**
+ * Rename one target lane. Source rows are not renamed here. A name that
+ * matches another target lane is refused so the maintainer changes one.
+ * `legacy_tag` is left alone.
+ */
+export async function renameTargetLane(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  name: string,
+): Promise<RenameLaneResult> {
+  const lanes = await listProjectLanes(db, projectId)
+  const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
+  if (!current) return { status: "not_found" }
+  const problem = laneNameProblem({
+    laneId,
+    name,
+    others: lanes.filter((lane) => lane.role === "target"),
+  })
+  if (problem) return { status: problem }
+  const trimmed = name.trim()
+  await db
+    .prepare(
+      `UPDATE lanes
+          SET name = ?, updated_at = now()
+        WHERE project_id = ? AND id = ? AND role = 'target'`,
+    )
+    .bind(trimmed, projectId, laneId)
+    .run()
+  return { status: "ok", lane: { ...current, name: trimmed } }
+}
+
+/**
+ * Insert one target lane the planner already approved. Position follows the
+ * rows already on the project so the switcher order is stable.
+ */
+export async function insertTargetLane(
+  db: AquillaDb,
+  projectId: string,
+  lane: { id: string; name: string; langCode: string | null; legacyTag: string },
+): Promise<void> {
+  const existing = await listProjectLanes(db, projectId)
+  const position = existing.reduce((max, row) => Math.max(max, row.position), -1) + 1
+  await db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'target', ?, ?, ?, ?)`,
+    )
+    .bind(lane.id, projectId, lane.name, lane.langCode, lane.legacyTag, position)
+    .run()
+}
+
+export type ArchiveLaneResult =
+  | { status: "ok"; lane: ProjectLaneRecord }
+  | { status: "not_found" }
+  | { status: "default_lane" }
+
+/**
+ * Soft-archive a target lane (`archived_at`). The default lane (`legacy_tag`
+ * '') stays; its cells are the project's primary target language.
+ */
+export async function setTargetLaneArchived(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+): Promise<ArchiveLaneResult> {
+  const lanes = await listProjectLanes(db, projectId)
+  const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
+  if (!current) return { status: "not_found" }
+  if (current.legacyTag === "") return { status: "default_lane" }
+  const archivedAt = archived ? new Date().toISOString() : null
+  await db
+    .prepare(
+      `UPDATE lanes
+          SET archived_at = ?, updated_at = now()
+        WHERE project_id = ? AND id = ? AND role = 'target'`,
+    )
+    .bind(archivedAt, projectId, laneId)
+    .run()
+  return { status: "ok", lane: { ...current, archivedAt } }
 }

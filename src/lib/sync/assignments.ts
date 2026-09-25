@@ -40,6 +40,8 @@ export interface OrgWorkloadAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -61,6 +63,10 @@ export interface MyAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
+  /** Opaque lane id. A deep link may use this in place of the tag. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number
@@ -165,6 +171,8 @@ export interface UnitAssignment {
   username: string | null
   scopeLabel: string
   targetLang: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   deadline: string | null
   cellsTotal: number
   translated: number

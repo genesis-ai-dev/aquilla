@@ -90,6 +90,8 @@ interface AssignModalProps {
    * to the pre-lane flow).
    */
   targetLanes?: string[]
+  /** Display names keyed by lane tag, including '' for the default lane. */
+  laneLabels?: Readonly<Record<string, string>>
   /**
    * AQU-538 (§3.5): lane to pre-select — the surface's active lane (workspace)
    * or the lane row the modal was launched from (PM surfaces). Defaults to ''
@@ -176,6 +178,7 @@ export function AssignModal({
   activeFileId,
   projectFiles,
   targetLanes,
+  laneLabels,
   defaultLane = "",
   defaultLaneLabel,
   members,
@@ -300,12 +303,12 @@ export function AssignModal({
     // so every lane, including the default, is listed by name and preselecting
     // the launching default lane reads as the language, not "default". Only
     // fall back to the generic label when the default language is unknown.
-    const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
+    const defaultLabel = laneLabels?.[""]?.trim() || defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
     return [
       { value: "", label: defaultLabel },
-      ...extra.map((lane) => ({ value: lane, label: lane })),
+      ...extra.map((lane) => ({ value: lane, label: laneLabels?.[lane] || lane })),
     ]
-  }, [targetLanes, defaultLaneLabel, t])
+  }, [targetLanes, laneLabels, defaultLaneLabel, t])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.

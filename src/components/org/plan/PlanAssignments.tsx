@@ -374,7 +374,7 @@ function PlanAssignmentRow({
               data-testid="plan-assignment-lane"
               className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
             >
-              {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))}
+              {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), a.laneName)}
             </span>
           )}
         </span>

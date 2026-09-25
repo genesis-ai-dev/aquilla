@@ -78,10 +78,10 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
-function laneOpenTo(projectId: string, lane: string): string {
-  return lane
-    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
-    : `/project/${projectId}/editor`
+function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
+  const key = lane.laneId || lane.lane
+  if (!key) return `/project/${projectId}/editor?lane=`
+  return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
 }
 
 /** People avatars for a lane, with an overflow "+N" bubble past the cap. */
@@ -180,17 +180,18 @@ export function OverviewLaneTable({
     return map
   }, [members, scopesByUser])
 
-  const laneLabel = (lane: string) => (lane === "" ? defaultLanguageLabel : lane)
+  const laneLabel = (lane: PortfolioLane) =>
+    lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane)
 
   const columns = useMemo<ColumnDef<PortfolioLane>[]>(
     () => [
       {
         id: "language",
-        accessorFn: (l) => laneLabel(l.lane).toLowerCase(),
+        accessorFn: (l) => laneLabel(l).toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
         meta: { className: "min-w-[7rem]" },
         cell: ({ row }) => (
-          <span className="text-sm font-medium text-foreground">{laneLabel(row.original.lane)}</span>
+          <span className="text-sm font-medium text-foreground">{laneLabel(row.original)}</span>
         ),
       },
       {
@@ -248,7 +249,7 @@ export function OverviewLaneTable({
             meta: { align: "right" as const, className: "w-10" },
             cell: ({ row }: { row: { original: PortfolioLane } }) => {
               const tagId = laneTagId(row.original.lane)
-              const label = laneLabel(row.original.lane)
+              const label = laneLabel(row.original)
               return (
                 <span className="inline-flex items-center justify-end gap-0.5">
                   <DataTableRowActionsButton
@@ -333,8 +334,8 @@ export function OverviewLaneTable({
         dense
         className={ADMIN_TABLE_CLASS}
         initialSorting={[{ id: "language", desc: false }]}
-        onRowClick={(l) => navigate(laneOpenTo(projectId, l.lane))}
-        rowLink={{ columnId: "language", to: (l) => laneOpenTo(projectId, l.lane) }}
+        onRowClick={(l) => navigate(laneOpenTo(projectId, l))}
+        rowLink={{ columnId: "language", to: (l) => laneOpenTo(projectId, l) }}
         renderRowMenuItems={canManageLanes ? (l) => {
           const tagId = laneTagId(l.lane)
           return (

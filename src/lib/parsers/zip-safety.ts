@@ -19,6 +19,21 @@ interface LoadedZipEntry {
   _data?: LoadedZipMetadata
 }
 
+export interface ZipArchiveSafetyOptions {
+  /**
+   * Members the importer does not need. When one of these carries unreadable
+   * size metadata it is reported as skipped instead of failing the whole
+   * archive (AQU-1406). Path-traversal, entry-count, per-entry size and
+   * compression-ratio limits still apply to every member that is kept.
+   */
+  isOptionalEntry?: (name: string) => boolean
+}
+
+export interface ZipArchiveSafetyReport {
+  /** Optional members excluded because their size metadata is unreadable. */
+  skipped: string[]
+}
+
 export function assertSafeArchiveInputSize(byteLength: number, label: string): void {
   if (byteLength === 0) throw new Error(`${label} is empty.`)
   if (byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
@@ -32,21 +47,37 @@ export function assertSafeArchiveInputSize(byteLength: number, label: string): v
  * data object; keep this small adapter isolated so every browser ZIP importer
  * applies the same bomb/path/entry-count policy.
  */
-export function assertSafeZipArchive(archive: JSZip, label: string): void {
+export function assertSafeZipArchive(
+  archive: JSZip,
+  label: string,
+  options?: ZipArchiveSafetyOptions,
+): ZipArchiveSafetyReport {
   const entries = Object.values(archive.files) as LoadedZipEntry[]
   if (entries.length > MAX_ARCHIVE_ENTRIES) {
     throw new Error(`${label} contains too many archive entries (maximum ${MAX_ARCHIVE_ENTRIES.toLocaleString()}).`)
   }
 
+  const skipped: string[] = []
   let totalUncompressed = 0
   let totalCompressed = 0
   for (const entry of entries) {
     if (entry.dir) continue
+    // Traversal is rejected for every member, needed or not — a path this
+    // archive should never contain is a reason to refuse it, not to skip on.
     if (entry.unsafeOriginalName && entry.unsafeOriginalName !== entry.name) {
       throw new Error(`${label} contains an unsafe archive path: ${entry.unsafeOriginalName}`)
     }
     const uncompressed = entry._data?.uncompressedSize
     const compressed = entry._data?.compressedSize
+    const sizeUnreadable =
+      !Number.isSafeInteger(uncompressed) || uncompressed! < 0 ||
+      !Number.isSafeInteger(compressed) || compressed! < 0
+    // An unreadable member the importer never reads: leave it out and let the
+    // import continue. Its (unknown) size is excluded from the bomb totals.
+    if (sizeUnreadable && options?.isOptionalEntry?.(entry.name)) {
+      skipped.push(entry.name)
+      continue
+    }
     if (!Number.isSafeInteger(uncompressed) || uncompressed! < 0) {
       throw new Error(`${label} contains an entry with invalid size metadata: ${entry.name}`)
     }
@@ -66,6 +97,8 @@ export function assertSafeZipArchive(archive: JSZip, label: string): void {
   if (totalCompressed > 0 && totalUncompressed / totalCompressed > MAX_COMPRESSION_RATIO) {
     throw new Error(`${label} has an unsafe compression ratio.`)
   }
+
+  return { skipped }
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   checkInputSize,
   parseCandidates,
+  parseCandidatesDetailed,
   parseStructuredRule,
   chunkDocument,
   candidateKey,
@@ -293,6 +294,71 @@ describe("parseCandidates — truncated pass-1 output (AQU-466)", () => {
   it("returns [] when the truncation left no complete entry", () => {
     expect(parseCandidates('["Nothing complete he')).toEqual([])
     expect(parseCandidates("[")).toEqual([])
+  })
+})
+
+describe("parseCandidatesDetailed — truncation is reported, not just survived (AQU-1254)", () => {
+  // Salvaging the complete entries (AQU-466) stopped the silent zero-rule
+  // import, but the caller still could not tell a document with nothing
+  // checkable in it from an answer the output cap cut in half. Both arrive as
+  // a short list; only this flag separates them, and the import dialog shows
+  // "no rules found in this document" off the difference.
+
+  it("flags an array cut off mid-string, keeping what completed", () => {
+    // Real pass-1 output against a long style guide: maxTokens hit mid-entry.
+    const truncated =
+      '["Numbers must be preserved exactly as in the source", ' +
+      '"The term \'church\' must be rendered as \'jemaat\'", ' +
+      '"Divine names must use the approved capitalis'
+
+    expect(parseCandidatesDetailed(truncated)).toEqual({
+      candidates: [
+        "Numbers must be preserved exactly as in the source",
+        "The term 'church' must be rendered as 'jemaat'",
+      ],
+      truncated: true,
+    })
+  })
+
+  it("flags an array cut off after a complete entry", () => {
+    expect(parseCandidatesDetailed('["Rule one", "Rule two", "Rule three"')).toEqual({
+      candidates: ["Rule one", "Rule two", "Rule three"],
+      truncated: true,
+    })
+  })
+
+  it("flags a cut-off answer that left no complete entry at all", () => {
+    // The case that reads as "your style guide has no rules" without the flag.
+    expect(parseCandidatesDetailed('["Nothing complete he')).toEqual({
+      candidates: [],
+      truncated: true,
+    })
+    expect(parseCandidatesDetailed("[")).toEqual({ candidates: [], truncated: true })
+  })
+
+  it("does not flag a well-formed array", () => {
+    expect(parseCandidatesDetailed('["Rule one", "Rule two"]')).toEqual({
+      candidates: ["Rule one", "Rule two"],
+      truncated: false,
+    })
+  })
+
+  it("does not flag a genuinely empty result", () => {
+    // A document with nothing checkable in it. "No rules found" is honest here.
+    expect(parseCandidatesDetailed("[]")).toEqual({ candidates: [], truncated: false })
+  })
+
+  it("does not flag an answer that contains no array at all", () => {
+    // Prose instead of JSON is a different failure — nothing says candidates
+    // were lost to the output cap, so it must not claim truncation.
+    expect(parseCandidatesDetailed("not json")).toEqual({ candidates: [], truncated: false })
+    expect(parseCandidatesDetailed("null")).toEqual({ candidates: [], truncated: false })
+  })
+
+  it("keeps parseCandidates as the candidates half of the same parse", () => {
+    for (const raw of ['["A", "B"]', '["A", "B", "C', "[]", "not json", "["]) {
+      expect(parseCandidates(raw)).toEqual(parseCandidatesDetailed(raw).candidates)
+    }
   })
 })
 

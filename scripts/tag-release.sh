@@ -12,6 +12,20 @@ if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})(-[0-9]{2})?$ ]]; 
 fi
 series="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
 
+# The "release tags" ruleset requires a successful GitHub Deployment against
+# `production` before it accepts the tag push below. Nothing else in the
+# deploy chain records one, so do it here, once, before any push attempt.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+  GITHUB_TOKEN="$(gh auth token 2>/dev/null || true)"
+  export GITHUB_TOKEN
+fi
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  echo "ABORT: GITHUB_TOKEN is required (and 'gh auth token' found none) to record the production deployment." >&2
+  exit 1
+fi
+node "$script_dir/record-github-deployment.mjs" "$(git rev-parse HEAD)" production
+
 for attempt in 1 2 3; do
   # Fetch tags only: a full fetch can trip over unrelated broken remote refs.
   git fetch --quiet origin "refs/tags/$series.*:refs/tags/$series.*"
@@ -31,7 +45,6 @@ for attempt in 1 2 3; do
   commit_sha="$(git rev-parse HEAD)"
 
   # Generate annotated tag message with preview metadata
-  script_dir="$(cd "$(dirname "$0")" && pwd)"
   metadata_script="$script_dir/tag-metadata.mjs"
   
   # Find node executable (try PATH first, then common locations)

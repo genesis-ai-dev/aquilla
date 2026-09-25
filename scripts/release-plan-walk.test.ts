@@ -37,6 +37,10 @@ describe("normalizeVerdict", () => {
     expect(normalizeVerdict("PASS")).toBe("PASS")
   })
 
+  it("reads NOT CHECKED as none, not a hold", () => {
+    expect(normalizeVerdict("NOT CHECKED")).toBe("none")
+  })
+
   it("reads FAIL, FLAKY, and BLOCKED all as fail", () => {
     expect(normalizeVerdict("FAIL")).toBe("fail")
     expect(normalizeVerdict("FLAKY")).toBe("fail")
@@ -91,6 +95,18 @@ describe("lookupWalk", () => {
       comments: [{ body: walkComment(771, HEAD_SHA, "FLAKY") }],
     })
     expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("fail")
+  })
+
+  it("reads a real NOT CHECKED comment (scripts-only diff) as none, not unknown", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 797, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [
+        {
+          body: `## Bot walk — PR 797 @ ${HEAD_SHA}\n\n**NOT CHECKED** · SPA skip (scripts-only) · claim walks: none · replays: none · base \`kieran/release-planner-slices\` (not \`dev\`) · as qa-bot`,
+        },
+      ],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("none")
   })
 
   it("returns unknown when no PR is associated with the commit", async () => {

@@ -226,6 +226,11 @@ export async function handleFilesReadRequest(
   if (!auth.ok) {
     return new Response(auth.reason, { status: auth.status })
   }
+  // null: wall off, Maintainer, or platform — the file clock stays.
+  // A set: newest file-scope progress clock among those lanes. The file
+  // clock is the max over every cell, including lanes this caller cannot
+  // see, and the list sorts by it.
+  const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
   // Threshold-aware approved count. `files.approved_count` (maintained by
   // fileCountersRecomputeStmt) counts `cells.validated`, which ignores the
@@ -283,9 +288,13 @@ export async function handleFilesReadRequest(
   const trash = url.searchParams.get("trash") === "1"
 
   if (fileId) {
-    const sql = `${thresholdCte} SELECT ${columns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
+    const tagList = grantedTags === null ? [] : [...grantedTags]
+    const fileColumns = grantedTags === null
+      ? columns
+      : columns.replace("f.last_edit_at", `${visibleLastEditSql(tagList.length)} AS last_edit_at`)
+    const sql = `${thresholdCte} SELECT ${fileColumns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
     const row = await env.AQUILLA_PG.prepare(sql)
-      .bind(projectId, projectId, fileId)
+      .bind(projectId, ...tagList, projectId, fileId)
       .first<FileRowRaw>()
     if (!row) return new Response("file not found", { status: 404 })
     await hideUngrantedDefaultLaneCounts(env, projectId, auth.claims, [row])
@@ -304,15 +313,21 @@ export async function handleFilesReadRequest(
 
   const tombstoneFilter = trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"
   const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`]
-  const binds: unknown[] = [projectId, projectId]
+  // Unrestricted: [threshold project, page project]. Restricted: the lane
+  // tags bind inside the clock subquery, which sits between those two.
+  const tagList = grantedTags === null ? [] : [...grantedTags]
+  const binds: unknown[] = grantedTags === null
+    ? [projectId, projectId]
+    : [projectId, ...tagList, projectId]
+  const clock = grantedTags === null ? "f.last_edit_at" : "f.visible_last_edit"
   if (cursor) {
     if (cursor.lastEditAt === null) {
       // Already inside the NULLS LAST tail: only later (name, id) NULL rows remain.
-      where.push("f.last_edit_at IS NULL AND (f.name > ? OR (f.name = ? AND f.id > ?))")
+      where.push(`${clock} IS NULL AND (f.name > ? OR (f.name = ? AND f.id > ?))`)
       binds.push(cursor.name, cursor.name, cursor.id)
     } else {
       where.push(
-        "(f.last_edit_at < ? OR f.last_edit_at IS NULL OR (f.last_edit_at = ? AND (f.name > ? OR (f.name = ? AND f.id > ?))))",
+        `(${clock} < ? OR ${clock} IS NULL OR (${clock} = ? AND (f.name > ? OR (f.name = ? AND f.id > ?))))`,
       )
       binds.push(cursor.lastEditAt, cursor.lastEditAt, cursor.name, cursor.name, cursor.id)
     }
@@ -322,12 +337,25 @@ export async function handleFilesReadRequest(
   // expand every file's histogram just to discard all but one page; on
   // PGlite that is the difference between ~60 ms and ~1.4 s at 1000 files.
   // The outer ORDER BY re-asserts the order the CTE produced.
+  //
+  // A restricted caller sorts by the granted-lane clock instead. That clock
+  // is one indexed MAX per file, computed before the page cut so the cursor
+  // matches the value the response returns. Histogram joins stay on the page.
+  const listColumns = grantedTags === null
+    ? columns
+    : columns.replace("f.last_edit_at", "f.visible_last_edit AS last_edit_at")
+  const listOrder = grantedTags === null
+    ? orderBy
+    : "ORDER BY f.visible_last_edit DESC NULLS LAST, f.name ASC, f.id ASC"
+  const pageFrom = grantedTags === null
+    ? "files f"
+    : `(SELECT f.*, ${visibleLastEditSql(tagList.length)} AS visible_last_edit FROM files f) f`
   const pageSql =
-    `SELECT * FROM files f WHERE ${where.join(" AND ")} ${orderBy}` +
+    `SELECT * FROM ${pageFrom} WHERE ${where.join(" AND ")} ${listOrder}` +
     (limit !== null ? " LIMIT ?" : "")
   if (limit !== null) binds.push(limit + 1)
   const sql =
-    `${thresholdCte}, page AS (${pageSql}) SELECT ${columns} FROM page f${joins} ${orderBy}`
+    `${thresholdCte}, page AS (${pageSql}) SELECT ${listColumns} FROM page f${joins} ${listOrder}`
   const result = await env.AQUILLA_PG.prepare(sql)
     .bind(...binds)
     .all<FileRowRaw>()
@@ -347,6 +375,33 @@ export async function handleFilesReadRequest(
 }
 
 export const FILES_MAX_PAGE = 500
+
+/**
+ * `null` keeps `files.last_edit_at` (wall off, Maintainer, platform).
+ * A set is the legacy tags whose file-scope progress clocks this caller
+ * may see. Empty means no target lane, so the clock is null.
+ */
+async function grantedLaneTagsForFiles(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+): Promise<ReadonlySet<string> | null> {
+  if (!env.AQUILLA_PG) return null
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (visible === null) return null
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  return legacyTagsForVisibleLanes(identities, visible) ?? new Set<string>()
+}
+
+/** Newest file-scope progress edit among the granted tags. No placeholders when there are no tags. */
+function visibleLastEditSql(tagCount: number): string {
+  if (tagCount === 0) return "NULL::bigint"
+  const placeholders = Array.from({ length: tagCount }, () => "?").join(", ")
+  return `(SELECT MAX(v.last_edit_at) FROM file_section_progress v
+    WHERE v.project_id = f.project_id AND v.file_id = f.id
+      AND v.scope = 'file' AND v.section_key = ''
+      AND v.target_lang IN (${placeholders}))`
+}
 
 /**
  * The files list is pinned to the default lane (`target_lang ''`) so a project

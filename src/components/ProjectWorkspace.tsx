@@ -103,6 +103,7 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import { decideScopedLandingLane } from "./project-workspace-lane-scope"
 import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
@@ -534,6 +535,32 @@ function writePersistedActiveLane(projectId: string, lane: string): void {
     else localStorage.removeItem(activeLaneStorageKey(projectId))
   } catch {
     /* storage unavailable (private mode / quota) — lane stays in-memory only */
+  }
+}
+
+// AQU-1029: a separate "the scope seed already ran for this project" marker.
+//
+// It cannot be inferred from the lane key above: that key stores the default
+// lane as ABSENT, so "never opened this project" and "opened it and chose
+// Project default" read identically. Without this marker the seed would
+// re-apply on every reload and drag a member back off the default lane they
+// deliberately switched to. One flag per project, written the first time the
+// seed gets a chance to run — whether or not it actually moved the lane.
+function activeLaneSeedStorageKey(projectId: string): string {
+  return `aquilla:activeLaneSeeded:${projectId}`
+}
+function hasSeededActiveLane(projectId: string): boolean {
+  try {
+    return localStorage.getItem(activeLaneSeedStorageKey(projectId)) === "1"
+  } catch {
+    return false
+  }
+}
+function markSeededActiveLane(projectId: string): void {
+  try {
+    localStorage.setItem(activeLaneSeedStorageKey(projectId), "1")
+  } catch {
+    /* storage unavailable — the in-mount ref below still keeps it one-shot */
   }
 }
 
@@ -2012,6 +2039,36 @@ export function ProjectWorkspace() {
     deepLinkLaneAppliedRef.current = true
     if (resolved !== null) setActiveLane(resolved)
   }, [projectId, project, searchParams, availableLanes, setActiveLane])
+  // AQU-1029: seed the opening lane from the member's OWN lane scope the first
+  // time they open a project. Without this a member assigned to one target lane
+  // lands on Project default — a language they cannot write to — and has to go
+  // out through "assignment" and click back in to reach their own lane.
+  //
+  // Strictly last in the precedence chain: a `?lane=` deep link wins, a lane
+  // they already persisted on this project wins, and the seed runs at most once
+  // per project (see `activeLaneSeedStorageKey`) so switching back to Project
+  // default sticks. The seed only ever moves the OPENING lane; the switcher is
+  // untouched and the scope remains a write restriction, not a view one.
+  const scopedLandingLaneAppliedRef = useRef(false)
+  useEffect(() => {
+    scopedLandingLaneAppliedRef.current = false
+  }, [projectId])
+  useEffect(() => {
+    if (scopedLandingLaneAppliedRef.current || !projectId) return
+    const decision = decideScopedLandingLane({
+      hasLaneParam: searchParams.has("lane"),
+      persistedLane: readPersistedActiveLane(projectId),
+      alreadySeeded: hasSeededActiveLane(projectId),
+      projectLoaded: Boolean(project),
+      scopes: myScopes,
+      availableLanes,
+    })
+    if (decision.action === "wait") return
+    scopedLandingLaneAppliedRef.current = true
+    if (decision.action === "stand-down") return
+    markSeededActiveLane(projectId)
+    setActiveLane(decision.lane)
+  }, [projectId, project, searchParams, myScopes, availableLanes, setActiveLane])
   // AQU-1006 follow-up: `terminology` on this record is now sourced from the
   // CONCEPTS PROJECTION, never from project settings.
   //

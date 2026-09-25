@@ -5,6 +5,7 @@ import {
   editorCellHref,
   resolveDeepLinkLane,
   resolveDeepLinkLaneFromSearchParams,
+  resolveDeepLinkLaneSelection,
 } from './project-workspace-lane-deeplink'
 
 // AQU-538: `/project/:id/editor?lane=<tag>` deep-link resolution.
@@ -28,6 +29,12 @@ describe('resolveDeepLinkLane', () => {
   it('falls back to the default lane for an unknown tag', () => {
     expect(resolveDeepLinkLane('de', available)).toBe('')
     expect(resolveDeepLinkLane('xx', ['', 'es'])).toBe('')
+  })
+
+  it('resolves a lane id to that lane\'s tag', () => {
+    expect(resolveDeepLinkLaneSelection('aabbccdd', [{ id: 'aabbccdd', legacyTag: 'es' }], available)).toBe('es')
+    expect(resolveDeepLinkLaneSelection('es', [{ id: 'aabbccdd', legacyTag: 'es' }], available)).toBe('es')
+    expect(resolveDeepLinkLaneSelection('missing', [{ id: 'aabbccdd', legacyTag: 'es' }], available)).toBe('')
   })
 
   it('an N=1 project (only the default lane) rejects any non-empty tag', () => {

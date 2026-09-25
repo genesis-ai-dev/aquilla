@@ -370,6 +370,18 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
+  lanes?: ProjectLaneView[]
+}
+
+export interface ProjectLaneView {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
 }
 
 export type PatchResult =
@@ -383,6 +395,96 @@ function authHeaders(jwt: string): HeadersInit {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
   }
+}
+
+export type RenameLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  name: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<RenameLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ name }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) {
+    return { kind: "error", message: `rename failed (${res.status})` }
+  }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type CreateLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** POST /api/v2/projects/:id/lanes. Language-edit floor. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  input: { name: string; language: string },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CreateLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(input),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+/** POST /api/v2/projects/:id/lanes/:laneId/archive. */
+export async function setProjectLaneArchived(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/archive`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ archived }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `archive failed (${res.status})` }
+  return { kind: "ok" }
 }
 
 /**

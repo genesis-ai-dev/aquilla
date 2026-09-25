@@ -24,9 +24,10 @@ function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  return a.targetLang
-    ? `${base}?lane=${encodeURIComponent(a.targetLang)}`
-    : base
+  const lane = a.laneId || a.targetLang
+  return lane
+    ? `${base}?lane=${encodeURIComponent(lane)}`
+    : `${base}?lane=`
 }
 
 function progressPct(a: MyOrgAssignment): number {
@@ -107,6 +108,7 @@ export function AssignedToMe() {
               <span className="truncate">{a.scopeLabel}</span>
               <AssignmentLaneBadge
                 targetLang={a.targetLang}
+                laneName={a.laneName}
                 defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
                 fallbackLabel={laneFallbackLabel}
               />
@@ -224,6 +226,7 @@ export function AssignedToMe() {
                   a.targetLang ?? "",
                   defaultLaneLabelByProjectId.get(a.projectId) ?? "",
                   laneFallbackLabel,
+                  a.laneName,
                 )
                 return (
                   a.scopeLabel.toLowerCase().includes(q) ||

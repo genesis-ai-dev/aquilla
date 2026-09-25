@@ -698,6 +698,11 @@ interface EditorTableProps {
    *  project/file's default target-language name. Non-default lanes label
    *  themselves with their own tag string. */
   defaultLaneLabel?: string
+  /**
+   * AQU-1418: display name for a lane tag, including `''` for the default lane.
+   * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
+   */
+  laneLabels?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -928,7 +933,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel, laneLabels,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, onClearCellErrors,
@@ -2689,7 +2694,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <LaneCombobox
                 options={(lanes ?? []).map((lane) => ({
                   value: lane,
-                  label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
+                  label: laneLabels?.[lane]
+                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
                   archived: isLaneArchived(lane, archivedLanes),
                   testId: lane,
                 }))}
@@ -2714,7 +2720,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                         `project.targetLanguage` is empty — prompt to set one
                         rather than showing a blank pill. A named lane always
                         has a tag. */}
-                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    {(laneLabels?.[activeLane]
+                      ?? (activeLane ? activeLane : project.targetLanguage))
+                      || t("editor.lane.setTargetLanguage")}
                     <ChevronDown className="h-2.5 w-2.5" />
                   </button>
                 }

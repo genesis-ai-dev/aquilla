@@ -80,7 +80,7 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveTimingLocked, createProjectLane, renameProjectLane, setProjectLaneArchived } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
@@ -420,6 +420,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    lanes: sharedLanes,
+    refresh: refreshSharedSettings,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
@@ -458,6 +460,37 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+
+  const renameLane = useCallback(async (laneId: string, name: string) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await renameProjectLane(jwt, id, laneId, name)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const createLane = useCallback(async (input: { name: string; language: string }) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await createProjectLane(jwt, id, input)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return false
+    const result = await setProjectLaneArchived(jwt, id, laneId, archived)
+    if (result.kind !== "ok") return false
+    await refreshSharedSettings()
+    return true
+  }, [session?.jwt, id, refreshSharedSettings])
   const {
     metrics: postEditMetrics,
     isLoading: metricsLoading,
@@ -1824,6 +1857,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             canEdit={canEditLanguages}
             disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
+            laneRecords={isCloudProject ? sharedLanes ?? undefined : undefined}
+            onRenameLane={isCloudProject ? renameLane : undefined}
+            onCreateLane={isCloudProject ? createLane : undefined}
+            onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
           />
         )}
 

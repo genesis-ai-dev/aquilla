@@ -102,7 +102,7 @@ import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAud
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
-import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import { resolveDeepLinkLaneSelection } from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
@@ -1968,16 +1968,36 @@ export function ProjectWorkspace() {
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
   const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
-  // AQU-1240: the `''` default lane IS the primary target language (it is
-  // *named* by `targetLanguage` and its cells carry `target_lang = ''`). Since
-  // slice 1 the registry (`targetLanes`) also LISTS the primary, so a naive
-  // `["", ...targetLanes]` renders the primary twice — a duplicate switcher row
-  // that reads as a second, redundant view of the same lane. Drop the primary
-  // from the registry side here; genuinely-extra lanes (French, …) stay.
-  const availableLanes = useMemo(
-    () => ["", ...targetLanes.filter((l) => !languagesEqual(l, project?.targetLanguage))],
-    [targetLanes, project?.targetLanguage],
+  const laneRows = useMemo(
+    () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+    [project?.lanes],
   )
+  const laneLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const lane of laneRows) {
+      const key = lane.legacyTag ?? ""
+      if (lane.name.trim()) labels[key] = lane.name
+    }
+    return labels
+  }, [laneRows])
+  // Lane rows win when the project has them: order is `position`, the label
+  // is `name`, and the value the editor stores is still `legacyTag` ('' for
+  // the default lane) because cell rows are keyed by that tag.
+  const availableLanes = useMemo(() => {
+    if (laneRows.length === 0) {
+      return ["", ...targetLanes.filter((l) => !languagesEqual(l, project?.targetLanguage))]
+    }
+    const tags = [...laneRows]
+      .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+      .map((lane) => lane.legacyTag ?? "")
+    const unique = [...new Set(tags)]
+    if (!unique.includes("")) unique.unshift("")
+    return unique
+  }, [laneRows, targetLanes, project?.targetLanguage])
+  const archivedLaneTags = useMemo(() => {
+    if (laneRows.length === 0) return project?.archivedLanes
+    return laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? "")
+  }, [laneRows, project?.archivedLanes])
   // If the active lane is no longer offered (removed from settings), fall back
   // to the default lane so the editor never points at a nonexistent lane.
   useEffect(() => {
@@ -2008,10 +2028,14 @@ export function ProjectWorkspace() {
     // Defer until the project (and thus its lane registry) has loaded, so an
     // unknown tag isn't mistaken for one whose registry hasn't arrived yet.
     if (!project) return
-    const resolved = resolveDeepLinkLaneFromSearchParams(searchParams, availableLanes)
+    const param = searchParams.has("lane") ? (searchParams.get("lane") ?? "") : null
+    // An id in `?lane=` cannot be told from an unknown tag until the lane
+    // rows arrive. A tag that is already in the registry can resolve now.
+    if (project.lanes == null && param && !availableLanes.includes(param)) return
+    const resolved = resolveDeepLinkLaneSelection(param, laneRows, availableLanes)
     deepLinkLaneAppliedRef.current = true
     if (resolved !== null) setActiveLane(resolved)
-  }, [projectId, project, searchParams, availableLanes, setActiveLane])
+  }, [projectId, project, searchParams, availableLanes, laneRows, setActiveLane])
   // AQU-1006 follow-up: `terminology` on this record is now sourced from the
   // CONCEPTS PROJECTION, never from project settings.
   //
@@ -12498,9 +12522,10 @@ export function ProjectWorkspace() {
             username={currentUsername}
             activeLane={activeLane}
             lanes={availableLanes}
-            archivedLanes={project?.archivedLanes}
+            archivedLanes={archivedLaneTags}
             onLaneChange={setActiveLane}
-            defaultLaneLabel={activeTargetLanguage || "Target"}
+            defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
+            laneLabels={laneLabels}
             // AQU-583: the TARGET tag is the discoverable entry point to change
             // the target language — deep-link to settings filtered to the
             // Project Info + Languages sections (both carry the "target language"
@@ -12980,6 +13005,7 @@ export function ProjectWorkspace() {
           activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
           targetLanes={project.targetLanes}
+          laneLabels={laneLabels}
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}
           members={projectMembers}

@@ -26,6 +26,25 @@ export function resolveDeepLinkLane(
   return availableLanes.includes(param) ? param : ''
 }
 
+/**
+ * `?lane=` accepts a legacy tag or a lane id. An id resolves to that lane's
+ * tag, which is what the editor stores. An unknown value still falls back
+ * to the default lane.
+ */
+export function resolveDeepLinkLaneSelection(
+  param: string | null | undefined,
+  lanes: readonly { id: string; legacyTag: string | null }[],
+  availableLanes: readonly string[],
+): string | null {
+  if (param === null || param === undefined) return null
+  const byId = lanes.find((lane) => lane.id === param)
+  if (byId) {
+    const tag = byId.legacyTag ?? ""
+    return availableLanes.includes(tag) ? tag : ""
+  }
+  return resolveDeepLinkLane(param, availableLanes)
+}
+
 /** Preserve the important distinction between an absent lane and `?lane=`. */
 export function resolveDeepLinkLaneFromSearchParams(
   searchParams: Pick<URLSearchParams, "get" | "has">,

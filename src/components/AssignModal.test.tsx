@@ -590,6 +590,32 @@ describe("lane select (AQU-538)", () => {
     expect(await screen.findByRole("option", { name: /vera/ })).toBeTruthy()
   })
 
+  it("says who can't take the work and in which language when the server refuses the pick", async () => {
+    const { AssignmentEmitError } = await import("@/lib/sync/assignments")
+    mockCreate.mockRejectedValueOnce(
+      new AssignmentEmitError(
+        "this person cannot take work in Spanish: they need to be a Contributor or above and be allowed to work in Spanish",
+        403,
+      ),
+    )
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish"]}
+        defaultLaneLabel="German"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "Spanish" }] }}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    expect(
+      await screen.findByText(
+        "anna can't be given work in Spanish. They need to be a Contributor or above, and allowed to work in Spanish.",
+      ),
+    ).toBeTruthy()
+  })
+
   it("names the main language by its name when that is a coordinator's only lane", () => {
     render(
       <AssignModal

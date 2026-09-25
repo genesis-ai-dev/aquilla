@@ -41,6 +41,8 @@ export const dialog = defineNamespace({
     "dialog.assign.error.selfOnly": "You can only assign work to yourself.",
     "dialog.assign.error.laneOutOfScope":
       "You can only assign work in the language lanes you've been given.",
+    "dialog.assign.error.assigneeNotEligible":
+      "{username} can't be given work in {language}. They need to be a Contributor or above, and allowed to work in {language}.",
     "dialog.assign.error.selectFile": "Select at least one book/file.",
     "dialog.assign.error.noFileOpen": "No file open.",
     "dialog.assign.error.noRouteFile": "No file available for routing.",
@@ -222,6 +224,16 @@ export const dialog = defineNamespace({
         description:
           "Inline validation error when a below-lead member (self-assign mode) tries " +
           "to submit an assignment to someone other than themselves.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.error.assigneeNotEligible": {
+        description:
+          "Error in the Assign work dialog when a language coordinator picks someone who " +
+          "can't do the work: their role is too low, or they are limited to other languages.",
+        placeholders: {
+          username: "The person the coordinator tried to assign — not translated.",
+          language: "The name of the language the work was for, e.g. 'Spanish'.",
+        },
         screenshot: "assign-modal",
       },
       "dialog.assign.error.laneOutOfScope": {

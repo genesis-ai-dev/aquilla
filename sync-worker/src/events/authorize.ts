@@ -362,19 +362,22 @@ export async function authorize<K extends EventKind>(
     let laneDelegateOk = false
     if (delegateCandidate && isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>)) {
       const payload = raw.payload as RawEvent<'assignment.create'>['payload']
+      const lane = typeof payload.targetLang === 'string' ? payload.targetLang : ''
       const eligible = await isEligibleLaneAssignee(
         db,
         raw.projectId,
         payload.assigneeUserId,
-        typeof payload.targetLang === 'string' ? payload.targetLang : '',
+        lane,
         payload.scope.map((entry) => entry.fileId),
       )
-      // Shown to the coordinator as-is by the assign dialog, so say why.
+      // The assign dialog recognises "cannot take work in" and shows its own
+      // translated message; anything else showing this sees plain words.
       if (!eligible) {
+        const language = lane === '' ? 'the main language' : lane
         return {
           ok: false,
           status: 403,
-          reason: 'this person cannot take work in this language: they need contributor access and must be allowed to work in it',
+          reason: `this person cannot take work in ${language}: they need to be a Contributor or above and be allowed to work in ${language}`,
         }
       }
       laneDelegateOk = true

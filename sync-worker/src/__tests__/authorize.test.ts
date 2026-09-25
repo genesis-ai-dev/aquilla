@@ -758,7 +758,9 @@ describe("authorize() — assignment.create lane-delegate carve-out (AQU-581)", 
     if (!result.ok) {
       expect(result.status).toBe(403)
       // The dialog shows this reason verbatim, so it must say why.
-      expect(result.reason).toMatch(/cannot take work in this language/)
+      expect(result.reason).toBe(
+        "this person cannot take work in es: they need to be a Contributor or above and be allowed to work in es",
+      )
     }
   })
 

@@ -399,6 +399,20 @@ export function AssignModal({
     })
   }, [])
 
+  // AQU-581 review: the server refuses a lane coordinator's pick when that
+  // person can't do the work. Say who and which language, in the reader's
+  // own language, rather than the server's English sentence.
+  const assigneeRefusal = useCallback(
+    (message: string, username: string): string | null => {
+      if (!message.includes("cannot take work in")) return null
+      const language =
+        laneItems.find((item) => item.value === selectedLane)?.label ??
+        (defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback"))
+      return t("dialog.assign.error.assigneeNotEligible", { username, language })
+    },
+    [laneItems, selectedLane, defaultLaneLabel, t],
+  )
+
   const handleSubmit = useCallback(async () => {
     setError(null)
     const member = members.find((m) => String(m.userId) === selectedMemberId)
@@ -462,7 +476,9 @@ export function AssignModal({
         const failed = results.filter((r) => r.error)
         const succeeded = results.length - failed.length
         if (succeeded > 0) onAssigned()
-        if (failed.length > 0) {
+        if (failed.length > 0 && assigneeRefusal(failed[0].error ?? "", member.username)) {
+          setError(assigneeRefusal(failed[0].error ?? "", member.username))
+        } else if (failed.length > 0) {
           setError(
             t("dialog.assign.error.bulkFailed", {
               failed: String(failed.length),
@@ -534,7 +550,7 @@ export function AssignModal({
       onOpenChange(false)
     } catch (e) {
       if (e instanceof AssignmentEmitError) {
-        setError(e.message)
+        setError(assigneeRefusal(e.message, member.username) ?? e.message)
       } else {
         // AQU-820: any error that isn't an AssignmentEmitError (the type
         // createAssignment uses for its own known failure modes, handled
@@ -552,7 +568,7 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
+    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
   ])
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor

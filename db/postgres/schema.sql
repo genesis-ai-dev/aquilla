@@ -585,10 +585,30 @@ CREATE TABLE cells (
     -- Writers resolve it from `lanes`; the backfill fills rows that predate that
     -- (migrations 0104–0111 enforce NOT NULL on databases created before this).
     lane_id           TEXT NOT NULL,
+    -- AQU-1422: reversible "park this cell" flag (migration 0112). Epoch-ms when
+    -- the cell was hidden, NULL when visible. Set by source.cell.visibility.set
+    -- on the SHARED SOURCE ROW ONLY (side='source', target_lang='') — hiding is
+    -- per cell, not per lane, so every consumer resolves a cell's visibility
+    -- from that one row rather than from its own side. Storing it per row would
+    -- strand a target row created AFTER the hide (a collaborator's in-flight
+    -- translation) with the flag unset, and that is precisely the row that must
+    -- not reappear. Deliberately NOT in `metadata`: the source.cell.create
+    -- UPSERT overwrites that bucket wholesale, so a re-import or a mirror upsert
+    -- would un-hide every parked cell; this column is absent from that SET list
+    -- and survives both. Nothing is deleted — text, translations, recordings,
+    -- comments and validations all come back untouched on show.
+    hidden_at         BIGINT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
 );
+
+-- AQU-1422: hidden cells are a handful per file, so only they are indexed —
+-- serves the "N hidden" counter and the hidden-cell filters without putting a
+-- full-table index on the hottest table in the schema.
+CREATE INDEX IF NOT EXISTS idx_cells_hidden
+  ON cells(project_id, file_id)
+  WHERE hidden_at IS NOT NULL;
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,

@@ -215,6 +215,23 @@ interface RuntimeContext {
    * editor: excluding them from PROGRESS is not the same as hiding them.
    */
   countStructural?: boolean
+  /**
+   * AQU-1422: reveal cells parked with "Hide cell" instead of dropping them
+   * from the display list. Absent ⇒ false, which is what every reader sees.
+   *
+   * The caller decides who may turn it on — it is the "Show hidden cells"
+   * preference, offered only to people who may edit source text. The store just
+   * takes the flag: it owns WHICH cells the display list contains, so it is the
+   * one place a hidden row can be dropped from the text table, the media lens
+   * and the chapter navigation counts together (they all read
+   * `getCellIdsForLens`). Filtering in the table alone would have left the row
+   * in the timeline and in the sidebar's totals.
+   *
+   * Unlike `countStructural`, this really does HIDE: a parked cell leaves the
+   * display list entirely. It stays in `order`, `sourceById` and `toRows()`, so
+   * nothing is lost and revealing it is free.
+   */
+  showHidden?: boolean
 }
 
 interface PendingOverlay {
@@ -286,6 +303,21 @@ export class CellStore {
    * meaning anything.
    */
   private removedCellIds = new Set<string>()
+  /**
+   * AQU-1422: cells parked with "Hide cell", read off each cell's SOURCE row
+   * (`CellRow.hidden`) — never off a target row, which carries no flag of its
+   * own and would be missing one entirely if it were created after the hide.
+   *
+   * Kept as state rather than derived per read because a membership change here
+   * changes the DISPLAY LIST, and `useCellIds` only re-reads on `listVersion`.
+   * A hide arrives through `replaceRowsForCell`, which leaves `order` alone (the
+   * cell is still in the file), so without an explicit bump the row would keep
+   * rendering until the next reorder.
+   */
+  private hiddenCellIds: ReadonlySet<string> = EMPTY_TAKES
+  /** Memoised `order` minus {@link hiddenCellIds}. Keyed on `listVersion`,
+   *  which {@link setHiddenCellIds} bumps, so a hide/show invalidates it. */
+  private visibleOrderCache: { listVersion: number; ids: readonly string[] } | null = null
   private cellVersionById = new Map<string, number>()
   // Feeds per-cell versions from one store-lifetime counter that reset() never
   // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
@@ -377,6 +409,12 @@ export class CellStore {
       || this.ctx.requiredValidations !== next.requiredValidations
       || (this.ctx.countStructural ?? true) !== nextCountStructural
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
+    // AQU-1422: revealing or re-hiding parked cells changes the DISPLAY LIST,
+    // not any cell's data — so it bumps `listVersion` (what useCellIds watches)
+    // and nothing else. Deliberately NOT folded into `userChanged`, which bumps
+    // every cell's version for a progress-rule change; no row's content moved.
+    const showHiddenChanged =
+      (this.ctx.showHidden ?? false) !== (next.showHidden ?? false)
     // AQU-646: the take set arrives from the attachment hook via its own
     // setter, not from these options, so a runtime update must not blank it.
     this.ctx = {
@@ -384,6 +422,13 @@ export class CellStore {
       lane: nextLane,
       countStructural: nextCountStructural,
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+    }
+    if (showHiddenChanged) {
+      this.visibleOrderCache = null
+      this.listVersion++
+      // LIST subscribers only: no cell's data (or version) moved, so waking the
+      // per-cell listeners would be a no-op that costs a pass over 30k rows.
+      this.emitList()
     }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
@@ -434,6 +479,10 @@ export class CellStore {
     this.sourceById = new Map()
     this.targetById = new Map()
     this.otherLaneTargetRows = []
+    // AQU-1422: another file's parked ids say nothing about this one, and a
+    // stale set would filter rows out of the incoming file by coincidence of id.
+    this.hiddenCellIds = EMPTY_TAKES
+    this.visibleOrderCache = null
     this.pendingOverlay = new Map()
     this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
@@ -505,10 +554,73 @@ export class CellStore {
     return this.order.length === 0 ? EMPTY_CELL_IDS : this.order
   }
 
+  /** AQU-1422: true while this cell is parked. Read off the SOURCE row. */
+  isCellHidden = (cellId: string): boolean => this.hiddenCellIds.has(cellId)
+
+  /** AQU-1422: how many of this file's cells are parked — the "N hidden"
+   *  indicator. Counts every hidden cell, whether or not they are being
+   *  revealed, because the indicator's job is to say what IS hidden. */
+  getHiddenCount = (): number => this.hiddenCellIds.size
+
+  /**
+   * AQU-1422: install the parked set, bumping `listVersion` when it moved so
+   * `useCellIds` re-reads the display list. Returns whether it changed.
+   *
+   * Called from both row-ingestion paths rather than derived lazily: the display
+   * list is what changes, and its subscribers watch `listVersion`, which a hide
+   * would otherwise never touch (the cell is still in `order`).
+   */
+  private setHiddenCellIds(next: ReadonlySet<string>): boolean {
+    const prev = this.hiddenCellIds
+    if (prev.size === next.size) {
+      let same = true
+      for (const id of next) {
+        if (!prev.has(id)) { same = false; break }
+      }
+      if (same) return false
+    }
+    this.hiddenCellIds = next.size === 0 ? EMPTY_TAKES : next
+    this.visibleOrderCache = null
+    this.listVersion++
+    return true
+  }
+
+  /** AQU-1422: rebuild the parked set from the current source rows. */
+  private collectHiddenCellIds(): ReadonlySet<string> {
+    let hidden: Set<string> | null = null
+    for (const [cellId, row] of this.sourceById) {
+      if (row.hidden === true) (hidden ??= new Set()).add(cellId)
+    }
+    return hidden ?? EMPTY_TAKES
+  }
+
+  /**
+   * AQU-1422: `order` with parked cells dropped.
+   *
+   * Returns `this.order` ITSELF whenever nothing is filtered out — identity is
+   * load-bearing. `useCellIds` hands the result to the editor as
+   * `displayCellIds`, and `getNavigationIndex` reuses the store's own index only
+   * when that array IS `this.order` (AQU-1104). A fresh array on every read
+   * would make every navigation lookup miss, on every file, hidden or not.
+   */
+  private visibleOrder(): readonly string[] {
+    if (this.hiddenCellIds.size === 0 || this.ctx.showHidden === true) return this.order
+    const cached = this.visibleOrderCache
+    if (cached && cached.listVersion === this.listVersion) return cached.ids
+    const filtered = this.order.filter((id) => !this.hiddenCellIds.has(id))
+    const ids = filtered.length === this.order.length ? this.order : filtered
+    this.visibleOrderCache = { listVersion: this.listVersion, ids }
+    return ids
+  }
+
   getCellIdsForLens(orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
-    if (this.order.length === 0) return EMPTY_CELL_IDS
-    if (orderedBy !== "time") return this.order
-    const rows = this.order
+    // AQU-1422: ONE funnel, deliberately. The text table, the media lens and
+    // (via displayCellIds) the chapter navigation counts all read this, so
+    // dropping a parked cell here drops it from all three together.
+    const order = this.visibleOrder()
+    if (order.length === 0) return EMPTY_CELL_IDS
+    if (orderedBy !== "time") return order
+    const rows = order
       .map((id) => {
         const summary = this.getCellSummary(id)
         return summary ? {
@@ -1035,6 +1147,10 @@ export class CellStore {
     this.targetById = targetById
     this.otherLaneTargetRows = otherLaneTargetRows
     this.indexById = new Map(order.map((id, index) => [id, index]))
+    // AQU-1422: after sourceById is installed, so the parked set is rebuilt from
+    // the rows this load actually landed. Bumps listVersion itself when it moved
+    // — a delta that only flips `hidden` changes no order and no membership.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
       if (!liveIds.has(id)) this.footnoteCache.delete(id)
@@ -1447,6 +1563,11 @@ export class CellStore {
     this.order.splice(orderAt >= 0 ? orderAt + 1 : 0, 0, row.cellId)
     this.indexById = new Map(this.order.map((id, index) => [id, index]))
     this.listVersion++
+    // AQU-1422: an id can be re-used — a removal rolled back, or a re-insert at
+    // the same cell id — so the parked set is re-derived from the rows rather
+    // than carried. A retained entry would filter the NEW row out of the display
+    // list, and nothing on screen would explain why.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
 
     this.rebuildDerivedIndexes()
     this.bumpCells(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
@@ -1512,6 +1633,10 @@ export class CellStore {
     // source-less row at the tail.
     this.removedCellIds.add(cellId)
     this.listVersion++
+    // AQU-1422: a revealed parked row can be removed from here, and a stale entry
+    // would then over-report the "N hidden" count for a cell that no longer
+    // exists.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
 
     this.rebuildDerivedIndexes()
     if (successorCellId) this.bumpCells([successorCellId])
@@ -1575,6 +1700,9 @@ export class CellStore {
     this.freshnessFloors.delete(cellId)
     this.indexById = new Map(this.order.map((id, index) => [id, index]))
     this.listVersion++
+    // AQU-1422: restoring a parked row must restore it PARKED — the snapshot
+    // carries its `hidden` flag, so re-deriving is what honours it.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
     this.rebuildDerivedIndexes()
     this.fileVersion++
     this.emitAll()
@@ -1622,6 +1750,35 @@ export class CellStore {
     this.bumpCells([cellId])
     this.fileVersion++
     this.emit([cellId])
+  }
+
+  /**
+   * AQU-1422: optimistic park / un-park. Returns the PREVIOUS flag so the caller
+   * can put it back if the server refuses, and `null` when there was no source
+   * row to patch (nothing was done, so nothing needs rolling back).
+   *
+   * Sets a freshness floor like every other optimistic path: without one, a
+   * correcting read already in flight lands the pre-hide row and the cell
+   * reappears for a beat before the confirming read takes it away again.
+   *
+   * Source row only — `hidden` lives there, and the display-list filter reads it
+   * from there.
+   */
+  applyOptimisticCellHidden(cellId: string, hidden: boolean): boolean | null {
+    const source = this.sourceById.get(cellId)
+    if (!source) return null
+    const previous = source.hidden === true
+    if (previous === hidden) return previous
+    this.freshnessFloors.set(cellId, ++this.writeSeq)
+    this.sourceById.set(cellId, { ...source, hidden: hidden ? true : undefined })
+    // Bumps listVersion itself, which is what drops the row from the display
+    // list — no order or membership changed, so nothing else would.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells([cellId])
+    this.fileVersion++
+    this.emit([cellId])
+    return previous
   }
 
   /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
@@ -1787,6 +1944,14 @@ export class CellStore {
         this.order = nextOrder
         this.indexById = new Map(this.order.map((id, index) => [id, index]))
       }
+    }
+    // AQU-1422: a hide/show arrives here — a targeted read or an `event.applied`
+    // frame carrying this cell's rows — and changes no order and no membership,
+    // so nothing above would bump `listVersion` and the row would keep rendering
+    // until the next reorder. Recomputing the whole set (rather than patching
+    // one id) keeps this path honest if the frame also drops the source row.
+    if ((previousSource?.hidden ?? false) !== (source?.hidden ?? false)) {
+      this.setHiddenCellIds(this.collectHiddenCellIds())
     }
     if (indexesUnchanged && this.updateTargetValidationProgress(cellId, previousTarget, target)) {
       this.invalidateDerivedViews()
@@ -2297,6 +2462,10 @@ export interface UseActiveCellStoreOptions {
   lane?: string
   /** AQU-1083: does this project count headings toward progress? Default yes. */
   countStructural?: boolean
+  /** AQU-1422: reveal cells parked with "Hide cell" instead of dropping them
+   *  from the display list. Default false. Only ever passed true for someone who
+   *  may edit source text — see RuntimeContext.showHidden. */
+  showHidden?: boolean
 }
 
 export interface UseActiveCellStoreResult {
@@ -2330,6 +2499,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     enabled = true,
     lane = "",
     countStructural = true,
+    showHidden = false,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // Debug handle for the console and e2e probes. Published from an effect
@@ -2379,8 +2549,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural })
-  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural, showHidden })
+  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under

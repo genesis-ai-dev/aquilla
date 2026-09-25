@@ -1235,6 +1235,48 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
+export interface SourceCellVisibilityInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** true parks the cell, false brings it back. */
+  hidden: boolean
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1422: park (or un-park) one cell — the three-dot menu's "Hide cell" /
+ * "Show cell".
+ *
+ * NO `parentId`, and that is the point: this kind is NOT chain-mutating. It
+ * moves only `cells.hidden_at` on the shared source row, so
+ *
+ *   - nothing is deleted (unlike `source.cell.delete`, which drops the
+ *     projection row) — the source text, every lane's translation, recordings,
+ *     comments and validations survive and come back on show; and
+ *   - `cells.event_id` does not advance, so no lane's translation goes stale.
+ *     Hiding a cell says nothing about whether its text changed, and AD-9
+ *     compares a target's pin against the source head.
+ *
+ * One event covers every language: hiding is per CELL, not per lane.
+ */
+export async function emitSourceCellVisibilitySet(
+  input: SourceCellVisibilityInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.visibility.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { hidden: input.hidden },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellCommitInput {
   projectId: string
   fileId: string

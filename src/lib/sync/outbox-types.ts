@@ -26,6 +26,11 @@ export type OutboxEventKind =
   | "source.cell.commit"
   | "source.cell.delete"
   | "source.cell.reorder"
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row, so nothing is deleted
+  // and no lane's translation goes stale. Hiding is per CELL, not per lane,
+  // which is why one source-side kind covers every language.
+  | "source.cell.visibility.set"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -171,6 +176,10 @@ export interface OutboxEventPayloads {
   "source.cell.delete": Record<string, never>
   "source.cell.reorder": {
     anchorCellId: string | null
+  }
+  "source.cell.visibility.set": {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
   }
 
   "target.cell.create": {

@@ -20,6 +20,8 @@ import {
   MoreVertical,
   Bold,
   VolumeX,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -3099,6 +3101,15 @@ function CellSourceMenu({
   sourceEditDisabledReason,
   /** Absent ⇒ this file has no clock, so the entry does not exist. */
   timestamps,
+  /** AQU-1422: park / un-park. Hidden entirely (not disabled) for anyone below
+   *  the source-edit gate — a reader must not learn that hiding exists, let
+   *  alone that this file has something parked. That is the ONE place this menu
+   *  departs from round 4's render-it-disabled rule, and deliberately: the rule
+   *  exists so an inapplicable action explains itself, not so every action
+   *  advertises itself to everyone. */
+  hidden,
+  onToggleHidden,
+  hiddenDisabledReason,
 }: {
   cellId: string
   onInsertBelow?: () => void
@@ -3111,17 +3122,27 @@ function CellSourceMenu({
   onToggleSourceEdit?: () => void
   sourceEditDisabledReason?: string | null
   timestamps?: CellTimestampsProps
+  /** AQU-1422: is this cell currently parked? Decides the entry's wording. */
+  hidden?: boolean
+  /** AQU-1422: park it / bring it back. Absent ⇒ not offered at all. */
+  onToggleHidden?: () => void
+  hiddenDisabledReason?: string | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [timesOpen, setTimesOpen] = useState(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
+  // AQU-1422: the park entry sits with the structural block below (it changes
+  // what the file shows, not what a cell says), but it is gated on the
+  // source-edit permission rather than on the add/remove tier, so it is its own
+  // flag rather than another term in `structural`.
+  const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
   // Nothing to offer at all: no menu. This is the PROJECT-level case the
   // corner already handled by not rendering — the tier does not admit you, or
   // the source is mirrored from upstream. Those never change while you are in
   // the file, so a permanently dead button would be furniture.
-  if (!structural && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
+  if (!structural && !parkable && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
 
   return (
     <>
@@ -3178,8 +3199,19 @@ function CellSourceMenu({
               onSelect={() => setTimesOpen(true)}
             />
           )}
-          {structural && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
+          {(structural || parkable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
             <DropdownMenuSeparator />
+          )}
+          {parkable && (
+            <RowInsertItem
+              testId="cell-menu-toggle-hidden"
+              icon={hidden
+                ? <Eye className="mr-2 h-3.5 w-3.5 shrink-0" />
+                : <EyeOff className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={hidden ? t("editor.row.showCell") : t("editor.row.hideCell")}
+              reason={hiddenDisabledReason}
+              onSelect={onToggleHidden}
+            />
           )}
           {structural && (
             <>
@@ -4764,7 +4796,7 @@ function EditorRow({
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
-    onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
+    onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -4962,6 +4994,34 @@ function EditorRow({
     ? idmlConfiguration.context.paragraphStyleId
     : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
+
+  /**
+   * AQU-1422: may this person park cells in this file, and if not, why?
+   *
+   * THE ROLE GATE IS SEPARATE from `canEditSource`, and has to be. That flag is
+   * forced false by a DCS pin for EVERY role, while `sourceReadOnlyReason`
+   * explains the pin to everyone — so mirroring the Edit-text entry's condition
+   * would have drawn "Hide cell", disabled, to a contributor on any pinned
+   * project, and the AC is that a contributor never learns hiding exists.
+   * `canPerform` reads the same role table the emitter enforces, so the button
+   * and the write cannot disagree.
+   *
+   * NOT `canEditSourceForCell`: an IDML row is parkable. Hiding does not touch
+   * the protected text or the package locator — it only stops the row being
+   * offered for translation — so the IDML refusal that stops Edit text has
+   * nothing to say here.
+   *
+   * A project-level permanent refusal (live-linked, no role) leaves the entry
+   * ABSENT rather than dead, exactly as Edit text does: neither changes while
+   * you are in the file, and this menu's house rule renders a disabled entry to
+   * EXPLAIN an inapplicable action, not to advertise one you will never have.
+   */
+  const mayParkCells = canPerform("source.cell.visibility.set", project.syncRole?.level ?? null)
+  const hiddenDisabledReason = canEditSource ? null : sourceReadOnlyReason
+  const cellHidden = cell.hidden === true
+  const onToggleHidden = mayParkCells && canEditSource && onSetCellHidden
+    ? () => onSetCellHidden(cell.id, !cellHidden)
+    : undefined
 
   // AQU-1068 item 5: the source cell's menu. The row's own reasons arrived as
   // strings; the actions come from context (stable for the whole file), and
@@ -6506,6 +6566,11 @@ function EditorRow({
         // reason as the line above: the ring it draws is the same gold as
         // multi-select's, so a class check cannot tell the two apart.
         data-queue-row={isQueueRow ? "true" : undefined}
+        // AQU-1422: a parked row only ever REACHES the table when its source
+        // editor has "Show hidden cells" on — the display list drops it for
+        // everyone else — so this attribute doubles as the assertion that the
+        // reveal worked, and a class check could not (dimming is opacity).
+        data-cell-hidden={cellHidden ? "true" : undefined}
         tabIndex={0}
         aria-label={t("editor.row.cellAria", { ref: cellRef })}
         className={cn(
@@ -6550,6 +6615,12 @@ function EditorRow({
           // pulsing inset ring anchored to the exact row makes progress evident
           // regardless of existing text or whether the action rail is hovered.
           isLoading && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
+          // AQU-1422: a revealed parked row reads as present-but-inactive.
+          // Opacity rather than a ring or a tint: every ring above means "this
+          // row is being acted on", and hidden is the opposite of that. Kept
+          // above the ~0.5 floor where text stops meeting contrast — it still
+          // has to be readable to be brought back deliberately.
+          cellHidden && "opacity-60",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
@@ -6805,6 +6876,12 @@ function EditorRow({
               onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
               removeDisabledReason={removeReason}
               timestamps={timestamps}
+              // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
+              // the role gate (absent ⇒ no entry at all); the reason is the DCS
+              // pin's, the same one Edit text shows.
+              hidden={cellHidden}
+              onToggleHidden={onToggleHidden}
+              hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
             />
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
                 mirrors the target column's header lane, and that mirror is what
@@ -6845,6 +6922,21 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              {/* AQU-1422: the eye-off badge. Only ever rendered on a row that
+                  reached the table while parked, which only happens for a
+                  source editor with "Show hidden cells" on — so it needs no
+                  permission check of its own. */}
+              {cellHidden && (
+                <AppTooltip content={t("editor.row.hiddenBadgeTooltip")}>
+                  <span
+                    data-testid="source-cell-hidden-badge"
+                    aria-label={t("editor.row.hiddenBadgeAria")}
+                    className="flex shrink-0 items-center"
+                  >
+                    <EyeOff className="h-3.5 w-3.5" />
+                  </span>
+                </AppTooltip>
+              )}
               <SourceTagChips metadata={cell.metadata} />
               <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
             </div>

@@ -131,6 +131,17 @@ export interface EditorActionsContextValue {
   onInsertCellBeside?: (cellId: string, position: "above" | "below") => void
   /** Take this cell out, after the confirmation its inventory earns. */
   onRemoveCell?: (cellId: string) => void
+  /**
+   * AQU-1422: park this cell, or bring it back. The reversible sibling of
+   * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no
+   * Maintainer: the source text, every lane's translation, recordings, comments
+   * and validations are all still there and come back untouched.
+   *
+   * Absent ⇒ this person may not park cells here at all (the same gate as
+   * "Edit text": Project Lead and up on a cloud project whose source is neither
+   * live-linked nor DCS-pinned).
+   */
+  onSetCellHidden?: (cellId: string, hidden: boolean) => void
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

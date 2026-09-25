@@ -22,6 +22,7 @@
 // Auth: sync-token JWT scoped to projectId.
 
 import { verifyTokenForProject } from "../auth"
+import { visibleLanesForRead } from "./lane-read-wall"
 import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from "../lib/confidence/propagate-health"
@@ -29,6 +30,8 @@ import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from ".
 export interface HealthRollupEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730. Unset locally and in e2e. */
+  LANE_READ_WALL?: string
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/health-rollup$/
@@ -74,19 +77,22 @@ async function loadFileCellsForRollup(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  targetLang: string,
 ): Promise<CellRow[]> {
+  // One target lane. Joining every target row duplicated a verse that had
+  // two translations and let a hidden lane change the score.
   const sql =
     "SELECT s.cell_id AS cell_id, s.value AS source_text, " +
     "COALESCE(t.value, '') AS target_text, COALESCE(t.validated, 0) AS validated " +
     "FROM cells s " +
     "LEFT JOIN cells t " +
     "  ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-    "  AND t.cell_id = s.cell_id AND t.side = 'target' " +
+    "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
     "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
     "LIMIT ?"
   const res = await db
     .prepare(sql)
-    .bind(projectId, fileId, MAX_FILE_CELLS)
+    .bind(targetLang, projectId, fileId, MAX_FILE_CELLS)
     .all<CellRow>()
   return res.results ?? []
 }
@@ -101,7 +107,7 @@ async function computeFileHealth(
   fileId: string,
   opts: { perHopDecay: number; maxHops: number; topK: number; targetLang: string },
 ): Promise<{ health: number; cellCount: number }> {
-  const rawCells = await loadFileCellsForRollup(db, verifiedProjectId, fileId)
+  const rawCells = await loadFileCellsForRollup(db, verifiedProjectId, fileId, opts.targetLang)
 
   // Only translated cells participate (untranslated = not started, not unhealthy).
   const cells = rawCells.filter((c) => c.target_text.trim() !== "")
@@ -143,6 +149,35 @@ async function computeFileHealth(
     sum += health.get(node.id) ?? 0
   }
   return { health: Math.round(sum / nodes.length), cellCount: nodes.length }
+}
+
+/**
+ * Lanes whose translations may enter the score.
+ * Wall off, Maintainer, and platform: the requested lane, or `''` when the
+ * card does not name one. Below Maintainer with the wall on: granted legacy
+ * tags only. A requested tag outside that set scores as no cells.
+ */
+async function laneTagsToScore(
+  env: HealthRollupEnv,
+  projectId: string,
+  claims: Parameters<typeof visibleLanesForRead>[1],
+  requestedLane: string | null,
+): Promise<string[]> {
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (visible === null) return [requestedLane ?? ""]
+  if (!env.AQUILLA_PG || visible.size === 0) return []
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT id, legacy_tag FROM lanes WHERE project_id = ? AND role = 'target'`,
+  )
+    .bind(projectId)
+    .all<{ id: string; legacy_tag: string | null }>()
+  const tags = new Set<string>()
+  for (const row of results ?? []) {
+    if (!visible.has(row.id)) continue
+    tags.add(row.legacy_tag ?? "")
+  }
+  if (requestedLane !== null) return tags.has(requestedLane) ? [requestedLane] : []
+  return [...tags]
 }
 
 export async function handleHealthRollupRequest(
@@ -193,39 +228,42 @@ export async function handleHealthRollupRequest(
   const startedAt = Date.now()
   // Optional target-language lane ('' = the single-lane default). Scopes
   // neighbor retrieval so multi-lane projects don't mix languages (AQU-1005).
-  const opts = {
-    perHopDecay,
-    maxHops,
-    topK: DEFAULT_TOP_K,
-    targetLang: url.searchParams.get("lane") ?? "",
-  }
+  // The cell load uses the same lane. The project card omits `lane`, so a
+  // restricted caller is scored once per granted lane and the ring is the
+  // weighted mean of those scores. A requested lane they were not granted
+  // contributes nothing.
+  const requestedLane = url.searchParams.get("lane")
+  const laneTags = await laneTagsToScore(env, projectId, auth.claims, requestedLane)
+  const propagation = { perHopDecay, maxHops, topK: DEFAULT_TOP_K }
 
   const fileHealth: Record<string, number> = {}
   let totalCells = 0
   let projectHealthSum = 0
 
+  const scoreFile = async (fileId: string) => {
+    let weighted = 0
+    let cells = 0
+    for (const tag of laneTags) {
+      const result = await computeFileHealth(env.AQUILLA_PG!, verifiedProjectId, fileId, {
+        ...propagation,
+        targetLang: tag,
+      })
+      weighted += result.health * result.cellCount
+      cells += result.cellCount
+    }
+    return { health: cells > 0 ? Math.round(weighted / cells) : 0, cellCount: cells }
+  }
+
   if (filterFileId) {
-    // Single-file rollup.
-    const { health, cellCount } = await computeFileHealth(
-      env.AQUILLA_PG,
-      verifiedProjectId,
-      filterFileId,
-      opts,
-    )
+    const { health, cellCount } = await scoreFile(filterFileId)
     fileHealth[filterFileId] = health
     totalCells = cellCount
     projectHealthSum = health * cellCount
   } else {
-    // Project-wide rollup: iterate all files.
     const fileIds = await loadProjectFiles(env.AQUILLA_PG, verifiedProjectId)
     await Promise.all(
       fileIds.map(async (fileId) => {
-        const { health, cellCount } = await computeFileHealth(
-          env.AQUILLA_PG!,
-          verifiedProjectId,
-          fileId,
-          opts,
-        )
+        const { health, cellCount } = await scoreFile(fileId)
         fileHealth[fileId] = health
         totalCells += cellCount
         projectHealthSum += health * cellCount

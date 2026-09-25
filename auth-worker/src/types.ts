@@ -106,6 +106,12 @@ export interface Env {
   DISCORD_INVITE_URL?: string
 
   ENVIRONMENT?: string
+  /**
+   * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
+   * members below Maintainer. Set on deployed dev and prod after the lane
+   * backfill's grant phase. Local and e2e leave it unset.
+   */
+  LANE_READ_WALL?: string
 
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
@@ -396,8 +402,8 @@ export interface SyncTokenClaims {
    * gates target-side writes + validate/unvalidate against these scopes.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
-  /** AQU-730: additive per-lane role grants. ABSENT = no grants. Each entry
-   *  grants access to `lane` at `level`. */
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. Each entry grants that lane at `level`. */
   laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number

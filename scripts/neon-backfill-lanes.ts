@@ -1,7 +1,9 @@
 #!/usr/bin/env tsx
-// AQU-1240 (v2) slice 4 — backfill the `lanes` table and populate lane_id on the
-// eight target_lang-carrying tables. Additive and non-destructive: target_lang
-// is left untouched; this only fills the new lane_id columns.
+// AQU-1240 (v2) slice 4 + AQU-730 grant phase — backfill the `lanes` table,
+// populate lane_id on the eight target_lang-carrying tables, then write one
+// project_member_lane_roles row per person per lane they can already see.
+// Additive and non-destructive: target_lang is left untouched; this only fills
+// the new lane_id columns and inserts missing grants.
 //
 // Per project:
 //   1. Derive the lane set (pure logic in src/lib/lanes/backfill-plan.ts):
@@ -11,6 +13,14 @@
 //   3. UPDATE ... FROM lanes to set lane_id on rows where it IS NULL, joining
 //      source rows -> the source lane and target rows -> the lane whose
 //      legacy_tag = target_lang.
+//   4. Grant phase (src/lib/lanes/grant-backfill.ts). Role comes from
+//      resolveProjectRoleShared, including archived projects so a later
+//      unarchive still has rows. Maintainer (600), platform, and anyone below
+//      Viewer get no rows. No kind='lane' scopes → one row per current target
+//      lane. Scopes match a lane only when the scope equals that lane's
+//      legacy_tag or its name. Zero matches or two matches: skip that scope
+//      and print a warning. INSERT ... ON CONFLICT DO NOTHING, so a re-run
+//      does not overwrite a grant a person changed later.
 //
 // Idempotent + resumable: upserts skip existing lanes; every UPDATE is guarded
 // by `lane_id IS NULL`, so a re-run only touches unfinished rows and a run
@@ -19,6 +29,12 @@
 // resolves legacy '' events.
 //
 // DRY RUN BY DEFAULT — prints the plan and does not write. Pass --apply to write.
+// A dry run before lanes exist describes grants by name and tag and says the
+// ids are assigned on apply. It does not invent ids.
+//
+// Optional ADMIN_EMAILS (comma-separated). When set, those accounts resolve as
+// platform and get no grant rows. Unset is safe: a platform admin who is also
+// a member may receive rows, and the wall still shows them every lane.
 //
 //   pnpm neon:backfill:lanes:dev              # dry run against dev
 //   pnpm neon:backfill:lanes:dev --apply      # write to dev
@@ -26,9 +42,12 @@
 //
 // Flags: --apply  --project <id>  --limit <n>  --verbose
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
-import { makePostgres } from '../db/shim/postgres'
+import { resolveProjectRoleIncludingArchivedShared } from '../db/shared/project-roles'
+import { makePostgres, type AquillaDb } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
+import { planLaneGrants } from '../src/lib/lanes/grant-backfill'
 import { newLaneId } from '../src/lib/lanes/lane-id'
+import type { LaneIdentity } from '../src/lib/lanes/read-wall'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -109,6 +128,40 @@ const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, name, lang_code,
    VALUES (?, ?, 'target', ?, ?, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`
 
+const TARGET_LANES = `SELECT id, name, legacy_tag
+  FROM lanes
+  WHERE project_id = ? AND role = 'target'
+  ORDER BY position, id`
+
+const GRANT_CANDIDATES = `SELECT DISTINCT u.user_id, usr.email
+  FROM (
+    SELECT user_id FROM project_members WHERE project_id = ?
+    UNION
+    SELECT gm.user_id
+      FROM group_project_grants gpg
+      JOIN group_members gm ON gm.group_id = gpg.group_id
+     WHERE gpg.project_id = ?
+    UNION
+    SELECT created_by AS user_id FROM projects WHERE id = ?
+  ) u
+  LEFT JOIN users usr ON usr.id = u.user_id`
+
+const LANE_SCOPES = `SELECT user_id, value
+  FROM project_member_scopes
+  WHERE project_id = ? AND kind = 'lane'`
+
+const EXISTING_GRANTS = `SELECT user_id, lane
+  FROM project_member_lane_roles
+  WHERE project_id = ?`
+
+const INSERT_GRANT = `INSERT INTO project_member_lane_roles
+    (project_id, user_id, lane, role_level)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT (project_id, user_id, lane) DO NOTHING`
+
+const MAINTAINER = 600
+const VIEWER = 100
+
 // Distinct target_lang values that actually appear in the data (target side).
 // One statement, 8 project_id binds; the non-cells tables are tiny and cells is
 // index-covered by (project_id, file_id, side, target_lang).
@@ -130,6 +183,171 @@ type ProjectRow = {
   target_lanes: unknown
 }
 
+type GrantTotals = {
+  planned: number
+  already: number
+  inserted: number
+  skipped: number
+  lockedOut: number
+}
+
+function emptyGrants(): GrantTotals {
+  return { planned: 0, already: 0, inserted: 0, skipped: 0, lockedOut: 0 }
+}
+
+async function requireBackfillTables(db: AquillaDb): Promise<void> {
+  for (const table of ['lanes', 'project_member_lane_roles', 'project_member_scopes'] as const) {
+    try {
+      await db.prepare(`SELECT 1 FROM ${table} LIMIT 0`).first()
+    } catch {
+      throw new Error(
+        `${table} is missing. Apply 0091_project_member_lane_roles and 0096_lanes before this backfill.`,
+      )
+    }
+  }
+}
+
+function unionTargetLanes(
+  existing: LaneIdentity[],
+  plan: readonly LaneRolePlan[],
+): { lanes: LaneIdentity[]; missing: number } {
+  const byTag = new Map<string, LaneIdentity>()
+  for (const lane of existing) byTag.set(lane.legacyTag ?? '', lane)
+  let missing = 0
+  for (const planned of plan) {
+    if (planned.role !== 'target') continue
+    const tag = planned.legacyTag ?? ''
+    if (byTag.has(tag)) continue
+    missing++
+    byTag.set(tag, {
+      id: `planned:${tag}`,
+      name: planned.name,
+      legacyTag: planned.legacyTag,
+    })
+  }
+  const lanes = [...byTag.values()].sort((a, b) => {
+    const tag = (a.legacyTag ?? '').localeCompare(b.legacyTag ?? '')
+    return tag !== 0 ? tag : a.id.localeCompare(b.id)
+  })
+  return { lanes, missing }
+}
+
+async function backfillGrants(
+  db: AquillaDb,
+  projectId: string,
+  plan: readonly LaneRolePlan[],
+  apply: boolean,
+  verbose: boolean,
+  adminEmails: string | undefined,
+): Promise<GrantTotals> {
+  const totals = emptyGrants()
+  const { results: laneRows } = await db
+    .prepare(TARGET_LANES)
+    .bind(projectId)
+    .all<{ id: string; name: string; legacy_tag: string | null }>()
+  const existing: LaneIdentity[] = laneRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    legacyTag: row.legacy_tag,
+  }))
+  const { lanes, missing } = unionTargetLanes(existing, plan)
+  if (apply && missing > 0) {
+    throw new Error(
+      `refusing to grant lanes that were not inserted for ${projectId} (${missing} still unassigned)`,
+    )
+  }
+
+  const { results: candidates } = await db
+    .prepare(GRANT_CANDIDATES)
+    .bind(projectId, projectId, projectId)
+    .all<{ user_id: string | number; email: string | null }>()
+  const { results: scopeRows } = await db
+    .prepare(LANE_SCOPES)
+    .bind(projectId)
+    .all<{ user_id: string | number; value: string }>()
+  const scopesByUser = new Map<string, string[]>()
+  for (const row of scopeRows) {
+    const id = String(row.user_id)
+    const list = scopesByUser.get(id) ?? []
+    list.push(row.value)
+    scopesByUser.set(id, list)
+  }
+  const { results: grantRows } = await db
+    .prepare(EXISTING_GRANTS)
+    .bind(projectId)
+    .all<{ user_id: string | number; lane: string }>()
+  const already = new Set(grantRows.map((row) => `${String(row.user_id)}:${row.lane}`))
+
+  const lines: string[] = []
+  for (const candidate of candidates) {
+    const userId = String(candidate.user_id)
+    const resolution = await resolveProjectRoleIncludingArchivedShared(
+      db,
+      { id: userId, email: candidate.email },
+      projectId,
+      adminEmails,
+    )
+    if (
+      !resolution ||
+      resolution.source === 'platform' ||
+      resolution.level >= MAINTAINER ||
+      resolution.level < VIEWER
+    ) {
+      continue
+    }
+    const laneScopes = scopesByUser.get(userId) ?? []
+    const planned = planLaneGrants({
+      roleLevel: resolution.level,
+      laneScopes,
+      lanes,
+    })
+    if (laneScopes.length > 0 && planned.grants.length === 0) {
+      totals.lockedOut++
+      lines.push(
+        `  WARN ${projectId} user ${userId} role ${resolution.level}: no target lane granted`,
+      )
+    }
+    for (const skip of planned.skipped) {
+      totals.skipped++
+      lines.push(
+        `  WARN ${projectId} user ${userId} scope ${JSON.stringify(skip.scope)}: ${skip.reason}`,
+      )
+    }
+    for (const grant of planned.grants) {
+      totals.planned++
+      const lane = lanes.find((item) => item.id === grant.laneId)
+      if (verbose) {
+        const label = lane ? `${lane.name} ${lane.legacyTag === '' ? '[∅]' : `[${lane.legacyTag}]`}` : grant.laneId
+        lines.push(`  grant user ${userId} role ${resolution.level} -> ${label}`)
+      }
+      if (already.has(`${userId}:${grant.laneId}`)) {
+        totals.already++
+        continue
+      }
+      if (!apply) continue
+      if (grant.laneId.startsWith('planned:')) {
+        throw new Error(`refusing to write an unassigned lane id for ${projectId}`)
+      }
+      const written = await db
+        .prepare(INSERT_GRANT)
+        .bind(projectId, userId, grant.laneId, grant.level)
+        .run()
+      totals.inserted += written.meta?.changes ?? 0
+    }
+  }
+
+  if (verbose || !apply || lines.some((line) => line.includes('WARN'))) {
+    const idNote = missing > 0 ? '; lane ids assigned on apply' : ''
+    console.log(
+      `  grants ${projectId}: ${totals.planned - totals.already} new, ${totals.already} already present${idNote}` +
+        (totals.skipped > 0 ? `; ${totals.skipped} scope(s) skipped` : '') +
+        (totals.lockedOut > 0 ? `; ${totals.lockedOut} member(s) would see no target lane` : ''),
+    )
+    for (const line of lines) console.log(line)
+  }
+  return totals
+}
+
 async function main(): Promise<void> {
   const apply = process.argv.includes('--apply')
   const verbose = process.argv.includes('--verbose')
@@ -143,6 +361,7 @@ async function main(): Promise<void> {
     // Prod-safety: bound each statement and never wait long on a lock.
     await db.exec(`SET statement_timeout = '${statementTimeout}'`)
     await db.exec(`SET lock_timeout = '${lockTimeout}'`)
+    await requireBackfillTables(db)
 
     let sql = `SELECT p.id, ps.source_language, ps.target_language, ps.target_lanes
                  FROM projects p
@@ -164,6 +383,8 @@ async function main(): Promise<void> {
     let done = 0
     let lanesPlanned = 0
     const rowsUpdated: Record<string, number> = {}
+    const grants = emptyGrants()
+    const adminEmails = process.env.ADMIN_EMAILS
     for (const p of projects) {
       const { results: tagRows } = await db
         .prepare(DISTINCT_TAGS)
@@ -208,6 +429,13 @@ async function main(): Promise<void> {
         rowsUpdated['cells'] = (rowsUpdated['cells'] ?? 0) + (cells.meta?.changes ?? 0)
       }
 
+      const projectGrants = await backfillGrants(db, p.id, plan, apply, verbose, adminEmails)
+      grants.planned += projectGrants.planned
+      grants.already += projectGrants.already
+      grants.inserted += projectGrants.inserted
+      grants.skipped += projectGrants.skipped
+      grants.lockedOut += projectGrants.lockedOut
+
       done++
       if (done % 50 === 0 || done === projects.length) {
         console.log(`lanes backfill: ${done}/${projects.length} projects`)
@@ -220,8 +448,20 @@ async function main(): Promise<void> {
         .first<{ n: number; projects: number }>()
       console.log(`lanes backfill complete: ${total?.n} lanes across ${total?.projects} projects`)
       console.log('rows populated:', JSON.stringify(rowsUpdated))
+      console.log(
+        `grants inserted: ${grants.inserted} (${grants.already} already present, left as-is)`,
+      )
     } else {
       console.log(`DRY RUN complete: would create ~${lanesPlanned} lanes (existing skipped on apply)`)
+      console.log(
+        `DRY RUN grants: ${grants.planned - grants.already} new, ${grants.already} already present`,
+      )
+    }
+    if (grants.skipped > 0 || grants.lockedOut > 0) {
+      console.log(
+        `WARNING: ${grants.skipped} lane scope(s) skipped, ${grants.lockedOut} member(s) would see no target lane. ` +
+          'Read those lines before deploying the read wall.',
+      )
     }
   } finally {
     await db.close()

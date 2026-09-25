@@ -137,6 +137,8 @@ declare global {
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
+      /** AQU-730. Unset locally and in e2e; dev and prod set it in wrangler. */
+      LANE_READ_WALL?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
       /** Exact Worker namespace selected by the deployment profile. */

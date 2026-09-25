@@ -29,6 +29,10 @@ function assignmentHref(a: MyOrgAssignment): string {
     : base
 }
 
+/** Stable identities so a pending/empty render never re-triggers memos. */
+const NO_ROWS: MyOrgAssignment[] = []
+const NO_LANE_LABELS = new Map<string, string>()
+
 function progressPct(a: MyOrgAssignment): number {
   return a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
 }
@@ -49,24 +53,37 @@ export function AssignedToMe() {
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
 
-  const [rows, setRows] = useState<MyOrgAssignment[]>([])
-  const [defaultLaneLabelByProjectId, setDefaultLaneLabelByProjectId] = useState<Map<string, string>>(
-    () => new Map(),
-  )
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  /**
+   * AQU-1173: the fetch result is stored together with the `(jwt, org)` it
+   * answers for, and `loading` / `rows` / `error` are DERIVED from that
+   * pairing instead of living in states of their own.
+   *
+   * Held separately, `loading` lagged one commit behind `activeOrgId`:
+   * OrgProvider resolves the active org after mount, so the table first
+   * mounted carrying the previous `loading === false` and rendered the
+   * settled "no assignments" table for one frame before the effect set
+   * loading back to true. Deriving closes that window structurally —
+   * `loading` flips in the same render `activeOrgId` does — so the table
+   * never shows a settled state for an org whose fetch has not returned.
+   */
+  const [resolved, setResolved] = useState<{
+    jwt: string
+    orgId: number
+    rows: MyOrgAssignment[]
+    laneLabels: Map<string, string>
+    error: string | null
+  } | null>(null)
   const laneFallbackLabel = t("org.projectOverview.laneDefaultFallback")
 
+  const current = resolved?.jwt === jwt && resolved?.orgId === activeOrgId ? resolved : null
+  const loading = jwt != null && activeOrgId != null && current === null
+  const rows = current?.rows ?? NO_ROWS
+  const defaultLaneLabelByProjectId = current?.laneLabels ?? NO_LANE_LABELS
+  const error = current?.error ?? null
+
   useEffect(() => {
-    if (!jwt || activeOrgId == null) {
-      setRows([])
-      setDefaultLaneLabelByProjectId(new Map())
-      setLoading(false)
-      return
-    }
+    if (!jwt || activeOrgId == null) return
     let cancelled = false
-    setLoading(true)
-    setError(null)
     void (async () => {
       try {
         const [all, portfolio] = await Promise.all([
@@ -74,18 +91,22 @@ export function AssignedToMe() {
           getPortfolio(jwt, activeOrgId),
         ])
         if (cancelled) return
-        const labels = new Map(
-          portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""]),
-        )
-        // Pair rows + loading so org-assigned-table never mounts empty while
-        // the fetch result is already in hand (avoids a race with content asserts).
-        setDefaultLaneLabelByProjectId(labels)
-        setRows(all)
-        setLoading(false)
+        setResolved({
+          jwt,
+          orgId: activeOrgId,
+          rows: all,
+          laneLabels: new Map(portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""])),
+          error: null,
+        })
       } catch (e) {
         if (cancelled) return
-        setError(e instanceof Error ? e.message : String(e))
-        setLoading(false)
+        setResolved({
+          jwt,
+          orgId: activeOrgId,
+          rows: [],
+          laneLabels: new Map(),
+          error: e instanceof Error ? e.message : String(e),
+        })
       }
     })()
     return () => { cancelled = true }

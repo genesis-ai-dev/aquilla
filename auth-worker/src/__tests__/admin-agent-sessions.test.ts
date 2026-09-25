@@ -24,7 +24,7 @@ describe("/api/v2/admin/agent-sessions", () => {
     // Seed agent sessions
     await env.AQUILLA_PG.prepare(
       `INSERT INTO agent_sessions (session_id, project_id, user_id, title, convo, created_at, updated_at, untrusted_active)
-       VALUES 
+       VALUES
          ('session1', 'proj1', 1, 'First session', '[]', 1000, 3000, false),
          ('session2', 'proj1', 1, 'Second session', '[{"role":"user","content":"hello"}]', 2000, 4000, false),
          ('session3', 'proj2', 2, 'Alice session', '[{"role":"user","content":"test"},{"role":"assistant","content":"response"}]', 3000, 5000, true)`,
@@ -33,7 +33,7 @@ describe("/api/v2/admin/agent-sessions", () => {
     // Seed agent runs
     await env.AQUILLA_PG.prepare(
       `INSERT INTO agent_runs (run_id, project_id, user_id, username, prompt, model, status, prompt_tokens, completion_tokens, cost_cents, steps, staged_count, started_at, ended_at, session_id)
-       VALUES 
+       VALUES
          ('run1', 'proj1', 1, 'wendi', 'test prompt', 'claude-3', 'ok', 100, 50, 10, 2, 5, 1500, 1600, 'session1'),
          ('run2', 'proj1', 1, 'wendi', 'another prompt', 'claude-3', 'error', 200, 100, 20, 3, 0, 2500, 2600, 'session2'),
          ('run3', 'proj2', 2, 'alice', 'alice prompt', 'claude-3', 'ok', 150, 75, 15, 2, 3, 3500, 3600, 'session3')`,

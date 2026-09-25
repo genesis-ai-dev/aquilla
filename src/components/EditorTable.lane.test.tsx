@@ -206,8 +206,11 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     emitCellValidate.mockClear()
     renderTable("fr", [{ kind: "lane", value: "es" }])
 
-    const button = await screen.findByRole("button", { name: /Click to validate/ })
-    expect(button).toBeDisabled()
+    const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
+    expect(button.getAttribute("aria-label")).not.toMatch(/click/i)
+    // aria-disabled rather than disabled, so its hover can still say why
+    // (2026-09-23). The click must still do nothing.
+    expect(button).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })

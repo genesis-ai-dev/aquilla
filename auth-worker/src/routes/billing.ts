@@ -1,3 +1,4 @@
+import { reconcileWorkspaceLifecycle, workspaceLifecycleEvents } from '../lib/billing/workspace-lifecycle'
 // Org billing — Field Plan checkout, word add-ons, customer portal, Stripe webhook.
 //
 // Authenticated org routes require maintainer+ (600). The webhook is public
@@ -5,7 +6,8 @@
 
 import { Hono } from "hono"
 import type { Context } from "hono"
-import { z } from "zod"
+import type { z } from "zod"
+import { checkoutSchema } from "../lib/billing/checkout-input"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { ROLE } from "../types"
@@ -19,7 +21,7 @@ import {
 import { FIELD_PLAN, resolveFieldPlan } from "../lib/billing/plans"
 import { loadPlatformSettings } from "../lib/platform-settings"
 import {
-  addonPriceId,
+  checkoutEnabled,
   createCheckoutSession,
   createPortalSession,
   fieldPriceId,
@@ -29,6 +31,11 @@ import {
   verifyStripeSignature,
 } from "../lib/billing/stripe"
 import { readOrgBilling, readWordSnapshot } from "../lib/billing/words"
+
+import { readBillingOffers, unavailableOffers } from "../lib/billing/catalog"
+
+import { workspaceCheckoutRehearsalEnabled } from "../lib/billing/workspace-checkout"
+import { reconcileWorkspacePayment } from "../lib/billing/workspace-payment"
 
 const billing = new Hono<AuthHonoEnv>()
 
@@ -45,6 +52,22 @@ async function requireMaintainer(c: Context<AuthHonoEnv>, orgId: number) {
   if (role == null || role < ROLE.MAINTAINER) return false
   return true
 }
+
+billing.get("/orgs/:orgId/billing/offers", authMiddleware, async (c) => {
+  const rawId = c.req.param("orgId") ?? ""
+  const orgId = Number(rawId)
+  if (!/^\d+$/.test(rawId) || !Number.isSafeInteger(orgId) || orgId < 1) {
+    return c.json({ error: "invalid orgId" }, 400)
+  }
+  if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
+  c.header("Cache-Control", "private, no-store")
+  try {
+    return c.json(await readBillingOffers(c.env))
+  } catch {
+    // Stripe errors can contain account details; never echo them to customers.
+    return c.json(unavailableOffers())
+  }
+})
 
 billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   const orgId = parseInt(c.req.param("orgId") ?? "", 10)
@@ -74,10 +97,10 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
     includedCredits: snapshot.includedCredits,
     languageCount: snapshot.languageCount,
     wordsPerCredit: snapshot.wordsPerCredit,
-    canSubscribe: (snapshot.plan === "none" || snapshot.plan === "explore") && stripeConfigured(c.env),
-    canBuyAddon: snapshot.plan === "field" && !snapshot.talkToUs && stripeConfigured(c.env),
+    canSubscribe: (snapshot.plan === "none" || snapshot.plan === "explore") && checkoutEnabled(c.env),
+    canBuyAddon: false,
     canManage: Boolean(snapshot.stripeCustomerId) && stripeConfigured(c.env),
-    checkoutEnabled: false,
+    checkoutEnabled: checkoutEnabled(c.env),
     stripeConfigured: stripeConfigured(c.env),
     fieldPlan: {
       name: catalog.name,
@@ -96,11 +119,6 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   })
 })
 
-const checkoutSchema = z.object({
-  kind: z.enum(["field", "addon"]),
-  packs: z.number().int().min(1).max(20).optional(),
-})
-
 billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
   const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
@@ -113,6 +131,14 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     return c.json({ error: "invalid body" }, 400)
   }
 
+  // Provisioning Stripe must never silently activate customer purchases.
+  if (!checkoutEnabled(c.env)) {
+    return c.json({ error: "checkout_disabled", message: "Paid subscriptions are coming soon." }, 503)
+  }
+  if (body.kind === "addon") {
+    return c.json({ error: "addons_unavailable", message: "Contact us to discuss additional capacity." }, 409)
+  }
+
   const catalog = resolveFieldPlan((await loadPlatformSettings(c.env)).settings.fieldPlan, c.env)
   const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId, catalog)
   if (snapshot.plan === "enterprise") {
@@ -121,30 +147,21 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
   if (body.kind === "field" && snapshot.plan === "field") {
     return c.json({ error: "already_subscribed", message: "This organization is already on the Field Plan." }, 409)
   }
-  if (body.kind === "addon" && snapshot.plan !== "field") {
-    return c.json({ error: "not_subscribed", message: "Buy the Field Plan before adding word packs." }, 409)
-  }
-  if (body.kind === "addon" && snapshot.talkToUs) {
-    return c.json({ error: "talk_to_us", message: "This volume needs an Enterprise conversation." }, 409)
-  }
 
   const user = c.get("user")
   try {
     const session = await createCheckoutSession(c.env, {
       customerId: snapshot.stripeCustomerId ?? undefined,
       customerEmail: snapshot.stripeCustomerId ? undefined : user.email,
-      priceId:
-        body.kind === "field"
-          ? (catalog.stripePriceField ?? fieldPriceId(c.env))
-          : (catalog.stripePriceAddon ?? addonPriceId(c.env)),
-      mode: body.kind === "field" ? "subscription" : "payment",
-      quantity: body.kind === "addon" ? (body.packs ?? 1) : 1,
+      priceId: fieldPriceId(c.env, body.billingInterval),
+      mode: "subscription",
+      quantity: 1,
       successUrl: billingReturnUrl(c.env, orgId, "?checkout=success"),
       cancelUrl: billingReturnUrl(c.env, orgId, "?checkout=cancel"),
       metadata: {
         orgId: String(orgId),
         kind: body.kind,
-        packs: String(body.kind === "addon" ? (body.packs ?? 1) : 0),
+        billingInterval: body.billingInterval,
       },
     })
     if (!session.url) return c.json({ error: "stripe_error", message: "Checkout session missing URL" }, 502)
@@ -195,7 +212,7 @@ billing.post("/billing/webhook", async (c) => {
     return c.json({ error: "webhook_unconfigured" }, 503)
   }
 
-  let event: { id?: string; type?: string; data?: { object?: Record<string, unknown> } }
+  let event: { id?: string; type?: string; created?: number; livemode?: boolean; account?: string; data?: { object?: Record<string, unknown> } }
   try {
     event = JSON.parse(payload) as typeof event
   } catch {
@@ -203,11 +220,14 @@ billing.post("/billing/webhook", async (c) => {
   }
 
   const obj = event.data?.object ?? {}
+  const metadata = obj.metadata as Record<string, unknown> | undefined
+  const invoiceMetadata = (obj.parent as { subscription_details?: { metadata?: Record<string, unknown> } } | undefined)?.subscription_details?.metadata
+  const legacyInvoiceMetadata = (obj.subscription_details as { metadata?: Record<string, unknown> } | undefined)?.metadata
   const type = event.type ?? ""
   const eventId = typeof event.id === "string" ? event.id : null
 
-  const handled = ["checkout.session.completed", "customer.subscription.updated",
-    "customer.subscription.deleted", "invoice.paid"].includes(type)
+  const handled = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "customer.subscription.updated",
+    "customer.subscription.deleted", "invoice.paid", "invoice.payment_failed"].includes(type)
   if (handled && !eventId?.trim()) {
     return c.json({ error: "missing_event_id" }, 400)
   }
@@ -219,6 +239,40 @@ billing.post("/billing/webhook", async (c) => {
   }
 
   try {
+    // Stored identities still isolate new plans if later events omit metadata.
+    const subscriptionId = type.startsWith("customer.subscription.") ? obj.id
+      : typeof obj.subscription === "string" ? obj.subscription
+      : (obj.parent as { subscription_details?: { subscription?: unknown } } | undefined)
+        ?.subscription_details?.subscription
+    const markedWorkspace = [metadata, invoiceMetadata, legacyInvoiceMetadata]
+      .some(meta => meta?.kind === "workspace_plan_rehearsal" || meta?.checkoutAttemptId != null)
+    const storedWorkspace = !markedWorkspace && (
+      (type.startsWith("checkout.session.") && typeof obj.id === "string"
+        && await c.env.AQUILLA_PG.prepare(
+          "SELECT id FROM workspace_checkout_attempts WHERE session_id = ?",
+        ).bind(obj.id).first())
+      || (typeof subscriptionId === "string" && await c.env.AQUILLA_PG.prepare(
+        "SELECT org_id FROM workspace_plan_entitlements WHERE stripe_subscription_id = ?",
+      ).bind(subscriptionId).first())
+    )
+    if (markedWorkspace || storedWorkspace) {
+      if (!secret || !workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) {
+        return c.json({ error: "workspace_activation_disabled" }, 503)
+      }
+      if (workspaceLifecycleEvents.includes(type)) {
+        const applied = await reconcileWorkspaceLifecycle(c.env, {
+          id: eventId!, type, created: event.created!, livemode: event.livemode!, account: event.account,
+        }, obj)
+        return c.json(applied ? { ok: true } : { ok: true, duplicate: true })
+      }
+      if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(type)) {
+        return c.json({ error: "workspace_lifecycle_not_ready" }, 503)
+      }
+      const applied = await reconcileWorkspacePayment(c.env, {
+        id: eventId!, type, created: event.created!, livemode: event.livemode!, account: event.account,
+      }, obj)
+      return c.json(applied ? { ok: true } : { ok: true, duplicate: true })
+    }
     if (type === "checkout.session.completed") {
       const orgId = orgIdFromMetadata(obj.metadata)
       if (orgId == null) return c.json({ ok: true, ignored: "no_org" })

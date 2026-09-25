@@ -267,6 +267,11 @@ interface Baseline {
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
+  // AQU-490: the audio policy. Separate keys, never fallbacks for the text
+  // ones.
+  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio: string[]
+  allowSelfValidationAudio: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
   cellEditingFloor: CellEditingTier
   /** AQU-646 stage 2: may this project's timelines be restructured? */
@@ -317,6 +322,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
+    validationRoleFloorAudio: project.validationRoleFloorAudio ?? "reviewer",
+    validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
+    allowSelfValidationAudio: project.allowSelfValidationAudio ?? true,
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
     cellEditingFloor: project.cellEditingFloor ?? "none",
@@ -565,6 +573,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
+  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
+  const [validationNamedUsersAudio, setValidationNamedUsersAudio] = useState<string[]>([])
+  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState(true)
   const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
   const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
@@ -629,6 +640,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
+    setValidationRoleFloorAudio(b.validationRoleFloorAudio)
+    setValidationNamedUsersAudio(b.validationNamedUsersAudio)
+    setAllowSelfValidationAudio(b.allowSelfValidationAudio)
     setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
     setTimingLocked(b.timingLocked)
@@ -797,6 +811,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
+      validationRoleFloorAudio !== baseline.validationRoleFloorAudio ||
+      JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio) ||
+      allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
       cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
       timingLocked !== baseline.timingLocked ||
@@ -816,6 +833,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
+    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
@@ -1030,6 +1048,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio; changedFieldLabels.push("minimum role to validate recordings") }
+      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio; changedFieldLabels.push("validating your own recordings") }
       if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
@@ -1107,6 +1128,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
+        validationRoleFloorAudio,
+        validationNamedUsersAudio,
+        allowSelfValidationAudio,
         cellEditingFloor,
         allowTrackEditing,
         timingLocked,
@@ -1151,6 +1175,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
+    // AQU-490. The note directly below is about exactly this list: handleSave
+    // closes over these, so a field missing here is a field whose change the
+    // save silently never sees.
+    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     // AQU-1068. Its predecessor `allowLineCreation` was missing from this list
     // too, and the bug is invisible until you try it: handleSave closes over a
     // stale value, the diff below sees no change, `sharedUpdates` comes out
@@ -1239,7 +1267,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -2439,10 +2467,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               projectId={id}
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
-              hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
               validationRoleFloor={validationRoleFloor}
               validationNamedUsers={validationNamedUsers}
               allowSelfValidation={allowSelfValidation}
+              validationRoleFloorAudio={validationRoleFloorAudio}
+              validationNamedUsersAudio={validationNamedUsersAudio}
+              allowSelfValidationAudio={allowSelfValidationAudio}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
               // AQU-1083: the last row of the validation card. Passed as a
@@ -2464,6 +2494,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 if (u.validationRoleFloor !== undefined) setValidationRoleFloor(u.validationRoleFloor)
                 if (u.validationNamedUsers !== undefined) setValidationNamedUsers(u.validationNamedUsers)
                 if (u.allowSelfValidation !== undefined) setAllowSelfValidation(u.allowSelfValidation)
+                if (u.validationRoleFloorAudio !== undefined) setValidationRoleFloorAudio(u.validationRoleFloorAudio)
+                if (u.validationNamedUsersAudio !== undefined) setValidationNamedUsersAudio(u.validationNamedUsersAudio)
+                if (u.allowSelfValidationAudio !== undefined) setAllowSelfValidationAudio(u.allowSelfValidationAudio)
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}

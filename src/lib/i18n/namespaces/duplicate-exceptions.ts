@@ -81,12 +81,25 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
-  "audio.newVoice.kokoroLabel":
-    "Field label for the Kokoro speaker dropdown in the New voice modal — which " +
-    "built-in voice this engine should speak with. editor.navTitle.voice is the " +
-    "editor's own audio-lens tab label naming a workspace mode. A form-field " +
+  "audio.newVoice.designAccentDefault":
+    "First accent option in Voice Design — the language family with no regional " +
+    "tag, selected until the user picks a named accent. " +
+    "org.projectOverview.laneDefaultFallback is the placeholder name the org " +
+    "project overview shows for a target lane that has no name. An accent " +
+    "choice and an unnamed-lane fallback are different referents that happen " +
+    "to share the adjective and diverge in most target languages.",
+  "audio.newVoice.inworldVoiceLabel":
+    "Field label for the Inworld stock-voice dropdown in the New voice modal — " +
+    "which catalog voice this engine should speak with. editor.navTitle.voice is " +
+    "the editor's own audio-lens tab label naming a workspace mode. A form-field " +
     "label and a navigation tab are different UI roles that happen to share the " +
     "word 'Voice' and diverge in most target languages.",
+  "audio.newVoice.inworldLanguageLabel":
+    "Names the spoken language the Inworld engine should synthesize — the voice's " +
+    "language on the New voice modal, picked per target-language lane. language.label " +
+    "is the accessible name of the interface-language switcher (globe button). Two " +
+    "unrelated referents that share one English word; conflating them would " +
+    "mislabel one of the two controls.",
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +
@@ -386,6 +399,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "dialog. editor.sync.live is the websocket-connection status indicator in " +
     "the editor's sync badge. A project-linking term of art vs a connectivity " +
     "status word that happen to share the English word 'Live'.",
+  "projectSettings.create.liveModeName":
+    "The emphasized mode word spliced into projectSettings.create.liveIntro's " +
+    "running sentence as a <strong> placeholder ('…a live copy that stays " +
+    "connected…'), so it must take whatever case, gender or article agreement " +
+    "that sentence demands in the target language. editor.sync.live is the " +
+    "standalone websocket-status chip label beside a colored dot, and " +
+    "projectSettings.sourceLink.modeLive is the citation-form badge/radio name " +
+    "of the link mode. A word inside a sentence vs two standalone labels.",
   "projectSettings.section.languages":
     "Card heading for this project's target-language lanes. fileDetails.languages " +
     "is a plain data label in a file-info panel naming which languages a file " +
@@ -478,14 +499,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "field label naming what a control selects are different grammatical " +
     "roles, and several languages inflect a fallback name differently from a " +
     "field label.",
-  "org.switcher.workspaceFallback":
-    "Fallback name shown in the org switcher/breadcrumb when the active " +
-    "organization has no name yet — same role as org.breadcrumb." +
-    "organizationFallback above, for 'Workspace' instead of 'Organization'. " +
-    "onboarding.preferences.workspace.groupLabel is the settings-group HEADING " +
-    "in personal Preferences that titles the sidebar-layout/confirm-replace " +
-    "section. A fallback placeholder name and a settings-section heading are " +
-    "different grammatical roles that happen to share one English noun.",
   "org.orgHome.pendingInvitations.expiresOn":
     "Lower-case trailing clause spliced mid-sentence into a Pending-invitations " +
     "row (' · expires {date}'), read as a continuation of the sentence before " +

@@ -15,9 +15,10 @@
 import type { AquillaDb } from '../../../db/shim/postgres'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
-import { checkProjectMembership } from './membership'
-import { counts, readValidationCount, BOOK_INDEX } from './progress-read-route'
+import { checkProjectMembershipDetailed } from './membership'
+import { counts, readValidationCount, readValidationCountAudio, BOOK_INDEX } from './progress-read-route'
 import { readCountStructuralCells } from './structural-cells'
+import { resolveCorpusMarker } from './corpus-marker'
 import {
   readPlanUnitsSql,
   planUnitExistsStmt,
@@ -37,6 +38,14 @@ export interface PlanUnit {
   fileName: string
   fileRole: string | null
   fileKind: string | null
+  /**
+   * AQU-1278: the file's sidebar folder — its corpus marker, resolved the way
+   * the sidebar resolves it — so the board's in-order arrangement can group
+   * by the same folders the editor shows. Null where the file has none.
+   */
+  corpusMarker: string | null
+  /** The file's own book code, for a one-book file; lets a file-grain unit find its testament. */
+  fileBookCode: string | null
   /** '' for a file-grain unit; a Bible book code for a sub-file one. */
   sectionKey: string
   totalCount: number
@@ -44,6 +53,15 @@ export interface PlanUnit {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /**
+   * What the two audio counts are OUT OF, when that is not `totalCount`.
+   *
+   * A dubbing project records against a hidden cue sheet whose cell count is
+   * its own — see the cue-sheet note in `db/shared/plan-units.ts`. Null means
+   * the unit has no cue sheet and audio shares the text denominator, which is
+   * every unit that existed before AQU-1278.
+   */
+  audioTotalCount: number | null
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null
@@ -65,7 +83,24 @@ export interface PlanRouteEnv {
   SYNC_SECRET_KEY?: string
 }
 
-function toUnit(row: PlanUnitRow, validationCount: number, countStructural: boolean): PlanUnit {
+/** The folder a file's meta names, or null; a blob that will not parse names none. */
+function corpusMarkerOf(meta: string | null): string | null {
+  if (!meta) return null
+  try {
+    const parsed: unknown = JSON.parse(meta)
+    if (!parsed || typeof parsed !== 'object') return null
+    return resolveCorpusMarker(parsed as { corpusMarker?: unknown; parserVersion?: unknown }) ?? null
+  } catch {
+    return null
+  }
+}
+
+function toUnit(
+  row: PlanUnitRow,
+  validationCount: number,
+  countStructural: boolean,
+  validationCountAudio: number,
+): PlanUnit {
   const c = counts(
     {
       scope: row.section_key ? 'book' : 'file',
@@ -77,21 +112,42 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
       structural_filled_count: row.structural_filled_count,
       structural_validator_histogram: row.structural_validator_histogram ?? null,
       revision: row.revision,
+      // AQU-1278: audio goes THROUGH `counts()` now rather than around it.
+      // These four used to be copied straight off the row below, which meant
+      // the headings policy reached the cells and not the recordings — and a
+      // book whose headings were voiced read over 100% audio on this board.
+      audio_count: row.audio_count,
+      audio_validated_count: row.audio_validated_count,
+      structural_audio_count: row.structural_audio_count,
+      structural_audio_validated_count: row.structural_audio_validated_count,
+      // AQU-490: the board's audio number is now measured at the project's
+      // required validator count, so the histograms have to come with the row.
+      audio_validator_histogram: row.audio_validator_histogram ?? null,
+      structural_audio_validator_histogram: row.structural_audio_validator_histogram ?? null,
     },
     validationCount,
     countStructural,
+    validationCountAudio,
   )
   return {
     fileId: row.file_id,
     fileName: row.file_name,
     fileRole: row.file_role ?? null,
     fileKind: row.file_kind ?? null,
+    corpusMarker: corpusMarkerOf(row.file_meta),
+    fileBookCode: row.file_book_code ?? null,
     sectionKey: row.section_key,
     totalCount: c.totalCount,
     filledCount: c.filledCount,
     validatedCount: c.validatedCount,
-    audioCount: Number(row.audio_count) || 0,
-    audioValidatedCount: Number(row.audio_validated_count) || 0,
+    audioCount: c.audioCount,
+    audioValidatedCount: c.audioValidatedCount,
+    // Not through `counts()`: a cue sheet holds cues, and a cue is never a
+    // heading or a paratext line, so the structural policy has nothing to
+    // subtract from this denominator. The pair above still goes through it,
+    // which costs nothing on a sheet whose structural share is zero and keeps
+    // one path for both shapes.
+    audioTotalCount: row.audio_total_count == null ? null : Number(row.audio_total_count),
     lastEditAt: row.last_edit_at == null ? null : Number(row.last_edit_at),
     targetDate: row.target_date ?? null,
     doneAt: row.done_at == null ? null : Number(row.done_at),
@@ -121,12 +177,13 @@ async function readPlan(
   db: AquillaDb,
   projectId: string,
   lane: string,
-): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
-  const [validationCount, countStructural] = await Promise.all([
+): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; validationCountAudio: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
+  const [validationCount, countStructural, validationCountAudio] = await Promise.all([
     readValidationCount(db, projectId),
     // AQU-1083: the board reads the same policy every other progress surface
     // does, so a book that opted out of counting headings is Done here too.
     readCountStructuralCells(db, projectId),
+    readValidationCountAudio(db, projectId),
   ])
   const { results } = await db
     .prepare(readPlanUnitsSql())
@@ -140,13 +197,16 @@ async function readPlan(
     revision = Math.max(revision, Number(row.revision) || 0)
     planUpdatedAt = Math.max(planUpdatedAt, Number(row.plan_updated_at) || 0)
     progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.progress_updated_at) || 0)
+    // A folder rename touches the file row and nothing the other clocks
+    // watch; without this the board keeps the old folder until an edit lands.
+    progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.file_updated_at) || 0)
     return {
-      unit: toUnit(row, validationCount, countStructural),
+      unit: toUnit(row, validationCount, countStructural, validationCountAudio),
       book: row.section_key || row.file_book_code || null,
     }
   })
   withBook.sort((x, y) => compareUnits(x.unit, y.unit, x.book, y.book))
-  return { units: withBook.map((x) => x.unit), revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt }
+  return { units: withBook.map((x) => x.unit), revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt }
 }
 
 export async function handlePlanRequest(
@@ -172,7 +232,7 @@ export async function handlePlanRequest(
   const lane = (url.searchParams.get('lane') ?? '').trim()
 
   if (request.method === 'GET') {
-    const { units, revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt } =
+    const { units, revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt } =
       await readPlan(db, projectId, lane)
     // THREE CLOCKS, because none of them alone moves for every change worth
     // re-reading. `revision` tracks the event sequence; plan writes never
@@ -181,8 +241,26 @@ export async function handlePlanRequest(
     // activity needs the newest projection updated_at or a client caches an
     // audio-less board forever.
     // …and a fourth for the structural policy, which moves none of the three.
+    //
+    // `s2` MARKS THE RESPONSE SHAPE, the way both progress ETags do. Every
+    // other part of this key is a property of the DATA, so when only the
+    // SHAPE moves — AQU-1278 adding audioTotalCount, corpusMarker and
+    // fileBookCode to every unit — nothing in the key moves with it. A
+    // browser holding a body cached before the deploy would then revalidate
+    // (Cache-Control is no-cache, so it always does), be told 304, and keep
+    // serving the old body to the new client: a dubbing project measured
+    // against its subtitle count instead of its cue sheet, and every file in
+    // one "All files" folder, for as long as nothing in the project changes.
+    // s1 = the shape before AQU-1278; s2 = these three fields.
+    //
+    // AQU-490 needs both halves again. `va` joins the key because every
+    // unit's audioValidatedCount is now measured against the AUDIO threshold,
+    // so raising it changes the body with no data write to move any of the
+    // three timestamps. And s3 because that field kept its name and its type
+    // and changed its question — the one kind of change none of the DATA
+    // parts of this key can ever express.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}${structuralTag}"`
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:va${validationCountAudio}:s3${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -199,9 +277,18 @@ export async function handlePlanRequest(
   // live membership before letting them write. Platform operators are the
   // documented exemption — they have no membership rows to check.
   if (auth.claims.src !== 'platform') {
-    const membership = await checkProjectMembership(db, projectId, auth.claims.userId)
-    if (membership === 'revoked') {
+    const membership = await checkProjectMembershipDetailed(db, projectId, auth.claims.userId)
+    if (membership.status === 'revoked') {
       return new Response('project membership revoked', { status: 403 })
+    }
+    // [Pen test 2026-09-21] The check above only catches full removal. A
+    // direct membership row DOWNGRADED below maintainer (not deleted) still
+    // has_grant, so it reports "ok" too, letting a stale still-maintainer
+    // token keep writing plan units for the rest of its window. The floor
+    // required here is a fixed constant, so re-check the live role against
+    // it directly rather than only against the token's stale claim.
+    if (membership.roleLevel !== null && membership.roleLevel < PLAN_WRITE_MIN_ROLE) {
+      return new Response('role >= maintainer (600) required', { status: 403 })
     }
   }
 
@@ -262,9 +349,10 @@ export async function handlePlanRequest(
     .all<PlanUnitRow>()
   const row = (results ?? [])[0]
   if (!row) return new Response('unknown plan unit', { status: 404 })
-  const [validationCount, countStructural] = await Promise.all([
+  const [validationCount, countStructural, validationCountAudio] = await Promise.all([
     readValidationCount(db, projectId),
     readCountStructuralCells(db, projectId),
+    readValidationCountAudio(db, projectId),
   ])
-  return Response.json({ unit: toUnit(row, validationCount, countStructural) })
+  return Response.json({ unit: toUnit(row, validationCount, countStructural, validationCountAudio) })
 }

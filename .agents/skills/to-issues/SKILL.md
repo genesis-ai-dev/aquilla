@@ -7,7 +7,7 @@ description: Break a plan, spec, or PRD into independently-grabbable issues on t
 
 Break a plan into independently-grabbable issues using vertical slices (tracer bullets).
 
-**Issue tracker for this repo:** Linear, team `Aquilla` (key `AQU`, id `de0f5d29-418f-4f62-ade7-02f77974c598`), project `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`). See the `/issue` command and `AGENTS.md` → "Issue workflow" for the status pipeline and the agent-vs-human pickup contract.
+**Issue tracker for this repo:** Linear, team `Aquilla` (key `AQU`, id `de0f5d29-418f-4f62-ade7-02f77974c598`). Issues land in one of two kinds of project (see "Where each slice lands"): an `<Area> V1` project under the **Road to V1** initiative, or `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`), the maintenance bucket. See the `/issue` command and `AGENTS.md` → "Issue workflow" for the status pipeline and the agent-vs-human pickup contract.
 
 **Where each slice lands:**
 
@@ -17,9 +17,15 @@ Break a plan into independently-grabbable issues using vertical slices (tracer b
 - **Every issue is created from one of the Aquilla team's issue templates** (`Bug Report`,
   `Feature Request`, or `Task` — see step 6). The template applies the category label
   (**`Bug`**, **`Feature`**, or **`Improvement`** for `Task`) by itself.
-- **Every issue carries a Prototype Debugging milestone** — the Road to V1 area it belongs
-  to (see step 6). An issue with no milestone is uncategorized and invisible to the Road to
-  V1 views.
+- **Every issue carries exactly one `Area` label** — the codebase area it belongs to
+  (`Editor`, `Importing`, `Dashboard`, … — `list_issue_labels` for the live list; the labels
+  sit in the team's `Area` label group, so Linear allows only one per issue). An issue with
+  no Area label is uncategorized and invisible to the per-area views.
+- **Every issue lands in one of two kinds of project** (see step 4). Work that V1 ships
+  *with* — it gates the release — goes into that area's **`<Area> V1`** project (`Editor V1`,
+  `Importing V1`, …, all under the **Road to V1** initiative). A maintenance bug or general
+  fix that V1 ships *without* goes into **`Prototype Debugging`**. When the source doesn't
+  say, default to `Prototype Debugging`; a human can move it into a V1 project later.
 
 ## Process
 
@@ -45,7 +51,7 @@ Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an
 
 ### 4. Discover the destination FIRST
 
-Before quizzing the user, query the issue tracker to enumerate the available **teams and projects** — do not guess from memory or recent context. Every issue needs both a team AND a project. The project is not optional and not an afterthought; an unassigned issue is a defect. In `Prototype Debugging`, every issue also needs a **milestone** (its Road to V1 area) — `list_milestones` the project for the live list.
+Before quizzing the user, query the issue tracker to enumerate the available **teams and projects** — do not guess from memory or recent context. Every issue needs both a team AND a project. The project is not optional and not an afterthought; an unassigned issue is a defect. Pick the project per the placement rule above: the area's `<Area> V1` project when the slice gates V1, `Prototype Debugging` otherwise. Every issue also needs an **`Area` label** — `list_issue_labels` the team for the live list.
 
 Confirm the target team and project with the user using the real options you just fetched. If a plausible project already exists (e.g. a debugging/triage project for bug-style work), surface it by name rather than making the user paste a URL.
 
@@ -55,7 +61,7 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 
 - **Title**: short descriptive name
 - **Type**: HITL / AFK
-- **Milestone**: the Prototype Debugging milestone (Road to V1 area) the slice lands in
+- **Area / project**: the `Area` label, and whether it lands in that area's `<Area> V1` project or in `Prototype Debugging`
 - **Blocked by**: which other slices (if any) must complete first
 - **User stories covered**: which user stories this addresses (if the source material has them)
 
@@ -100,12 +106,17 @@ acceptance criteria for isn't AFK — it's HITL.
 **Set BOTH the team and the project on every issue.** Verify the publish response actually
 shows the project assigned — do not assume it stuck.
 
-**Set a milestone on every issue** (`milestone` on `save_issue`, by name). Prototype
-Debugging's milestones are the Road to V1 areas: `Media Timeline`, `Living Memory`, `Dashboard`, `Project Management`, `Autopilot`, `Editor`, `Importing`, `Exporting`, `Login/Logout`, plus the catch-all buckets `Audio & Voice`, `Agents & Agent API`, `Comments & Notifications`, `Codex Migration`, `Infra & Deploy`, `Process & Docs`, `Marketing & Billing`.
-Fetch the live list with `list_milestones` rather than trusting this text. When the source
-is an existing issue, inherit its milestone; otherwise pick the area the slice's user-facing
-surface belongs to and confirm it in step 5. If the parent issue is in a cycle, pass the same
-`cycle` so the slice stays in the cycle. Verify the create response shows the milestone.
+**Set an `Area` label on every issue** (pass it in `labels` on `save_issue`, by name; it is
+merged with the template's category label). The areas are: `Media Timeline`, `Living Memory`,
+`Dashboard`, `Project Management`, `Autopilot`, `Editor`, `Importing`, `Exporting`,
+`Login/Logout`, `Audio & Voice`, `Agents & Agent API`, `Comments & Notifications`,
+`Codex Migration`, `Infra & Deploy`, `Process & Docs`, `Marketing & Billing`. Fetch the live
+list with `list_issue_labels` rather than trusting this text. When the source is an existing
+issue, inherit its Area label and its project; otherwise pick the area the slice's
+user-facing surface belongs to and confirm it in step 5. If the parent issue is in a cycle,
+pass the same `cycle` so the slice stays in the cycle. Verify the create response shows the
+Area label and the intended project (`addLabels` responses can lag — `get_issue` before
+assuming a label write failed).
 
 Publish issues in dependency order (blockers first) so you can reference real issue
 identifiers in the "Blocked by" field.

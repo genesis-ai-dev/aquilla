@@ -169,6 +169,93 @@ export async function getProjectAssignments(
 }
 
 /**
+ * One live assignment covering ONE planning unit, with that person's OWN
+ * progress inside it (mirrors UnitAssignment on the server — AQU-1278).
+ *
+ * Every count below is over that assignment's cells INSIDE THIS UNIT and
+ * nothing else: `cellsTotal` is not the assignment's whole size, it is the
+ * part of it that lands in the unit on screen. That is the only grain at which
+ * "Anna: 940 of 950" can be read against the unit's own bar directly above it.
+ *
+ * `translated`/`validated` are measured in the lane the caller asked for;
+ * `recorded`/`audioValidated` are lane-independent, because `cell_audio` has
+ * no target_lang column — one recording is the recording, whichever text lane
+ * you are looking at.
+ *
+ * `targetLang` is the lane the ASSIGNMENT is pinned to (AQU-538 §3.5, '' = the
+ * default lane), which need not be the lane being viewed — see
+ * getUnitAssignments.
+ */
+export interface UnitAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  targetLang: string
+  deadline: string | null
+  cellsTotal: number
+  translated: number
+  validated: number
+  recorded: number
+  audioValidated: number
+  /**
+   * AQU-1278: the same counts per chapter, canonically ordered, so the panel
+   * can name WHERE a person's outstanding work is and which chapters of the
+   * unit nobody holds. Summing a column gives the aggregate above.
+   *
+   * OPTIONAL ON THE WIRE on purpose. The client and the workers deploy
+   * separately, and a page talking to a worker that predates this field would
+   * otherwise crash on `.map` rather than quietly drop one line of detail.
+   */
+  chapters?: UnitAssignmentChapter[]
+}
+
+/** One chapter's share of an assignment. `key` is a section key: "GEN 12". */
+export interface UnitAssignmentChapter {
+  key: string
+  total: number
+  translated: number
+  validated: number
+  recorded: number
+  audioValidated: number
+}
+
+/**
+ * Every live assignment covering one planning unit (AQU-1278), for the plan
+ * inspector's "Assigned to" section.
+ *
+ * `sectionKey` is '' for a file-grain unit — the whole file, no section
+ * predicate — and a Bible book code ("GEN") for a sub-file one. `lane` is the
+ * lane the inspector is showing; '' is the default lane and, like every other
+ * read in this app, is sent as an empty value rather than omitted so the
+ * server never has to guess which lane "absent" meant.
+ *
+ * NOT FILTERED BY LANE, deliberately. The server returns assignments pinned to
+ * OTHER lanes too, because their cells are spoken for either way and dropping
+ * them would show an empty section on a unit that is fully assigned. Callers
+ * label the odd ones out from each row's own `targetLang`.
+ *
+ * AD-3: a plain fetch, subscribed to nothing. A caller that creates or removes
+ * an assignment must re-invoke this itself — see getProjectAssignments' note,
+ * which this read shares word for word.
+ */
+export async function getUnitAssignments(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  sectionKey: string,
+  lane: string,
+): Promise<UnitAssignment[]> {
+  const query = new URLSearchParams({ fileId, section: sectionKey, lane })
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/unit?${query.toString()}`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignments: UnitAssignment[] }).assignments
+}
+
+/**
  * Distinct chapters in a file (for the assign picker's chapter dropdown).
  * Natural-sorted server-side; each value feeds createAssignment's
  * `scope[].chapter` (→ resolver LIKE 'GEN 1:%') directly. Any project member.
@@ -384,4 +471,29 @@ export async function unassignAssignment(args: UnassignAssignmentArgs): Promise<
     payload: { assignmentId: args.assignmentId },
   })
   await postAssignmentEvent(args.jwt, args.projectId, args.fileId, event)
+}
+
+/** One person on one planning unit — a board row's avatar chip (mirrors the server). */
+export interface UnitAssignee {
+  fileId: string
+  /** '' for a whole file, a book code for a book inside a Scripture file. */
+  sectionKey: string
+  userId: number
+  username: string | null
+}
+
+/**
+ * AQU-1278, round 6: who is on EVERY unit of a project, in one read, so the
+ * board can draw its avatar chips from the first paint instead of learning a
+ * unit's people only once its inspector has been opened. Same floor as
+ * `getUnitAssignments`: below it the server answers 403 and the board draws
+ * no chips at all rather than wrong ones.
+ */
+export async function getProjectUnitAssignees(jwt: string, projectId: string): Promise<UnitAssignee[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/units`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignees: UnitAssignee[] }).assignees
 }

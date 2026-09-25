@@ -17,6 +17,7 @@ import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ResetPassword } from "@/pages/ResetPassword"
+import { BillingSelection } from "@/pages/BillingSelection"
 import { Login } from "@/pages/Login"
 import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
@@ -60,6 +61,7 @@ import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
+import { AgentModeRoute } from "@/components/agent/AgentModeRoute"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
@@ -359,6 +361,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -419,7 +422,7 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
-        <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/agent" element={<AgentModeRoute><ProjectWorkspace /></AgentModeRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />

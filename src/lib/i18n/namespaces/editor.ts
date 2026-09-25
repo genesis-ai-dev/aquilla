@@ -531,6 +531,7 @@ export const editor = defineNamespace({
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
+    "editor.selection.validateText": "Validate text",
     "editor.selection.validateTooltip": plural({
       one: "Validate {count} cell",
       other: "Validate {count} cells",
@@ -542,7 +543,29 @@ export const editor = defineNamespace({
       "Nothing eligible — untouched AI drafts require individual review",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
-    "editor.selection.removeMyValidations": "Remove my validations",
+    "editor.selection.removeMyValidations": "Remove my text validations",
+    "editor.selection.validateAudio": "Validate audio",
+    "editor.selection.validateAudioTooltip": plural({
+      one: "Validate {count} take in the selection",
+      other: "Validate {count} takes in the selection",
+    }),
+    "editor.selection.validateAudioNoTakes": "Nothing recorded in the selection",
+    "editor.selection.validateAudioAllMine": "You have validated every take in the selection",
+    "editor.selection.validateAudioNothingEligible": "No takes here are yours to validate",
+    "editor.selection.removeMyAudioValidations": "Remove my audio validations",
+    "editor.selection.noAudioValidations": "You have not validated any take here",
+    "editor.selection.unvalidateAudioTooltip": plural({
+      one: "Remove your validation from {count} take",
+      other: "Remove your validation from {count} takes",
+    }),
+    "editor.selection.unvalidatedAudioToast": plural({
+      one: "Removed your validation from {count} take",
+      other: "Removed your validation from {count} takes",
+    }),
+    "editor.selection.validatedAudioToast": plural({
+      one: "Validated {count} take",
+      other: "Validated {count} takes",
+    }),
     "editor.selection.noValidations": "No cells have your validation",
     "editor.selection.unvalidateTooltip": plural({
       one: "Remove your validation from {count} cell",
@@ -1236,20 +1259,60 @@ export const editor = defineNamespace({
     "editor.tts.audioFailed": "Audio failed",
 
     // — Validation button, validator popover and its history ——————————
-    "editor.validation.notValidatedTooltip": "Not validated — click to validate",
+    "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
-    "editor.validation.unavailableTooltip": "Validation unavailable",
+    "editor.validation.unavailableTooltip": "Text validation unavailable",
+    "editor.validation.noContentTooltip": "No text to validate",
+    "editor.validation.ariaNoContent": "No text to validate — {ref}.",
     "editor.validation.ariaValidated":
       "Validated — {ref}. Click to remove your validation.",
     "editor.validation.ariaValidatedByOthers":
       "Validated by others — {ref}. Click to add your validation.",
     "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
-    "editor.validation.validatedBy": "Validated by",
+    "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
+    "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
+    "editor.validation.validatedBy": "Text validated by",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
     "editor.validation.noValidatorsOnState": "No validators on this state",
     "editor.validation.you": "(you)",
+
+    // — Audio validation (AQU-490): the same control, one vote per TAKE ——
+    "editor.audioValidation.notValidatedTooltip": "Audio not validated — click to validate",
+    "editor.audioValidation.outOfScopeTooltip": "Outside your assigned files",
+    "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
+    "editor.audioValidation.noAudioTooltip": "No audio to validate",
+    "editor.audioValidation.ariaNoAudio": "No audio to validate — {ref}.",
+    "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
+    "editor.audioValidation.ariaValidated":
+      "Audio validated — {ref}. Click to remove your validation.",
+    "editor.audioValidation.ariaPartlyValidated":
+      "You have validated {done} of {total} takes — {ref}. Click to validate the rest.",
+    "editor.audioValidation.ariaValidatedByOthers":
+      "Audio validated by others — {ref}. Click to add your validation.",
+    "editor.audioValidation.ariaValidatedNoAction": "Audio validated — {ref}.",
+    "editor.audioValidation.validateThisTake": "Validate this take",
+    "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
+    "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
+    "editor.audioValidation.ariaOthersValidated": plural({
+      one: "Someone else has validated this audio — {ref}. {count} more validator needed.",
+      other: "Someone else has validated this audio — {ref}. {count} more validators needed.",
+    }),
+    "editor.audioValidation.ariaYoursMoreNeeded": plural({
+      one: "You have validated this audio — {ref}. {count} more validator needed.",
+      other: "You have validated this audio — {ref}. {count} more validators needed.",
+    }),
+    "editor.audioValidation.validatedBy": "Audio validated by",
+    "editor.audioValidation.takeFraction": "{done}/{total}",
+    "editor.audioValidation.needsMore": plural({
+      one: "{count} more validator needed",
+      other: "{count} more validators needed",
+    }),
+    "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.generatedTake": "Generated voice",
+    "editor.audioValidation.defaultTrack": "Main",
+    "editor.audio.addedTrackTakeHint": "Take on an added track",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
@@ -1437,6 +1500,7 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
+    "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
 
@@ -3743,6 +3807,75 @@ export const editor = defineNamespace({
           "first-person possessive is load-bearing.",
         maxLength: 30,
       },
+      "editor.selection.validateText": {
+        description:
+          "Label of the selection toolbar's bulk TEXT validation button. Says "
+          + "\"text\" out loud because an audio twin sits beside it and the two "
+          + "are never the same act. A count badge follows.",
+        maxLength: 20,
+      },
+      "editor.selection.validateAudioNoTakes": {
+        description:
+          "Tooltip when the bulk audio validation button is dark because none "
+          + "of the selected lines has a recording at all.",
+        maxLength: 60,
+      },
+      "editor.selection.validateAudioAllMine": {
+        description:
+          "Tooltip when the bulk audio validation button is dark because the "
+          + "reader has already validated every take in the selection.",
+        maxLength: 60,
+      },
+      "editor.selection.validateAudioNothingEligible": {
+        description:
+          "Tooltip when the bulk audio validation button is dark and neither "
+          + "of the plainer reasons applies — the takes are out of the "
+          + "reader's assignment, or are generated voices, which are signed "
+          + "off one at a time.",
+        maxLength: 60,
+      },
+      "editor.selection.removeMyAudioValidations": {
+        description:
+          "Label of the button that withdraws the reader's own validation "
+          + "from every selected recording. The first-person possessive is "
+          + "load-bearing: it never touches anyone else's vote.",
+        maxLength: 34,
+      },
+      "editor.selection.noAudioValidations": {
+        description:
+          "Tooltip when that button is dark because the reader has not "
+          + "validated any take in the selection.",
+        maxLength: 60,
+      },
+      "editor.selection.unvalidateAudioTooltip": {
+        description:
+          "Tooltip on the button that withdraws the reader's own validation "
+          + "from the selected recordings. Counts TAKES, not lines — a line "
+          + "with two tracks holds two.",
+        placeholders: { count: "How many takes the reader's vote comes off." },
+      },
+      "editor.selection.unvalidatedAudioToast": {
+        description:
+          "Toast after withdrawing the reader's own validation from the "
+          + "selected recordings. Counts takes.",
+        placeholders: { count: "How many takes the vote came off." },
+      },
+      "editor.selection.validateAudio": {
+        description:
+          "Button in the selection toolbar that validates the recordings on every "
+          + "selected line. SEPARATE from the text Validate beside it — signing off "
+          + "a translation says nothing about whether anyone has listened to its "
+          + "recording. The word is 'validate', never 'approve'.",
+        maxLength: 26,
+      },
+      "editor.selection.validateAudioTooltip": {
+        description: "Tooltip for the button above, with the number of recordings it would sign off.",
+        placeholders: { count: "How many recordings the selection holds that this user can still validate." },
+      },
+      "editor.selection.validatedAudioToast": {
+        description: "Confirmation after the bulk recording validation above ran.",
+        placeholders: { count: "How many recordings were validated." },
+      },
       "editor.selection.noValidations": {
         description:
           "Tooltip when the remove-my-validations button is disabled because none of " +
@@ -4476,11 +4609,39 @@ export const editor = defineNamespace({
           ref: "The cell's reference or fallback row number. Do not translate.",
         },
       },
+      "editor.validation.ariaNotValidatedNoAction": {
+        description:
+          "Screen-reader name when nobody has signed the cell off and the viewer cannot " +
+          "validate it (outside their files or lanes, or their role cannot).",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.validation.ariaValidatedByOthersNoAction": {
+        description:
+          "Screen-reader name when other people have validated the cell and the viewer " +
+          "cannot add a validation of their own.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.validation.noContentTooltip": {
+        description:
+          "Tooltip on the faded, unclickable validation circle shown on a line that " +
+          "has no translated text, so there is nothing to validate. Not an error.",
+      },
+      "editor.validation.ariaNoContent": {
+        description:
+          "Screen-reader label for the faded validation circle on a line with no text.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
       "editor.validation.validatedBy": {
         description:
           "Heading of the popover listing the people who have signed this " +
-          "translation off. A sentence fragment introducing the list of names that " +
-          "follows.",
+          "translation's TEXT off. Names the text half because an audio twin sits " +
+          "beside it. A sentence fragment introducing the list of names that follows.",
         maxLength: 22,
       },
       "editor.validation.noActiveValidators": {
@@ -4513,6 +4674,159 @@ export const editor = defineNamespace({
           "Marker appended after the current user's own name in validator lists, so " +
           "they can spot themselves. Parenthesised, second person.",
         maxLength: 12,
+      },
+      "editor.audioValidation.notValidatedTooltip": {
+        description:
+          "Tooltip on the audio validation control when the line's recording has not " +
+          "been signed off yet. The word is 'validate', never 'approve'.",
+      },
+      "editor.audioValidation.outOfScopeTooltip": {
+        description:
+          "Tooltip when the viewer may validate audio in general but not in this file. " +
+          "No lane clause, unlike the text twin: a recording is shared by every target " +
+          "language, so audio validation is never per-language.",
+      },
+      "editor.audioValidation.unavailableTooltip": {
+        description:
+          "Tooltip when the viewer's role or the project's named-validator list does " +
+          "not let them validate recordings at all.",
+      },
+      "editor.audioValidation.ariaValidatedByOthers": {
+        description:
+          "Screen-reader name when enough other people have validated the line's audio " +
+          "and the viewer has not, but still may.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.ariaValidatedNoAction": {
+        description:
+          "Screen-reader name when the line's audio is fully validated by others and " +
+          "the viewer cannot add a validation of their own.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.validateThisTake": {
+        description:
+          "Button in the validation list of a line with several takes, validating just " +
+          "that one take. The word is 'validate', never 'approve'.",
+      },
+      "editor.audioValidation.noAudioTooltip": {
+        description:
+          "Tooltip on the faded, unclickable microphone shown on a line that has no " +
+          "recording yet, so there is nothing to validate. Not an error.",
+      },
+      "editor.audioValidation.ariaNoAudio": {
+        description:
+          "Screen-reader label for the faded microphone on a line with no recording. " +
+          "{ref} is the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.ownRecordingTooltip": {
+        description:
+          "Tooltip when the viewer recorded this take themselves and the project has " +
+          "turned self-validation off for audio. States who must act instead.",
+      },
+      "editor.audioValidation.ariaValidated": {
+        description:
+          "Screen-reader name of the audio validation button once the viewer has " +
+          "validated. {ref} is the line's reference, e.g. 'GEN 1:1'.",
+        placeholders: { ref: "The line's reference, e.g. 'GEN 1:1'." },
+      },
+      "editor.audioValidation.ariaPartlyValidated": {
+        description:
+          "Screen-reader name when a line carries takes on more than one track and " +
+          "some are validated. Every track holding a chosen take must be validated " +
+          "before the line counts, so this says how far along it is.",
+        placeholders: {
+          done: "How many of the line's takes have reached the required number of validators.",
+          total: "How many takes the line has, one per track.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaNotValidatedByYou": {
+        description:
+          "Screen-reader name when the line's audio is not validated and the "
+          + "reader cannot validate what is left — their own recording on a "
+          + "project that forbids self-validation, for instance. Same words as "
+          + "the clickable version minus the invitation to click.",
+        placeholders: { ref: "The line's reference, e.g. GEN 1:1." },
+      },
+      "editor.audioValidation.ariaOthersValidated": {
+        description:
+          "Screen-reader name when somebody ELSE has validated this line's "
+          + "audio but the project needs more validators and the reader is not "
+          + "one of them yet. Matches the filled-mic icon.",
+        placeholders: {
+          ref: "The line's reference, e.g. GEN 1:1.",
+          count: "How many more validators the project still needs.",
+        },
+      },
+      "editor.audioValidation.ariaNotValidated": {
+        description: "Screen-reader name of the audio validation button before anyone validates.",
+        placeholders: { ref: "The line's reference, e.g. 'GEN 1:1'." },
+      },      "editor.audioValidation.ariaYoursMoreNeeded": {
+        description:
+          "Screen-reader name when the viewer HAS validated but the project asks "
+          + "for more validators than the recording has. Without it the button "
+          + "announces plain 'validated' while the icon beside it shows a single "
+          + "check rather than the double check that means finished — the label "
+          + "and the picture would disagree.",
+        placeholders: {
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+          count: "How many further validators the recording still needs.",
+        },
+      },
+      "editor.audioValidation.validatedBy": {
+        description:
+          "Heading of the popover listing who has validated the line's AUDIO — the " +
+          "twin of 'Text validated by'. On a line with several takes, each take's " +
+          "name follows as a sub-heading above its own list.",
+        maxLength: 28,
+      },
+      "editor.audioValidation.takeFraction": {
+        description:
+          "The badge beside the audio validation icon on a line with several takes: " +
+          "how many are validated out of how many exist. Digits and a slash only — it " +
+          "sits in a very small space beside the icon.",
+        placeholders: {
+          done: "How many takes have reached the required number of validators.",
+          total: "How many takes the line has.",
+        },
+        maxLength: 6,
+      },
+      "editor.audioValidation.needsMore": {
+        description:
+          "In the take popover: how many further people must validate this take before " +
+          "it counts. The project sets the required number.",
+        placeholders: { count: "How many more validators are needed." },
+        maxLength: 34,
+      },
+      "editor.audioValidation.noValidators": {
+        description: "Shown for a take in the popover that nobody has validated yet.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.generatedTake": {
+        description:
+          "Labels a take in the popover that was produced by text-to-speech rather than " +
+          "recorded by a person. Such takes are never validated automatically.",
+        maxLength: 20,
+      },
+      "editor.audio.addedTrackTakeHint": {
+        description:
+          "Header over a take in the Recording tab that lives on an extra "
+          + "target-audio track rather than the line's main track, when the take "
+          + "has no name of its own.",
+        maxLength: 30,
+      },
+      "editor.audioValidation.defaultTrack": {
+        description:
+          "Name of the line's main audio track in the take popover, used when a take " +
+          "has no name of its own. Extra tracks carry their own names.",
+        maxLength: 14,
       },
       "editor.row.noTimingAria": {
         description:
@@ -5305,6 +5619,16 @@ export const editor = defineNamespace({
           "Name of the expansion tab showing extra untranslated columns that came in " +
           "with the import (reference codes, quotes, tags, attached images). A noun.",
         maxLength: 18,
+      },
+      "editor.metadata.showOnCells": {
+        description:
+          "Tooltip and screen-reader name of the checkbox beside one field in a cell's " +
+          "Metadata tab. Checking it shows that field's value as a small label on every " +
+          "cell in the project that has the field. {key} is the field name as imported " +
+          "(e.g. \"Field\"), shown verbatim — do not translate it.",
+        placeholders: {
+          key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
+        },
       },
       "editor.issues.none": {
         description:

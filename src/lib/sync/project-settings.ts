@@ -73,6 +73,10 @@ export interface ProjectWideSettings {
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /** AQU-490: the audio twins. Separate keys, never fallbacks for each other. */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-1068: who may add and remove cells in this project's files?
    *
@@ -225,8 +229,10 @@ export interface ProjectWideSettings {
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
   /**
-   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
-   * Opaque BCP-47-ish tags; order = display order.
+   * Complete target-language lane registry, including the project's primary
+   * lane (the same tag as `targetLanguage`). There is no implicit '' default
+   * lane — every lane is an explicit entry. Opaque BCP-47-ish tags; order =
+   * display order (primary first).
    */
   targetLanes?: string[]
   /**
@@ -276,6 +282,18 @@ export interface ProjectWideSettings {
    * (pseudonymous ids). Not agent-writable (`POLICY_SETTINGS_KEYS`).
    */
   agentAuthorship?: "none"
+  /**
+   * AQU-934: per-file genre assignment — fileId → genre id from the vocabulary
+   * in `src/lib/rules/file-genre.ts`. Human-set (a model may only suggest); an
+   * entry OVERRIDES the genre derived from a scripture book code and is the
+   * ONLY way a non-scripture document gets one, so genre-scoped style rules
+   * reach every cell of a classified document. Files with no entry keep
+   * deriving from their book code, so this map stays small — bounded by file
+   * count (tens of entries), not by content, which is why it belongs in the
+   * settings blob rather than its own table. Replacing this key replaces the
+   * whole map: writers must send the full merged object.
+   */
+  fileGenres?: Record<string, string>
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -431,9 +449,11 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
- * Caller must include `ifMatchVersion`; mismatched version returns
- * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
+ * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
+ * settings blob (no per-key merge) — send a complete blob. Per-key merge is
+ * only available via the `useProjectSettings` hook and the Agent API
+ * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
+ * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
  */
 export async function patchProjectSettings(

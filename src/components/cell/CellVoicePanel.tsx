@@ -30,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { resolveCastVoice } from "@/lib/audio/voices"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
@@ -40,6 +41,9 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { AudioValidationControl } from "./AudioValidationControl"
+import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -217,6 +221,7 @@ export function CellVoicePanel({
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
+  const languageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   // AQU-768: resolve THIS line's active voice from the saved cast assignment
   // here in the leaf that displays it, rather than trusting a pre-resolved prop
@@ -337,6 +342,11 @@ export function CellVoicePanel({
       voiceId: att.voiceId ?? null,
       referenceAudioId: att.referenceAudioId ?? null,
       durationMs: att.durationMs ?? null,
+      // AQU-490: carried, because this overlay REPLACES the attachment and a
+      // missing optional field silently reads as "nobody validated this". The
+      // second of the two trim call sites; both have to say it.
+      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
+      ...(att.validators ? { validators: att.validators } : {}),
       trimStartMs: start != null ? Math.round(start * 1000) : null,
       trimEndMs: end != null ? Math.round(end * 1000) : null,
     }, trimP)
@@ -399,6 +409,18 @@ export function CellVoicePanel({
   }, [voices, recency])
 
   // Section breaks (paratext) aren't voiced — render nothing.
+  // AQU-490. The source clip is excluded by the adapter (role 'source'), so a
+  // media line whose only audio is the shared programme track shows no control
+  // here — which is right: nobody validates the film's own soundtrack.
+  const audioValidation = useAudioValidation({
+    project: project as unknown as ProjectRecord,
+    fileId: cell.fileId,
+    cellId: cell.id,
+    username,
+    jwt: sess?.jwt ?? null,
+  })
+  const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
+
   if (isParatext) return null
 
   // Nothing to voice yet (untranslated) — a quiet hint, no player chrome.
@@ -419,6 +441,17 @@ export function CellVoicePanel({
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
+      {voiceValidationTakes.length > 0 && (
+        <AudioValidationControl
+          cellRef={cell.context?.trim() || cell.id}
+          takes={voiceValidationTakes}
+          currentUsername={username}
+          validationRequirement={audioValidation.validationRequirement}
+          canValidate={audioValidation.canValidate}
+          onValidationChange={audioValidation.onValidationChange}
+          variant="inline"
+        />
+      )}
       {/* Round 5: no crop on the shared source clip — its window is the
           section's timing; retime the section in the timeline. */}
       {!isSourceClip && (
@@ -476,6 +509,7 @@ export function CellVoicePanel({
             voices={ordered}
             active={active}
             busy={isVoicing}
+            showLanguageBadge={languageBadge}
             onPick={generateWith}
           />
         </div>

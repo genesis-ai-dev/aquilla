@@ -67,6 +67,11 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     "workspace.staleSibling.viewInHistory": "View in history",
+    // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
+    // set, which silently switches off every term check in the editor. Say so
+    // rather than letting the editor look like a project with no terminology.
+    "workspace.terminologyUnavailableBanner":
+      "Terminology checks are unavailable — the termbase could not be loaded, so term rules are not being applied.",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
     "workspace.focusLock.editingNotice":
@@ -101,7 +106,7 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
+      "The first language is the project's primary target; each one you add below becomes its own lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",
@@ -278,6 +283,19 @@ export const workspace = defineNamespace({
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
 
+    // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
+    "workspace.alignment.originalHeading": "Original language",
+    "workspace.alignment.originalSub": "— the Greek/Hebrew words behind this verse",
+    "workspace.alignment.originalHelpTooltip":
+      "Every word of the original-language source, with its dictionary form, Strong's number and " +
+      "morphology. Where the model can place a word, its rendering in your translation is shown " +
+      "beside it. Words matched through the dictionary form are marked — treat those as a hint.",
+    "workspace.alignment.originalNoMatch": "no confident match",
+    "workspace.alignment.originalViaLemma": "via lemma",
+    "workspace.alignment.originalViaLemmaTooltip":
+      "Matched through the dictionary form {lemma} rather than the form used in this verse, so it " +
+      "is a weaker guess than a direct match.",
+
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
 
@@ -410,6 +428,8 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
+    "workspace.targetAudioLane.takeValidated": "This take is validated",
+    "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -1294,6 +1314,47 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.originalHeading": {
+        description:
+          "Heading of the section listing the original-language (biblical Hebrew or " +
+          "Greek) words of the verse being translated, above the statistical " +
+          "alignment links. 'Original language' means the language the scripture " +
+          "was written in, not the project's source text.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalSub": {
+        description:
+          "Muted continuation of workspace.alignment.originalHeading, on the same " +
+          "line. The leading dash joins it to the heading; do not start with a " +
+          "capital. 'Greek/Hebrew' names the two biblical languages.",
+      },
+      "workspace.alignment.originalHelpTooltip": {
+        description:
+          "Tooltip on the help icon beside that heading. 'Dictionary form' is the " +
+          "lemma — the headword an inflected form is listed under; \"Strong's " +
+          "number\" is a standard scripture-word index and stays as-is.",
+      },
+      "workspace.alignment.originalNoMatch": {
+        description:
+          "Shown in place of a target word when the model cannot say which part of " +
+          "the translation renders this original-language word. Lowercase, muted; " +
+          "it is a status, not a heading.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalViaLemma": {
+        description:
+          "Small badge on a row whose target word was found through the word's " +
+          "dictionary form (lemma) rather than the exact form in this verse — a " +
+          "weaker match. Lowercase, very short.",
+        maxLength: 14,
+      },
+      "workspace.alignment.originalViaLemmaTooltip": {
+        description:
+          "Tooltip on that badge, explaining why the match is weaker.",
+        placeholders: {
+          lemma: "The dictionary form of the original-language word — not translated.",
+        },
+      },
 
       "workspace.offlineBanner.message": {
         description:
@@ -1708,6 +1769,22 @@ export const workspace = defineNamespace({
           "button. It plays only that one clip, trimmed exactly as the " +
           "timeline draws it, without moving the playhead or starting the " +
           "rest of the timeline.",
+      },
+      "workspace.targetAudioLane.takeValidated": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip whose "
+          + "recording has reached the number of validators the project asks "
+          + "for. Read-only — the vote itself is cast in the editor, the "
+          + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
+      },
+      "workspace.targetAudioLane.takeValidatedByYou": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip that YOU "
+          + "have validated, on a project that asks for more validators than "
+          + "just you. A single tick rather than a double one, matching the "
+          + "editor's margin: your part is done, the line is not.",
+        maxLength: 30,
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

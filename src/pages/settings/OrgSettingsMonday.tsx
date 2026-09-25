@@ -8,7 +8,7 @@
 // app has no global toast system).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { Check, CheckCircle2, Copy, ExternalLink, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,7 +39,7 @@ import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsMonday() {
   const { locale, t } = useI18n()
-  const { activeOrg, activeOrgId } = useActiveOrg()
+  const { activeOrg, activeOrgId, accessibleProjects, accessibleProjectsLoading, accessibleProjectsError, refreshAccessibleProjects } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const canManage = (activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER
@@ -295,6 +295,34 @@ export function OrgSettingsMonday() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
+
+      {connected && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Next: link your projects</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.
+            </p>
+            {accessibleProjectsLoading ? <p role="status">Loading projects…</p> : accessibleProjectsError ? (
+              <div role="alert">
+                <p>{accessibleProjectsError}</p>
+                <Button variant="outline" onClick={() => void refreshAccessibleProjects()}>Retry projects</Button>
+              </div>
+            ) : accessibleProjects.filter(project => project.orgId === activeOrgId).length === 0 ? (
+              <p>No accessible projects in this organization.</p>
+            ) : accessibleProjects.filter(project => project.orgId === activeOrgId).map(project => (
+              <div key={project.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="font-medium">{project.name}</span>
+                <Link to={`/project/${project.id}/settings/integrations#section-monday`} className="text-sm underline">
+                  {project.role.level >= ROLE.MAINTAINER ? "Set up or manage board" : "View Monday integration"}
+                </Link>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Two-step connect: the install needs a Monday WORKSPACE admin, and a
           non-admin who hits Monday's consent screen gets a dead-end "not

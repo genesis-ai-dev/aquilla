@@ -46,6 +46,8 @@ export interface MondayBoardGroup {
 
 /** Cached board structure stored on monday_board_links.board_structure. */
 export interface MondayBoardStructure {
+  url?: string | null
+  name?: string | null
   fetchedAt: string
   columns: MondayBoardColumn[]
   groups: MondayBoardGroup[]

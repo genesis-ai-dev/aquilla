@@ -85,6 +85,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
   const [connection, setConnection] = useState<MondayConnectionStatus | null>(null)
   const [link, setLink] = useState<MondayBoardLink | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+  const [projectConnected, setProjectConnected] = useState<boolean | undefined>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -120,17 +122,22 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const load = useCallback(async () => {
     if (!jwt) return
     setLoading(true)
+    setStatusError(null)
     setError(null)
     try {
       const [linkRes, connRes] = await Promise.all([
         fetchMondayLink(jwt, projectId),
-        orgId != null ? fetchMondayConnection(jwt, orgId) : Promise.resolve(null),
+        orgId != null ? fetchMondayConnection(jwt, orgId).catch(() => null) : Promise.resolve(null),
       ])
       if (!aliveRef.current) return
       setLink(linkRes.linked && linkRes.link ? linkRes.link : null)
       setConnection(connRes)
+      setProjectConnected(linkRes.orgConnected ?? linkRes.link?.orgConnected)
+      if (linkRes.orgConnected == null && !linkRes.link && !connRes) {
+        setStatusError("Could not check the Monday connection. Try again.")
+      }
     } catch (e) {
-      if (aliveRef.current) setError(errMsg(e))
+      if (aliveRef.current) setStatusError(errMsg(e))
     } finally {
       if (aliveRef.current) setLoading(false)
     }
@@ -140,7 +147,13 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     void load()
   }, [load])
 
-  const orgConnected = link?.orgConnected ?? connection?.connected ?? false
+  useEffect(() => {
+    const refresh = () => void load()
+    window.addEventListener("focus", refresh)
+    return () => window.removeEventListener("focus", refresh)
+  }, [load])
+
+  const orgConnected = projectConnected ?? link?.orgConnected ?? connection?.connected ?? false
 
   // ── Boards list (unlinked, maintainer only) ──────────────────────────────
   // Only fetched once the manual path is opened; the wizard picks the board
@@ -341,6 +354,11 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner /> {t("projectSettings.monday.loadingIntegration")}
+            </div>
+          ) : statusError ? (
+            <div role="alert" className="flex flex-col gap-2">
+              <p>{statusError}</p>
+              <Button variant="outline" onClick={() => void load()}>Retry</Button>
             </div>
           ) : !orgConnected && !canManage ? (
             <div className="space-y-2 text-sm text-muted-foreground">

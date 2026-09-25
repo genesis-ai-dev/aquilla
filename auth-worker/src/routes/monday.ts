@@ -167,6 +167,7 @@ function linkResponse(link: IntegrationLinkRow, orgConnected: boolean) {
     id: link.id,
     boardId: link.external_id,
     boardName: link.external_name,
+    boardUrl: parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)?.url ?? null,
     enabled: link.enabled,
     config: parseJsonColumn<MondayMapping | null>(link.config, null),
     structureStale: link.remote_state_stale,
@@ -399,6 +400,8 @@ monday.get("/orgs/:orgId/boards/:boardId/structure", authMiddleware, async (c) =
   if (!boardId) return c.json({ error: "invalid boardId" }, 400)
   const structure = await fetchBoardStructure(token, boardId)
   return c.json({
+    url: structure.url ?? null,
+    name: structure.name ?? null,
     columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
     groups: structure.groups,
   })
@@ -412,8 +415,8 @@ monday.get("/projects/:projectId/link", authMiddleware, async (c) => {
   const orgId = await getProjectOrgId(c.env, guard.projectId)
   const orgConnected = orgId != null && (await getConnection(c.env, orgId)) != null
   const link = await getLink(c.env, guard.projectId)
-  if (!link) return c.json({ linked: false, orgConnected })
-  return c.json({ linked: true, link: linkResponse(link, orgConnected) })
+  if (!link) return c.json({ linked: false, orgConnected, orgId })
+  return c.json({ linked: true, orgConnected, orgId, link: linkResponse(link, orgConnected) })
 })
 
 const putLinkSchema = z.object({
@@ -447,6 +450,8 @@ monday.put(
 
     const cachedStructure: MondayBoardStructure = {
       fetchedAt: new Date().toISOString(),
+      url: structure.url ?? null,
+      name: structure.name ?? null,
       columns: structure.columns,
       groups: structure.groups,
     }
@@ -494,7 +499,7 @@ monday.put(
         PROVIDER,
         conn.id,
         body.boardId,
-        body.boardName ?? null,
+        structure.name ?? body.boardName ?? null,
         JSON.stringify(mapping),
         body.enabled ?? true,
         JSON.stringify(webhookIds),
@@ -656,7 +661,8 @@ monday.post(
         summary: result.summary,
         warnings: result.warnings,
         boardId,
-        boardName,
+        boardName: structure.name ?? boardName,
+        boardUrl: structure.url ?? null,
         boardReason,
       })
     } catch (err) {

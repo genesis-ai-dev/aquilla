@@ -7,6 +7,18 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
 
+// Keep the overview suite's project-member reads local.
+vi.mock("@/lib/frontier/members", async (importActual) => ({
+  ...await importActual<typeof import("@/lib/frontier/members")>(),
+  fetchProjectRoster: vi.fn(async () => ({ kind: "ok", members: [] })),
+}))
+
+const mondayLink = vi.fn(async (..._args: unknown[]) => ({ linked: false, orgConnected: false }))
+vi.mock("@/lib/monday/api", () => ({
+  fetchMondayLink: (...args: unknown[]) => mondayLink(...args),
+  fetchMondayBoardStructure: vi.fn(),
+}))
+
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
   const actual = await importActual<typeof import("react-router-dom")>()
@@ -298,6 +310,7 @@ function renderOverview() {
 }
 
 beforeEach(async () => {
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: false })
   localStorage.clear()
   _deadlineStatusResult = null
   // Some AQU-474 tests override this to simulate a user with no orgs;
@@ -1589,6 +1602,22 @@ describe("plan board on the overview", () => {
     renderOverview()
     expect(await screen.findByTestId("plan-empty")).toBeInTheDocument()
   })
+})
+
+it("AQU-1208: the overview exposes Monday setup for a connected project", async () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(await screen.findByRole("link", { name: "Link a board" })).toHaveAttribute("href", "/project/p1/settings/integrations")
+  expect(mondayLink).toHaveBeenCalledWith("jwt", "p1")
+})
+
+it("AQU-1208: the overview hides the Monday card below maintainer", () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 500 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  expect(mondayLink).not.toHaveBeenCalled()
 })
 
 // AQU-656: original-blob downloads. The files card they used to hang off was

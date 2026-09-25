@@ -170,6 +170,8 @@ export async function listBoards(accessToken: string): Promise<MondayBoardSummar
 }
 
 export interface BoardStructureResult {
+  url?: string | null
+  name?: string | null
   columns: MondayBoardColumn[]
   groups: MondayBoardGroup[]
 }
@@ -181,16 +183,18 @@ export async function fetchBoardStructure(
 ): Promise<BoardStructureResult> {
   const data = await mondayGraphQL<{
     boards: Array<{
+      url?: string
+      name?: string
       columns: Array<{ id: string; title: string; type: string; settings_str?: string }>
       groups: Array<{ id: string; title: string }>
     }> | null
   }>(
     accessToken,
-    `query { boards(ids: ${gqlString(boardId)}) { columns { id title type settings_str } groups { id title } } }`,
+    `query { boards(ids: ${gqlString(boardId)}) { name url columns { id title type settings_str } groups { id title } } }`,
   )
   const board = data.boards?.[0]
   if (!board) throw new MondayApiError(`board ${boardId} not found`, 404)
-  return { columns: board.columns ?? [], groups: board.groups ?? [] }
+  return { name: board.name ?? null, url: board.url ?? null, columns: board.columns ?? [], groups: board.groups ?? [] }
 }
 
 export interface MondayItemSample {

@@ -100,7 +100,6 @@ export function MondaySetupWizard({
   orgId,
   jwt,
   orgConnected,
-  accountSlug,
   onLinked,
   onUnlinked,
   onConnected,
@@ -120,6 +119,8 @@ export function MondaySetupWizard({
   const [boards, setBoards] = useState<MondayBoard[] | null>(null)
   const [changingBoard, setChangingBoard] = useState(false)
 
+  const [linkedBoardUrl, setLinkedBoardUrl] = useState<string | null>(null)
+  const [customizing, setCustomizing] = useState(false)
   const [linkedBoardName, setLinkedBoardName] = useState<string | null>(null)
   const [pushNotice, setPushNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [awaitingOAuth, setAwaitingOAuth] = useState(false)
@@ -144,6 +145,8 @@ export function MondaySetupWizard({
     setScanDone(0)
     setChangingBoard(false)
     setLinkedBoardName(null)
+    setLinkedBoardUrl(null)
+    setCustomizing(false)
     setPushNotice(null)
     setAwaitingOAuth(false)
   }, [open])
@@ -278,6 +281,7 @@ export function MondaySetupWizard({
         },
       })
       if (!aliveRef.current) return
+      setLinkedBoardUrl(out.link.boardUrl ?? structure?.url ?? analysis.boardUrl ?? null)
       setLinkedBoardName(out.link.boardName ?? boardName ?? null)
       onLinked(out.link)
 
@@ -286,7 +290,7 @@ export function MondaySetupWizard({
         const res = await syncMondayNow(jwt, projectId)
         if (!aliveRef.current) return
         setPushNotice(
-          res.ok
+          res.ok && res.pushed
             ? {
                 ok: true,
                 text:
@@ -305,7 +309,7 @@ export function MondaySetupWizard({
       setError(errMsg(e))
       setStage("review")
     }
-  }, [jwt, analysis, projectId, granularity, rows, boards, onLinked])
+  }, [jwt, analysis, projectId, granularity, rows, boards, onLinked, structure])
 
   const handleUndo = useCallback(async () => {
     if (!jwt) return
@@ -322,10 +326,7 @@ export function MondaySetupWizard({
     }
   }, [jwt, projectId, onUnlinked, onOpenChange])
 
-  const boardUrl =
-    accountSlug && analysis?.boardId
-      ? `https://${accountSlug}.monday.com/boards/${analysis.boardId}`
-      : null
+  const boardUrl = linkedBoardUrl ?? structure?.url ?? analysis?.boardUrl ?? null
   const mappedCount = rows.filter((r) => r.columnId).length
 
   return (
@@ -334,7 +335,7 @@ export function MondaySetupWizard({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
-            {stage === "done" ? "Monday.com is set up" : "Set up Monday.com with AI"}
+            {stage === "done" ? (pushNotice?.ok ? "Monday.com is set up" : "Board linked — sync needs attention") : "Set up Monday.com with AI"}
           </DialogTitle>
           {stage === "intro" && (
             <DialogDescription>
@@ -442,7 +443,14 @@ export function MondaySetupWizard({
               )}
             </div>
 
-            <div>
+            <div className="flex flex-col gap-2 text-sm">
+              <p>Recommended: one item per {granularity}, with {mappedCount} progress {mappedCount === 1 ? "column" : "columns"}.</p>
+              {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">Preview board in Monday</a>}
+              <Button variant="outline" onClick={() => setCustomizing(!customizing)}>
+                {customizing ? "Hide customization" : "Customize data and columns"}
+              </Button>
+            </div>
+            {customizing && <div>
               <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.boardItemsLabel")}</p>
               <Select
                 items={{
@@ -464,7 +472,7 @@ export function MondaySetupWizard({
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
 
             {analysis.warnings.length > 0 && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
@@ -480,7 +488,7 @@ export function MondaySetupWizard({
               </div>
             )}
 
-            <div>
+            {customizing && <div>
               <p className="mb-1 text-xs text-muted-foreground">
                 {t("projectSettings.monday.reviewRowsCaption")}
               </p>
@@ -490,7 +498,7 @@ export function MondaySetupWizard({
                 disabled={false}
                 onChange={setRows}
               />
-            </div>
+            </div>}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
@@ -538,6 +546,7 @@ export function MondaySetupWizard({
                 {t("projectSettings.monday.viewBoardLink")} <ExternalLink className="h-3.5 w-3.5" />
               </a>
             )}
+            {!boardUrl && <p className="text-sm text-muted-foreground">Find {linkedBoardName ?? analysis?.boardId} in Monday. The direct board link is unavailable.</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}

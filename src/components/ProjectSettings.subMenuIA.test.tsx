@@ -59,6 +59,7 @@ const PROJECT_ID = "proj-submenu-ia"
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
+    orgId: 7,
     name: "Sub-menu IA Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
@@ -99,7 +100,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 }))
 
 vi.mock("@/hooks/useOrg", () => ({
-  useOrg: () => ({ org: null }),
+  useOrg: () => ({ org: { id: 99 } }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -523,4 +524,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText(/roster hidden/i)).toBeNull()
     expect(screen.getByText("General")).toBeTruthy()
   })
+})
+
+vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
+  MondayIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="monday-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
 })

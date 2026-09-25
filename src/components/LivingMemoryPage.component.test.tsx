@@ -384,18 +384,36 @@ describe("LivingMemoryPage — examples pane", () => {
     }))
   })
 
-  it("keeps the Recent Examples section and role=status empty state", () => {
+  // AQU-921: the pane is an inspection surface, so its body starts collapsed.
+  it("collapses Recent Examples by default, leaving the disclosure control visible", () => {
     renderPage("/project/proj-1/memory/examples")
+
     expect(
       document.querySelector('section[aria-label="Recent Examples"]'),
     ).toBeInTheDocument()
+
+    const trigger = screen.getByRole("button", { name: /Recent Examples/i })
+    expect(trigger).toBeVisible()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+
+    // The body — description and empty state — is not exposed until expanded.
+    expect(screen.getByText(/No validated translations yet/i)).not.toBeVisible()
+  })
+
+  it("keeps the Recent Examples section and role=status empty state once expanded", () => {
+    renderPage("/project/proj-1/memory/examples")
+    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+
+    expect(
+      screen.getByRole("button", { name: /Recent Examples/i }),
+    ).toHaveAttribute("aria-expanded", "true")
     expect(
       screen.getByRole("status", { name: /No validated translations/i }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/No validated translations yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/No validated translations yet/i)).toBeVisible()
   })
 
-  it("renders validated cells grouped by file when populated", () => {
+  it("renders validated cells grouped by file when populated and expanded", () => {
     vi.mocked(useLivingMemory).mockReturnValue({
       cells: [makeCell()],
       isLoading: false,
@@ -404,12 +422,29 @@ describe("LivingMemoryPage — examples pane", () => {
       fileCount: 1,
     })
     renderPage("/project/proj-1/memory/examples")
-    expect(screen.getByText("Genesis")).toBeInTheDocument()
-    expect(screen.getByText("In the beginning")).toBeInTheDocument()
-    expect(screen.getByText("Mwanzoni")).toBeInTheDocument()
+
+    // Collapsed first: the cell list is rendered but not exposed.
+    expect(screen.getByText("In the beginning")).not.toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+    expect(screen.getByText("Genesis")).toBeVisible()
+    expect(screen.getByText("In the beginning")).toBeVisible()
+    expect(screen.getByText("Mwanzoni")).toBeVisible()
     expect(
       screen.queryByRole("status", { name: /No validated translations/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it("keeps fetching validated cells while collapsed", () => {
+    renderPage("/project/proj-1/memory/examples")
+
+    // Collapsing is presentational only — the query still runs for the pane.
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true }),
+    )
+    expect(
+      screen.getByRole("button", { name: /Recent Examples/i }),
+    ).toHaveAttribute("aria-expanded", "false")
   })
 })
 

@@ -59,7 +59,7 @@ export function readImportMilestone(
 export function deriveMilestoneNavigation(
   cells: readonly MilestoneNavigationCell[],
 ): DerivedMilestoneNavigation {
-  const seeds = cells.map(legacyMilestoneSeed)
+  const seeds = identityPreservingSeeds(cells.map(legacyMilestoneSeed))
   const scriptureMode = seeds.some((seed) => (
     seed?.key.startsWith("scripture:") || seed?.key.startsWith("story:OBS:")
   ))
@@ -329,6 +329,29 @@ function fallbackMilestones(cells: readonly MilestoneNavigationCell[]): ImportMi
     }
   }
   return assignments
+}
+
+/**
+ * AQU-1164: `part` is the only milestone kind that carries no identity — it is
+ * the deterministic 50-cell "Part N" label used when a file offers nothing
+ * better. A file that has real identity somewhere (a Scripture chapter, a
+ * Biblica chapter, a heading section, an IDML story, a slide, a group) must not
+ * swap its header to "Part N" partway down just because some of its cells were
+ * persisted with the generic fallback — those cells belong to the book or
+ * section already in effect. Dropping the generic seeds lets the inheritance
+ * below carry the surrounding identity across them, exactly as it already does
+ * for a cell that has no seed at all.
+ *
+ * A file that is generic all the way through keeps its persisted `Part N`
+ * labels untouched: there is no identity to inherit, so "Part N" is the
+ * deliberate answer rather than a mid-file surprise.
+ */
+function identityPreservingSeeds(
+  seeds: readonly (ImportMilestone | undefined)[],
+): (ImportMilestone | undefined)[] {
+  const hasIdentity = seeds.some((seed) => seed && seed.kind !== "part")
+  if (!hasIdentity) return [...seeds]
+  return seeds.map((seed) => (seed?.kind === "part" ? undefined : seed))
 }
 
 function isScriptureMilestone(value: ImportMilestone | undefined): value is ImportMilestone {

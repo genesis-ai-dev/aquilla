@@ -43,6 +43,27 @@ vi.mock("@/lib/frontier/portfolio", () => ({
 }))
 vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
 
+// AQU-1173: record the `loading` the inbox hands the table on EVERY render.
+// The flake was a one-render window, not a lasting state, so it has to be
+// observed per render — a DOM probe after `waitFor` samples one moment and
+// only lands inside the window on a slow enough machine. The wrapper
+// delegates, so the other specs in this file see the real table.
+const { tableRenders } = vi.hoisted(() => ({
+  tableRenders: [] as { loading: boolean; rows: number }[],
+}))
+
+vi.mock("@/components/ui/data-table", async (importActual) => {
+  const actual = await importActual<typeof import("@/components/ui/data-table")>()
+  const Real = actual.DataTable
+  return {
+    ...actual,
+    DataTable: (props: Parameters<typeof Real>[0]) => {
+      tableRenders.push({ loading: Boolean(props.loading), rows: props.data.length })
+      return <Real {...props} />
+    },
+  }
+})
+
 import { getMyAssignmentsForOrg } from "@/lib/sync/assignments"
 const mockGetMy = vi.mocked(getMyAssignmentsForOrg)
 
@@ -50,6 +71,7 @@ beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   navigate.mockClear()
+  tableRenders.length = 0
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -72,9 +94,32 @@ describe("AssignedToMe", () => {
     mockGetMy.mockImplementation(() => new Promise(() => {}))
     renderInbox()
 
-    await waitFor(() => expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument())
-    expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    // AQU-1173: wait on the state actually being asserted. Waiting on the
+    // search box instead and then probing the skeleton synchronously made
+    // this order-dependent — the table mounts one commit before the
+    // skeleton did, so a full-suite run could observe the gap.
+    await waitFor(() => {
+      expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    })
+    expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument()
     expect(document.querySelector(".animate-pulse")).toBeTruthy()
+  })
+
+  // AQU-1173 regression guard — the root cause behind the flake above.
+  // OrgProvider resolves the active org after mount, so the inbox re-renders
+  // with a real org one render BEFORE its fetch effect runs. While `loading`
+  // was its own state it lagged that render, and the table was handed
+  // `loading: false` with zero rows — the settled "no assignments" view — for
+  // one frame before the skeleton replaced it.
+  it("never hands the table a settled state while the active org's assignments are pending", async () => {
+    mockGetMy.mockImplementation(() => new Promise(() => {}))
+    renderInbox()
+
+    await waitFor(() => {
+      expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    })
+    expect(tableRenders.length).toBeGreaterThan(0)
+    expect(tableRenders.filter((render) => !render.loading)).toEqual([])
   })
 
   it("aggregates the caller's open assignments across projects with progress", async () => {

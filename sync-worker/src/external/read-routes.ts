@@ -66,6 +66,7 @@ import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
@@ -183,7 +184,10 @@ async function handleExternalProjectDetail(
 
   // authenticateAndScope already 404s an unknown project id; a null here means
   // the project was deleted between the two reads.
-  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role)
+  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(authed.ctx.credential.userId),
+  })
   if (!detail) return externalError("not_found", "project not found", 404)
   return Response.json(detail)
 }
@@ -416,9 +420,19 @@ async function handleExternalProjectSettings(
   // is an agent-facing surface and the id identifies a human translator. The
   // blob + version are all `ifMatchVersion` needs. A project with no settings
   // row yet reads as `{}` at version 0 — patch against 0 to create it.
+  // AQU-1421: the blob's lane registry is cut to this caller's grants when the
+  // read wall is on. The version stays the live one so PatchSettings still matches.
+  const settings = await filterSettingsBlobForMember(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
-    settings: current.settings,
+    settings,
     version: current.version,
     updatedAt: current.updatedAt,
   })

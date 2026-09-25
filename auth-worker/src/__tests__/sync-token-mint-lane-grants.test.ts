@@ -44,7 +44,7 @@ describe("AQU-730 — signSyncTokenWithRole laneGrants claim", () => {
     await seedProjectMember()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
-       VALUES ('p1', 1, 'fr', 300), ('p1', 1, 'es', 400)`,
+       VALUES ('p1', 1, 'lanefr01', 300), ('p1', 1, 'lanees01', 400)`,
     ).run()
     const signed = await signSyncTokenWithRole(
       env as unknown as Env,
@@ -57,8 +57,8 @@ describe("AQU-730 — signSyncTokenWithRole laneGrants claim", () => {
       laneGrants?: { lane: string; level: number }[]
     }
     expect(claims.laneGrants).toEqual([
-      { lane: "es", level: 400 },
-      { lane: "fr", level: 300 },
+      { lane: "lanees01", level: 400 },
+      { lane: "lanefr01", level: 300 },
     ])
   })
 })

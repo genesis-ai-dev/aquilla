@@ -1,11 +1,7 @@
 /**
- * AQU-608: the editor-header TARGET-tag lane switcher is a maintainer-and-above
- * affordance. This test renders the real EditorTable with more than one lane and
- * an `onLaneChange` handler, and proves:
- *   - a maintainer (600) sees the interactive dropdown (`lane-switcher`);
- *   - a contributor (400) does NOT — the tag falls back to a static pill that
- *     still names the target language, so translators keep to their lane.
- * The dropdown UI itself landed with AQU-602; this locks in the role gate.
+ * The editor-header target-lane switcher. A maintainer always sees the
+ * dropdown. A contributor sees it when more than one lane was handed in, and
+ * a static pill when there is only one.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -135,18 +131,49 @@ function renderTable(level: number, targetLanguage = "fr") {
   )
 }
 
-describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
+describe("EditorTable — lane switcher", () => {
   it("shows the interactive dropdown for a maintainer", async () => {
     renderTable(ROLE.MAINTAINER)
     expect(await screen.findByTestId("lane-switcher")).toBeInTheDocument()
   })
 
-  it("hides the switcher for a contributor, leaving a static target-language pill", async () => {
+  it("opens the switcher for a contributor who was handed more than one lane", async () => {
     renderTable(ROLE.CONTRIBUTOR)
-    // The row renders (proves the header mounted) but no lane switcher exists…
+    expect(await screen.findByTestId("lane-switcher")).toBeInTheDocument()
+  })
+
+  it("keeps a static pill for a contributor with a single lane", async () => {
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={makeProject(ROLE.CONTRIBUTOR, "fr")}
+            cellStore={makeStore()}
+            username="tester"
+            activeLane=""
+            lanes={[""]}
+            onLaneChange={() => {}}
+            defaultLaneLabel="fr"
+            isCompletionConfigured={false}
+            isCompletionAvailable={false}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={() => {}}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
     await screen.findByText("bonjour")
     expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
-    // …and the target language is still shown as a plain pill.
     expect(screen.getByText("fr")).toBeInTheDocument()
   })
 

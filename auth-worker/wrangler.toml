@@ -251,6 +251,9 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles in production. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -353,6 +356,9 @@ BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "development"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles on dev. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"

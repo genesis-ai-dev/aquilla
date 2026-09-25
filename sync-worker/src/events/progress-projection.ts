@@ -255,7 +255,7 @@ export function fileProgressRecomputeStmt(
               '{}'::jsonb
             )
        FROM summary CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(
     projectId, fileId,
@@ -441,7 +441,7 @@ export function sectionsProgressRecomputeStmt(
         AND audio_histograms.scope = summaries.scope
         AND audio_histograms.section_key = summaries.section_key
        CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(...binds)
 }
@@ -615,7 +615,7 @@ export function fullProgressRecomputeStmts(
           AND audio_histograms.scope = summaries.scope
           AND audio_histograms.section_key = summaries.section_key
          CROSS JOIN watermark
-       ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+       ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,
     ).bind(
       projectId, fileId,

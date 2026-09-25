@@ -104,7 +104,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang)')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
     // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
     // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
     // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
@@ -163,7 +163,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
     // bind order (mirrors the INSERT column list):

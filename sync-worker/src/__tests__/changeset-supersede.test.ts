@@ -72,7 +72,7 @@ async function humanCommitsTarget(tdb: TestDb, value: string, eventId: string): 
   await tdb.pg.query(
     `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
      VALUES ($1, $2, $3, 'target', '', $4, $5, 2)
-     ON CONFLICT (project_id, file_id, cell_id, side, target_lang)
+     ON CONFLICT (project_id, file_id, cell_id, lane_id)
      DO UPDATE SET value = EXCLUDED.value, event_id = EXCLUDED.event_id`,
     [PROJECT, FILE, CELL, value, eventId],
   )

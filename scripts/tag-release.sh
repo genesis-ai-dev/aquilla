@@ -17,7 +17,7 @@ series="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
 # deploy chain records one, so do it here, once, before any push attempt.
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
-  GITHUB_TOKEN="$(gh auth token 2>/dev/null || true)"
+  GITHUB_TOKEN="$(gh auth token 2>/dev/null || true)" # secret-scan:allow — command substitution, not a literal secret
   export GITHUB_TOKEN
 fi
 if [ -z "${GITHUB_TOKEN:-}" ]; then

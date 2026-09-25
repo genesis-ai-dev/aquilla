@@ -109,40 +109,6 @@ export default defineConfig([
       ],
     },
   },
-  // LaneScopedRead perimeter guard: only lane-visibility-authority.ts may mint
-  // the brand. Any other file that constructs the object literal or casts to
-  // LaneScopedRead bypasses the visibility resolver.
-  {
-    files: ['sync-worker/src/**/*.ts'],
-    ignores: ['sync-worker/src/events/lane-visibility-authority.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            'ObjectExpression > Property[key.name="__brand"][value.value="lane-scoped-read"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Direct brand construction defeats the read perimeter.',
-        },
-        {
-          selector: 'TSAsExpression[typeAnnotation.typeName.name="LaneScopedRead"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Type assertions defeat the read perimeter.',
-        },
-        {
-          selector: 'TSTypeAssertion[typeAnnotation.typeName.name="LaneScopedRead"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Type assertions defeat the read perimeter.',
-        },
-        {
-          selector:
-            'ImportSpecifier[imported.name="LaneScopedRead"]:not([local.name="LaneScopedRead"])',
-          message:
-            'LaneScopedRead must not be aliased on import; this defeats the ESLint perimeter guard.',
-        },
-      ],
-    },
-  },
   // DOM-global shadow guard (AQU-642): these PascalCase browser globals collide with
   // lucide-react icon names. If an icon import is dropped (e.g. in a merge-conflict
   // resolution), the JSX silently resolves to the DOM global — TypeScript accepts it

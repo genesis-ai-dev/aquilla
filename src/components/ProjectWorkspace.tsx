@@ -11521,10 +11521,20 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
+            // AQU-1079: the Agent workbench lives in the center pane, not the
+            // dock, so the rail used to render its icon inactive and swallow
+            // the click while the workbench was open — the sidebar entry read
+            // as dead. Mark it active while its surface is up, and let the
+            // click toggle that surface off like any other rail tab.
+            surfaceTab={centerSurface === "agent" ? "agent" : null}
+            onSurfaceTabToggle={() => closeAgentTab()}
             onActiveTabChange={(t) => {
               // Agent rail: while the workbench is showing, re-focus it;
               // otherwise open the compact panel in the dock (even if an
-              // Agent editor tab is still sitting in the strip).
+              // Agent editor tab is still sitting in the strip). The rail's
+              // own click on an active Agent surface no longer lands here —
+              // it goes to onSurfaceTabToggle above — so this branch is now
+              // only the expand affordance restoring its last tab.
               if (t === "agent") {
                 if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
                   openAgentTab()

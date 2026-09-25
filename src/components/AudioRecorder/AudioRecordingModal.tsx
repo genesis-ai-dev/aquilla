@@ -1657,13 +1657,51 @@ export function AudioRecordingModal({
               showFilm && "flex-1",
             )}
           >
-          <div className="shrink-0 px-4 pt-3">
+          {/* THE ANCHORED SOURCE (AQU-1407) — the thing being translated, and
+              the one line in this panel a translator cannot afford to lose.
+              Josseline (Biblica ETT, Pattani Malay, 2026-09-24): "if we could
+              find a way to prevent the source from hiding".
+
+              Two things kept it from being readable, and both are fixed here:
+
+              STICKY, because this block used to be an ordinary first child of
+              the scrollable region below. On any viewport short enough to make
+              that region scroll — which is every laptop once the takes drawer
+              is open — reaching the record button scrolled the source off the
+              top, and it was gone for the countdown and the whole take. Pinned
+              to the top of its own scroller it survives every scroll position,
+              every phase, and every line change (the text is read straight off
+              `activeCell`, so navigating re-renders it in place).
+
+              SCROLLABLE, NOT CLAMPED, because it was `line-clamp-2`: a verse
+              longer than two lines was silently cut with no way to see the
+              rest. A capped, scrollable strip shows as much as the panel can
+              spare and keeps the remainder reachable — the ticket's "may
+              collapse to a scrollable strip, but it must never disappear".
+              The cap is deliberate: the performer's own line below owns a
+              measured five-line budget (`readAloudBudget`) that an unbounded
+              source would push out of the panel. */}
+          <div
+            data-testid="rec-source"
+            // `bg-popover`, not `bg-background`: the dialog surface is
+            // `bg-popover` (see `components/ui/dialog.tsx`), and a sticky strip
+            // in the wrong token is a visible seam in dark mode and lets the
+            // performer's line scroll THROUGH the source in light mode.
+            className="sticky top-0 z-10 shrink-0 bg-popover px-4 pt-3 pb-3"
+          >
             <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
               {t("editor.column.source")}
             </div>
-            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
+            <p
+              data-testid="rec-source-text"
+              className="mt-0.5 max-h-20 overflow-y-auto text-xs leading-snug text-muted-foreground"
+              style={{ scrollbarGutter: "stable" }}
+            >
               {activeCell.original || <span className="text-muted-foreground/60 italic">{t("audio.recordingModal.emptySource")}</span>}
             </p>
+          </div>
+
+          <div className="shrink-0 px-4">
             {/* Who is speaking, and whether the camera is on them — the two
                 things a performer settles BEFORE the first word, so they sit
                 above the line rather than beside the meter.
@@ -1673,7 +1711,7 @@ export function AudioRecordingModal({
                 `readAloudBudget`; anything added inside it silently shrinks
                 the performer's type. Sharing the label's row costs the line
                 nothing at all. */}
-            <div className="mt-3 flex items-baseline gap-2">
+            <div className="flex items-baseline gap-2">
               <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
                 {t("audio.recordingModal.readAloudLabel")}
               </div>

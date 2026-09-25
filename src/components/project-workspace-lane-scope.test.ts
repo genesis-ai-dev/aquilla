@@ -110,12 +110,32 @@ describe("decideScopedLandingLane", () => {
     expect(decideScopedLandingLane({ ...settled, scopes: null })).toEqual({ action: "wait" })
   })
 
-  it("still burns its one shot when the scopes have no opinion", () => {
-    // Scoped, but to a lane this project does not offer: the seed is spent so a
-    // later scope change never yanks the member off a lane they have settled on.
-    expect(decideScopedLandingLane({ ...settled, scopes: [lane("de")] })).toEqual({
+  it("THE SPA-NAV REGRESSION: never burns the one-shot against a lane registry that has not arrived", () => {
+    // `targetLanes` arrives on a SEPARATE settings fetch overlaid onto the
+    // project record, so on client-side navigation `project` is truthy while
+    // `availableLanes` is still just the default lane. Spending the one-shot
+    // here pinned a scoped member to Project default permanently — QA caught
+    // it walking "Open project" from the overview.
+    const registryNotYetIn = { ...settled, availableLanes: [""] }
+    expect(decideScopedLandingLane(registryNotYetIn)).toEqual({ action: "wait" })
+    // …and when the registry lands on a later render, it seeds as intended.
+    expect(decideScopedLandingLane({ ...registryNotYetIn, availableLanes: ["", "fr"] })).toEqual({
       action: "seed",
-      lane: null,
+      lane: "fr",
     })
+  })
+
+  it("waits rather than settling when the scopes name no lane this project offers", () => {
+    // Indistinguishable from "registry not in yet", and waiting costs nothing:
+    // it writes no marker and changes no lane.
+    expect(decideScopedLandingLane({ ...settled, scopes: [lane("de")] })).toEqual({
+      action: "wait",
+    })
+  })
+
+  it("only ever seeds a real lane, so the caller never has a null to handle", () => {
+    const decision = decideScopedLandingLane(settled)
+    expect(decision.action).toBe("seed")
+    if (decision.action === "seed") expect(decision.lane).toBeTruthy()
   })
 })

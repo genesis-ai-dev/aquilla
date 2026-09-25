@@ -66,17 +66,12 @@ export function resolveScopedLandingLane(
 
 /** What the workspace should do about the opening lane on this render. */
 export type ScopedLandingLaneDecision =
-  /** Inputs aren't settled yet (project or scopes still loading) — try again. */
+  /** Nothing to act on yet — re-evaluate on the next render. */
   | { action: "wait" }
   /** Someone else owns the lane (deep link / prior choice) — stand down for good. */
   | { action: "stand-down" }
-  /**
-   * The seed has had its one chance: record that it ran, and move to `lane`
-   * when it is non-null. `null` means the member's scopes had no opinion —
-   * still one-shot, so an unscoped member who is scoped LATER isn't yanked off
-   * a lane they have since settled on.
-   */
-  | { action: "seed"; lane: string | null }
+  /** Move to `lane` and record that the seed has run. Only ever a real lane. */
+  | { action: "seed"; lane: string }
 
 /**
  * AQU-1029: the precedence chain in front of {@link resolveScopedLandingLane}.
@@ -89,7 +84,24 @@ export type ScopedLandingLaneDecision =
  *    key stores Project default as an ABSENT key, so without it "never opened"
  *    and "opened and deliberately switched back to default" are the same
  *    reading and the seed would drag the member off default on every reload.
- * 4. Otherwise seed, once the project (lane registry) and scopes have loaded.
+ * 4. Otherwise seed — but ONLY once a real lane resolves.
+ *
+ * AQU-1029 follow-up: that last point is the whole of a bug QA caught on the
+ * preview. `targetLanes` reaches the workspace through a SEPARATE settings
+ * fetch overlaid onto the project record (`useProject`), so `project` is
+ * truthy for a while before the lane registry exists — reliably so on SPA
+ * client-side navigation, where the record is already cached and renders at
+ * once. An earlier cut treated "scopes loaded, no lane matched" as a spent
+ * one-shot, which on that path burned the seed against an empty registry and
+ * wrote the marker, so the member was pinned to Project default for good. A
+ * cold full page load happened to work because both arrived together.
+ *
+ * So a null resolution is never terminal: it is `wait`. Waiting forever is
+ * harmless — it writes nothing and changes nothing — while burning the shot
+ * early is not recoverable. Nor is the marker needed before a successful seed:
+ * a member who has chosen a lane is already held off by `persistedLane`, and
+ * the only case the marker exists for (switched back to Project default, which
+ * persists as an absent key) can only arise after the seed has fired.
  *
  * Kept pure — storage and the router live in ProjectWorkspace — so the
  * precedence itself is pinned by tests rather than only by reading the effect.
@@ -113,5 +125,9 @@ export function decideScopedLandingLane(input: {
   // move them", so waiting is free for an unscoped member and correct for one
   // whose fetch is still in flight.
   if (!input.projectLoaded || !input.scopes || input.scopes.length === 0) return { action: "wait" }
-  return { action: "seed", lane: resolveScopedLandingLane(input.scopes, input.availableLanes) }
+  const lane = resolveScopedLandingLane(input.scopes, input.availableLanes)
+  // No lane yet: either the registry has not arrived (keep waiting — it will)
+  // or the member's scopes name nothing this project offers (keep waiting
+  // forever, which costs nothing). Never spend the one-shot here.
+  return lane ? { action: "seed", lane } : { action: "wait" }
 }

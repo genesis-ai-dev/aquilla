@@ -2067,7 +2067,7 @@ export function ProjectWorkspace() {
     scopedLandingLaneAppliedRef.current = true
     if (decision.action === "stand-down") return
     markSeededActiveLane(projectId)
-    if (decision.lane) setActiveLane(decision.lane)
+    setActiveLane(decision.lane)
   }, [projectId, project, searchParams, myScopes, availableLanes, setActiveLane])
   // AQU-1006 follow-up: `terminology` on this record is now sourced from the
   // CONCEPTS PROJECTION, never from project settings.

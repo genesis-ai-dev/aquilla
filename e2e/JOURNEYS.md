@@ -182,6 +182,19 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
+  Project Lead, including on a DCS-pinned project where a refusal reason exists),
+  the DCS-pinned disabled reason, the IDML row that is parkable although its text
+  is not editable, the Show-cell wording flip, and the dimmed eye-off row —
+  covered in RTL (`EditorTable.hiddenCells.test.tsx`). The display-list rule that
+  drops a parked cell from the text table, the media lens and the chapter counts
+  together, and the list-version bumps a live hide/show depends on, are in
+  `useActiveCellStore.hiddenCells.test.ts`. The durable contract is a worker unit
+  test, not a smoke: `sync-worker/src/__tests__/hidden-cells-projection.test.ts`
+  drives the real projection against real Postgres and reads it back out through
+  the real cells read route, which is the producer/consumer seam that would
+  otherwise fail silently. The emit contract (non-chain-mutating, PROJECT_LEAD
+  floor) is in `src/lib/sync/events-emit.hiddenCells.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

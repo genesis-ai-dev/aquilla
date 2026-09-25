@@ -49,6 +49,17 @@ const REQUIRED_ROLE: Record<string, number> = {
   "source.cell.commit": ROLE.PROJECT_LEAD,
   "source.cell.delete": ROLE.COMMENTER,
   "source.cell.reorder": ROLE.COMMENTER,
+  // AQU-1422: PROJECT_LEAD, in lock-step with the server. Hiding a cell takes it
+  // out of translation and out of every export for EVERYONE, in every lane — the
+  // same class of decision as source.cell.commit, and not the low-floored
+  // create/delete/reorder trio (those sit at COMMENTER because re-import, DCS
+  // repair and diarization all emit them through a user's own outbox).
+  //
+  // THE MIRROR MATTERS HERE PARTICULARLY: this module fails OPEN on an unknown
+  // kind, so a missing row would let a contributor's outbox enqueue a hide that
+  // the server then 403s — the row would vanish optimistically and come back on
+  // reload, which reads as data loss rather than as a refusal.
+  "source.cell.visibility.set": ROLE.PROJECT_LEAD,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,

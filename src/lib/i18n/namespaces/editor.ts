@@ -944,9 +944,38 @@ export const editor = defineNamespace({
     "editor.addCell.forbiddenToast": "You don\u2019t have permission to add cells here, so it has been removed again.",
     "editor.removeCell.forbiddenToast": "You don\u2019t have permission to remove cells here, so it has been put back.",
     "editor.removeCell.notYetSavedToast": "That cell is still being saved \u2014 try removing it again in a moment.",
+    // AQU-1422: a refused hide/show puts the row back, so these say what the
+    // user can now see for themselves — same shape as the removeCell pair above.
+    "editor.hideCell.failedToast": "Couldn’t hide that cell, so it is still showing.",
+    "editor.showCell.failedToast": "Couldn’t show that cell, so it is still hidden.",
+    "editor.hideCell.forbiddenToast":
+      "You don’t have permission to hide cells here, so nothing changed.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
+    // AQU-1422: the reversible sibling of "Remove this line". The wording says
+    // "cell" rather than "line" on purpose — one hide parks the row in EVERY
+    // language lane at once, so calling it a line invites the reading that it
+    // only affects the lane you are looking at.
+    "editor.row.hideCell": "Hide cell",
+    "editor.row.showCell": "Show cell",
+    "editor.row.hiddenBadgeTooltip":
+      "Hidden — not shown to translators and left out of exports.",
+    "editor.row.hiddenBadgeAria": "Hidden cell",
+    // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
+    // indicator sits in a crowded toolbar where the shortest true string wins.
+    "editor.hiddenCells.indicator": "{count} hidden",
+    "editor.hiddenCells.toggle": "Show hidden cells",
+    "editor.hiddenCells.indicatorTooltip": plural({
+      one:
+        "{count} cell in this file is hidden: translators do not see it and exports " +
+        "leave it out. Nothing was deleted — show it to bring its text, " +
+        "translations, recordings and comments back.",
+      other:
+        "{count} cells in this file are hidden: translators do not see them and " +
+        "exports leave them out. Nothing was deleted — show a cell to bring " +
+        "its text, translations, recordings and comments back.",
+    }),
     "editor.row.addLineAbove": "Add a line above",
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
@@ -5629,6 +5658,59 @@ export const editor = defineNamespace({
         placeholders: {
           key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
         },
+      },
+      // AQU-1422 — hide / show one cell.
+      "editor.row.hideCell": {
+        description:
+          "Menu entry on a source cell that parks the cell: translators stop seeing " +
+          "it and exports leave it out, but nothing is deleted. Imperative. Say " +
+          "\"cell\", not \"line\" — one hide parks the row in every language at once.",
+        maxLength: 18,
+      },
+      "editor.row.showCell": {
+        description:
+          "The same menu entry on a cell that is already parked — it brings the cell " +
+          "back, with its text, translations, recordings and comments intact. " +
+          "Imperative. The opposite of \"Hide cell\"; keep the pair recognisable.",
+        maxLength: 18,
+      },
+      "editor.row.hiddenBadgeTooltip": {
+        description:
+          "Tooltip on the crossed-out-eye badge drawn on a parked cell, for the source " +
+          "editor who has turned on \"Show hidden cells\". States the two consequences " +
+          "of hiding. Full sentence with a period.",
+      },
+      "editor.row.hiddenBadgeAria": {
+        description:
+          "Screen-reader name of that crossed-out-eye badge. A short noun phrase, not " +
+          "a sentence.",
+        maxLength: 20,
+      },
+      "editor.hiddenCells.indicator": {
+        description:
+          "Compact count in the file header telling a source editor how many of this " +
+          "file's cells are parked, e.g. \"3 hidden\". Only they see it. Keep it as " +
+          "short as the English — it sits in a crowded toolbar.",
+        placeholders: {
+          count: "How many cells in this file are hidden. Always one or more — the " +
+            "indicator is not drawn at zero.",
+        },
+        maxLength: 16,
+      },
+      "editor.hiddenCells.indicatorTooltip": {
+        description:
+          "Tooltip on that count. Explains what hiding does and reassures the reader " +
+          "that nothing was lost. Full sentences with periods.",
+        placeholders: {
+          count: "How many cells in this file are hidden. Always one or more.",
+        },
+      },
+      "editor.hiddenCells.toggle": {
+        description:
+          "Label of the switch beside the hidden-cell count. On, the parked cells are " +
+          "drawn dimmed instead of dropped from the list — it reveals them on this " +
+          "screen only and un-hides nothing for anyone else. Imperative.",
+        maxLength: 24,
       },
       "editor.issues.none": {
         description:

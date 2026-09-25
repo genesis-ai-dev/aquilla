@@ -223,3 +223,84 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(onCheckToggle).toHaveBeenCalledOnce()
   })
 })
+
+/**
+ * AQU-1422: the file header's hidden-cell indicator.
+ *
+ * Count and reveal are ONE control because they answer one question — the thing
+ * that tells you something is parked is the thing that shows it to you, rather
+ * than a badge here and a switch three menus away.
+ *
+ * The workspace hands the prop over only to someone who may park cells, and only
+ * when the count is above zero, so there is no permission check and no zero state
+ * inside the component. The `hiddenCells` prop being ABSENT is therefore the
+ * reader's case as well as the nothing-hidden case, and both are asserted.
+ */
+describe("FileChapterToolbar hidden-cell indicator (AQU-1422)", () => {
+  const base = {
+    lens: "text" as const,
+    onLensChange: vi.fn(),
+    checkOpen: false,
+    checkRunning: false,
+    checkResult: null,
+    onCheckToggle: vi.fn(),
+    menuItems: [],
+  }
+
+  it("is absent when nothing is hidden, or the reader may not park cells", () => {
+    render(<FileChapterToolbar {...base} />)
+    expect(screen.queryByTestId("hidden-cells-indicator")).toBeNull()
+  })
+
+  it("states the count and reads as not revealed", () => {
+    render(
+      <FileChapterToolbar
+        {...base}
+        hiddenCells={{ count: 3, revealed: false, onRevealedChange: vi.fn() }}
+      />,
+    )
+
+    const btn = screen.getByTestId("hidden-cells-indicator")
+    expect(btn.textContent).toContain("3 hidden")
+    // Exposed as state, not as a colour class: the two appearances differ only by
+    // tint, and asserting on the class would pin the styling rather than this.
+    expect(btn).toHaveAttribute("data-revealed", "false")
+    expect(btn).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("turns the reveal on and off from the same control", async () => {
+    const onRevealedChange = vi.fn()
+    const { rerender } = render(
+      <FileChapterToolbar
+        {...base}
+        hiddenCells={{ count: 1, revealed: false, onRevealedChange }}
+      />,
+    )
+
+    await userEvent.click(screen.getByTestId("hidden-cells-indicator"))
+    expect(onRevealedChange).toHaveBeenCalledWith(true)
+
+    rerender(
+      <FileChapterToolbar
+        {...base}
+        hiddenCells={{ count: 1, revealed: true, onRevealedChange }}
+      />,
+    )
+    const btn = screen.getByTestId("hidden-cells-indicator")
+    expect(btn).toHaveAttribute("data-revealed", "true")
+    expect(btn).toHaveAttribute("aria-pressed", "true")
+
+    await userEvent.click(btn)
+    expect(onRevealedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("keeps the count singular-correct", () => {
+    render(
+      <FileChapterToolbar
+        {...base}
+        hiddenCells={{ count: 1, revealed: false, onRevealedChange: vi.fn() }}
+      />,
+    )
+    expect(screen.getByTestId("hidden-cells-indicator").textContent).toContain("1 hidden")
+  })
+})

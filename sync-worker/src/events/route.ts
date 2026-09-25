@@ -245,7 +245,17 @@ async function notifyLiveDownstreamsOfUpstreamChanges(
  * `cells.validated` without advancing the chain head.
  */
 function isEventAppliedRowsKind(kind: string): boolean {
-  return isChainMutatingKind(kind) || kind === 'cell.validate' || kind === 'cell.unvalidate'
+  return (
+    isChainMutatingKind(kind) ||
+    kind === 'cell.validate' ||
+    kind === 'cell.unvalidate' ||
+    // AQU-1422: a hide/show changes the cell's projected rows without being
+    // chain-mutating, so it has to be named here. Left out, the frame carries no
+    // `rows` and every collaborator's client falls back to a by-ids refetch to
+    // learn a row left the file — correct, but a round trip for a one-column
+    // change we already have in hand.
+    kind === 'source.cell.visibility.set'
+  )
 }
 
 /** Above this many distinct cells in one request, `rows` is omitted from every

@@ -17,7 +17,7 @@ import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } 
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
+import { grantsVersionFromSyncToken, readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
@@ -567,6 +567,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the empty-state UI as if the file genuinely has no cells.
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  const grantsVersionRef = useRef("")
   // Tauri offline read branch (see resolveOfflineStore above). `store` is
   // null outside Tauri, before boot completes, or on boot failure — every
   // one of those falls straight through to the unchanged HTTP path below.
@@ -808,13 +809,39 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       return
     }
 
+    let token: string | null = null
+    try {
+      token = getToken ? await getToken(fileId) : null
+    } catch {
+      token = null
+    }
+    if (generationRef.current !== gen) return
+    if (!token) {
+      const attempt = ++tokenAttemptsRef.current
+      inFlightRef.current = false
+      if (attempt >= 6) {
+        setIsError(true)
+        setIsLoading(false)
+        return
+      }
+      const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+      if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = setTimeout(() => {
+        tokenRetryRef.current = null
+        if (generationRef.current === gen) void doFetchRef.current(soft)
+      }, delay)
+      return
+    }
+    tokenAttemptsRef.current = 0
+    const grantsVersion = grantsVersionFromSyncToken(token)
+    grantsVersionRef.current = grantsVersion
+
     let usedCache = false
     if (!soft) {
-      // Try the IDB cache before showing a skeleton. A hit paints cached rows
-      // synchronously into rowsRef, hides the skeleton, and demotes the rest
-      // of the fetch to soft mode (atomic swap on completion) so the user
-      // never flickers from cached rows → skeleton → fresh rows.
-      const cached = await readCellsCache(projectId, fileId)
+      // The token is resolved first so a grant change does not paint the
+      // previous snapshot. A warm token is already in memory; a cold mint
+      // shows the skeleton until the key is known.
+      const cached = await readCellsCache(projectId, fileId, grantsVersion)
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         rowsRef.current = cached.rows
@@ -839,29 +866,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     setIsError(false)
     let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const token = getToken ? await getToken(fileId) : null
-      if (!token) {
-        if (generationRef.current !== gen) return
-        // Token unavailable: probably an auth race or transient /sync-token
-        // failure. Keep the skeleton up and retry with backoff (250ms → 4s)
-        // so the file appears as soon as auth resolves. After ~6 attempts
-        // surface isError so the UI can show a real failure state.
-        const attempt = ++tokenAttemptsRef.current
-        inFlightRef.current = false
-        if (attempt >= 6) {
-          setIsError(true)
-          setIsLoading(false)
-          return
-        }
-        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
-        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
-        tokenRetryRef.current = setTimeout(() => {
-          tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetchRef.current(soft)
-        }, delay)
-        return
-      }
-      tokenAttemptsRef.current = 0
       // M2-1 delta path: with a confirmed watermark, ONE `?since=` request
       // replaces the ~60-page full re-stream for every soft revalidate
       // (window focus, visibilitychange, post-commit) and for warm reopens.
@@ -905,7 +909,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
             rowsRef.current = kept
             rebuildFromCache()
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark, nextEpoch ?? undefined)
+            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark, nextEpoch ?? undefined, grantsVersion)
           } else if (result.maxServerSeq !== since) {
             // Watermark moved on row-less events (file.rename etc.) — advance
             // the cursor so those events aren't re-scanned forever.
@@ -915,6 +919,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
               rowsRef.current,
               result.maxServerSeq,
               nextEpoch ?? undefined,
+              grantsVersion,
             )
           }
           maxServerSeqRef.current = nextWatermark
@@ -1021,6 +1026,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         rowsRef.current,
         watermark ?? undefined,
         watermarkEpoch ?? undefined,
+        grantsVersion,
       )
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
@@ -1200,6 +1206,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       rowsRef.current,
       maxServerSeqRef.current ?? undefined,
       projectEpochRef.current ?? undefined,
+      grantsVersionRef.current,
     )
   }, [])
 

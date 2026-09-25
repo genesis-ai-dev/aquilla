@@ -74,6 +74,8 @@ interface PendingCellsCacheWrite {
   maxServerSeq?: number
   projectEpoch?: number
   timer: ReturnType<typeof setTimeout> | null
+  /** Unversioned key to delete once a grant-scoped snapshot is stored. */
+  unversionedKey: string | null
 }
 
 interface InFlightCellsCacheWrite {
@@ -85,10 +87,59 @@ interface InFlightCellsCacheWrite {
 const pendingWrites = new Map<string, PendingCellsCacheWrite>()
 const inFlightWrites = new Map<string, InFlightCellsCacheWrite>()
 
-function cacheKey(projectId: string, fileId: string): string {
-  const legacy = `${projectId}:${fileId}`
+function cacheKey(projectId: string, fileId: string, grantsVersion = ""): string {
+  const legacy = grantsVersion
+    ? `${projectId}:${fileId}:gv:${grantsVersion}`
+    : `${projectId}:${fileId}`
   if (activeOwnerKey === undefined) return legacy
   return scopedCacheKey(activeOwnerKey, legacy)
+}
+
+/** FNV-1a. Stable, synchronous, and enough to separate grant sets in a cache key. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+function decodeJwtPayload(token: string): unknown {
+  const part = token.split(".")[1]
+  if (!part) return null
+  const b64 = part.replace(/-/g, "+").replace(/_/g, "/")
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4)
+  return JSON.parse(atob(padded))
+}
+
+/**
+ * Cache-key suffix for the sync token's `laneGrants` claim.
+ * An absent or empty claim returns "" so existing snapshots keep their key.
+ */
+export function grantsVersionFromSyncToken(token: string | null | undefined): string {
+  if (!token) return ""
+  let payload: unknown
+  try {
+    payload = decodeJwtPayload(token)
+  } catch {
+    return ""
+  }
+  if (!payload || typeof payload !== "object") return ""
+  const raw = (payload as { laneGrants?: unknown }).laneGrants
+  if (!Array.isArray(raw) || raw.length === 0) return ""
+  const parts: string[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const lane = (item as { lane?: unknown }).lane
+    const level = (item as { level?: unknown }).level
+    if (typeof lane !== "string" || lane.length === 0) continue
+    if (typeof level !== "number" || !Number.isFinite(level)) continue
+    parts.push(`${lane}:${level}`)
+  }
+  if (parts.length === 0) return ""
+  parts.sort()
+  return fnv1a(parts.join("\n"))
 }
 
 function scopedCacheKey(ownerKey: string | null, legacyKey: string): string {
@@ -184,17 +235,23 @@ export async function claimLegacyCellsCache(ownerKey: string | null): Promise<vo
 export async function readCellsCache(
   projectId: string,
   fileId: string,
+  grantsVersion = "",
 ): Promise<CellsCacheEntry | null> {
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   try {
     const db = await openDb()
-    return await new Promise<CellsCacheEntry | null>((resolve, reject) => {
+    const entry = await new Promise<CellsCacheEntry | null>((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const store = tx.objectStore(STORE)
       const req = store.get(entryKey)
       req.onsuccess = () => resolve((req.result as CellsCacheEntry | undefined) ?? null)
       req.onerror = () => reject(req.error ?? new Error("IDB get failed"))
     })
+    if (unversionedKey) {
+      await deleteGrantSiblings(unversionedKey, entryKey).catch(() => undefined)
+    }
+    return entry
   } catch {
     return null
   }
@@ -206,11 +263,13 @@ export async function writeCellsCache(
   rows: CellRow[],
   maxServerSeq?: number,
   projectEpoch?: number,
+  grantsVersion = "",
 ): Promise<void> {
   // Capture the identity namespace before the first await. An IndexedDB open
   // can settle after an account switch; recomputing then would write the old
   // request's rows into the newly-active account's key.
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   // An immediate snapshot supersedes an older queued tuple. Serialize it
   // behind any in-flight write so a slower worker cannot restore older rows.
   const queued = pendingWrites.get(entryKey)
@@ -225,6 +284,7 @@ export async function writeCellsCache(
       maxServerSeq,
       projectEpoch,
       timer: null,
+      unversionedKey,
     })
   } catch {
     /* cache write is best-effort; a failed write must not break the load */
@@ -258,6 +318,30 @@ async function putCellsCacheEntry(
   } else {
     await putCellsCacheSnapshot(db, entry)
   }
+  if (pending.unversionedKey) {
+    await deleteGrantSiblings(pending.unversionedKey, pending.entryKey)
+  }
+}
+
+/** Drop the pre-grant snapshot and any other grant versions of this file. */
+async function deleteGrantSiblings(unversionedKey: string, keepKey: string): Promise<void> {
+  const db = await openDb()
+  const prefix = `${unversionedKey}:gv:`
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    const store = tx.objectStore(STORE)
+    store.delete(unversionedKey)
+    const request = store.openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const key = String(cursor.key)
+      if (key.startsWith(prefix) && key !== keepKey) cursor.delete()
+      cursor.continue()
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("IDB grant-sibling delete failed"))
+  })
 }
 
 /**
@@ -272,10 +356,12 @@ export function scheduleCellsCacheWrite(
   rows: CellRow[],
   maxServerSeq?: number,
   projectEpoch?: number,
+  grantsVersion = "",
 ): void {
   // Capture the owner-scoped key now. The active account can change before
   // the timer fires, and old rows must never land in the new account's key.
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   const previous = pendingWrites.get(entryKey)
   if (previous?.timer != null) {
     clearTimeout(previous.timer)
@@ -291,6 +377,7 @@ export function scheduleCellsCacheWrite(
     maxServerSeq,
     projectEpoch,
     timer: null,
+    unversionedKey,
   }
   pending.timer = setTimeout(() => {
     pending.timer = null

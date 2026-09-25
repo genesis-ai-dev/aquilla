@@ -6,6 +6,7 @@ import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/ce
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import {
   flushCellsCacheWrites,
+  grantsVersionFromSyncToken,
   mergeCellsDelta,
   readCellsCache,
   scheduleCellsCacheWrite,
@@ -2352,6 +2353,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const inFlightRef = useRef(false)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  const grantsVersionRef = useRef("")
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // I3: queue, don't drop. A second event.applied for a cell while its GET is
   // in flight marks it dirty; the in-flight fetch re-runs once when it lands.
@@ -2391,7 +2393,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // on reload, whereas a poisoned one paints a rejected edit as saved.
   const persistCellsCache = useCallback((pid: string, fid: string, maxServerSeq?: number, projectEpoch?: number) => {
     if (store.hasOptimisticEdits()) return
-    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch)
+    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch, grantsVersionRef.current)
   }, [store])
 
   const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
@@ -2459,11 +2461,37 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       return
     }
 
+    let token: string | null = null
+    try {
+      token = tokenFetcher ? await tokenFetcher(fid) : null
+    } catch {
+      token = null
+    }
+    if (generationRef.current !== gen) return
+    if (!token) {
+      const attempt = ++tokenAttemptsRef.current
+      inFlightRef.current = false
+      if (attempt >= 6) {
+        setIsError(true)
+        setIsLoading(false)
+        return
+      }
+      const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+      if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = setTimeout(() => {
+        tokenRetryRef.current = null
+        if (generationRef.current === gen) void doFetchRef.current(soft)
+      }, delay)
+      return
+    }
+    tokenAttemptsRef.current = 0
+    grantsVersionRef.current = grantsVersionFromSyncToken(token)
+
     let usedCache = false
 
     if (!soft) {
       store.reset(pid, fid)
-      const cached = await readCellsCache(pid, fid)
+      const cached = await readCellsCache(pid, fid, grantsVersionRef.current)
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
@@ -2481,26 +2509,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     setIsError(false)
     let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const token = tokenFetcher ? await tokenFetcher(fid) : null
-      if (!token) {
-        if (generationRef.current !== gen) return
-        const attempt = ++tokenAttemptsRef.current
-        inFlightRef.current = false
-        if (attempt >= 6) {
-          setIsError(true)
-          setIsLoading(false)
-          return
-        }
-        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
-        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
-        tokenRetryRef.current = setTimeout(() => {
-          tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetchRef.current(soft)
-        }, delay)
-        return
-      }
-      tokenAttemptsRef.current = 0
-
       const since = store.getMaxServerSeq()
       // AQU-943: a cursor whose incarnation is unknown (cache entry written
       // before the epoch existed) cannot be validated against a wipe + re-

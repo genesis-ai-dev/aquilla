@@ -103,7 +103,11 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(level: number, targetLanguage = "fr") {
+function renderTable(
+  level: number,
+  targetLanguage = "fr",
+  laneLabels?: Record<string, string>,
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -116,6 +120,7 @@ function renderTable(level: number, targetLanguage = "fr") {
           lanes={["", "es"]}
           onLaneChange={() => {}}
           defaultLaneLabel="fr"
+          laneLabels={laneLabels}
           isCompletionConfigured={false}
           isCompletionAvailable={false}
           completing={new Map()}
@@ -148,6 +153,13 @@ describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
     expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
     // …and the target language is still shown as a plain pill.
     expect(screen.getByText("fr")).toBeInTheDocument()
+  })
+
+  it("names the static pill from the lane label, the same way the switcher does", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { "": "Spanish" })
+    await screen.findByText("bonjour")
+    expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+    expect(screen.getByText("Spanish")).toBeInTheDocument()
   })
 
   // AQU-583: with extra lanes registered but no default target language set, the

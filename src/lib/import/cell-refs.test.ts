@@ -19,6 +19,12 @@ describe("file target import cell references", () => {
     }])
     const refs = store.getAllSummaries().map(fileTargetCellRef)
     expect(refs.map(ref => [ref.startMs, ref.endMs])).toEqual([[1000, 2000], [10000, 11000]])
+    // AQU-1360: the line's own timecode rides along for the review screen,
+    // built by the real store from the same milliseconds.
+    expect(refs.map(ref => ref.cueRef)).toEqual([
+      "00:00:01.000 --> 00:00:02.000",
+      "00:00:10.000 --> 00:00:11.000",
+    ])
     const incoming = vttToTargetRows("WEBVTT\n\n00:00:10.000 --> 00:00:11.000\nDeux\n\n00:00:01.000 --> 00:00:02.000\nUn\n")
     const match = matchTargetRowsByOrder(incoming, refs)
     expect(match.alignedBy).toBe("overlap")
@@ -30,5 +36,6 @@ describe("file target import cell references", () => {
 
     store.replaceRows([{ ...source, startMs: undefined, endMs: undefined }])
     expect(fileTargetCellRef(store.getAllSummaries()[0])).not.toHaveProperty("startMs")
+    expect(fileTargetCellRef(store.getAllSummaries()[0])).not.toHaveProperty("cueRef")
   })
 })

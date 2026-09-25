@@ -11,7 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { FileTargetImportPanel } from "@/components/import/FileTargetImportPanel"
+import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import { ImportDialogBackButton } from "@/components/import/ImportDialogBackButton"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 import { useT } from "@/lib/i18n/I18nProvider"
 import posthog from "@/lib/posthog"
@@ -55,6 +56,9 @@ export function FileTargetImportDialog({
   // Remount the panel each time the dialog opens so a previous run's step
   // state never leaks into the next one.
   const [panelKey, setPanelKey] = useState(0)
+  // Where the title's back arrow leads. The panel reports it per step, and a
+  // freshly mounted panel reports none, so reopening clears it.
+  const [back, setBack] = useState<FileTargetPanelBack | null>(null)
   useEffect(() => {
     if (open) {
       setPanelKey((k) => k + 1)
@@ -66,7 +70,16 @@ export function FileTargetImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{t("importExport.dialog.titleFileTarget")}</DialogTitle>
+          <DialogTitle>
+            {back ? (
+              <div className="flex items-center gap-2">
+                <ImportDialogBackButton label={back.label} onClick={back.onBack} disabled={back.disabled} />
+                {t("importExport.dialog.titleFileTarget")}
+              </div>
+            ) : (
+              t("importExport.dialog.titleFileTarget")
+            )}
+          </DialogTitle>
         </DialogHeader>
         {/* The panel owns its own header / scroll / footer layout; give it the
             full remaining height so its review step can pin the footer. */}
@@ -99,6 +112,7 @@ export function FileTargetImportDialog({
             }}
             onCancel={() => onOpenChange(false)}
             excludeFrontMatter={excludeFrontMatter}
+            onBackChange={setBack}
           />
         </div>
       </DialogContent>

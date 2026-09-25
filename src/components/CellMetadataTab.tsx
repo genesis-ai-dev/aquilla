@@ -176,8 +176,11 @@ function MetadataValue({ value, depth = 0 }: { value: unknown; depth?: number })
  * AQU-1369: with a `projectId`, every key whose value can read as a label gets
  * a "show on cells" checkbox. It is a project-wide display setting — checking
  * it here labels every cell in the project that carries the key, and
- * unchecking it from any such cell clears it everywhere. Nested objects and
- * attachments get no checkbox: they have no one-line label to show.
+ * unchecking it from any such cell clears it everywhere. A nested object's
+ * fields get their own checkboxes one level down, keyed `parent.child` —
+ * SDBH keeps every field under `sdbh`, so without this it offered none.
+ * Attachments and deeper structures get no checkbox: they have no one-line
+ * label to show.
  */
 export function CellMetadataTab({
   metadata,
@@ -188,22 +191,40 @@ export function CellMetadataTab({
 }) {
   const t = useT()
   const displayFields = useCellDisplayFields(projectId)
+
+  const toggle = (fieldKey: string, value: unknown) =>
+    projectId && displayFieldLabel(value) != null ? (
+      <Checkbox
+        className="self-center"
+        checked={displayFields.includes(fieldKey)}
+        onCheckedChange={(checked) => setCellDisplayField(projectId, fieldKey, checked === true)}
+        aria-label={t("editor.metadata.showOnCells", { key: fieldKey })}
+        title={t("editor.metadata.showOnCells", { key: fieldKey })}
+      />
+    ) : null
+
   return (
     <dl className="space-y-1.5 py-3 text-xs">
       {Object.entries(metadata).map(([key, value]) => (
         <div key={key} className="flex items-baseline gap-2">
-          {projectId && displayFieldLabel(value) != null && (
-            <Checkbox
-              className="self-center"
-              checked={displayFields.includes(key)}
-              onCheckedChange={(checked) => setCellDisplayField(projectId, key, checked === true)}
-              aria-label={t("editor.metadata.showOnCells", { key })}
-              title={t("editor.metadata.showOnCells", { key })}
-            />
-          )}
+          {toggle(key, value)}
           <dt className="shrink-0 font-medium text-muted-foreground">{key}</dt>
           <dd className="min-w-0">
-            <MetadataValue value={value} />
+            {projectId && isPlainObject(value) && Object.keys(value).length > 0 ? (
+              <span className="flex flex-col gap-1.5">
+                {Object.entries(value).map(([child, childValue]) => (
+                  <span key={child} className="flex items-baseline gap-2">
+                    {toggle(`${key}.${child}`, childValue)}
+                    <span className="shrink-0 font-medium text-muted-foreground">{child}</span>
+                    <span className="min-w-0">
+                      <MetadataValue value={childValue} depth={1} />
+                    </span>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <MetadataValue value={value} />
+            )}
           </dd>
         </div>
       ))}

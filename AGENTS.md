@@ -169,6 +169,14 @@ Whether an agent may pick an issue up is read straight off the **status** — th
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
 
+Placement is orthogonal too. Every issue carries exactly one label from the team's **`Area`**
+label group (`Editor`, `Importing`, `Dashboard`, … — `list_issue_labels` for the live list)
+and lives in one of two kinds of project. Work that V1 ships *with* goes in that area's
+**`<Area> V1`** project (all under the **Road to V1** initiative); maintenance and general
+fixes that V1 ships *without* go in **`Prototype Debugging`**. Agents default new issues to
+`Prototype Debugging`; promoting one into a V1 project is a human call. The `Todo` queue is
+read team-wide, across both kinds of project.
+
 **Every new issue is created from one of the Aquilla team's issue templates** — pass
 `template` to `save_issue`: **`Bug Report`** for bugs, **`Feature Request`** for new
 user-facing capabilities, **`Task`** for everything else (chores, improvements, refactors,

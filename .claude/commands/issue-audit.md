@@ -1,5 +1,5 @@
 ---
-description: Reconcile Linear (Prototype Debugging) against what's actually in main — surface status drift and untracked commits
+description: Reconcile the Linear board (team Aquilla, every project) against what's actually in main — surface status drift and untracked commits
 argument-hint: [--since <git-ref> | --base <branch>]
 ---
 
@@ -13,7 +13,9 @@ Arguments: $ARGUMENTS
 ## Constants
 
 - Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
-- Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
+- Linear scope: the whole team — the `<Area> V1` projects under the **Road to V1** initiative
+  plus `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`, the maintenance
+  bucket). Audit by team, not by project, or the V1 projects' issues are missed.
 - Status pipeline (AGENTS.md → "Issue workflow"):
   `Triage → Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
   - `Deployed`/`Done` are **post-merge-to-main** (QA owns that merge).
@@ -40,7 +42,7 @@ git log origin/main --no-merges --pretty='%h%x09%s' | grep -ivE 'AQU-[0-9]+' > /
 
 ## Step 2 — Pull the board
 
-`list_issues` for the project (id above), all non-terminal-ish statuses you care about
+`list_issues` for the **team** (id above — not a single project), all non-terminal-ish statuses you care about
 (`Dispatched`, `Fixed`, `Dev Verification Needed`, `Ready for QA`, plus `Deployed`/`Done`
 for the reverse check). Capture each issue's identifier + status.
 

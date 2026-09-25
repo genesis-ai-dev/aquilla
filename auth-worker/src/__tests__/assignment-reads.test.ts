@@ -178,6 +178,46 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     expect(byId["as-anna"].fileName).toBe("01-GEN.usfm")
   })
 
+  // AQU-894: the sidebar asks "is this file mine?" of every row, and `fileId`
+  // (a LIMIT 1 pick) cannot answer it for a scope spanning more than one file.
+  it("returns EVERY file an assignment's cells touch, not just the routing one", async () => {
+    await seedOrgWithAssignments()
+    // Give anna a second file inside the SAME assignment — the multi-book
+    // scope ("Genesis + Exodus") that `fileId` alone silently halves.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', '02-EXO.usfm', 'e-pa')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES
+        ('pa', 'f2', 'c6', 'source', 's', 'e-pa', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna', 'f2', 'c6')",
+    ).run()
+    // And an open assignment whose scope resolved to nothing at all.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('as-anna-empty', 'pa', 2, 'books', 'Ruth', 0, 1, 1200, NULL)`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; fileId: string | null; fileIds: string[] }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna"].fileIds).toEqual(["f1", "f2"])
+    // The routing field keeps its old meaning: one of them, not all of them.
+    expect(byId["as-anna"].fileIds).toContain(byId["as-anna"].fileId)
+    expect(byId["as-anna-empty"].fileIds).toEqual([])
+    // Still the caller's own rows only — bob's assignment leaks nothing here.
+    expect(byId["as-bob"]).toBeUndefined()
+  })
+
   it("403s a user with no access to the project", async () => {
     await seedOrgWithAssignments()
     const res = await app.request(

@@ -282,6 +282,8 @@ export const nav = defineNamespace({
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
+    "nav.fileRow.notAssignedToYou": "Not assigned to you. You can still open it.",
+    "nav.fileRow.notAssignedTooltip": "{name} — not assigned to you. You can still open it.",
 
     // -- ExpandableFileList --
     "nav.fileList.filterFiles": "Filter files",
@@ -1204,6 +1206,22 @@ export const nav = defineNamespace({
       },
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",
+      },
+      "nav.fileRow.notAssignedToYou": {
+        description:
+          "Screen-reader-only text on a dimmed file row (AQU-894), carrying the same " +
+          "meaning the dimming carries visually. Both sentences matter: the second one " +
+          "is what keeps it from being heard as a locked file.",
+      },
+      "nav.fileRow.notAssignedTooltip": {
+        description:
+          "Tooltip on a dimmed file row (AQU-894): this project uses assignments, the " +
+          "reader holds some, and this file isn't one of theirs. The second sentence is " +
+          "load-bearing — the row is only de-emphasised, never locked, and without it the " +
+          "dimming reads as 'you may not open this'. Keep both parts.",
+        placeholders: {
+          name: "The file's name, or the '{name} (imported as {original})' form when it was renamed on import.",
+        },
       },
 
       // -- ExpandableFileList --

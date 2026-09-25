@@ -518,6 +518,17 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName: string | null
+  /**
+   * AQU-894: EVERY file the assignment's resolved cells touch, ascending.
+   *
+   * `fileId` above is one arbitrary member of this set (`LIMIT 1`), which is
+   * all the inbox's "open the right file" click needs. It cannot answer "is
+   * this file mine?", because a books-scope assignment over GEN + EXO reports
+   * one of the two and says nothing about the other — so a sidebar reading
+   * `fileId` alone would mark half a person's own work as somebody else's.
+   * Empty only when the scope resolved to zero cells.
+   */
+  fileIds: string[]
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
@@ -527,6 +538,39 @@ export interface MyAssignment {
   cellsTotal: number
   cellsDone: number
   createdAt: number
+}
+
+/**
+ * assignment_id → the distinct files its resolved cells live in (AQU-894).
+ *
+ * A second read rather than an aggregate in the inbox query itself: the inbox
+ * is a once-per-project-open read, and one plain SELECT that any Postgres
+ * driver returns as plain rows is worth more here than saving a round trip on
+ * a `json_agg` whose shape depends on how the driver decodes a JSON column.
+ *
+ * Callers pass the assignment ids they already selected, so this inherits
+ * their authorization exactly — it never widens what the caller may see.
+ */
+async function fileIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  for (const id of assignmentIds) byAssignment.set(id, [])
+  if (assignmentIds.length === 0) return byAssignment
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.file_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; file_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
 }
 
 /**
@@ -571,11 +615,15 @@ export async function getMyAssignments(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
@@ -641,12 +689,16 @@ export async function getMyAssignmentsAcrossOrg(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",

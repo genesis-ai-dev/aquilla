@@ -27,6 +27,7 @@ import {
   planUnitExpectsAudio,
   planUnitIsNearlyComplete,
   planUnitLabel,
+  planUnitExpectsText,
   planUnitShortfall,
   planUnitStatus,
   type PlanUnit,
@@ -185,6 +186,7 @@ export const PlanRow = memo(function PlanRow({
   now,
   selected,
   showAudio,
+  textFiles,
   showStatus = false,
   onSelect,
   audioFiles,
@@ -209,6 +211,12 @@ export const PlanRow = memo(function PlanRow({
    * count stands in, which is right for one row and wrong for a board.
    */
   audioFiles?: ReadonlySet<string>
+  /**
+   * AQU-955: files that carry text work, from `textFileIds` over the WHOLE
+   * board. Optional for the same reason `audioFiles` is; omitted, the unit's
+   * own expectation stands in.
+   */
+  textFiles?: ReadonlySet<string>
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
@@ -217,7 +225,8 @@ export const PlanRow = memo(function PlanRow({
 }) {
   const t = useT()
   const { locale } = useI18n()
-  const status = planUnitStatus(unit, now, audioFiles)
+  const hasText = textFiles ? textFiles.has(unit.fileId) : planUnitExpectsText(unit)
+  const status = planUnitStatus(unit, now, audioFiles, textFiles)
   const translated = planPct(unit.filledCount, unit.totalCount)
   const validated = planPct(unit.validatedCount, unit.totalCount)
   // AQU-1278: against the CUE SHEET on a dubbing project, whose cell count is
@@ -225,12 +234,12 @@ export const PlanRow = memo(function PlanRow({
   const audioTotal = planAudioTotal(unit)
   const recorded = planPct(unit.audioCount, audioTotal)
   const audioValidated = planPct(unit.audioValidatedCount, audioTotal)
-  const note = usePlanRowNote(unit, now, audioFiles)
+  const note = usePlanRowNote(unit, now, audioFiles, textFiles)
   const readoutTips = usePlanReadoutTips()
 
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
-  const shortfall = planUnitShortfall(unit, hasAudio)
-  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles)
+  const shortfall = planUnitShortfall(unit, hasAudio, hasText)
+  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
   const shortfallText = usePlanShortfallText(shortfall)
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
@@ -489,14 +498,19 @@ export const PlanRow = memo(function PlanRow({
         </span>
 
         <span className="flex flex-col gap-1.5">
-          <PlanBar
-            label={t("org.projectOverview.plan.textBarLabel")}
-            outer={translated}
-            inner={validated}
-            tone="text"
-            aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
-            tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
-          />
+          {/* AQU-955: an audio-only file has no text bar. Pinned at 0% it was
+              not a neutral extra — it was the only bar a PM could see on the
+              row, and it said the book had not been started. */}
+          {hasText && (
+            <PlanBar
+              label={t("org.projectOverview.plan.textBarLabel")}
+              outer={translated}
+              inner={validated}
+              tone="text"
+              aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
+              tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
+            />
+          )}
           {showAudio && (
             <PlanBar
               label={t("org.projectOverview.plan.audioBarLabel")}

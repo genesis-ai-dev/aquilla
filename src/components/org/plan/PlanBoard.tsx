@@ -42,6 +42,7 @@ import {
   filterPlanUnits,
   groupPlanUnits,
   planHasAudio,
+  textFileIds,
   planSummary,
   planUnitId,
   PLAN_STATUS_LABEL_KEY,
@@ -344,12 +345,17 @@ export function PlanBoard({
     [units, query, needsDateOnly],
   )
   const audioFiles = useMemo(() => audioFileIds(units), [units])
+  // AQU-955: the mirror set — which files carry TEXT work. Same rule as
+  // `audioFiles`: derived from the UNFILTERED units, because whether a file is
+  // audio-only is a fact about the file and must not change when the search
+  // box hides its siblings.
+  const textFiles = useMemo(() => textFileIds(units), [units])
   // `audioFiles` comes from the UNFILTERED units and is handed in rather than
   // re-derived: see groupPlanUnits' own note on why a search box must not be
   // able to change which group a row is in.
   const groups = useMemo(
-    () => groupPlanUnits(visible, now, audioFiles),
-    [visible, now, audioFiles],
+    () => groupPlanUnits(visible, now, audioFiles, textFiles),
+    [visible, now, audioFiles, textFiles],
   )
   // AQU-1278: the in-order arrangement is grouped too — by the project's
   // folders, the way the editor's sidebar groups its files, with one group
@@ -401,7 +407,7 @@ export function PlanBoard({
   const folderTally = useCallback((members: readonly PlanUnit[]): string => {
     const tally = new Map<PlanUnitStatus, number>()
     for (const u of members) {
-      const s = planUnitStatus(u, now, audioFiles)
+      const s = planUnitStatus(u, now, audioFiles, textFiles)
       tally.set(s, (tally.get(s) ?? 0) + 1)
     }
     return PLAN_GROUP_ORDER
@@ -411,7 +417,7 @@ export function PlanBoard({
         (acc, part) => (acc == null ? part : t("org.projectOverview.plan.shortfallPair", { first: acc, second: part })),
         null,
       ) ?? ""
-  }, [now, audioFiles, t])
+  }, [now, audioFiles, textFiles, t])
 
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
@@ -507,6 +513,7 @@ export function PlanBoard({
         now={now}
         showAudio={showAudio}
         audioFiles={audioFiles}
+        textFiles={textFiles}
         // AQU-1278. Both maps are looked up HERE rather than passed whole: a
         // row handed the map would re-render whenever any other row's chapters
         // or assignees arrived, and on a sixty-six row board that is the whole

@@ -31,19 +31,23 @@ export function shortChaptersByUnit(
   units: readonly PlanUnit[],
   sectionsByFile: ReadonlyMap<string, readonly PlanSection[]>,
   audioFiles: ReadonlySet<string>,
+  /** AQU-955: files that carry text work, from `textFileIds`. Omitted, every
+   *  file does — which is what this said before audio-only projects existed. */
+  textFiles?: ReadonlySet<string>,
 ): Map<string, string[]> {
   const map = new Map<string, string[]>()
   for (const unit of units) {
     const sections = sectionsByFile.get(unit.fileId)
     if (!sections) continue
     const hasAudio = audioFiles.has(unit.fileId)
+    const hasText = textFiles ? textFiles.has(unit.fileId) : true
     const mine = sections.filter((s) => sectionBelongsToUnit(s.key, unit.sectionKey))
     const numbered = numberedBookCodes(mine.map((s) => s.key))
     const short = mine
       .filter(
         (section) =>
           classifyPlanSection(section.key, numbered).kind !== "frontMatter" &&
-          planSectionShortfall(section, hasAudio).worst > 0,
+          planSectionShortfall(section, hasAudio, hasText).worst > 0,
       )
       .map((section) => section.label)
     if (short.length > 0) map.set(planUnitId(unit), short)

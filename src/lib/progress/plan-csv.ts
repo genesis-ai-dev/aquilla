@@ -6,7 +6,13 @@
 // and how far along it is.
 
 import type { PlanUnit, PlanUnitStatus } from "@/lib/plan/plan-status"
-import { audioFileIds, planAudioTotal, planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
+import {
+  audioFileIds,
+  planAudioTotal,
+  planUnitLabel,
+  planUnitStatus,
+  textFileIds,
+} from "@/lib/plan/plan-status"
 
 const HEADER = [
   "Unit",
@@ -66,9 +72,14 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
   // is missing — still calls it In progress. The two surfaces have to say the
   // same word about the same row, or the export is the one that gets believed.
   const audioFiles = audioFileIds(units)
+  // AQU-955: and the text set, for the same reason. Without it every book of
+  // an audio-only project exports as Not started however much of it is
+  // recorded — the export is what a PM forwards, so it has to say what the
+  // board says.
+  const textFiles = textFileIds(units)
   const rows = units.map((u) => [
     planUnitLabel(u),
-    STATUS_TEXT[planUnitStatus(u, now, audioFiles)],
+    STATUS_TEXT[planUnitStatus(u, now, audioFiles, textFiles)],
     u.targetDate ?? "",
     isoDate(u.doneAt),
     u.doneBy ?? "",

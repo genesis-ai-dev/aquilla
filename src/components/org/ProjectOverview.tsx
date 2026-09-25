@@ -61,6 +61,7 @@ import { mergeUnitAssignees } from "@/lib/plan/plan-assignees"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
 import {
   audioFileIds,
+  textFileIds,
   planUnitIsNearlyComplete,
   planUnitId,
   planUnitLabel,
@@ -666,6 +667,14 @@ export function ProjectOverview() {
    * verse in the Bible. See `audioFileIds`.
    */
   const planAudioFiles = useMemo(() => audioFileIds(planUnits), [planUnits])
+  /**
+   * AQU-955: the mirror set — which FILES carry text work. An audio-only file
+   * (recordings present, no target text anywhere in this lane) is charged no
+   * text shortfall, so an ETEN audio-only project's books finally roll up on
+   * the medium they are actually being produced in instead of reading 0%
+   * forever against text nobody will ever write. See `textFileIds`.
+   */
+  const planTextFiles = useMemo(() => textFileIds(planUnits), [planUnits])
 
   // ── AQU-1278: the two background reads the board and inspector cannot make ──
   //
@@ -705,7 +714,7 @@ export function ProjectOverview() {
   const planFileKey = useMemo(
     () => Array.from(new Set([
       ...planUnits
-        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles))
+        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles, planTextFiles))
         .map((u) => u.fileId),
       // AQU-1278: plus whichever file the OPEN unit belongs to, nearly complete
       // or not. The inspector's "N chapters are not assigned" counts the unit's
@@ -779,8 +788,8 @@ export function ProjectOverview() {
   // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
   // can hold it still; this memo only caches it against the three inputs.
   const planShortChaptersByUnit = useMemo(
-    () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles),
-    [planUnits, planFileSections, planAudioFiles],
+    () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
   )
 
   // AQU-1278, round 6: who is on EVERY unit, read once per project and again
@@ -928,7 +937,8 @@ export function ProjectOverview() {
     async (unit: PlanUnit, kind?: PlanOpenKind) => {
       if (!id || !getPlanToken) return
       const hasAudio = planAudioFiles.has(unit.fileId)
-      const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio))
+      const hasText = planTextFiles.has(unit.fileId)
+      const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
       let cellId: string | null = null
       if (wanted) {
         try {
@@ -1100,6 +1110,9 @@ export function ProjectOverview() {
       // in this panel as it does in the row that opened it — without this the
       // two sit six inches apart disagreeing about one unit.
       audioFiles={planAudioFiles}
+      // AQU-955: and the same text set, for the same reason — the panel and
+      // the row must agree about whether this file has text work at all.
+      textFiles={planTextFiles}
       assignments={
         <PlanAssignments
           assignments={selectedUnitAssignments}

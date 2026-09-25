@@ -13,14 +13,16 @@ deploy commands, calver tags).
 ## The line
 
 ```
-PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD ──QA triggers──▶ prod + tag YYYY.MM.DD.NN
+PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──ordinary: bot deploys──▶ prod + tag YYYY.MM.DD.NN
+                                                              └─held: a person deploys──┘
 ```
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
 | PR → `dev` | Agents (merge themselves) | Evidence below. No required human reviewer. |
 | `dev` → release branch | Release bot | `node scripts/release-plan.mjs` says `cut: true`. |
-| Release → prod | QA (Kieran, Matthew) | Checks only the gaps, then `pnpm run deploy:aquilla`. |
+| Release → prod, ordinary slice | Release bot | `hold` is false. Runs `pnpm run deploy:aquilla` itself. |
+| Release → prod, held slice | Kieran or Matthew | `hold` is true. Same command, run by a person. |
 
 ## 1. Pull request: verify once
 
@@ -41,69 +43,82 @@ API or the DOM state directly) so the next walk is conclusive. Do not hand the
 item to a human to "just look at it". Every inconclusive result that reaches
 QA is re-checking we chose not to automate.
 
-## 2. Cutting a release: small batches, one in flight
+## 2. Cutting a release: one in flight, no ceiling
 
-The release bot runs on a schedule (hourly is fine) and does only this:
+The release bot runs on a schedule (a 15-minute poll, plus once right after
+every deploy so a finished slice doesn't sit idle) and does only this:
 
 1. `git fetch origin --tags` and fetch `release/*`.
-2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `reason`,
-   `tier`, and the unreleased PRs with their risk `areas`. Do not second-guess
-   it; the rules are in code on purpose.
-3. If `cut` is false, stop. Post nothing.
-4. If `cut` is true, create `release/YYYY/MM/DD` (today, UTC) from `origin/dev`,
-   push it, and post the release notes below where QA watches.
+2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `hold`,
+   `reason`, `branch`, `sha`, `areas`, and the PRs in the slice. Do not
+   second-guess it; the rules are in code on purpose.
+3. If `cut` is false, stop. Post nothing, except a once-only warning for a
+   held branch with no tag after 4 hours.
+4. If `cut` is true, create the named `branch` at the named `sha` — not the
+   tip of `dev` — push it, and post the release notes below where QA watches.
+5. If `hold` is false, run `pnpm run deploy:aquilla` from a clean checkout of
+   that branch, checked out by name. If `hold` is true, stop: a person
+   deploys the same command when they are ready.
 
-The bot never deploys and never tags. The plan's rules:
+The plan's rules:
 
 - **One release in flight.** A release branch whose HEAD has no calver tag is
-  waiting for QA or deploy; no new cut happens until it ships. New merges roll
-  into the next release instead of piling onto this one. The release branch is
-  the freeze; `dev` keeps moving.
-- **Small batches.** Cut at 4 unreleased PRs, or when the oldest has waited 24
-  hours. Small batches make each QA pass short and each rollback cheap.
-- **Risk tier from paths.** A PR is high risk if it touches migrations, the
-  sync engine, auth, or deploy infra (see `HIGH_RISK` in
-  `scripts/release-plan.mjs`). The release is high risk if any PR is.
+  waiting for QA or deploy; no new cut happens until it ships or is deleted.
+  New merges roll into the next release instead of piling onto this one. The
+  release branch is the freeze; `dev` keeps moving.
+- **No queue, no ceiling.** The instant the in-flight release closes, the
+  next slice cuts at whatever's ready in `dev` right then — however many PRs
+  that is. Waiting for a fixed count or a clock only means a hotfix
+  cherry-picked onto the closed branch has to be re-cherry-picked onto every
+  slice cut before `dev` catches up; cutting immediately means `dev` already
+  carries the fix.
+- **A PR holds** when it touches a migration or the deploy machinery itself
+  (see `HOLDING_AREAS` in `scripts/release-plan.mjs`), or when its walk is
+  anything other than `PASS` or `none`. The oldest waiting PR holding cuts it
+  alone, immediately, with `hold: true`. A holding PR behind an already-ready
+  run ships that run immediately instead of waiting for it.
+- **Sync and auth are noted, not held.** A PR touching `sync-worker/src/`,
+  `src/lib/sync/`, `db/shim/`, or `auth-worker/src/` ships in the ordinary
+  slice; its area is listed in `areas` so a person can see it.
 
 ### Release notes template
 
 ```
-## Release release/2026/09/24 · tier: low · 4 PRs
+## Release release/2026/09/24-02 · 4 PRs · areas: sync
 
-| PR | Title | Walk @ merged sha | Risk areas |
+| PR | Title | Walk @ head sha | Areas |
 | --- | --- | --- | --- |
 | #771 | Remove Inworld companion preset | PASS | — |
-| #772 | Comment thread polish | PASS | — |
+| #772 | Comment thread polish | PASS | sync |
 | #773 | Export raw mode fix | FLAKY | — |
 | #774 | Retention tab copy | none (docs only) | — |
 
 Needs a human: #773 (walk not conclusive).
 ```
 
-"Walk @ merged sha" is the PR bot's status for the sha that merged. Anything
-other than PASS goes in "Needs a human". Docs-only or test-only PRs may be
-`none` without needing a human.
+"Walk @ head sha" is the PR bot's status for the PR's own final head sha, not
+the merge commit that landed on `dev` — the bot's walk comment is posted
+against the PR, before it merges. Anything other than PASS or `none` goes in
+"Needs a human". Docs-only or test-only PRs may be `none` without needing a
+human.
 
-## 3. QA at release: check the gaps, then ship
+## 3. QA at a held release: check the gaps, then ship
 
+An ordinary slice (`hold: false`) deploys itself; QA's job there is the stop
+button below, not a sign-off. A held slice (`hold: true`) waits for a person.
 QA opens the release branch's preview and checks **only**:
 
 1. Rows listed under "Needs a human".
-2. For a **high** tier release: the interactions between PRs in the risky
-   areas (for example a migration plus a sync change), and that the migration
-   is safe for the previous release's code.
+2. For a migration or deploy-infra hold: that the change is safe for the
+   previous release's code still running in production, and, where the slice
+   also carries a sync or auth area, the interaction between them.
 3. Taste: does anything in this batch feel wrong, off-brand, or confusing?
 
 QA does **not** re-walk PASS rows. If QA finds itself repeating a check, that
 check belongs in a journey; file it so the bot does it next time.
 
-Then:
-
-- **Low tier:** deploy the same day. QA's job here is the stop button, not a
-  sign-off.
-- **High tier:** a person deploys it deliberately and watches the live checks.
-
-Deploy from a clean checkout of the release branch with
+Deploy from a clean checkout of the release branch, checked out by name (not
+a detached HEAD — the branch guard and the tag script both need it), with
 `pnpm run deploy:aquilla`. It refuses to publish if prod has pending
 migrations, and it tags the verified deploy `YYYY.MM.DD.NN`. That tag ends
 the release's "in flight" state, so the bot can cut the next one.
@@ -115,8 +130,9 @@ Anyone may stop a release. Stopping is cheap and expected, never blame.
 - **Before deploy:** push a fix to the release branch (cherry-pick from `dev`
   when it is already fixed there), or drop the release: delete the untagged
   branch and let the bot cut again after the fix merges to `dev`.
-- **After deploy:** roll back first, then diagnose. Hotfixes are
-  cherry-picks onto the same release branch; redeploying tags the next `NN`.
+- **After deploy:** roll back first, then diagnose. A hotfix is a
+  cherry-pick onto the branch that was deployed; redeploying tags the next
+  `NN` in that date's series, independent of the branch's own `-NN` suffix.
 - Every stop gets a follow-up: which check should have caught it? Add that
   check to a journey or a test, so the same class of problem is caught at the
   PR next time.

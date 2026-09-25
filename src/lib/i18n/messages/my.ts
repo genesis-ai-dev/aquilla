@@ -2894,7 +2894,7 @@ export const my: Catalog = {
   "onboarding.apiTokens.mintingButton": "ထုတ်နေသည်…",
   "onboarding.apiTokens.mintTokenButton": "token ထုတ်ရန်",
   "onboarding.credits.rail.llm": "ချတ်",
-  "onboarding.credits.panelTitle": "ကွန်ပျူတာစွမ်းအား credit များ",
+  "onboarding.credits.panelTitle": "AI credit များ",
   "onboarding.credits.panelDescription": "နေ့စဉ်နှင့် အပတ်စဉ် ကန့်သတ်ချက်နှင့် နှိုင်းယှဉ်သော အသုံးပြုမှု၊ rail အလိုက် ခွဲခြားထားသည်",
   "onboarding.credits.agentSpendNote": "အေးဂျင့်အသုံးစရိတ် (မြင့်တင်ထားသော rail — ကိုယ်ပိုင်ကန့်သတ်ချက်၊ 5× စျေးနှုန်းမြှင့်)",
   "onboarding.credits.dialSummary": "ယနေ့ သုံးစွဲထားသော အေးဂျင့် credit: {credits}",

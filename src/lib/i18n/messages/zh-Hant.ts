@@ -2893,7 +2893,7 @@ export const zh_Hant: Catalog = {
   "onboarding.apiTokens.mintTokenButton": "產生權杖",
   "onboarding.credits.rail.llm": "對話",
   "onboarding.credits.rail.tts": "語音合成",
-  "onboarding.credits.panelTitle": "運算點數",
+  "onboarding.credits.panelTitle": "AI 點數",
   "onboarding.credits.panelDescription": "依用途分列的每日與每週上限用量",
   "onboarding.credits.agentSpendNote": "代理程式花費（進階用途 — 有獨立上限，費率為 5 倍）",
   "onboarding.credits.dialSummary": "今日已使用的代理程式點數：{credits}",

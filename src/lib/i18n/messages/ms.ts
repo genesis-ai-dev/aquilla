@@ -2901,7 +2901,7 @@ export const ms: Catalog = {
   "onboarding.apiTokens.mintingButton": "Menerbitkan…",
   "onboarding.apiTokens.mintTokenButton": "Terbitkan token",
   "onboarding.credits.rail.llm": "Sembang",
-  "onboarding.credits.panelTitle": "Kredit pengkomputeran",
+  "onboarding.credits.panelTitle": "Kredit AI",
   "onboarding.credits.panelDescription": "Penggunaan berbanding had harian & mingguan, dipecahkan mengikut laluan",
   "onboarding.credits.agentSpendNote": "Perbelanjaan ejen (laluan tinggi — had sendiri, markup 5×)",
   "onboarding.credits.dialSummary": "Kredit ejen digunakan hari ini: {credits}",

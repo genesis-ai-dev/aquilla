@@ -2892,7 +2892,7 @@ export const th: Catalog = {
   "onboarding.apiTokens.mintingButton": "กำลังสร้าง…",
   "onboarding.apiTokens.mintTokenButton": "สร้างโทเคน",
   "onboarding.credits.rail.llm": "แชท",
-  "onboarding.credits.panelTitle": "เครดิตการประมวลผล",
+  "onboarding.credits.panelTitle": "เครดิต AI",
   "onboarding.credits.panelDescription": "การใช้งานเทียบกับเพดานรายวันและรายสัปดาห์ แยกตามช่องทาง",
   "onboarding.credits.agentSpendNote": "การใช้จ่ายของเอเจนต์ (ช่องทางระดับสูง — มีเพดานของตัวเอง คิดเพิ่ม 5 เท่า)",
   "onboarding.credits.dialSummary": "เครดิตเอเจนต์ที่ใช้วันนี้: {credits}",

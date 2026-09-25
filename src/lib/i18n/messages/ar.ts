@@ -2893,7 +2893,7 @@ export const ar: Catalog = {
   "onboarding.apiTokens.mintingButton": "جارٍ الإنشاء…",
   "onboarding.apiTokens.mintTokenButton": "إنشاء رمز",
   "onboarding.credits.rail.llm": "الدردشة",
-  "onboarding.credits.panelTitle": "أرصدة الحوسبة",
+  "onboarding.credits.panelTitle": "أرصدة الذكاء الاصطناعي",
   "onboarding.credits.panelDescription": "الاستخدام مقابل الحدود اليومية والأسبوعية، مقسّمًا حسب المسار",
   "onboarding.credits.agentSpendNote": "إنفاق الوكيل (مسار مرتفع — بحد خاص به وزيادة 5×)",
   "onboarding.credits.dialSummary": "أرصدة الوكيل المستخدَمة اليوم: {credits}",

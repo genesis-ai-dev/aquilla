@@ -387,7 +387,7 @@ function OrgActions({
           +1,000 agent credits
         </Button>
         <Button size="sm" variant="outline" onClick={onGrantCredits} data-testid={`grant-credits-${org.orgId}`}>
-          +100 compute credits
+          +100 AI credits
         </Button>
       </div>
       {confirm == null ? (

@@ -105,6 +105,42 @@ export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
 }
 
 /**
+ * Copy one settings key across. Generic over the key so both sides of the
+ * assignment are the same `ProjectWideSettings[K]`; a write keyed by the whole
+ * `keyof` union does not typecheck, which is why the call sites below used to
+ * cast the value away.
+ */
+function copySettingsKey<K extends keyof ProjectWideSettings>(
+  target: ProjectWideSettings,
+  source: ProjectWideSettings,
+  key: K,
+): void {
+  target[key] = source[key]
+}
+
+/**
+ * Roll a settings snapshot back to server truth for exactly the keys a
+ * rejected patch tried to write: a key the server stores takes its stored
+ * value back, a key it does not know is dropped, and anything outside the
+ * write attempt is left alone.
+ */
+function rollbackRejectedKeys(
+  prev: ProjectWideSettings,
+  partial: ProjectWideSettings,
+  snapTarget: ProjectWideSettings,
+): ProjectWideSettings {
+  const next = { ...prev }
+  for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
+    if (key in snapTarget) {
+      copySettingsKey(next, snapTarget, key)
+    } else {
+      delete next[key]
+    }
+  }
+  return next
+}
+
+/**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
  * Project settings are PATCHed through auth-worker's REST API, not the sync
@@ -657,11 +693,7 @@ export function useProjectSettings(
         patchProjectSettings(jwt, projectId, local, baseVersion),
       )
       if (!aliveRef.current) return
-      const nonEmptyCount = Object.keys(local).filter((k) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key indexing into settings object; TS can't narrow string-keyed access
-        const v = (local as any)[k]
-        return v !== "" && v != null
-      }).length
+      const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServer(out.value)
         posthog.capture("project settings migrated", {
@@ -827,21 +859,10 @@ export function useProjectSettings(
       // the optimistic local state we applied above — do not silently retain the
       // rejected value per AQU-255 acceptance criteria.
       void refresh() // revert optimistic overlay by re-fetching truth
-      const snapTarget = serverRef.current?.settings ?? {}
-      setLocal((prev) => {
-        // Remove keys from partial that the server rejected; keep anything
-        // that wasn't part of this write attempt.
-        const next = { ...prev }
-        for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-          if (key in snapTarget) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment; TS can't narrow the value type for string-keyed writes on a record type
-            next[key] = snapTarget[key] as any
-          } else {
-            delete next[key]
-          }
-        }
-        return next
-      })
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      // Remove keys from partial that the server rejected; keep anything
+      // that wasn't part of this write attempt.
+      setLocal((prev) => rollbackRejectedKeys(prev, partial, snapTarget))
       void patchProject(projectId, (existing) => {
         // Roll back IDB keys to server truth for the keys in partial.
         const next = { ...existing }
@@ -865,17 +886,11 @@ export function useProjectSettings(
     // permanently diverge from server truth.
     void refresh()
     setLocal((prev) => {
-      const snapTarget = serverRef.current?.settings ?? {}
-      const next = { ...prev }
-      for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-        if (key in snapTarget) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during optimistic rollback; TS can't narrow string-keyed writes
-          next[key] = snapTarget[key] as any
-        } else {
-          delete next[key]
-        }
-      }
-      return next
+      // Read inside the updater, not at the call site: `refresh()` above is in
+      // flight, so the snapshot this resolves to is whatever the ref holds when
+      // React runs the update.
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])

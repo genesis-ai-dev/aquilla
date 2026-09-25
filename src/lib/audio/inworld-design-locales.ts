@@ -121,7 +121,7 @@ export function designAccentsForFamily(
   const rest = (named.length > 0 ? named : inFamily)
     .filter((row) => row.code.toLowerCase() !== key)
   const existingDefault = inFamily.find((row) => row.code.toLowerCase() === key)
-  const defaultRow = existingDefault ?? syntheticFamilyDefault(inFamily[0]!)
+  const defaultRow = existingDefault ?? syntheticFamilyDefault(inFamily[0])
   return [defaultRow, ...rest]
 }
 

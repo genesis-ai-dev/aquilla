@@ -1325,6 +1325,9 @@ export const editor = defineNamespace({
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // AQU-1163: why a target cell will not take your text — shown as the
+    // locked cell's tooltip and appended to its accessible name.
+    "editor.row.lockedBy": "Locked — {name} is editing this cell",
     // -- CellPresenceBadges: per-row live-collaborator chips --
     "editor.presence.viewing": "viewing",
     "editor.presence.editing": "editing",
@@ -4890,6 +4893,16 @@ export const editor = defineNamespace({
           ref: "Human reference or localized row number.",
           source: "A short excerpt of the source text. Do not translate.",
           state: "Already localized validation or empty state.",
+        },
+      },
+      "editor.row.lockedBy": {
+        description:
+          "Tooltip on a target cell that another person currently holds the edit " +
+          "lease on, and the suffix appended to that cell's accessible name. It " +
+          "answers \"why can't I type here?\" — the cell is read-only for now, not " +
+          "broken, and frees up when that person moves on.",
+        placeholders: {
+          name: "Display name of the collaborator holding the edit lease.",
         },
       },
       "editor.row.selectedTooltip": {

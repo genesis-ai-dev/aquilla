@@ -20,16 +20,24 @@ const CSV_HEADER = ["File", "Filled", "Approved", "Total cells", "Word count"] a
  * or newline (CR or LF) — the characters that would otherwise break the
  * column/row boundaries a spreadsheet parses on paste/import.
  */
-function escapeCsvField(value: string): string {
+export function escapeCsvField(value: string): string {
   if (/[",\r\n]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`
   }
   return value
 }
 
-function toCsvLine(fields: ReadonlyArray<string | number>): string {
+/**
+ * Join one row's fields into an RFC-4180 line. Exported so every CSV surface
+ * in the app shares this escaping rather than re-deriving it — the AQU-1392
+ * analysis report is the second caller.
+ */
+export function toCsvLine(fields: ReadonlyArray<string | number>): string {
   return fields.map((f) => escapeCsvField(String(f))).join(",")
 }
+
+/** RFC-4180 line ending, shared by every CSV surface. */
+export const CSV_EOL = "\r\n"
 
 /**
  * Serialize the visible per-file progress rows to a CSV string, header

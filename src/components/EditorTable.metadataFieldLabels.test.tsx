@@ -84,11 +84,13 @@ function cellRows(id: string, metadata: Record<string, unknown> | null): CellRow
   ]
 }
 
-// The SDBH importer's real shape (AQU-793): `Field` names what the cell is.
+// Flat top-level keys (DCS TSV style) plus one row in the SDBH importer's real
+// shape, where every field sits under `metadata.sdbh` (src/lib/parsers/sdbh.ts).
 const ROWS: CellRow[] = [
   ...cellRows("sdbh-a-glosses", { Field: "glosses", tags: ["Gloss"] }),
   ...cellRows("sdbh-a-definition", { Field: "definition" }),
   ...cellRows("plain-cell", { quote: "λόγος" }),
+  ...cellRows("sdbh-nested", { tags: ["אָב", "Definition"], sdbh: { layer: "sense", lemma: "אָב" } }),
 ]
 
 function renderTable(extra: { onAddConceptFromSelection?: () => void } = {}) {
@@ -148,6 +150,12 @@ describe("metadata display-field labels (AQU-1369)", () => {
     const lines = screen.getAllByTestId("source-context-line")
     const withLabels = lines.filter((line) => within(line).queryByTestId("metadata-field-labels"))
     expect(withLabels).toHaveLength(2)
+  })
+
+  it("labels rows from a nested parent.child key (SDBH keeps fields under `sdbh`)", () => {
+    renderTable()
+    act(() => setCellDisplayField(project.id, "sdbh.lemma", true))
+    expect(labelTexts()).toEqual(["אָב"])
   })
 
   it("clears the labels from every row when the key is switched off", () => {

@@ -89,7 +89,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
-import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
+import { displayFieldLabel, displayFieldValue, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
@@ -4687,8 +4687,7 @@ function MetadataFieldLabels({
   const fields = useCellDisplayFields(projectId)
   if (!metadata || fields.length === 0) return null
   const labels = fields.flatMap((key) => {
-    if (!Object.prototype.hasOwnProperty.call(metadata, key)) return []
-    const text = displayFieldLabel(metadata[key])
+    const text = displayFieldLabel(displayFieldValue(metadata, key))
     return text == null ? [] : [{ key, text }]
   })
   if (labels.length === 0) return null

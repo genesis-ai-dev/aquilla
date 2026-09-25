@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/tooltip"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 
 interface BaseProps {
   cellId: string
@@ -40,6 +41,12 @@ interface BaseProps {
   upstreamTooltipText?: string
   /** Tailwind size; default 12px (h-3 w-3) so it fits in a cell action rail. */
   iconClassName?: string
+  /** AQU-831: classes for the badge SHELL (the span around the icon). The row
+   *  gutter stacks this badge with the synth/comment badges, which are all
+   *  20px `gutterIconShell` squares; without a matching shell the 12px icon
+   *  sat off-centre against them in the fixed-width column. Call sites that
+   *  want the bare inline icon (action rails) simply omit this. */
+  className?: string
 }
 
 interface ManagedProps extends BaseProps {
@@ -77,6 +84,7 @@ export function StaleSourceIndicator(props: StaleSourceIndicatorProps) {
         tooltipText={props.tooltipText}
         upstreamTooltipText={props.upstreamTooltipText}
         iconClassName={props.iconClassName}
+        className={props.className}
       />
     )
   }
@@ -105,6 +113,7 @@ function StandaloneStaleSource(props: StandaloneProps) {
       tooltipText={props.tooltipText}
       upstreamTooltipText={props.upstreamTooltipText}
       iconClassName={props.iconClassName}
+      className={props.className}
     />
   )
 }
@@ -115,12 +124,14 @@ function StaleBadge({
   tooltipText,
   upstreamTooltipText,
   iconClassName,
+  className,
 }: {
   direct: boolean
   inherited: boolean
   tooltipText?: string
   upstreamTooltipText?: string
   iconClassName?: string
+  className?: string
 }) {
   const t = useT()
   if (!direct && !inherited) return null
@@ -135,7 +146,10 @@ function StaleBadge({
             <span
               role="img"
               aria-label={t("editor.stale.directLabel")}
-              className="inline-flex items-center text-amber-600 dark:text-amber-400"
+              className={cn(
+                "inline-flex items-center text-amber-600 dark:text-amber-400",
+                className,
+              )}
               data-testid="stale-source-indicator"
             />
           }
@@ -155,7 +169,10 @@ function StaleBadge({
           <span
             role="img"
             aria-label={t("editor.stale.upstreamLabel")}
-            className="inline-flex items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400"
+            className={cn(
+              "inline-flex items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400",
+              className,
+            )}
             data-testid="upstream-stale-source-indicator"
           />
         }

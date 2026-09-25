@@ -6657,6 +6657,9 @@ function EditorRow({
                     cellId={cell.id}
                     staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
                     upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+                    // AQU-831: same 20px square slot as the synth/comment
+                    // badges it stacks with, so the column stays aligned.
+                    className={gutterIconShell}
                   />
                 )}
                 {showFormattingLossWarning && (

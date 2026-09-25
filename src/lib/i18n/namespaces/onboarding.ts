@@ -545,7 +545,7 @@ export const onboarding = defineNamespace({
     // agent rail label reuses `nav.dock.agentTab` (identical text)
     "onboarding.credits.rail.llm": "Chat",
     "onboarding.credits.rail.tts": "TTS",
-    "onboarding.credits.panelTitle": "Compute credits",
+    "onboarding.credits.panelTitle": "AI credits",
     "onboarding.credits.panelDescription": "Usage against daily & weekly caps, broken out by rail",
     "onboarding.credits.agentSpendNote": "Agent spend (elevated rail — own cap, 5× markup)",
     "onboarding.credits.dialSummary": "Agent credits used today: {credits}",

@@ -2893,7 +2893,7 @@ export const zh_Hans: Catalog = {
   "onboarding.apiTokens.mintTokenButton": "产生令牌",
   "onboarding.credits.rail.llm": "对话",
   "onboarding.credits.rail.tts": "语音合成",
-  "onboarding.credits.panelTitle": "运算点数",
+  "onboarding.credits.panelTitle": "AI 点数",
   "onboarding.credits.panelDescription": "依用途分列的每日与每周上限用量",
   "onboarding.credits.agentSpendNote": "代理程序花费（高级用途 — 有独立上限，费率为 5 倍）",
   "onboarding.credits.dialSummary": "今日已使用的代理程序点数：{credits}",

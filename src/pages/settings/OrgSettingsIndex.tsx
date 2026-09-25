@@ -42,7 +42,10 @@ export function OrgSettingsIndex() {
         <NavList label={t("onboarding.apiTokens.orgLabel")}>
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title={t("settings.orgSettingsIndex.navIdentity")} hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint="Visibility & permissions" />
-          <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Field Plan" />
+          {/* AQU-688: the hint used to read "Field Plan" for every org, including
+              the ones that have never been on it. It names the destination, not a
+              plan the org may not hold. */}
+          <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Plan & AI usage" />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint="Org keys" />
           {/* AQU-1131: rules sit beside the Knowledge Base — both are the
               org-wide context an org should see on arrival, not something

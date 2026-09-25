@@ -1,6 +1,6 @@
 import type { Env } from '../../types'
 import { readProviderCostCents } from '../../../../db/shared/billing-cost'
-import { recordUsageProviderRef, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
+import { recordUsageProviderRef, releaseWorkspaceUsage, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
 import { boundRequestCostCents, readRateCard } from './rate-card'
 import { weeklyUsageActive } from './usage-mode'
 
@@ -49,6 +49,35 @@ export async function holdChatUsage(env: Env, usage: ChatUsage, ref: string | un
   if (ref === undefined) return
   try { await recordUsageProviderRef(env.AQUILLA_PG, usage.orgId, usage.requestId, ref) }
   catch { console.warn('[billing] chat usage provider reference not recorded', usage) }
+}
+
+/** Does this upstream rejection prove the model never ran (AQU-1241)?
+ *
+ * Only a gateway-side refusal qualifies. A 4xx is decided before any generation
+ * exists, so the request is proven free; 408 is excluded because a timed-out
+ * request may already be generating, and 5xx is excluded because an upstream
+ * failure can follow a completed generation. Both stay held under
+ * `releaseWorkspaceUsage`'s rule that uncertainty is not evidence of no charge.
+ * A rejection that still names a generation record is not proven free either.
+ */
+export function providerRejectedPreModel(status: number, body: string) {
+  if (status < 400 || status >= 500 || status === 408) return false
+  try { return providerRefOf(JSON.parse(body)) === undefined }
+  catch { return true } // no parseable body means no generation to reconcile
+}
+
+/** Release a reservation the provider proved free, so it stops counting against
+ * the workspace's allowance. Never throws: a release that cannot be recorded
+ * leaves the reservation held for reconciliation rather than losing the row.
+ */
+export async function releaseChatUsage(env: Env, usage: ChatUsage) {
+  try {
+    await releaseWorkspaceUsage(env.AQUILLA_PG, usage.orgId, usage.requestId)
+    return 'released' as const
+  } catch {
+    console.warn('[billing] chat usage release failed; reservation held', usage)
+    return 'pending' as const
+  }
 }
 
 /** Observe SSE with backpressure and bounded parser state; output bytes remain

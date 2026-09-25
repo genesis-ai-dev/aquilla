@@ -118,6 +118,50 @@ it('retains the reservation after provider failure', async () => {
   expect((await f.totals()).reserved).toBe(1_562_500)
 })
 
+// AQU-1241: a request the provider refuses before the model runs costs nothing,
+// so it must not keep consuming the workspace's allowance.
+const rejection = (status: number, body = '{"error":{"message":"rejected"}}') =>
+  withRateCard(vi.fn(async () => new Response(body, { status, headers: { 'Content-Type': 'application/json' } })))
+
+it.each([400, 402, 403, 429])('releases the reservation when the provider rejects with %i before the model', async status => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(status))
+  const response = await f.send()
+  expect(response.status).toBe(status)
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('released')
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 0, committed: 0 })
+})
+
+it('releases a pre-model rejection whose body is not JSON', async () => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(400, 'Bad Request'))
+  expect((await f.send()).headers.get('X-Billing-Usage-Status')).toBe('released')
+  expect((await f.totals()).committed).toBe(0)
+})
+
+it.each([408, 500, 502, 503])('retains the reservation when a %i failure cannot prove the model never ran', async status => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(status))
+  const response = await f.send()
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('pending')
+  expect((await f.totals()).reserved).toBe(1_562_500)
+})
+
+it('retains a rejection that still names a generation record', async () => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(403, '{"id":"gen-abc","error":{"message":"moderated"}}'))
+  const response = await f.send()
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('pending')
+  expect((await f.totals()).reserved).toBe(1_562_500)
+})
+
+it('frees a released request from the allowance so the next one is admitted', async () => {
+  const f = await setup()
+  vi.stubGlobal('fetch', rejection(429))
+  expect((await f.send()).status).toBe(429)
+  const fetch = upstream(JSON.stringify({ choices: [], usage: { cost: 0.001 } })); vi.stubGlobal('fetch', fetch)
+  const ok = await f.send({}, {}, crypto.randomUUID())
+  expect(ok.status).toBe(200)
+  expect(ok.headers.get('X-Billing-Usage-Status')).toBe('settled')
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 400_000, committed: 400_000 })
+})
+
 it('settles before delivering DONE when the client stops without draining transport EOF', async () => {
   const f = await setup()
   let sent = false

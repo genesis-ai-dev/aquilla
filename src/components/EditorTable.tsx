@@ -74,7 +74,7 @@ import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-c
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
-import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
@@ -87,6 +87,7 @@ import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -5335,20 +5336,29 @@ function EditorRow({
     () => !targetHasRichFormatting && segmentUsfmForDisplay(visibleTranslated ?? "") === null,
     [targetHasRichFormatting, visibleTranslated],
   )
+  // Play All sounds a queue element, not this row's player. While it is on
+  // this line, follow that clock. A take's clock already matches word timings;
+  // a shared source clip reports file time, so subtract the section start.
+  const queuePlayhead = useQueueCellPlayhead(cell.id)
+  const queueWordTime = queuePlayhead == null
+    ? null
+    : queueClockIsFileTime(cell) && typeof cell.startTime === "number" && Number.isFinite(cell.startTime)
+      ? queuePlayhead - cell.startTime
+      : queuePlayhead
+  const highlightTime = audioController.isPlaying
+    ? audioController.currentTime
+    : generatedVoiceController.isPlaying
+      ? generatedVoiceController.currentTime
+      : queueWordTime
+  const highlightTimings = audioController.isPlaying || (queueWordTime != null && hasAudio)
+    ? cellAudioTimings
+    : generatedVoiceController.isPlaying || queueWordTime != null
+      ? generatedVoiceTimings
+      : cellAudioTimings
   const karaokeReadRange = useMemo(() => {
-    if (!targetIsPlainText) return null
-    if (audioController.isPlaying) {
-      return activeWordRange(cellAudioTimings, audioController.currentTime)
-    }
-    if (generatedVoiceController.isPlaying) {
-      return activeWordRange(generatedVoiceTimings, generatedVoiceController.currentTime)
-    }
-    return null
-  }, [
-    targetIsPlainText, cellAudioTimings, generatedVoiceTimings,
-    audioController.isPlaying, audioController.currentTime,
-    generatedVoiceController.isPlaying, generatedVoiceController.currentTime,
-  ])
+    if (!targetIsPlainText || highlightTime == null) return null
+    return activeWordRange(highlightTimings, highlightTime)
+  }, [targetIsPlainText, highlightTimings, highlightTime])
 
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
@@ -6072,6 +6082,7 @@ function EditorRow({
               voices={audioLens.voices}
               session={audioLens.session}
               username={audioLens.username}
+              controller={hasAudio ? audioController : hasGeneratedVoice ? generatedVoiceController : undefined}
               onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
@@ -6360,8 +6371,8 @@ function EditorRow({
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
-                    audioTimings={cellAudioTimings}
-                    audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                    audioTimings={highlightTimings}
+                    audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
@@ -6389,8 +6400,24 @@ function EditorRow({
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
                     preserveWhitespace={Boolean(idmlConfiguration)}
+                    onMouseDown={(event) => {
+                      if (!targetIsPlainText) return
+                      const generatedPlaying = generatedVoiceController.isPlaying
+                      const timings = generatedPlaying ? generatedVoiceTimings : cellAudioTimings
+                      const seek = generatedPlaying
+                        ? generatedVoiceController.seek
+                        : hasAudio ? audioController.seek : undefined
+                      if (!seek) return
+                      const timing = timingFromClick(timings, targetReadContentRef.current, event.nativeEvent)
+                      if (!timing) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      seek(timing.t0)
+                    }}
                     onClick={(event) => {
                       event.stopPropagation()
+                      // Option/Alt+click seeks (onMouseDown); don't also enter edit.
+                      if (isWordSeekClick(event)) return
                       requestTargetEdit(idmlConfiguration
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
@@ -7060,6 +7087,7 @@ function EditorRow({
                     <CellTakeBlock
                       project={project}
                       owner={cell}
+                      controller={audioController}
                       timings={cellAudioTimings}
                       cellText={visibleTranslated}
                       editable={editable}
@@ -7077,6 +7105,7 @@ function EditorRow({
                       project={project}
                       owner={cell}
                       audioId={cell.selectedGeneratedVoiceAudioId}
+                      controller={generatedVoiceController}
                       timings={generatedVoiceTimings}
                       cellText={visibleTranslated}
                       editable={editable}

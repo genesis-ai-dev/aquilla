@@ -238,8 +238,7 @@ export const onboarding = defineNamespace({
 
     // — AiModelsStep — model metadata (was module-level ModelMeta consts)
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
-    "onboarding.checklist.aiModels.whisper.blurb":
-      "Word-level timing for recorded audio. Runs locally; no network after download.",
+    // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
       "Local voices for many languages — one language model per download.",

@@ -2945,7 +2945,15 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -5896,7 +5904,15 @@
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
     "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
-    "org.orgSettings.noSessionError": "2e7c28aba070c036"
+    "org.orgSettings.noSessionError": "2e7c28aba070c036",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "mfa": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -8837,7 +8853,15 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -11788,7 +11812,15 @@
     "workspace.targetAudioLane.drawnShortNextDubStays": "a941006604a2c7be",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
     "workspace.fileSort.canonical": "034c2466884eb7f3",
-    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb"
+    "workspace.fileSort.alphabetical": "a49d631f8c6cf6fb",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -16602,7 +16634,15 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -21416,6 +21456,14 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   }
 }

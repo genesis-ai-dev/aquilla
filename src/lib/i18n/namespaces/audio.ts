@@ -461,6 +461,17 @@ export const audio = defineNamespace({
     // in the first-run download-consent dialog (AiModelConsentDialog).
     "audio.consent.whisperLabel": "Whisper (transcription)",
     "audio.consent.mmsLabel": "MMS (multilingual TTS)",
+    // Shared compact + Learn more copy (consent prompt, onboarding checklist,
+    // Preferences → Local models). AQU-1211: tell the operator what they get
+    // and when, without unexplained "word-level timing" / "scrub" / "karaoke".
+    "audio.consent.whisper.short":
+      "After you save a recording, this device transcribes it automatically. The spoken words then light up in the cell as the recording plays. Recordings never leave this device.",
+    "audio.consent.whisper.learnMore":
+      "A transcript preview under the cell shows whether the recording matches your text, sounds a little different (you can adopt what was heard), or that you edited after recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove this model later in Preferences → Local models.",
+    "audio.consent.mms.short":
+      "Reads the cell's text aloud on this device in many languages. Your text isn't sent to any server.",
+    "audio.consent.mms.learnMore":
+      "Each language is downloaded the first time you use it. Manage or remove this model later in Preferences → Local models.",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
     // failure category, shown as the popover title (InlineAiError et al.).
@@ -2294,6 +2305,43 @@ export const audio = defineNamespace({
         description:
           "Display name for the MMS multilingual text-to-speech model in the same " +
           "consent dialog as audio.consent.whisperLabel, same naming pattern.",
+      },
+      "audio.consent.whisper.short": {
+        description:
+          "Compact explanation of what Whisper transcription does, reused in the " +
+          "first-run download prompt, the onboarding 'Configure voice & transcription' " +
+          "step, and Preferences → Local models so the story cannot drift. Plain " +
+          "words: after each save the recording is transcribed on this device and " +
+          "spoken words light up in the cell during playback. Do not introduce " +
+          "unexplained 'karaoke', 'scrub', or 'word-level timing'.",
+      },
+      "audio.consent.whisper.learnMore": {
+        description:
+          "Fuller explanation revealed in place by the consent prompt's Learn more " +
+          "control (not a second dialog). Covers the transcript preview under the " +
+          "cell and its matches / sounds different / edited-after-recording states, " +
+          "jumping playback by modifier-clicking a word in the cell editor (not in " +
+          "that preview), and Preferences → Local models as the place to manage or " +
+          "remove the model. {modifier} is rendered as the Option key glyph on Apple " +
+          "and the word Alt elsewhere — keep it next to '+click'. Paragraphs are " +
+          "separated by blank lines (keep them).",
+        placeholders: {
+          modifier:
+            "The seek-click modifier, rendered as a keycap: ⌥ (Option) on Mac, Alt otherwise.",
+        },
+      },
+      "audio.consent.mms.short": {
+        description:
+          "Compact explanation of what the MMS local-voice model does, reused in " +
+          "the first-run download prompt and Preferences → Local models. Plain " +
+          "words: it reads cell text aloud on this device; text does not leave the " +
+          "browser.",
+      },
+      "audio.consent.mms.learnMore": {
+        description:
+          "Fuller explanation revealed in place by the MMS consent prompt's Learn " +
+          "more control. Notes that each language downloads on first use, and that " +
+          "Preferences → Local models is where to manage or remove the model.",
       },
       "audio.aiError.dailyLimitTitle": {
         description:

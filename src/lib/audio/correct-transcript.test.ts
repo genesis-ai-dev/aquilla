@@ -16,6 +16,17 @@ describe("remapTranscriptTimings", () => {
     ])
   })
 
+  it("keeps the cell's character offsets when a corrected word is longer", () => {
+    // The cell already holds "teh house". A longer correction must not
+    // reindex offsets onto that longer string — those offsets would run
+    // past the cell and the preview would ask for another transcription.
+    const next = remapTranscriptTimings(timings, "the household")
+    expect(next).toEqual([
+      { word: "the", t0: 0, t1: 0.4, start: 0, end: 3 },
+      { word: "household", t0: 0.4, t1: 0.9, start: 4, end: 9 },
+    ])
+  })
+
   it("redistributes the original time range when the word count changes", () => {
     const next = remapTranscriptTimings(timings, "the big house")
     expect(next).toHaveLength(3)

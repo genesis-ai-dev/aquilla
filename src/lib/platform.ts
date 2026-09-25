@@ -31,3 +31,8 @@ export function isApplePlatform(): boolean {
   if (platform) return /mac|iphone|ipad|ipod/i.test(platform)
   return /mac|iphone|ipad|ipod/i.test(navigator.userAgent ?? "")
 }
+
+/** Keycap name for the modifier that seeks karaoke playback (MouseEvent.altKey). */
+export function altClickModifierLabel(): "Option" | "Alt" {
+  return isApplePlatform() ? "Option" : "Alt"
+}

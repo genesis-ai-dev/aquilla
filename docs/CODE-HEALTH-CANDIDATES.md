@@ -95,8 +95,18 @@ routine never modifies test files.
   `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec
   tag). Also skip `AD-2 chain pointer... entry came from D1` at `src/lib/parsers/types.ts:723`
   only after re-reading in context (mixed usage nearby).
-- **Remaining**: none known as of 2026-09-02 — a fresh repo-wide grep would be needed to
-  confirm before closing this entry outright.
+- **Remaining**: none. **Closed 2026-09-25** by the fresh repo-wide grep this entry asked
+  for: `grep -rniE "\bD1\b|d1_databases|D1Database"` over `src/`, `auth-worker/src`,
+  `sync-worker/src`, `agent-worker/src` and `worker/` returns only (a) the paragraph-model
+  `D1` spec tags listed above, (b) the contextual-pipeline "design §8, slice D1" tags in
+  `auth-worker/src/{index,routes/contextual,lib/contextual/tick,services/sync-worker-notify}.ts`,
+  (c) the `retention.d1`/`d7`/`d30` day-N field names in `auth-worker/src/lib/retention.ts`
+  and `src/lib/frontier/admin.ts`, (d) correctly historical framing of the cutover in
+  `auth-worker/src/index.ts:382-408` and `sync-worker/src/index.ts:7-124`, and (e) the
+  **live** legacy-identity bridge (`auth-worker/src/services/frontier-d1.ts`,
+  `legacy-user-migration.ts`, `routes/auth.ts`, `types.ts:114-118`), which really does read
+  a separate Cloudflare D1 over its HTTP API and is not datastore drift. Nothing left to
+  reword. Do not reopen without a *new* hit outside those five groups.
 
 ## "frontier-server" mentions in sync-worker — done 2026-09-02
 
@@ -688,3 +698,126 @@ still-pending `rules.*` / `onboarding` orphan keys once `context.test.ts` is gre
 
   The 2026-09-21 run's `ArchivedProjects.test.tsx` / `RecordingVideoSurface.test.tsx` timing
   flakes did **not** fire in either the baseline or the final run this time.
+
+## 2026-09-25 — type-tightening run: the SPA's last removable `any`s and `!`s
+
+**Done this run** (theme 3, type tightening; 4 files, no test file touched):
+
+- `src/hooks/useProjectSettings.ts` — dropped 3 of the file's 6
+  `@typescript-eslint/no-explicit-any` suppressions. The `nonEmptyCount` tally became
+  `Object.values(local).filter(…)` (the same idiom the migration guard 11 lines above
+  already uses), and the two byte-identical rollback ladders in `patch()` collapsed into
+  one `rollbackRejectedKeys()` helper whose per-key write goes through a generic
+  `copySettingsKey<K extends keyof ProjectWideSettings>` — a generic key is exactly what
+  makes `target[key] = source[key]` typecheck, so the cast that used to paper over the
+  `keyof`-union write is gone rather than relocated.
+- `src/lib/audio/inworld-design-locales.ts:124`, `src/lib/egress/build-project-export.ts:196`,
+  `src/lib/biblica/ebl/notes.ts:459,462,467` — 5 array-index non-null assertions removed.
+  Same story as every prior `!` pass: `tsconfig.app.json` sets `strict` but not
+  `noUncheckedIndexedAccess`, so `arr[i]` already types non-optional and `!` emits nothing.
+  `npx tsc -b` clean after each.
+
+**The `!`-assertion sweep is now finished for `src/`.** A fresh
+`grep -rEn "\w+\[[a-zA-Z0-9_+. ]+\]!" src --include=*.ts --include=*.tsx` (minus tests)
+returns 6 hits; 5 are the ones deleted above and the sixth is
+`src/lib/audio/whisper-worker.ts:186`, already recorded in the 2026-08-24 entry as a
+*genuine* assertion (nullable tuple, narrowed across a `.filter()`/`.map()` boundary that
+TS cannot carry). The `keep.at(-1)!` in `ebl/notes.ts:461` is likewise genuine — `.at()`
+really does return `T | undefined`. Treat this entry as closing the 2026-08-24 candidate.
+
+### Left behind in `useProjectSettings.ts` — the other 3 `any`s, and why each stays
+
+None of these is a mechanical removal; each would change what the code does or merely
+rename the cast. Picking any of them up needs a human who owns the settings↔IDB seam.
+
+- **`{} as any` at the `completionSettings` spread** (was line 480). `CompletionSettings`
+  has five *required* fields (`endpoint`, `model`, `maxTokens`, `temperature`,
+  `systemPrompt`), so `existing.completionSettings ?? {}` genuinely is not one. The cast
+  is masking a real gap: when a project has no `completionSettings` yet, this write stores
+  `{ systemPrompt }` alone under a key typed as the full object. Removing the `any`
+  honestly means either constructing a complete default or widening the field to
+  `Partial<CompletionSettings>` — both behavior changes, both out of this routine.
+- **The two `as any`s in the IDB forbidden-rollback** (`(next as any)[key] =
+  (snapTarget as any)[key]`). `next` is a `ProjectRecord` and `snapTarget` a
+  `ProjectWideSettings`; their key sets only partially overlap (`ProjectRecord` carries
+  `sourceLanguage`/`targetLanguage`/`rules`/`rulePenalties`/`algorithmicChecks`/`targetLanes`/
+  `archivedLanes` but not, e.g., `validationCount*` or `cellEditingFloor`). A type-safe
+  version has to name the intersection, which decides *which keys roll back* — i.e. it is a
+  behavior decision, not a typing one. **Proof it would need**: the intersection spelled out
+  against both interfaces plus a test pinning which keys the IDB rollback touches; there is
+  no such test today.
+
+### Nothing else in the SPA or the workers carries a removable `any`
+
+`grep -rn "no-explicit-any" src --include=*.ts --include=*.tsx` (minus tests) is 21 hits in
+6 files. Besides `useProjectSettings.ts`, all of them are `window as any` / `performance as any`
+debug-global attachments in `EditorTable.tsx`, `ProjectWorkspace.tsx`, `useActiveCellStore.ts`,
+`perf-log.ts` and `report-problem.ts` — legitimate, since the properties they set
+(`__perfRowRenders`, `__cellStore`, `__aquillaMemorySnapshot`, `togglePerfLog`, PostHog's
+undeclared `get_session_replay_url`) are deliberately not on any declared interface. A
+matching sweep over `auth-worker/`, `sync-worker/`, `agent-worker/` and `worker/` found
+**zero** `any` in production code — every `\bas any\b|: any\b` hit there is the word "any"
+inside a prose comment, except `agent-worker/src/resolve-sandbox.ts:10`, which documents its
+own `Sandbox<any>` loosening as deliberate. **Theme 3 is exhausted; rotate to another theme
+next run.**
+
+### Baseline recorded 2026-09-25 (`origin/dev` `073f1aa4`) — `dev` is greener than on 2026-09-23
+
+- **`pnpm build`** — green.
+- **`pnpm lint`** — exit 2, **129 errors**, 910 warnings. Unchanged in character from
+  2026-09-23 (the 122 `i18n/no-unkeyed-string` errors in the billing surfaces, the four
+  unused type imports at `sync-worker/src/external/commands.ts:39-42`, the unused `ROLE` at
+  `auth-worker/src/routes/changeset-approvals.ts:34`, and the three others listed there).
+  ESLint still reports stale `eslint-suppressions.json` entries.
+- **`pnpm test`** — exit 1, **2 files** (down from 6): `src/lib/i18n/context.test.ts`
+  (2 tests, the `onboarding.connect.*` context/placeholder issue, carried over unchanged
+  since 2026-09-21) and `scripts/cloudflare-preview-comment.test.mjs` (collection error,
+  `node:test`, carried over). 1272 files / 14160 tests passing.
+  **The four `OrgProjectsPage.*.test.tsx` collection errors new on 2026-09-23 are gone** —
+  the stale `cloud-projects` `vi.mock` was fixed on `dev` since. `OrgProjectsDataTable.tsx`
+  and `src/lib/offline/download.ts` are no longer frozen.
+- **Still frozen by a red test**: every `src/lib/i18n/namespaces/*.ts` (the whole-catalog
+  invariant in `context.test.ts`), which continues to block the pending `rules.*` /
+  `onboarding` / `audio.recordingModal.*` orphan-key sweeps logged above.
+
+### Pre-existing, found while getting the e2e gate to run: `auth-worker`'s npm install is broken
+
+`cd auth-worker && npm ci` (and `npm install`) fails outright with `ERESOLVE`:
+`auth-worker/package.json` devDeps pin `vitest ^5.0.0`, but its
+`@cloudflare/vitest-pool-workers@0.22.0` peers `vitest ^4.1.0`. So the exact command
+CLAUDE.md documents for that package — `cd auth-worker && npm test` — cannot be run from a
+clean checkout without `--legacy-peer-deps`. `sync-worker` and `agent-worker` both dry-run
+clean; `worker/` has no lockfile at all, so `npm ci` is not applicable there. **Not touched
+this run** — dependency versions are a frozen zone for this routine, and the fix is a real
+decision (downgrade `vitest`, or wait for a `vitest-pool-workers` that peers `^5`). Worth a
+ticket: it silently blocks the worker-suite half of every AI or human contributor's gate.
+
+### Running `pnpm test:e2e:smoke` in a Claude-Code-on-the-web container (it *is* possible)
+
+The 2026-09-25 run got the smoke gate to a real 79/79 pass in the cloud sandbox. Recorded
+here because the default invocation fails four different ways and each one looks like a
+product bug at first glance. None of this is a repo change — it is all container setup:
+
+1. **No Postgres running.** Postgres 16 is installed but the cluster is down:
+   `pg_ctlcluster 16 main start`, then create the login role the scripts expect
+   (`CREATE ROLE aquilla LOGIN SUPERUSER PASSWORD 'aquilla'`).
+2. **`E2E_PG_ADMIN_URL` defaults to a local socket as the current OS user** (root), which is
+   not a Postgres role. Export
+   `E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres`.
+3. **Worker `node_modules` are not installed by the root `pnpm i`.** The mock
+   legacy-migration server imports `bcryptjs` out of `auth-worker/src/utils/password.ts` and
+   dies at boot, which surfaces only as `timed out waiting for .../healthz`. Install
+   auth-worker and sync-worker deps (auth-worker needs `--legacy-peer-deps` — see the
+   ERESOLVE entry above).
+4. **Playwright's pinned Chromium build is not the one on the image.** The repo's
+   `@playwright/test` wants build 1234; `/opt/pw-browsers` ships 1194, and the newer
+   Playwright also renamed the inner directory (`chrome-headless-shell-linux64/` vs
+   `chrome-linux/`). Do not run `playwright install` — symlink instead:
+   `/opt/pw-browsers/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`
+   → `…/chromium_headless_shell-1194/chrome-linux/headless_shell`, plus `INSTALLATION_COMPLETE`
+   and `DEPENDENCIES_VALIDATED` marker files.
+5. **Do not use the default 3-way shard.** Three concurrent stacks (3 vite + 6 wrangler +
+   chromium) exhaust the container: wrangler dies mid-run and every affected spec fails with
+   `TypeError: fetch failed` / `ECONNREFUSED`, which reads exactly like a product regression
+   and is not one. Run `npx tsx scripts/e2e-shard.ts 1 -- smoke.spec` instead — 79 specs, one
+   worker, ~10 minutes.

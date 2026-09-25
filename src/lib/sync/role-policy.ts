@@ -363,21 +363,24 @@ export function canSubmitAssignment(
 }
 
 /**
- * AQU-608: whether the editor's TARGET-tag lane switcher is interactive for
- * `roleLevel`. Switching the active translation lane is a maintainer-and-above
- * affordance — every role below maintainer (translators/reviewers/leads) stays
- * in the lane they're on and sees the target-language tag as a static pill, not
- * a dropdown.
+ * Whether the editor's target-lane switcher opens.
  *
- * This is a pure client-side UI gate: selecting a lane emits no event and hits
- * no server endpoint, so there is no server mirror to keep in lock-step. It is
- * intentionally stricter than any event role bar in this file. Fail-CLOSED (an
- * unknown/absent role never gets the switcher) precisely because there is no
- * server backstop here — unlike `canPerform`, which fails open because the
- * server re-checks.
+ * Maintainer and above always can: they see every lane. Below that, the
+ * switcher opens when the caller was handed more than one lane. The settings
+ * response is already cut to their grants when the read wall is on, so the
+ * count is the lanes they may enter. One lane (or none) stays a static pill.
+ * An unknown role stays closed.
+ *
+ * Selecting a lane emits no event. The read wall is what refuses a lane the
+ * caller was not granted.
  */
-export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
-  return roleLevel != null && roleLevel >= ROLE.MAINTAINER
+export function canSwitchLanes(
+  roleLevel: number | null | undefined,
+  visibleLaneCount = 0,
+): boolean {
+  if (roleLevel == null) return false
+  if (roleLevel >= ROLE.MAINTAINER) return true
+  return visibleLaneCount > 1
 }
 
 // ──────────────────────────────────────────────────────────────────────────

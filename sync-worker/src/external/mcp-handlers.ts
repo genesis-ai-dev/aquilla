@@ -429,7 +429,10 @@ async function getProject(
   // AQU-1222: shared with the REST GET /projects/:projectId route so the two
   // adapters cannot drift — and so both carry settingsVersion, the number
   // PatchSettings.ifMatchVersion has to match.
-  const detail = await loadProjectDetail(db, projectId, resolved.level)
+  const detail = await loadProjectDetail(db, projectId, resolved.level, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(cred.userId),
+  })
   if (!detail) return fail('not_found', `project ${projectId} not found`)
   return ok(detail)
 }

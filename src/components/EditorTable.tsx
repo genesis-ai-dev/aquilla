@@ -2673,13 +2673,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   language settings.
                 • with neither handler → the original static pill (byte-identical
                   to the pre-AQU-583 header for callers that pass no handlers).
-                AQU-608: lane switching is a maintainer-and-above affordance —
-                below maintainer the tag stays a static pill so translators keep
-                to their assigned lane. */}
+                Below maintainer the switcher opens only when more than one
+                lane was handed to this caller (their grants, once the read
+                wall is on). One lane stays a static pill. */}
             {lanes &&
             lanes.length > 1 &&
             onLaneChange &&
-            canSwitchLanes(project.syncRole?.level) ? (
+            canSwitchLanes(project.syncRole?.level, lanes.length) ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)

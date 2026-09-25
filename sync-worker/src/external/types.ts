@@ -8,6 +8,8 @@ import type { CellPrecondition } from './preconditions'
 /** Environment for the external API — a superset of the /events perimeter env
  *  (the compiled events are routed back through handleEventsWriteRequest). */
 export type ExternalEnv = EventsRouteEnv & {
+  /** AQU-730 read wall. Unset locally and in e2e. */
+  LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string
   /** R2 media/original-import blob bucket (artifact bytes). */

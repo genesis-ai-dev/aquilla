@@ -16,7 +16,7 @@
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
 /** Maintainer. At and above this role, every lane is visible. */
-const MAINTAINER = 600
+export const READ_WALL_MAINTAINER = 600
 
 /** `lane` is `lanes.id`, never a language name or code. */
 export interface LaneGrant {
@@ -39,7 +39,7 @@ export function visibleLaneTags(input: {
 }): VisibleLaneTags {
   if (!input.enabled) return null
   if (input.src === "platform") return null
-  if (input.role >= MAINTAINER) return null
+  if (input.role >= READ_WALL_MAINTAINER) return null
   const tags = new Set<string>()
   for (const grant of input.laneGrants ?? []) {
     if (typeof grant.lane !== "string") continue
@@ -104,7 +104,9 @@ export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds
  * Drop lane labels the caller was not granted. `visible === null` returns the
  * response unchanged. `lanes` maps those ids to the names the UI shows.
  */
-export function filterSettingsToVisibleLanes<T extends { settings: Record<string, unknown> }>(
+export function filterSettingsToVisibleLanes<
+  T extends { settings: Record<string, unknown>; lanes?: readonly { id: string }[] },
+>(
   response: T,
   visible: VisibleLaneTags,
   lanes: readonly LaneIdentity[] = [],
@@ -121,5 +123,79 @@ export function filterSettingsToVisibleLanes<T extends { settings: Record<string
   if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
     settings.targetLanguage = ""
   }
-  return { ...response, settings }
+  const next = { ...response, settings }
+  if (response.lanes) {
+    next.lanes = response.lanes.filter((lane) => visible.has(lane.id))
+  }
+  return next
+}
+
+/**
+ * Legacy tags (`''` for the default target lane) of the granted lane ids.
+ * `null` means the caller is unrestricted. An empty set means no target lane.
+ */
+export function legacyTagsForVisibleLanes(
+  lanes: readonly LaneIdentity[],
+  visible: VisibleLaneTags,
+): ReadonlySet<string> | null {
+  if (visible === null) return null
+  const tags = new Set<string>()
+  for (const lane of lanes) {
+    if (!visible.has(lane.id)) continue
+    tags.add(lane.legacyTag ?? "")
+  }
+  return tags
+}
+
+export interface PortfolioLaneTotals {
+  lane: string
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+}
+
+/**
+ * Lane rows and text totals the caller may see. `null` when `allowedTags` is
+ * null (unrestricted — the caller keeps the cross-lane SQL totals). Sums only
+ * the lanes whose legacy tag is granted, so a hidden lane cannot contribute
+ * a cell count or a newer edit time.
+ */
+export function portfolioTextFromVisibleLanes<T extends PortfolioLaneTotals>(
+  lanes: readonly T[],
+  allowedTags: ReadonlySet<string> | null,
+): {
+  lanes: T[]
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+} | null {
+  if (allowedTags === null) return null
+  const kept = lanes.filter((lane) => allowedTags.has(lane.lane))
+  let totalCells = 0
+  let filledCells = 0
+  let validatedCells = 0
+  let lastEditAt: number | null = null
+  for (const lane of kept) {
+    totalCells += lane.totalCells
+    filledCells += lane.filledCells
+    validatedCells += lane.validatedCells
+    if (lane.lastEditAt != null && Number.isFinite(lane.lastEditAt)) {
+      lastEditAt = lastEditAt == null ? lane.lastEditAt : Math.max(lastEditAt, lane.lastEditAt)
+    }
+  }
+  return { lanes: kept, totalCells, filledCells, validatedCells, lastEditAt }
+}
+
+/**
+ * The portfolio's `targetLanguage` is the default lane's name. Hide it unless
+ * that lane (`legacy_tag ''`) is visible. `null` allowedTags keeps it.
+ */
+export function visibleDefaultLaneLanguage(
+  targetLanguage: string | null,
+  allowedTags: ReadonlySet<string> | null,
+): string | null {
+  if (allowedTags === null) return targetLanguage
+  return allowedTags.has("") ? targetLanguage : null
 }

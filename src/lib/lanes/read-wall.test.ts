@@ -6,7 +6,10 @@ import {
   laneReadWallEnabled,
   laneTagAllowed,
   lanesForRequestedTag,
+  legacyTagsForVisibleLanes,
+  portfolioTextFromVisibleLanes,
   visibilityCacheToken,
+  visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "./read-wall"
 
@@ -97,5 +100,49 @@ describe("lane read wall", () => {
     )
     expect(named.settings.targetLanguage).toBe("")
     expect(named.settings.targetLanes).toEqual(["Yoruba Team"])
+  })
+
+  it("drops lane records the caller was not granted", () => {
+    const filtered = filterSettingsToVisibleLanes(
+      {
+        settings: { targetLanes: ["es"] },
+        lanes: [
+          { id: "es", name: "Spanish" },
+          { id: "fr", name: "French" },
+        ],
+      },
+      new Set(["es"]),
+      [
+        { id: "es", name: "Spanish", legacyTag: "es" },
+        { id: "fr", name: "French", legacyTag: "fr" },
+      ],
+    )
+    expect(filtered.lanes.map((lane) => lane.id)).toEqual(["es"])
+  })
+
+  it("sums only the granted lanes and hides the default language name", () => {
+    const lanes = [
+      { id: "def", name: "Spanish", legacyTag: "" },
+      { id: "yo", name: "Yoruba Team", legacyTag: "yo" },
+    ]
+    const tags = legacyTagsForVisibleLanes(lanes, new Set(["yo"]))
+    expect(tags).toEqual(new Set(["yo"]))
+    const totals = portfolioTextFromVisibleLanes(
+      [
+        { lane: "", totalCells: 100, filledCells: 40, validatedCells: 10, lastEditAt: 5000 },
+        { lane: "yo", totalCells: 100, filledCells: 3, validatedCells: 1, lastEditAt: 2000 },
+      ],
+      tags,
+    )
+    expect(totals).toEqual({
+      lanes: [{ lane: "yo", totalCells: 100, filledCells: 3, validatedCells: 1, lastEditAt: 2000 }],
+      totalCells: 100,
+      filledCells: 3,
+      validatedCells: 1,
+      lastEditAt: 2000,
+    })
+    expect(visibleDefaultLaneLanguage("Spanish", tags)).toBeNull()
+    expect(visibleDefaultLaneLanguage("Spanish", new Set([""]))).toBe("Spanish")
+    expect(portfolioTextFromVisibleLanes([], null)).toBeNull()
   })
 })

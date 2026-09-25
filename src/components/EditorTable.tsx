@@ -87,6 +87,7 @@ import {
   railFocusOwnerOnFocus,
 } from "@/lib/editor/cell-rail-pin"
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
+import { openActivationInputCapture, type ActivationInputCapture } from "@/lib/editor/activation-input-capture"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
@@ -4927,6 +4928,14 @@ function EditorRow({
   // never loses the first character(s). See requestTargetEdit / handleGridRowKeyDown.
   const awaitingEditorFocusRef = useRef(false)
   const pendingActivationInputRef = useRef<string>("")
+  // AQU-1333: keydown is only one of the ways text enters a cell. CDP
+  // `Input.insertText` (browser agents, Playwright `fill`), IME composition, OS
+  // dictation and paste deliver text with no keydown at all, and need an
+  // *editing host* to fire on — which the plain row wrapper is not. So for the
+  // length of the activation window the row becomes one, with the caret parked
+  // in this throwaway span so nothing can splice into React-owned row DOM.
+  const activationCaretHostRef = useRef<HTMLSpanElement | null>(null)
+  const activationCaptureRef = useRef<ActivationInputCapture | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -5695,6 +5704,14 @@ function EditorRow({
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, getPendingTargetEventId])
 
   const editorFocusedRef = useRef(false)
+  // AQU-1333: close the activation window — always through here, so the row can
+  // never be left as a stray editing host competing with the real editor.
+  const closeActivationCapture = useCallback(() => {
+    awaitingEditorFocusRef.current = false
+    activationCaptureRef.current?.close()
+    activationCaptureRef.current = null
+  }, [])
+
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
@@ -5706,8 +5723,23 @@ function EditorRow({
     awaitingEditorFocusRef.current = true
     pendingActivationInputRef.current = ""
     rowRef.current?.focus({ preventScroll: true })
+    // AQU-1333: and catch the text that never arrives as a keydown — agent
+    // insertText, IME, dictation, paste — into the same buffer, so the editor's
+    // existing replay-on-focus drains all of it together and in order.
+    activationCaptureRef.current?.close()
+    activationCaptureRef.current = rowRef.current && activationCaretHostRef.current
+      ? openActivationInputCapture({
+        host: rowRef.current,
+        caretHost: activationCaretHostRef.current,
+        onText: (text) => { pendingActivationInputRef.current += text },
+      })
+      : null
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  // A row unmounting mid-activation (virtualisation, lane switch, file change)
+  // would otherwise leave its listeners and `contenteditable` behind.
+  useEffect(() => closeActivationCapture, [closeActivationCapture])
 
   const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
     onTargetPresenceSelection?.(cell.id, selection)
@@ -5717,23 +5749,25 @@ function EditorRow({
     editorFocusedRef.current = true
     // AQU-746: the editor now owns the caret — stop buffering; TranslatedEditor
     // replays whatever was captured during activation (see its onFocus).
-    awaitingEditorFocusRef.current = false
+    // AQU-1333 closes the row's editing host in the same breath, so the two
+    // never both look editable.
+    closeActivationCapture()
     onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
-  }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
+  }, [cell.id, closeActivationCapture, onActivateEditor, onClaimCell, onAckRemoteChange])
 
   const handleEditorBlurOuter = useCallback(() => {
     // AQU-746: activation was abandoned without the editor ever focusing — drop
     // any buffered keys so they can't leak into a later, unrelated activation.
-    awaitingEditorFocusRef.current = false
+    closeActivationCapture()
     pendingActivationInputRef.current = ""
     if (editorFocusedRef.current) {
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
     }
     onDeactivateEditor(cell.id)
-  }, [cell.id, onDeactivateEditor, onReleaseCell])
+  }, [cell.id, closeActivationCapture, onDeactivateEditor, onReleaseCell])
 
   useEffect(() => {
     if (!isEditorActive) return
@@ -6561,6 +6595,17 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
+        {/* AQU-1333: caret park for the activation window. Inert and invisible
+            the rest of the time — it only becomes editable because the row it
+            sits in is made an editing host for those ~300 ms, and it exists so
+            text the browser inserts before we can cancel it (an uncancelable
+            IME composition) lands here instead of in row content React owns. */}
+        <span
+          ref={activationCaretHostRef}
+          data-activation-caret-host
+          aria-hidden="true"
+          className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
+        />
         {healthCalculationsEnabled && (
           <HealthRibbon
             point={healthRibbonPoint}

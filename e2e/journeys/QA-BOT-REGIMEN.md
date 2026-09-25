@@ -7,22 +7,21 @@ bot already proved. Humans spend their attention on taste and on what the bots
 could not prove.
 
 Related: [PR-BOT.md](PR-BOT.md) (how a PR is walked),
+[DEPLOY-BOT.md](DEPLOY-BOT.md) (how a release branch is cut),
 [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md) (branches,
 deploy commands, calver tags).
 
 ## The line
 
 ```
-PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──ordinary: bot deploys──▶ prod + tag YYYY.MM.DD.NN
-                                                              └─held: a person deploys──┘
+PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──a person deploys──▶ prod + tag YYYY.MM.DD.NN
 ```
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
 | PR → `dev` | Agents (merge themselves) | Evidence below. No required human reviewer. |
-| `dev` → release branch | Release bot | `node scripts/release-plan.mjs` says `cut: true`. |
-| Release → prod, ordinary slice | Release bot | `hold` is false. Runs `pnpm run deploy:aquilla` itself. |
-| Release → prod, held slice | Kieran or Matthew | `hold` is true. Same command, run by a person. |
+| `dev` → release branch | Deploy bot | `node scripts/release-plan.mjs` says `cut: true`. |
+| Release → prod | Kieran or Matthew | Always a person — see "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). `hold` sets how much they check first (§3). |
 
 ## 1. Pull request: verify once
 
@@ -45,8 +44,9 @@ QA is re-checking we chose not to automate.
 
 ## 2. Cutting a release: one in flight, no ceiling
 
-The release bot runs on a schedule (a 15-minute poll, plus once right after
-every deploy so a finished slice doesn't sit idle) and does only this:
+The Deploy bot's only job is cutting the branch — it never deploys, and it
+never touches production. Full step-by-step mechanics, hard stops, and the
+comment template are in [DEPLOY-BOT.md](DEPLOY-BOT.md); the summary:
 
 1. `git fetch origin --tags` and fetch `release/*`.
 2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `hold`,
@@ -55,10 +55,13 @@ every deploy so a finished slice doesn't sit idle) and does only this:
 3. If `cut` is false, stop. Post nothing, except a once-only warning for a
    held branch with no tag after 4 hours.
 4. If `cut` is true, create the named `branch` at the named `sha` — not the
-   tip of `dev` — push it, and post the release notes below where QA watches.
-5. If `hold` is false, run `pnpm run deploy:aquilla` from a clean checkout of
-   that branch, checked out by name. If `hold` is true, stop: a person
-   deploys the same command when they are ready.
+   tip of `dev` — push it, and post the release notes below as a comment
+   on that commit, where QA and the deployer both find it.
+
+Deploying is always a person's call (see "Deployment ownership" in
+[DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md)).
+`hold` does not change who deploys; it changes how much a person checks
+first (§3) before running `pnpm run deploy:aquilla` themselves.
 
 The plan's rules:
 
@@ -104,9 +107,12 @@ human.
 
 ## 3. QA at a held release: check the gaps, then ship
 
-An ordinary slice (`hold: false`) deploys itself; QA's job there is the stop
-button below, not a sign-off. A held slice (`hold: true`) waits for a person.
-QA opens the release branch's preview and checks **only**:
+Every slice waits for a person to run the deploy command; `hold` only
+changes how much QA does first. An ordinary slice (`hold: false`) needs no
+extra check beyond the stop button below — the PASS evidence chain from PR
+review already covers it, so whoever deploys can run it once the branch's
+preview looks right. A held slice (`hold: true`) waits for QA to open the
+release branch's preview and check **only**:
 
 1. Rows listed under "Needs a human".
 2. For a migration or deploy-infra hold: that the change is safe for the

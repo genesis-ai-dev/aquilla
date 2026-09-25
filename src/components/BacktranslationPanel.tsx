@@ -375,6 +375,7 @@ export function BacktranslationPanel({
                 confirmedSeeds={confirmedSeeds ?? []}
                 onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
                 originalWords={originalWords}
+                editable={editable}
               />
             </div>
           )}

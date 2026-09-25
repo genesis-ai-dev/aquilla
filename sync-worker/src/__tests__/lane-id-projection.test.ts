@@ -9,8 +9,8 @@
 //      projection, a rebuild/replay, and the bulk-import builders all land the
 //      SAME lane_id, because they run the same SQL against the same (replay-
 //      stable) `lanes` table.
-//   3. It is BEHAVIOR-NEUTRAL until lanes exist — with no matching lane the
-//      subquery is NULL, so lane_id stays NULL (additive column, migration 0097).
+//   3. Once lane_id is NOT NULL, a write with no matching lane is rejected.
+//      The old "stay NULL until backfill" path is gone.
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -52,8 +52,7 @@ function ev(partial: Partial<PersistedEvent> & { kind: EventKind }): PersistedEv
   }
 }
 
-/** Seed the three lanes the tests resolve against. Omit to test the
- *  behavior-neutral (no lanes -> NULL) path. */
+/** Seed the three lanes the tests resolve against. */
 async function seedLanes(t: TestDb): Promise<void> {
   await t.pg.query(
     `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
@@ -128,23 +127,10 @@ describe('lane_id resolution — canonical per-event projection', () => {
     expect(await laneIdOf(t, 'target', 'es')).toBe(ES_LANE)
   })
 
-  it('leaves lane_id NULL when the project has no lanes rows (behavior-neutral)', async () => {
-    await project(t, [SOURCE, LEGACY_TARGET, ES_TARGET])
-
-    expect(await laneIdOf(t, 'source', '')).toBeNull()
+  it('rejects a cell write when the project has no lanes (lane_id is NOT NULL)', async () => {
+    await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await expect(project(t, [SOURCE, LEGACY_TARGET])).rejects.toThrow(/not-null constraint/i)
     expect(await laneIdOf(t, 'target', '')).toBeNull()
-    expect(await laneIdOf(t, 'target', 'es')).toBeNull()
-  })
-
-  it('backfills lane_id on ON CONFLICT: a row first written lanes-less resolves once lanes exist', async () => {
-    // First commit lands NULL (no lanes yet); then lanes appear; a later commit
-    // to the same row must fill lane_id via COALESCE(excluded.lane_id, ...).
-    await project(t, [SOURCE, LEGACY_TARGET])
-    expect(await laneIdOf(t, 'target', '')).toBeNull()
-
-    await seedLanes(t)
-    await project(t, [ev({ kind: 'target.cell.commit', id: 'tc-2', parentId: 'tc-legacy', payload: { value: 'Salut' } })])
-    expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
   })
 
   it('the composite FK forbids orphaning a resolved lane_id, and COALESCE guards NULL-writes', async () => {
@@ -160,20 +146,23 @@ describe('lane_id resolution — canonical per-event projection', () => {
     ).rejects.toThrow(/foreign key constraint/i)
     expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
 
-    // COALESCE still guards the other direction: a lanes-unaware write that
-    // supplies NULL must not regress an already-resolved id. Re-run the exact
-    // ON CONFLICT clause the projection uses, forcing excluded.lane_id = NULL.
-    await t.pg.query(
-      `INSERT INTO cells
-         (project_id, file_id, cell_id, side, target_lang, value, event_id,
-          last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-       VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
-       ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
-         value   = excluded.value,
-         lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
-      [PROJECT, FILE],
-    )
-    expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE) // COALESCE keeps it
+    // A raw NULL lane_id is rejected outright (the column is NOT NULL), so the
+    // already-resolved id cannot be wiped. Turn the test-only filler off so
+    // this sees the production constraint.
+    await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await expect(
+      t.pg.query(
+        `INSERT INTO cells
+           (project_id, file_id, cell_id, side, target_lang, value, event_id,
+            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
+         VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
+         ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+           value   = excluded.value,
+           lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
+        [PROJECT, FILE],
+      ),
+    ).rejects.toThrow(/not-null constraint/i)
+    expect(await laneIdOf(t, 'target', '')).toBe(DEFAULT_TARGET_LANE)
   })
 })
 

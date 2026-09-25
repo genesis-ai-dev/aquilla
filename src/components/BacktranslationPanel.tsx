@@ -1,11 +1,22 @@
 /**
  * Trust-first back-translation panel.
  *
- * One reading of the translation on screen, with provenance (AI vs corrected)
- * and freshness always visible. The project's statistical gloss is an
- * independent check: live while there is no AI reading, and a disagreement
- * card when the two readings diverge. Alignment stays collapsed as an
- * advanced tool.
+ * Two readings of the translation, each labelled with what KIND of output it
+ * is, in the order a translator should meet them (AQU-1408, Biblica ETT):
+ *
+ *   1. The STATISTICAL GLOSS — literal, word-for-word, derived from this
+ *      project's own translated pairs. It is the project's own evidence, so it
+ *      leads, and it is always on screen rather than folded into an expander.
+ *   2. The AI BACK-TRANSLATION — a smoothed re-reading, with provenance (AI vs
+ *      hand-corrected) and freshness always visible.
+ *
+ * Before AQU-1408 the AI reading was the main block and the gloss was a
+ * collapsed section beneath it, which read as "the AI is the answer and the
+ * corpus is a footnote" — the opposite of what the gloss is for. Neither
+ * descriptor lives in a tooltip any more: a reader who does not know which
+ * of the two they are looking at cannot weigh either.
+ *
+ * Alignment stays collapsed as an advanced tool.
  */
 
 import { useCallback, useState } from "react"
@@ -70,7 +81,6 @@ export function BacktranslationPanel({
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState("")
   const [saving, setSaving] = useState(false)
-  const [statsOpen, setStatsOpen] = useState(false)
 
   const hasTranslation = visibleTranslated.trim().length > 0
   const reading = cell.backtranslation?.trim() ?? ""
@@ -78,7 +88,6 @@ export function BacktranslationPanel({
   const originCorrected = cell.backtranslationPolished === false
   const gloss = statisticalGloss.trim()
   const disagree = Boolean(reading && !readingStale && readingsDisagree(reading, gloss))
-  const showLivePairs = hasTranslation && !reading && !editing && gloss.length > 0
 
   const subject = readingCell(cell, visibleTranslated)
 
@@ -109,12 +118,63 @@ export function BacktranslationPanel({
 
   return (
     <div className="flex flex-col gap-2.5">
+      {/* AQU-1408 §3/§4: the statistical gloss leads, labelled with what it is.
+          It is the project's own evidence about its own words, so it is not
+          folded away behind an expander and not gated on the AI reading being
+          absent — it is simply the first thing in the tab. */}
+      {hasTranslation && !editing && (
+        <section className="relative overflow-hidden rounded-xl bg-muted/40 py-2.5 pr-3 pl-4">
+          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-muted-foreground/30" />
+          <h4 className="text-[11px] font-medium text-foreground">
+            {t("editor.bt.statisticalGloss")}
+          </h4>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+            {t("editor.bt.glossDescriptor")}
+          </p>
+          {gloss ? (
+            <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/80">{gloss}</p>
+          ) : (
+            <p className="mt-1.5 text-[11px] italic text-muted-foreground">
+              {t("editor.bt.glossNotEnoughPairs")}
+            </p>
+          )}
+          {disagree && (
+            <p className="mt-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {t("editor.bt.pairsDisagree")}
+            </p>
+          )}
+          {disagree && editable && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="mt-1 h-auto px-2 py-0.5 text-[11px]"
+              onClick={() => onSaveBacktranslation?.(subject, gloss, false)}
+            >
+              {t("editor.bt.usePairsInstead")}
+            </Button>
+          )}
+          {gloss && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground/70">
+              {t("editor.bt.glossDisclaimer")}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* AQU-1408 §3/§4: the AI reading moves below the gloss and carries its
+          own visible descriptor. */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-foreground">{t("editor.bt.label")}</span>
-          <AppTooltip content={t("editor.bt.explainTooltip")}>
-            <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
-          </AppTooltip>
+        <div className="flex min-w-0 flex-col">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-foreground">{t("editor.bt.aiHeading")}</span>
+            <AppTooltip content={t("editor.bt.explainTooltip")}>
+              <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
+            </AppTooltip>
+          </div>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {t("editor.bt.aiDescriptor")}
+          </p>
         </div>
         {reading && !editing && (
           <div className="flex items-center gap-0.5">
@@ -240,12 +300,14 @@ export function BacktranslationPanel({
                 )}
               />
               <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
-                <span className={originCorrected
-                  ? "text-emerald-700 dark:text-emerald-400"
-                  : "text-muted-foreground"}
-                >
-                  {originCorrected ? t("editor.bt.originCorrected") : t("editor.bt.originAi")}
-                </span>
+                {/* AQU-1408: the section heading above already says "AI
+                    back-translation", so the origin badge only earns its space
+                    when it contradicts that — i.e. a human rewrote the reading. */}
+                {originCorrected && (
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    {t("editor.bt.originCorrected")}
+                  </span>
+                )}
                 {!readingStale && (
                   <span className="inline-flex items-center gap-1 text-emerald-700/80 dark:text-emerald-400/80">
                     <Check className="h-3 w-3" />
@@ -288,62 +350,6 @@ export function BacktranslationPanel({
             <p className="text-[11px] text-muted-foreground/70">
               {t("editor.bt.contributorCanGenerate")}
             </p>
-          )}
-        </div>
-      )}
-
-      {showLivePairs && (
-        <div className="relative overflow-hidden rounded-xl bg-muted/40 py-2.5 pr-3 pl-4">
-          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-muted-foreground/30" />
-          <p className="text-[11px] font-medium text-muted-foreground">{t("editor.bt.pairsLive")}</p>
-          <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">{gloss}</p>
-        </div>
-      )}
-
-      {disagree && !editing && (
-        <div className="relative overflow-hidden rounded-xl bg-muted/40 py-2.5 pr-3 pl-4">
-          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-amber-500/50" />
-          <p className="text-[11px] font-medium text-foreground">{t("editor.bt.pairsDisagree")}</p>
-          <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">{gloss}</p>
-          {editable && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="mt-1.5 h-auto px-2 py-0.5 text-[11px]"
-              onClick={() => onSaveBacktranslation?.(subject, gloss, false)}
-            >
-              {t("editor.bt.usePairsInstead")}
-            </Button>
-          )}
-        </div>
-      )}
-
-      {hasTranslation && !editing && (
-        <div className="rounded-lg border border-border/60">
-          <button
-            type="button"
-            onClick={() => setStatsOpen((v) => !v)}
-            aria-expanded={statsOpen}
-            className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <ChevronRight className={cn("h-3 w-3 shrink-0", statsOpen && "rotate-90")} />
-            {t("editor.bt.statisticalGloss")}
-            <span className="font-normal text-muted-foreground/60">{t("editor.bt.statisticalGlossSub")}</span>
-          </button>
-          {statsOpen && (
-            <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
-              {gloss ? (
-                <p className="text-[13px] leading-relaxed text-foreground/80">{gloss}</p>
-              ) : (
-                <p className="text-[11px] italic text-muted-foreground">
-                  {t("editor.bt.glossNotEnoughPairs")}
-                </p>
-              )}
-              <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-                {t("editor.bt.glossDisclaimer")}
-              </p>
-            </div>
           )}
         </div>
       )}

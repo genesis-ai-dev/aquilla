@@ -105,6 +105,35 @@ export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
 }
 
 /**
+ * AQU-1408: interlinear alignment seeds — what a member writes by confirming
+ * (✓) or rejecting (✕) a word-alignment suggestion in the BT tab. A patch that
+ * touches only this key is admitted at contributor(400)+.
+ *
+ * This carve-out exists because the panel's confirm/reject buttons are shown to
+ * every project member, so under the flat maintainer floor they were a
+ * silently dead control below 600: the in-memory model moved, the AQU-255
+ * guard (correctly) refused the below-floor local apply, and the seed never
+ * reached the server — the decision was simply gone on reload.
+ *
+ * Contributor matches `cell.backtranslation.set` in the sync perimeter's
+ * role policy, which is the same act at a different grain: saying what the
+ * words of a translation mean.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only this key changed" test against the stored
+ * row and remains authoritative.
+ */
+export const ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR = ROLE.CONTRIBUTOR
+
+const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
+
+/** True when a patch changes the alignment seeds and nothing else. */
+export function isAlignmentSeedsOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === ALIGNMENT_SEEDS_KEY)
+}
+
+/**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
  * Project settings are PATCHed through auth-worker's REST API, not the sync
@@ -694,13 +723,14 @@ export function useProjectSettings(
     // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
     //
-    // AQU-822 / AQU-1086 / AQU-1246: the required floor is
-    // SETTINGS_EDIT_ROLE_FLOOR (maintainer) for every patch EXCEPT three
+    // AQU-822 / AQU-1086 / AQU-1246 / AQU-1408: the required floor is
+    // SETTINGS_EDIT_ROLE_FLOOR (maintainer) for every patch EXCEPT the
     // single-scope carve-outs — a terminology-only one (org's configured
-    // termbaseEditMinRole), a language-only one (org's configured
-    // languageEditMinRole), and an autopilotEnabled-only one (project_lead).
-    // Deriving it per-patch (rather than loosening the hook-wide floor) keeps
-    // the AQU-255 guarantee intact for all the other keys.
+    // termbaseEditMinRole), a countStructuralCells-only one (project_lead), a
+    // language-only one (org's configured languageEditMinRole), an
+    // autopilotEnabled-only one (project_lead), and an alignmentSeeds-only one
+    // (contributor). Deriving it per-patch (rather than loosening the
+    // hook-wide floor) keeps the AQU-255 guarantee intact for all other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
@@ -727,6 +757,7 @@ export function useProjectSettings(
       : isCountStructuralOnlyPatch(partial) ? ROLE.PROJECT_LEAD
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
+      : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
       : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will

@@ -116,6 +116,27 @@ const AUTOPILOT_KEY = "autopilotEnabled"
 const AUTOPILOT_WRITE_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /**
+ * AQU-1408: the interlinear alignment seeds — the ± pseudo-counts a member
+ * writes by confirming (✓) or rejecting (✕) a word-alignment suggestion in the
+ * BT tab. A write whose only *changed* key is this one is admitted at
+ * contributor(400)+.
+ *
+ * Until this ticket the key rode the flat maintainer floor, which made the
+ * panel's confirm/reject buttons a silently dead control for everyone below
+ * 600: the click updated the in-memory model, the optimistic local apply was
+ * (correctly) refused by the AQU-255 guard, and the seed never reached the
+ * server — so the decision was gone on reload (Biblica ETT, 2026-09-24).
+ *
+ * Contributor is the floor because this is the same act as correcting a
+ * back-translation, which `cell.backtranslation.set` already admits at
+ * ROLE.CONTRIBUTOR: a person who writes the translation says what its words
+ * mean. It hands them nothing else — every other key in the blob keeps the
+ * maintainer gate above.
+ */
+const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
+const ALIGNMENT_SEEDS_WRITE_MIN_ROLE = ROLE.CONTRIBUTOR
+
+/**
  * Top-level settings keys whose value differs between the stored blob and an
  * incoming write. Compared on the CHANGE, not on presence: the client patch
  * is a whole-object read-modify-write, so every write echoes back every key
@@ -240,7 +261,12 @@ projectSettings.on(
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
         && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
-      if (!terminologyOnly && !languageOnly && !autopilotOnly && !countStructuralOnly) {
+      const alignmentSeedsOnly = changed.length > 0
+        && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
+      if (
+        !terminologyOnly && !languageOnly && !autopilotOnly
+        && !countStructuralOnly && !alignmentSeedsOnly
+      ) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
@@ -283,6 +309,19 @@ projectSettings.on(
           return c.json(
             {
               error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
+            },
+            403,
+          )
+        }
+      } else if (alignmentSeedsOnly) {
+        // AQU-1408: server-enforced, not merely a client floor — the panel's
+        // confirm/reject buttons are visible to the whole project, so the
+        // answer to "may this decision be saved?" has to be the same one the
+        // client shows.
+        if (role.level < ALIGNMENT_SEEDS_WRITE_MIN_ROLE) {
+          return c.json(
+            {
+              error: `role >= contributor (${ALIGNMENT_SEEDS_WRITE_MIN_ROLE}) required to confirm or reject word alignments`,
             },
             403,
           )

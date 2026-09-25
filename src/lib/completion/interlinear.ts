@@ -432,17 +432,28 @@ function diagonalPrior(
 /**
  * Compute confidence-scored word alignment links for a single cell.
  *
- * Each source token is aligned to its best-matching target token (greedy argmax
- * over confidence × diagonal prior). Only links above `opts.threshold` are
- * returned (default 0.1).
+ * Each source token is aligned to at most one target token, and — AQU-1408 —
+ * **each target token is claimed by at most one source token**. Only links
+ * above `opts.threshold` are returned (default 0.1).
  *
  * The algorithm:
  * 1. For each (srcToken, tgtToken) pair, compute a raw score:
  *    - Warm: IBM Model 1 probability P(tgt | src) from EM-trained probTable.
  *    - Cold: Dice(srcToken, tgtToken) from co-occurrence counts.
  * 2. Multiply by diagonalPrior(srcPos, srcLen, tgtPos, tgtLen).
- * 3. For each source token, pick the target token with the highest combined score.
- * 4. Filter by threshold.
+ * 3. Competitive linking: consider every candidate above the threshold in
+ *    descending score order and keep it only when neither endpoint is spoken
+ *    for. The best claimant of a target word keeps it; a source word that
+ *    loses falls through to its next-best free target, or to no link at all.
+ *
+ * Step 3 used to be a per-source-token argmax, which decided each source token
+ * independently and so let several of them land on the same target word — the
+ * panel then showed "father" three times over for one "father" in the verse
+ * (AQU-1408, Biblica ETT). A one-to-one matching is also what the target-side
+ * reading is: a target word means one thing here, not three.
+ *
+ * Ties are broken by source position, then target position, so the result is
+ * deterministic for a given model and cell.
  *
  * @param source  Source-language verse string.
  * @param target  Target-language verse string.
@@ -463,12 +474,13 @@ export function alignCell(
 
   if (srcTokens.length === 0 || tgtTokens.length === 0) return []
 
-  const links: AlignmentLink[] = []
+  // Score every (source, target) candidate once, keeping only those that clear
+  // the display threshold. Scoring is separated from choosing so the choice can
+  // be made globally rather than one source token at a time.
+  const candidates: { srcIndex: number; tgtIndex: number; confidence: number }[] = []
 
   for (let si = 0; si < srcTokens.length; si++) {
     const s = srcTokens[si]
-    let bestTgtIndex = -1
-    let bestScore = -Infinity
 
     for (let ti = 0; ti < tgtTokens.length; ti++) {
       const t = tgtTokens[ti]
@@ -483,26 +495,35 @@ export function alignCell(
       if (rawScore === 0) continue
 
       const prior = diagonalPrior(si, srcTokens.length, ti, tgtTokens.length)
-      const combined = rawScore * prior
+      // Clamp confidence to [0, 1]
+      const confidence = Math.min(1, Math.max(0, rawScore * prior))
 
-      if (combined > bestScore) {
-        bestScore = combined
-        bestTgtIndex = ti
-      }
+      if (confidence >= threshold) candidates.push({ srcIndex: si, tgtIndex: ti, confidence })
     }
+  }
 
-    // Clamp confidence to [0, 1]
-    const confidence = Math.min(1, Math.max(0, bestScore))
+  // Competitive linking: strongest candidate first, and a token on either side
+  // can only be spent once. Position tie-breaks keep the walk deterministic.
+  candidates.sort(
+    (a, b) =>
+      b.confidence - a.confidence || a.srcIndex - b.srcIndex || a.tgtIndex - b.tgtIndex,
+  )
 
-    if (bestTgtIndex >= 0 && confidence >= threshold) {
-      links.push({
-        srcIndex: si,
-        srcToken: s,
-        tgtIndex: bestTgtIndex,
-        tgtToken: tgtTokens[bestTgtIndex],
-        confidence,
-      })
-    }
+  const takenSrc = new Set<number>()
+  const takenTgt = new Set<number>()
+  const links: AlignmentLink[] = []
+
+  for (const { srcIndex, tgtIndex, confidence } of candidates) {
+    if (takenSrc.has(srcIndex) || takenTgt.has(tgtIndex)) continue
+    takenSrc.add(srcIndex)
+    takenTgt.add(tgtIndex)
+    links.push({
+      srcIndex,
+      srcToken: srcTokens[srcIndex],
+      tgtIndex,
+      tgtToken: tgtTokens[tgtIndex],
+      confidence,
+    })
   }
 
   return links.sort((a, b) => a.srcIndex - b.srcIndex || a.tgtIndex - b.tgtIndex)

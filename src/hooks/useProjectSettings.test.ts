@@ -519,6 +519,87 @@ describe("useProjectSettings — write path", () => {
     })
   })
 
+  // AQU-1408: confirming (✓) / rejecting (✕) a word alignment in the BT tab
+  // writes `alignmentSeeds`. The panel shows those buttons to the whole
+  // project, so under the flat maintainer floor they were a dead control for
+  // everyone below 600 — the click moved the in-memory model, the AQU-255
+  // guard refused the local apply, and the decision was gone on reload.
+  describe("alignmentSeeds-only carve-out (AQU-1408)", () => {
+    const SEEDS = [{ srcToken: "father", tgtToken: "père", weight: 1 }]
+
+    it("lets a contributor (400) save a confirmation", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { alignmentSeeds: SEEDS } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: SEEDS })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("lets a contributor save a rejection (the negative seed is the same permission)", async () => {
+      const rejected = [{ srcToken: "father", tgtToken: "papa", weight: -1 }]
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { alignmentSeeds: rejected } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: rejected })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a reviewer (300) — contributor is the floor, not every member", async () => {
+      const idbMod = await import("@/lib/store/project-index")
+      vi.mocked(idbMod.patchProject).mockClear()
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 300))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: SEEDS })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+      expect(idbMod.patchProject).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key — a contributor bundling another key stays blocked", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
+        otherKey = await result.current.patch({ sourceLanguage: "fr" })
+        bundled = await result.current.patch({ alignmentSeeds: SEEDS, sourceLanguage: "fr" })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()

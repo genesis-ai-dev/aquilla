@@ -282,6 +282,8 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    "workspace.alignment.contributorRequired":
+      "Contributor+ required to confirm or reject alignments",
 
     // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
     "workspace.alignment.originalHeading": "Original language",
@@ -1311,6 +1313,13 @@ export const workspace = defineNamespace({
           srcToken: "The source-language word/token — not translated.",
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
+      },
+      "workspace.alignment.contributorRequired": {
+        description:
+          "AQU-1408. Tooltip and accessible name on the disabled confirm/reject " +
+          "buttons for a member below the contributor rung, who may read the " +
+          "alignment but not teach it. Mirror editor.bt.contributorRequired; keep " +
+          "the 'or above' sense of the trailing plus.",
       },
       "workspace.alignment.originalHeading": {
         description:

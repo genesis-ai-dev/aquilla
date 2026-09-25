@@ -5244,6 +5244,10 @@ function EditorRow({
           cellId: cell.id,
           editEventId: eventId,
           author: username,
+          // The same lane the commit above went to. Without it the validation
+          // landed on the MAIN language: editing Spanish silently validated the
+          // German row, and a member limited to Spanish had it refused.
+          targetLang: activeLane,
         }).catch((err) => {
           // Telemetry-adjacent, non-blocking: the commit already landed.
           console.warn("[auto-validate] emit failed:", err)

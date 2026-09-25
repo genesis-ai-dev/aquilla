@@ -93,6 +93,14 @@ the covered outcome actually is rather than what it was meant to be.
 Rows 1 and 3 are the cheapest to add next: both reuse the existing seeded
 file and need no second identity or media fixture.
 
+## Adversarial journeys (deployed dev, advisory)
+
+Jev attacks the deployed dev build under hostile conditions, red-team goals,
+and reworded goals; a snapshot oracle over every touched project decides.
+Findings file as Linear Triage tickets under AQU-1330. A model-free canary
+gates each run. See [the adversarial suite](../smart-tests/adversarial/README.md).
+The catalogue lives in `smart-tests/adversarial/attacks.ts`.
+
 ## Journeys moved to another repository
 
 | Area | Journey | Current owner |

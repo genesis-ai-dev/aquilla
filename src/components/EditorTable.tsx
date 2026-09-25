@@ -183,7 +183,8 @@ import { ViolationToast } from "./ViolationToast"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
-import type { Concept, ConceptDraft } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -3913,6 +3914,8 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
+  /** Project affix inventory + fold defaults feeding the shared matcher. */
+  termMatching?: TermMatchingSettings
   onViewConcept?: (conceptId: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
@@ -3928,6 +3931,7 @@ export function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
+  termMatching,
   onViewConcept,
   inline = false,
 }: SourceWithTermLookupProps) {
@@ -3940,12 +3944,14 @@ export function SourceWithTermLookup({
   // Match whole terms over the full text with the shared matcher, not
   // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
   // equal to a single token, so an index keyed by token could never highlight
-  // one. findTermMatches also brings wildcard parity with the target-side
-  // chips (`grac*` → grace/graced).
+  // one. AQU-1272: the CONCEPT is matched, not just its headword string, so the
+  // popover lights up on the same occurrences as the chips, enforcement and the
+  // per-term stats — wildcards (`grac*` → grace/graced), mark folding, the
+  // project's affix inventory, extra `match.forms` and `excludedForms` included.
   const matches = useMemo(() => {
     const found: Array<{ start: number; end: number }> = []
     for (const concept of activeConcepts) {
-      for (const m of findTermMatches(text, concept.sourceTerm)) found.push(m)
+      for (const m of findConceptMatches(text, concept, termMatching)) found.push(m)
     }
     // Longest-first at each offset, then drop anything overlapping an already
     // taken span — a highlight may not start inside another one.
@@ -3958,7 +3964,7 @@ export function SourceWithTermLookup({
       taken = m.end
     }
     return kept
-  }, [text, activeConcepts])
+  }, [text, activeConcepts, termMatching])
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
   // Font size inherits from the source column wrapper (per-file pref) — no
@@ -4002,6 +4008,7 @@ export function SourceWithTermLookup({
         key={`term-${i}`}
         sourceTerm={matchedText}
         concepts={activeConcepts}
+        termMatching={termMatching}
         onViewConcept={onViewConcept}
       >
         <span className="terminology-highlight">
@@ -6898,6 +6905,7 @@ function EditorRow({
                   idmlStyleCatalog={idmlStyleCatalog}
                   idmlParagraphStyleId={idmlParagraphStyleId}
                   concepts={terminologyConcepts}
+                  termMatching={project.termMatching}
                 />
               </div>
             ) : (
@@ -6915,6 +6923,7 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
+                termMatching={project.termMatching}
                 onViewConcept={onOpenTerminologyConcept}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -7138,6 +7147,7 @@ function EditorRow({
                 <TermLookupPopover
                   sourceTerm={termChipState.term}
                   concepts={terminologyConcepts}
+                  termMatching={project.termMatching}
                   onViewConcept={onOpenTerminologyConcept}
                   open
                   onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}

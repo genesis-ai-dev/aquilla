@@ -450,7 +450,9 @@ export function TerminologyTermDetail({
   }, [newRendering, concept.renderings, concept.id, onRenderingsChange])
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    // AQU-1272: the e2e page object scopes its "N occurrences" assertion to
+    // this panel — page-wide, the same string appears in the term list too.
+    <div className="flex flex-col min-h-screen bg-background" data-testid="term-detail">
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <Button

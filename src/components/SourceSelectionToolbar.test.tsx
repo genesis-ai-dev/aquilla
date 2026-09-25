@@ -102,6 +102,36 @@ describe("SourceSelectionToolbar", () => {
     expect(onViewConcept).toHaveBeenCalledWith("concept-grace")
   })
 
+  // AQU-1272: "View term" used to appear on a bidirectional substring test, so
+  // it was silent on a prefixed/differently-pointed selection the rest of the
+  // terminology stack recognises — and loud on an unrelated neighbour.
+  it("offers View term for a prefixed selection of a pointed term", () => {
+    render(
+      <SourceSelectionToolbar
+        sourceSelection="וְהָאָ֗רֶץ"
+        concepts={[{ ...MATCHING_CONCEPT, id: "concept-haaretz", sourceTerm: "הָאָ֗רֶץ" }]}
+        termMatching={{ prefixes: ["ו", "ה", "ב", "ל"], suffixes: ["ים"] }}
+        onAskAi={vi.fn()}
+        onViewConcept={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: /^View term$/i })).toBeInTheDocument()
+  })
+
+  it("does not offer View term for a selection that merely contains the term as a substring", () => {
+    render(
+      <SourceSelectionToolbar
+        sourceSelection="graceful"
+        concepts={[MATCHING_CONCEPT]}
+        onAskAi={vi.fn()}
+        onViewConcept={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: /^View term$/i })).not.toBeInTheDocument()
+  })
+
   it("keeps View term a native button when Base UI composes the trigger", () => {
     render(
       <SourceSelectionToolbar

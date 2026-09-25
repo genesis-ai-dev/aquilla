@@ -98,6 +98,8 @@ export const env = {
   AGENT_MODEL_DEFAULT: undefined as string | undefined,
   // Site-admin identity by email: "root" (root@example.com) is the test admin.
   ADMIN_EMAILS: "root@example.com" as string | undefined,
+  // AQU-730. Suites that exercise the wall set this to "1" and clear it after.
+  LANE_READ_WALL: undefined as string | undefined,
   // Step-up elevation OFF by default so existing admin-route tests stay open;
   // the elevation suite sets it per-test.
   ADMIN_REQUIRE_ELEVATION: undefined as string | undefined,

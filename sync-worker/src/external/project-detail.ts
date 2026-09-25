@@ -16,6 +16,7 @@
 // query, not a gate.
 
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { filterSettingsBlobForMember } from '../../../db/shared/lane-visibility'
 
 export interface ExternalProjectDetail {
   id: string
@@ -40,12 +41,20 @@ interface ProjectDetailRow {
   archived_at: string | null
 }
 
+/** Who is asking, so the settings blob can be cut to their grants. Omit it and
+ *  the blob is returned whole — callers that show settings to an agent pass it. */
+export interface LaneSettingsViewer {
+  flag: string | undefined
+  userId: number
+}
+
 /** Read one project plus its live settings/version. Returns null when no such
  *  project exists — the caller maps that to not_found. */
 export async function loadProjectDetail(
   db: AquillaDb,
   projectId: string,
   role: number,
+  viewer?: LaneSettingsViewer,
 ): Promise<ExternalProjectDetail | null> {
   const row = await db
     .prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
@@ -54,13 +63,16 @@ export async function loadProjectDetail(
   if (!row) return null
 
   const settings = await loadProjectSettings(db, projectId)
+  const visibleSettings = viewer
+    ? await filterSettingsBlobForMember(db, viewer.flag, projectId, viewer.userId, role, settings.settings)
+    : settings.settings
   return {
     id: row.id,
     name: row.name,
     org_id: row.org_id == null ? null : String(row.org_id),
     archived: row.archived_at != null,
     role,
-    settings: settings.settings,
+    settings: visibleSettings,
     settingsVersion: settings.version,
     settingsUpdatedAt: settings.updatedAt,
   }

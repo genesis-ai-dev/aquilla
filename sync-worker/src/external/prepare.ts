@@ -59,6 +59,7 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { echoableLaneLabels } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
@@ -493,10 +494,20 @@ export async function prepareChangesetCore(
     )
     for (const [index, c] of setCommands.entries()) {
       if (c.laneId && !registeredLanes.has(c.laneId)) {
+        const echoable = await echoableLaneLabels(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          resolvedRole.level,
+        )
+        const listedLanes = echoable === null
+          ? [...registeredLanes]
+          : [...registeredLanes].filter((lane) => echoable.has(lane))
         return errorResponse(
           'validation_failed',
           `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
-          { registeredLanes: [...registeredLanes] },
+          { registeredLanes: listedLanes },
         )
       }
     }

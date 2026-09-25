@@ -96,7 +96,12 @@ syncToken.post(
       // outbox quarantines events as permanently forbidden on a mint 403,
       // which is how a DB blip turned a contributor's comment into a bogus
       // "no permission" error on 2026-08-25.
+      // AQU-1389: the lane-grant read is off by default, so this is
+      // unreachable unless the AQU-1352 rollout flag is on. Same transient
+      // contract as role_lookup_failed — never a 403, so an enforcement-time
+      // DB blip can neither fail open nor quarantine the SPA outbox.
       case "role_lookup_failed":
+      case "lane_grant_lookup_failed":
         return c.json(
           { error: "Unable to verify project access right now. Please retry." },
           503,

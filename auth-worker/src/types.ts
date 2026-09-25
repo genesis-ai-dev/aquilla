@@ -107,6 +107,15 @@ export interface Env {
 
   ENVIRONMENT?: string
 
+  // ── Lane-permission rollout gate (AQU-1389, owned by AQU-1352) ────────
+  /** Fail-closed activation gate for the additive per-lane grant read
+   * (project_member_lane_roles → the `laneGrants` sync-token claim). Only the
+   * exact string "true" enables it. UNSET EVERYWHERE TODAY — the lane-model
+   * cutover (AQU-1240) must not depend on a permission rollout, so with this
+   * off the token producer issues no grant query at all. AQU-1352's
+   * access_grants rollout owns turning it on. See services/lane-grants.ts. */
+  LANE_GRANTS_ENABLED?: string
+
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
    * lookup for identities absent from Neon. */

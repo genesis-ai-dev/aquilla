@@ -11,6 +11,7 @@
 
 import { sign } from "hono/jwt"
 import type { AuthUser, Env, RoleResolution, SyncTokenClaims } from "../types"
+import { LaneGrantLookupError, loadLaneGrants } from "./lane-grants"
 import { loadProjectRow, resolveProjectRole, RoleLookupError } from "./project-permissions"
 
 /** 15-minute lifetime — matches docs/SYNC.md. */
@@ -70,6 +71,11 @@ export type SyncTokenMintFailure =
   | "role_lookup_failed"
   /** projectId/fileId contains R2-key-unsafe characters (see isPathSafeId). */
   | "unsafe_id"
+  /** AQU-1389: the lane-grant read failed while the AQU-1352 rollout flag is
+   *  on. Same contract as role_lookup_failed — a transient 5xx, never a 403 —
+   *  so enforcement can never fail open. Unreachable while the flag is off
+   *  (the default), because no query is issued then. */
+  | "lane_grant_lookup_failed"
 
 export type SyncTokenMintResult =
   | { ok: true; token: string; expiresIn: number; role: RoleResolution }
@@ -81,9 +87,14 @@ export type SyncTokenMintResult =
  * another route can reuse it without re-resolving. Loads the user's
  * lane/file scopes (AQU-553) — the claim is omitted entirely when unscoped so
  * an absent claim keeps meaning "no restriction" on the sync-worker side.
+ *
+ * AQU-1389: the additive lane-grant read is gated by services/lane-grants.ts
+ * and issues NO query while the AQU-1352 rollout flag is off (the default), so
+ * minting never depends on project_member_lane_roles. Throws
+ * LaneGrantLookupError if that read is enabled and fails.
  */
 export async function signSyncTokenWithRole(
-  env: Pick<Env, "AQUILLA_PG" | "SYNC_SECRET_KEY">,
+  env: Pick<Env, "AQUILLA_PG" | "SYNC_SECRET_KEY" | "LANE_GRANTS_ENABLED">,
   user: Pick<AuthUser, "id" | "username">,
   projectId: string,
   fileId: string,
@@ -102,10 +113,7 @@ export async function signSyncTokenWithRole(
     value: r.value,
   }))
 
-  const grantRows = await env.AQUILLA_PG.prepare(
-    "SELECT lane, role_level FROM project_member_lane_roles WHERE project_id = ? AND user_id = ? ORDER BY lane",
-  ).bind(projectId, user.id).all<{ lane: string; role_level: number }>()
-  const laneGrants = (grantRows.results ?? []).map((r) => ({ lane: r.lane, level: r.role_level }))
+  const laneGrants = await loadLaneGrants(env, projectId, user.id)
 
   const now = Math.floor(Date.now() / 1000)
   const claims: SyncTokenClaims = {
@@ -121,6 +129,7 @@ export async function signSyncTokenWithRole(
     // AQU-553: omit entirely when unscoped (no rows).
     ...(scopes.length > 0 ? { scopes } : {}),
     // AQU-730: omit entirely when the user has no lane grants (dual-read).
+    // AQU-1389: also always omitted while the lane-grant rollout flag is off.
     ...(laneGrants.length > 0 ? { laneGrants } : {}),
     aud: "sync",
     iat: now,
@@ -166,6 +175,15 @@ export async function mintSyncTokenForUser(
   }
   if (!resolved) return { ok: false, reason: "no_access" }
 
-  const signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)
+  let signed: { token: string; expiresIn: number }
+  try {
+    signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)
+  } catch (err) {
+    // AQU-1389: a failed lane-grant read is transient, not a denial.
+    if (err instanceof LaneGrantLookupError) {
+      return { ok: false, reason: "lane_grant_lookup_failed" }
+    }
+    throw err
+  }
   return { ok: true, token: signed.token, expiresIn: signed.expiresIn, role: resolved }
 }

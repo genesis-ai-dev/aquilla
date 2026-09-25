@@ -1168,6 +1168,15 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
 -- role in a lane = max(base project role, grant role_level) — grants only
 -- elevate, never demote. kind='file' scopes stay in project_member_scopes.
 -- Backfill/enforcement land later and MUST follow AQU-1240 (no default lane).
+--
+-- AQU-1389: INERT AND NOT AN AUTHORITY. Nothing reads this table on any
+-- deployed environment — the sync-token mint's read is gated by
+-- LANE_GRANTS_ENABLED (auth-worker/src/services/lane-grants.ts), unset
+-- everywhere, and sync-worker's resolveVisibleLanes is still unwired. It must
+-- not become an eighth source of truth: AQU-1352 collapses every grant source
+-- into `access_grants` behind one resolver and owns this table's migration.
+-- The table and its rows are preserved (never dropped, never backfilled here)
+-- so that rollout has something to migrate from.
 CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     project_id TEXT    NOT NULL,
     user_id    BIGINT  NOT NULL,

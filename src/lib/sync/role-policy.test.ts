@@ -4,6 +4,7 @@ import {
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
+  scopedLanesFor,
   canSubmitAssignment,
   foreignRoleFor,
   effectiveCommentRoleFor,
@@ -341,5 +342,34 @@ describe("role-policy (client mirror)", () => {
         commentFloorsFrom({ commentCreateMinRole: 9999, commentResolveMinRole: -1 }),
       ).toEqual(DEFAULT_COMMENT_FLOORS)
     })
+  })
+})
+
+describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
+  const lanes = ["", "es", "de"]
+  const lane = (value: string) => ({ kind: "lane", value })
+
+  it("leaves MAINTAINER+ to the full switcher (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.MAINTAINER, [lane("es")], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
+  })
+
+  it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [{ kind: "file", value: "f1" }], lanes)).toBeNull()
+  })
+
+  it("gives a lane-limited contributor or reviewer their lanes, in the project's order", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de"), lane("es")], lanes)).toEqual(["es", "de"])
+    expect(scopedLanesFor(ROLE.REVIEWER, [lane("es")], lanes)).toEqual(["es"])
+  })
+
+  it("counts the default lane ('') as a lane like any other", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("")], lanes)).toEqual([""])
+  })
+
+  it("yields [] for a scope naming no lane the project has — nothing to move to", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("Spansih")], lanes)).toEqual([])
   })
 })

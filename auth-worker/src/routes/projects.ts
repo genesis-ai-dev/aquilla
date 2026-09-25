@@ -46,6 +46,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import {
+  getAssignmentsGivenBy,
   getFileChapters,
   getMyAssignments,
   getProjectAssignmentRoster,
@@ -995,6 +996,21 @@ projects.get("/:projectId/assignments/mine", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
   const assignments = await getMyAssignments(c.env, projectId, user.id)
+  return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/given — open assignments the
+ * caller handed out in this project (AQU-581: a lane coordinator's own list,
+ * so they can take back a mistake). Any project member; it only ever lists
+ * the caller's own.
+ */
+projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  const assignments = await getAssignmentsGivenBy(c.env, projectId, user.id)
   return c.json({ assignments })
 })
 

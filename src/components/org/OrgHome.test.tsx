@@ -164,6 +164,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
   countStructuralCells: true,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),

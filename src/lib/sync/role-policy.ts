@@ -323,31 +323,75 @@ export function canMutateComment(
 }
 
 /**
+ * AQU-581: the caller's own lane-delegate grant — the org's
+ * `allowScopedLaneAssignment` setting plus the caller's own lane/file scopes
+ * (AQU-553). Passed as one object so the two halves can never drift apart at
+ * a call site: the setting alone grants nothing, and scopes alone grant
+ * nothing.
+ */
+export interface LaneDelegateGrant {
+  allowScopedLaneAssignment: boolean
+  scopes: ReadonlyArray<{ kind: "lane" | "file"; value: string }>
+}
+
+/**
+ * The lane values a delegate grant covers — empty when it grants nothing
+ * (setting off, or the caller carries no lane scopes). Exported so the assign
+ * UI can restrict its lane picker to exactly these, rather than offering a
+ * lane the submit check would then refuse.
+ */
+export function laneDelegateLanes(grant: LaneDelegateGrant | undefined): string[] {
+  if (!grant?.allowScopedLaneAssignment) return []
+  return grant.scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+}
+
+/** True when the grant confers assignment authority in at least one lane. */
+function isLaneDelegate(grant: LaneDelegateGrant | undefined): boolean {
+  return laneDelegateLanes(grant).length > 0
+}
+
+/**
  * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
  * offered at all, given the caller's role and the org's `allowSelfAssignment`
- * setting. Mirrors the self-assign carve-out enforced server-side in
- * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
- * boundary; the server re-checks independently on every `assignment.create`.
+ * setting. AQU-581 adds a second way in: a lane-scoped delegate. Mirrors the
+ * carve-outs enforced server-side in `sync-worker/src/events/authorize.ts` —
+ * UX gate only, never the security boundary; the server re-checks
+ * independently on every `assignment.create`.
  *
  * A caller at the org's assignmentMinRole can open it for any assignee.
- * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
- * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
+ * Below that floor, CONTRIBUTOR+ can open it only under one of the org's two
+ * carve-outs — and opening is not submitting either way:
+ * `canSubmitAssignment` narrows a self-assigner to themselves, and a lane
+ * delegate to the lanes their grant names.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  return allowSelfAssignment || isLaneDelegate(laneDelegate)
 }
 
 /**
- * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
- * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
- * and only when allowSelfAssignment is on.
+ * AQU-496 / AQU-581: whether `roleLevel` may submit `assignment.create`
+ * assigning `assigneeUserId` in lane `lane`. Callers at assignmentMinRole may
+ * assign anyone, anywhere. Below-floor callers get in one of two ways,
+ * mirroring the two server carve-outs in
+ * `sync-worker/src/events/authorize.ts`:
+ *
+ *   1. AQU-496 self-assign — `assigneeUserId === callerUserId`, while the org
+ *      has `allowSelfAssignment` on.
+ *   2. AQU-581 lane delegate — assigning ANYONE, but only in a lane the org
+ *      scoped this caller to, and only while `allowScopedLaneAssignment` is
+ *      on. `lane` is the assignment's target-language lane ('' = default);
+ *      omitting it means the default lane, matching the server's read of an
+ *      absent `payload.targetLang`.
+ *
+ * UX gate only — the server re-checks independently on every event.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
@@ -355,11 +399,14 @@ export function canSubmitAssignment(
   callerUserId: number | null | undefined,
   assigneeUserId: number,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
+  lane: string = "",
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
-  return callerUserId != null && callerUserId === assigneeUserId
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  if (allowSelfAssignment && callerUserId != null && callerUserId === assigneeUserId) return true
+  return laneDelegateLanes(laneDelegate).includes(lane)
 }
 
 /**
@@ -378,6 +425,30 @@ export function canSubmitAssignment(
  */
 export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
+}
+
+/**
+ * The lanes a member below MAINTAINER may open and switch between: their own
+ * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
+ * switcher from everyone below MAINTAINER so a translator stays on the lane
+ * their assignment opens — but a member the org has LIMITED to certain lanes
+ * then opened on the default lane, often the one lane outside their limit,
+ * with no way to reach their own. A lane coordinator (AQU-581) could hand out
+ * Spanish chapters yet not open the Spanish lane to look at them.
+ *
+ * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
+ * via `canSwitchLanes`) or a member with no lane scopes (their assigned lane).
+ * A scope naming no lane the project has yields `[]`: nothing to move to.
+ */
+export function scopedLanesFor(
+  roleLevel: number | null | undefined,
+  scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
+  lanes: readonly string[],
+): string[] | null {
+  if (canSwitchLanes(roleLevel)) return null
+  const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
+  if (laneScopes.length === 0) return null
+  return lanes.filter((lane) => laneScopes.includes(lane))
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -587,7 +587,9 @@ CREATE TABLE cells (
     lane_id           TEXT NOT NULL,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag:
+    -- '' on source rows (not a lane) and the lane's legacy_tag on target rows.
+    PRIMARY KEY (project_id, file_id, cell_id, lane_id)
 );
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
@@ -638,7 +640,8 @@ CREATE TABLE file_section_progress (
     structural_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    PRIMARY KEY (project_id, file_id, scope, section_key, lane_id),
     CONSTRAINT file_section_progress_scope_check CHECK (scope IN ('file', 'section', 'book')),
     CONSTRAINT file_section_progress_shape_check CHECK (
       (scope = 'file' AND section_key = '') OR
@@ -694,7 +697,8 @@ CREATE TABLE cell_validators (
     event_id    TEXT NOT NULL,
     username    TEXT NOT NULL,
     decided_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)
 );
 
 -- AQU-490: one row per (take, person). Presence IS the vote, exactly as in

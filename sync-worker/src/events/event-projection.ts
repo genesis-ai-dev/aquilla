@@ -129,7 +129,7 @@ export function buildBulkTargetCellCommitStmt(
       canonical_ref, anchor_cell_id, event_id, source_event_id,
       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
-    ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+    ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
       value = excluded.value,
       value_html = excluded.value_html,
       event_id = excluded.event_id,
@@ -443,7 +443,7 @@ export function buildBulkSourceCellCreateStmt(
         medium, sequence_index, transcription, camera_state, metadata,
         lane_id
       ) VALUES ${placeholders}
-      ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+      ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
         side           = excluded.side,
         value          = excluded.value,
         value_html     = excluded.value_html,
@@ -677,7 +677,7 @@ export function buildEventProjectionStmts(
               medium, sequence_index, transcription, camera_state, metadata,
               lane_id
             ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
-            ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
               value_html     = excluded.value_html,
@@ -855,7 +855,7 @@ export function buildEventProjectionStmts(
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
               ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
-              ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
                 event_id          = excluded.event_id,
@@ -1289,9 +1289,9 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
-      // AQU-538: the lane this validation addresses. Absent/'' = default lane
-      // (byte-identical for N=1). A user's standing validation is per-lane —
-      // the cell_validators PK carries target_lang — so validating a cell in
+      // AQU-538 / AQU-1420: the lane this validation addresses. Absent/'' is the
+      // default lane's legacy tag. A user's standing validation is per lane —
+      // the cell_validators primary key is lane_id — so validating a cell in
       // lane A leaves lane B's validators (and validated flag) untouched.
       const lane =
         typeof (p as { targetLang?: unknown }).targetLang === 'string'
@@ -1310,7 +1310,7 @@ export function buildEventProjectionStmts(
               `INSERT INTO cell_validators (
                 project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
               ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
+              ON CONFLICT(project_id, file_id, cell_id, lane_id, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
                 decided_ts = excluded.decided_ts,
@@ -2616,7 +2616,7 @@ case 'cell.audio.attach': {
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 upstream_event_id, upstream_seq, tombstoned_at, lane_id
               ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
-              ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
@@ -2664,7 +2664,7 @@ case 'cell.audio.attach': {
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, NULL, ${laneIdResolveSql('source')}
             )
-            ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),

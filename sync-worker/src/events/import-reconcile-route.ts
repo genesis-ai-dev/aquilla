@@ -525,7 +525,7 @@ function buildGatedSourceUpsert(
             AND cc.cell_id = v.claim_cell_id AND cc.parent_key = v.claim_parent_key
             AND cc.event_id = v.event_id
        )
-     ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+     ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
        value = excluded.value, value_html = excluded.value_html, type = excluded.type,
        canonical_ref = excluded.canonical_ref, anchor_cell_id = excluded.anchor_cell_id,
        event_id = excluded.event_id, source_event_id = NULL,
@@ -623,7 +623,7 @@ function buildGatedTargetInsert(
             AND source.cell_id = v.cell_id AND source.side = 'source'
             AND source.target_lang = '' AND source.event_id = v.source_event_id
        )
-     ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO NOTHING`,
+     ON CONFLICT(project_id, file_id, cell_id, lane_id) DO NOTHING`,
   ).bind(...binds)
 }
 

@@ -444,47 +444,38 @@ async function reconcilePgSchema(
     patched.push(...await finalizeArtifactBindingSchema(client, run))
   }
 
-  // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
-  // target_lang lane. The generic loop above adds the column, but a drifted
-  // container still carries the 4-column PK — and Postgres rejects
-  // `ON CONFLICT (…, target_lang)` without a matching unique constraint,
-  // 500-ing every commit. Local dev has no old workers serving, so we skip the
-  // production expand/contract dance and rebuild the PK straight to the 5-column
-  // form here; all pre-lane rows carry '' so it's trivially unique. Idempotent
-  // (skipped once target_lang is in the PK).
+  // AQU-1420: row identity is lane_id. A container created before that still
+  // has target_lang in the primary key, and Postgres rejects the new
+  // ON CONFLICT (…, lane_id) until the key matches. Local dev has no old
+  // workers serving, so rebuild straight to the lane_id key. Idempotent
+  // (skipped once lane_id is in the PK). lane_id is NOT NULL, so the key
+  // cannot collapse two rows that never received a lane.
   const { rows: pkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
   )
-  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
-       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
-      "rebuilding the cells primary key with target_lang (migrations 0057+0061)",
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id)`,
+      "rebuilding the cells primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cells PK with target_lang")
+    patched.push("rebuilt cells PK on lane_id")
   }
 
-  // AQU-538 (migrations 0058 expand + 0062 contract): cell_validators and file_section_progress gained
-  // target_lang in their PKs so validations and progress rollups are per-lane.
-  // Same rationale as the cells rebuild above — the generic loop adds the
-  // column, but a drifted container keeps the pre-lane PK and Postgres rejects
-  // the lane-qualified `ON CONFLICT` / upsert. All pre-lane rows carry '' so
-  // the new key is trivially unique. Idempotent (skipped once target_lang is
-  // in the PK).
   const { rows: validatorPkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cell_validators'::regclass AND i.indisprimary`,
   )
-  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
-       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
-      "rebuilding the cell_validators primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)`,
+      "rebuilding the cell_validators primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cell_validators PK with target_lang")
+    patched.push("rebuilt cell_validators PK on lane_id")
   }
 
   const { rows: progressPkCols } = await client.query(
@@ -492,13 +483,13 @@ async function reconcilePgSchema(
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'file_section_progress'::regclass AND i.indisprimary`,
   )
-  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
-       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
-      "rebuilding the file_section_progress primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, lane_id)`,
+      "rebuilding the file_section_progress primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt file_section_progress PK with target_lang")
+    patched.push("rebuilt file_section_progress PK on lane_id")
   }
 
   await finalizeProgressSchema(run)

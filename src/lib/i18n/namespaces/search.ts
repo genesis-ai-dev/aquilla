@@ -146,6 +146,17 @@ export const search = defineNamespace({
       other: "{count} examples",
     }),
     "search.examples.popoverAriaLabel": "Translation examples",
+
+    // TM-style fuzzy matches inside the examples popover (AQU-1393)
+    "search.examples.matchPercent": "{percent}% match",
+    "search.examples.exactMatch": "100% match",
+    "search.examples.looseLabel": "Example",
+    "search.examples.insert": "Insert",
+    "search.examples.insertAriaLabel": "Insert this translation into the target cell",
+    "search.examples.originTranslationMemory": "TM · {fileName}",
+    "search.examples.originFile": "{fileName}",
+    "search.examples.diffAddedAriaLabel": "only in this match",
+    "search.examples.diffRemovedAriaLabel": "only in this cell",
   },
   context: {
     _context: {
@@ -625,6 +636,73 @@ export const search = defineNamespace({
         description:
           "Accessible name (aria-label) of the examples popover content region, read " +
           "once by a screen reader before its example pairs.",
+      },
+      "search.examples.matchPercent": {
+        description:
+          "Badge on an example row giving how similar its source is to the cell being " +
+          "translated, the way a TMS tool labels a fuzzy match. Sits in a narrow badge " +
+          "beside the row, so keep it to the number plus one short word.",
+        maxLength: 16,
+        placeholders: {
+          percent:
+            "Whole-number similarity between 75 and 99, already computed; no percent sign.",
+        },
+      },
+      "search.examples.exactMatch": {
+        description:
+          "Badge on an example row whose source is identical to the cell being " +
+          "translated — the row that offers the one-click Insert. Written as its own " +
+          "key rather than 100 through {percent} so a locale can word an exact match " +
+          "differently from a partial one.",
+        maxLength: 16,
+      },
+      "search.examples.looseLabel": {
+        description:
+          "Badge on an example row too dissimilar to carry a percentage (below 75%). " +
+          "Names what the row still is — a translated pair worth reading — rather than " +
+          "advertising a number that would imply false precision.",
+        maxLength: 16,
+      },
+      "search.examples.insert": {
+        description:
+          "Visible label of the button that puts an exact match's existing translation " +
+          "into the target editor for the translator to keep or edit. One word.",
+        maxLength: 12,
+      },
+      "search.examples.insertAriaLabel": {
+        description:
+          "Accessible name (aria-label) of the Insert button, longer than its visible " +
+          "one-word label because it must say on its own what gets inserted where.",
+      },
+      "search.examples.originTranslationMemory": {
+        description:
+          "Origin line on an example row that came from an imported translation-memory " +
+          "(TMX) file rather than from the project's own translated cells. 'TM' is the " +
+          "translators' own abbreviation and is normally left as-is.",
+        placeholders: {
+          fileName: "Name of the imported TMX file, as shown in the file list.",
+        },
+      },
+      "search.examples.originFile": {
+        description:
+          "Origin line on an example row that came from a file in this project. Just " +
+          "the file name in the base locale; the key exists so a locale can wrap it " +
+          "(e.g. 'from {fileName}') if a bare name reads wrong.",
+        placeholders: {
+          fileName: "Name of the project file the example pair lives in.",
+        },
+      },
+      "search.examples.diffAddedAriaLabel": {
+        description:
+          "Accessible name (aria-label) on the highlighted words of a match's source " +
+          "that the cell being translated does not have. Read by a screen reader in " +
+          "place of the visual highlight, so it must say which side the words are on.",
+      },
+      "search.examples.diffRemovedAriaLabel": {
+        description:
+          "Accessible name (aria-label) on the struck-through words shown inside a " +
+          "match's source that belong to the cell being translated and are missing " +
+          "from the match.",
       },
     },
   },

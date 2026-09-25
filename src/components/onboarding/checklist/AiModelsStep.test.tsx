@@ -49,6 +49,13 @@ beforeEach(async () => {
 })
 
 describe("AiModelsStep skip (AQU-701)", () => {
+  it("describes Whisper with the shared consent copy", () => {
+    render(<AiModelsStep project={makeProject()} onUpdated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /set up transcription/i }))
+    expect(screen.getByText(/after you save a recording/i)).toBeInTheDocument()
+    expect(screen.queryByText(/word-level timing/i)).not.toBeInTheDocument()
+  })
+
   it("skip seeds an IDB row for a server-loaded project and reports the flag", async () => {
     const project = makeProject({ id: "srv-1" })
     const onUpdated = vi.fn()

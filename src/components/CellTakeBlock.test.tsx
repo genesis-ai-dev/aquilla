@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
-const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string }> = []
+const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; askAgain?: boolean }> = []
 
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: (_project: unknown, cell: { metadata?: Record<string, unknown> }, fileId: string) => {
@@ -30,8 +30,8 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 vi.mock("@/lib/audio/transcribe", () => ({
-  transcribeCell: vi.fn(async ({ cell, language }: { cell: { id: string; fileId: string }; language?: string }) => {
-    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language })
+  transcribeCell: vi.fn(async ({ cell, language, askAgain }: { cell: { id: string; fileId: string }; language?: string; askAgain?: boolean }) => {
+    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language, askAgain })
     return 1
   }),
 }))
@@ -99,6 +99,21 @@ beforeEach(() => {
 })
 
 describe("whose recording it plays", () => {
+  it("plays the row's player when one is handed in, so the cell highlight follows", () => {
+    const play = vi.fn()
+    draw({
+      controller: {
+        state: "ready", error: null, isPlaying: false, currentTime: 0.4, duration: 3,
+        peaks: null, peaksState: "idle",
+        play, pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
+        setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+      },
+    })
+    expect(audioCalls).toHaveLength(0)
+    fireEvent.click(screen.getByRole("button", { name: "Play audio" }))
+    expect(play).toHaveBeenCalledOnce()
+  })
+
   it("fetches from the OWNER's file, not from whatever row it sits in", () => {
     draw()
     expect(audioCalls).toHaveLength(1)
@@ -120,7 +135,7 @@ describe("whose recording it acts on", () => {
     draw()
     fireEvent.click(screen.getByRole("button", { name: /transcribe/i }))
     await waitFor(() => expect(transcribeCalls).toHaveLength(1))
-    expect(transcribeCalls[0]).toMatchObject({ cellId: "cue-1", fileId: "cue-sibling" })
+    expect(transcribeCalls[0]).toMatchObject({ cellId: "cue-1", fileId: "cue-sibling", askAgain: true })
     // A take voices the TARGET text; only an imported source clip is source speech.
     expect(transcribeCalls[0].language).toBe("hy")
   })

@@ -20,7 +20,7 @@ import {
   useModelStatus,
   type ModelId,
 } from "@/lib/audio/prefetch"
-import { clearStoredConsent } from "@/lib/audio/ai-consent"
+import { clearStoredConsent, storeModelConsent } from "@/lib/audio/ai-consent"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -28,7 +28,7 @@ interface ModelMeta {
   id: ModelId
   label: string
   sizeMb: number
-  blurb: string
+  blurbKey: Parameters<ReturnType<typeof useT>>[0]
 }
 
 const MODELS: ModelMeta[] = [
@@ -38,13 +38,13 @@ const MODELS: ModelMeta[] = [
     // label below (already atomic — untranslated in every locale).
     label: "Whisper",
     sizeMb: 140,
-    blurb: "Transcribes recordings and adds word-level timing for karaoke playback.",
+    blurbKey: "audio.consent.whisper.short",
   },
   {
     id: "mms",
     label: "MMS",
     sizeMb: 130,
-    blurb: "Multilingual text-to-speech — one language model per download.",
+    blurbKey: "audio.consent.mms.short",
   },
 ]
 
@@ -77,6 +77,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   const isError = status.kind === "error"
 
   const download = async () => {
+    storeModelConsent(meta.id)
     setBusy(true)
     try {
       await prefetchAiModels({
@@ -104,7 +105,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
           <span className="text-sm font-medium">{meta.label}</span>
           <StatusBadge status={status} sizeMb={meta.sizeMb} />
         </div>
-        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+        <p className="text-xs text-muted-foreground">{t(meta.blurbKey)}</p>
         {status.kind === "downloading" && <DownloadBar loaded={status.loaded} total={status.total} />}
         {isError && <p className="text-xs text-destructive">{status.message}</p>}
       </div>

@@ -4,11 +4,13 @@
 // don't redraw 60Hz — only when the active word actually changes.
 
 import { Plugin, PluginKey } from "@tiptap/pm/state"
-import { Decoration, DecorationSet } from "@tiptap/pm/view"
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { FOOTNOTE_NODE_NAME } from "@/lib/richtext/usfm-plain-text"
+import { isWordSeekClick } from "@/lib/audio/seek-word-click"
+import { findTimingAtPlainOffset } from "@/lib/audio/timings"
 
 // Leaf-text serialiser for textBetween: footnote nodes expand to their raw
 // `\f...\f*` (so timing offsets computed against the plain `value` line up),
@@ -74,6 +76,21 @@ function pmPosToPlain(doc: PMNode, pmPos: number): number | null {
 }
 
 export function createKaraokeExtension(getState: () => KaraokePluginState) {
+  const seekToClickedWord = (view: EditorView, event: MouseEvent, pos?: number): boolean => {
+    // Option+click on Mac (and Alt+click elsewhere) — both set altKey.
+    if (!isWordSeekClick(event)) return false
+    const s = getState()
+    if (!s.onSeekToWord || !s.timings || s.timings.length === 0) return false
+    const pmPos = pos ?? view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+    if (pmPos === undefined) return false
+    const plain = pmPosToPlain(view.state.doc, pmPos)
+    if (plain === null) return false
+    const timing = findTimingAtPlainOffset(s.timings, plain)
+    if (!timing) return false
+    s.onSeekToWord(s.timings.indexOf(timing), timing)
+    return true
+  }
+
   return Extension.create({
     name: "karaokeDecorations",
     addProseMirrorPlugins() {
@@ -97,22 +114,18 @@ export function createKaraokeExtension(getState: () => KaraokePluginState) {
           decorations(state) {
             return karaokePluginKey.getState(state)
           },
+          // Option+click on Mac (altKey) is more reliable on mousedown than
+          // click: some browsers treat Option+click as a drag-copy and never
+          // fire a click. handleClick stays for the same gesture on mouseup.
+          handleDOMEvents: {
+            mousedown(view, event) {
+              if (!seekToClickedWord(view, event)) return false
+              event.preventDefault()
+              return true
+            },
+          },
           handleClick(view, pos, event) {
-            // Alt+click on a word → seek audio to that word's start. Plain
-            // clicks fall through to normal cursor positioning.
-            if (!event.altKey) return false
-            const s = getState()
-            if (!s.onSeekToWord || !s.timings || s.timings.length === 0) return false
-            const plain = pmPosToPlain(view.state.doc, pos)
-            if (plain === null) return false
-            for (let i = 0; i < s.timings.length; i++) {
-              const t = s.timings[i]
-              if (plain >= t.start && plain < t.end) {
-                s.onSeekToWord(i, t)
-                return true
-              }
-            }
-            return false
+            return seekToClickedWord(view, event, pos)
           },
         },
       })]

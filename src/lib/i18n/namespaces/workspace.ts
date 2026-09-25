@@ -184,6 +184,11 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
     "workspace.aiConsent.enableAllTooltip": "Also pre-download the local AI models so they're ready next time",
     "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.justThisButton": "Just {model}",
+    "workspace.aiConsent.sizeNote":
+      "One-time download of about {size} MB — it stays on this device.",
+    "workspace.aiConsent.learnMore": "Learn more",
+    "workspace.aiConsent.genericModelName": "AI model",
 
     // -- AiModelDownloadChip --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
@@ -986,6 +991,42 @@ export const workspace = defineNamespace({
         description:
           "Button that consents to and starts downloading every local AI " +
           "model at once, instead of just the one the current feature needs.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.justThisButton": {
+        description:
+          "Secondary action on the first-run local-model download prompt: " +
+          "consent to and download only the model named in {model}, not every " +
+          "local model. {model} is the short product name (Whisper, MMS) and " +
+          "stays untranslated.",
+        placeholders: {
+          model: "Short product name of the model being asked about (Whisper or MMS).",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.sizeNote": {
+        description:
+          "Sentence in the compact consent-prompt body stating the one-time " +
+          "download size and that the model stays on this device. Follows the " +
+          "model-specific short explanation. {size} is a whole number of megabytes.",
+        placeholders: {
+          size: "Approximate one-time download size in megabytes, e.g. 140.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.learnMore": {
+        description:
+          "Inline disclosure control on the local-model download prompt. " +
+          "Expands (and collapses) a fuller explanation in place — not a " +
+          "link out and not a second dialog. The expanded state is exposed " +
+          "via aria-expanded; the label does not change.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.genericModelName": {
+        description:
+          "Fallback display name interpolated into workspace.aiConsent." +
+          "downloadTitle when the pending model is unknown (dialog closing). " +
+          "Generic noun phrase, not a product name.",
         screenshot: "confirm-dialog",
       },
 

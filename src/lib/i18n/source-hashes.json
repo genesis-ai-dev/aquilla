@@ -3611,7 +3611,15 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7215,7 +7223,15 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10804,7 +10820,15 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14409,7 +14433,15 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19340,7 +19372,15 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -24271,6 +24311,14 @@
     "terminology.editor.loadFailedDisabledTooltip": "4e2842a71b51dc5c",
     "terminology.editor.refreshFailedNotice": "7f388a96dab56568",
     "workspace.terminologyUnavailableBanner": "53f35e1609b02613",
-    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82"
+    "rules.terminologyUnavailableNotice": "0c6a7a0aa05bcf82",
+    "audio.consent.whisper.short": "2b7b2be5d7b11069",
+    "audio.consent.whisper.learnMore": "8342e9efcab691d3",
+    "audio.consent.mms.short": "c81d95e865187cbb",
+    "audio.consent.mms.learnMore": "1d2dbecd646933dd",
+    "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
+    "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
+    "workspace.aiConsent.learnMore": "1445799c033a2d17",
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
   }
 }

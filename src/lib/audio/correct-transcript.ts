@@ -3,9 +3,13 @@
  *
  * Oral transcripts are a reading of the recording — users must be able to
  * fix Whisper mistakes without throwing the karaoke timestamps away. Same
- * word count keeps each word's audio span; a different count redistributes
- * the original time range across the new words and reindexes character
- * offsets into the corrected transcript.
+ * word count keeps each word's audio span and the character offsets already
+ * stored (they address the cell, or the transcript already inserted into
+ * it). Replacing those offsets with the corrected string's layout makes a
+ * longer word look like the cell was shortened, and the preview asks for a
+ * fresh transcription. A different word count redistributes the original
+ * time range across the new words and reindexes character offsets into the
+ * corrected transcript.
  */
 
 import type { WordTiming } from "@/lib/codex-editor/types"
@@ -21,8 +25,8 @@ export function remapTranscriptTimings(
   if (timings.length === words.length) {
     return words.map((w, i) => ({
       word: w.word,
-      start: w.start,
-      end: w.end,
+      start: timings[i].start,
+      end: timings[i].end,
       t0: timings[i].t0,
       t1: timings[i].t1,
     }))

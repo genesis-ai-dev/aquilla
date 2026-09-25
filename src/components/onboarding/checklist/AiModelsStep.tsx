@@ -36,7 +36,7 @@ const TRANSCRIBE_MODEL: ModelMeta = {
   id: "whisper",
   labelKey: "onboarding.checklist.aiModels.whisper.label",
   sizeMb: 140,
-  blurbKey: "onboarding.checklist.aiModels.whisper.blurb",
+  blurbKey: "audio.consent.whisper.short",
 }
 
 const MMS_MODEL: ModelMeta = {

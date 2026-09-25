@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -28,6 +28,7 @@ import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
+import { MembersSection } from "@/components/ProjectSettings/MembersSection"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isAutopilotVisible } from "@/lib/features/flags"
@@ -465,6 +466,9 @@ export function ProjectOverview() {
   // permission-composition question), or (b) a project-scoped "list authors
   // who have ever committed an event" endpoint independent of both floors.
   const [selectedMemberUsername, setSelectedMemberUsername] = useState<string | null>(null)
+  // AQU-1171: the Members card starts collapsed on every mount. The open
+  // state lives only in this render — a reload always returns to the header.
+  const [membersOpen, setMembersOpen] = useState(false)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -2285,6 +2289,61 @@ export function ProjectOverview() {
                   )}
                 </div>
               </SectionVisibilityGate>
+
+              {/* ── Members card (AQU-1171) — same add / change-role / revoke
+                  surface as Project Settings → Team members. Collapsed on
+                  every load so the overview stays as compact as the header
+                  row. AQU-486: rosterViewMinRole hides the shell entirely
+                  for a below-floor caller. Managers only, and never on an
+                  archived project. */}
+              {canManage && !isArchived && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.rosterViewMinRole}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-lg border bg-card px-5",
+                      membersOpen ? "py-5" : "py-3",
+                      sectionTintClass(orgSettings.rosterViewMinRole),
+                    )}
+                    data-testid="overview-members-card"
+                    data-expanded={membersOpen ? "true" : "false"}
+                  >
+                    <div className={cn("flex items-center justify-between gap-2", membersOpen && "mb-3")}>
+                      {/* Heading wraps the button: a button may only contain
+                          phrasing content, and an h2 inside it is invalid. */}
+                      <h2 className="contents">
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-expanded={membersOpen}
+                          aria-controls="overview-members-panel"
+                          data-testid="overview-members-toggle"
+                          onClick={() => setMembersOpen((open) => !open)}
+                        >
+                          {membersOpen
+                            ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                            : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                          {t("editor.navTitle.members")}
+                        </button>
+                      </h2>
+                      <SectionVisibilityBadge
+                        minRole={orgSettings.rosterViewMinRole}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        description={t("org.projectOverview.membersVisibilityDescription")}
+                      />
+                    </div>
+                    {membersOpen && (
+                      <div id="overview-members-panel">
+                        <MembersSection projectId={id} />
+                      </div>
+                    )}
+                  </div>
+                </SectionVisibilityGate>
+              )}
             </div>
           )}
           </div>

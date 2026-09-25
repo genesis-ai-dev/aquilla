@@ -33,7 +33,9 @@ vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProje
 
 // AQU-1277: the PM picker calls useProjectMembers, which fetches
 // /api/v2/projects/:id/members. Unmocked that reached production identity for
-// real. None of these tests assert on the roster, so an empty one is enough.
+// real. The overview Members card (AQU-1171) mounts the same hook via
+// MembersSection once expanded; an empty roster is enough to prove the
+// surface is present without hitting identity.
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
     members: [],
@@ -1218,13 +1220,20 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
 
 // ── AQU-486: per-section visibility chrome ──────────────────────────────────
 
-describe("ProjectOverview roster lives in project settings", () => {
-  // WHY: the overview used to embed MembersTab (add / change-role / revoke)
-  // under a visibility-gated card. That roster is now only in Project
-  // Settings → Team members. Overview still has the Team *progress* card
-  // (assignments + activity); it must not re-host the membership roster.
+describe("ProjectOverview Members card (AQU-1171)", () => {
+  // WHY: managers need the settings roster (add / change-role / revoke) one
+  // click from the overview, without the card making the page long. It starts
+  // collapsed on every mount, sits directly under the Team card, and keeps
+  // the original gates: manager, not archived, and the roster-visibility floor.
 
-  it("does not render the members roster card", async () => {
+  function teamCard(): HTMLElement {
+    const heading = screen.getByRole("heading", { name: "Team" })
+    const card = heading.closest(".rounded-lg")
+    if (!card) throw new Error("Team heading is not inside a card")
+    return card as HTMLElement
+  }
+
+  it("starts collapsed under the Team card and reveals the settings roster when opened", async () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
       rosterViewMinRole: 600,
@@ -1233,10 +1242,118 @@ describe("ProjectOverview roster lives in project settings", () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     renderOverview()
 
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(teamCard().nextElementSibling).toBe(card)
+    expect(within(card).getByRole("heading", { name: "Members" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add a member" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add a member" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add a member" })).not.toBeInTheDocument()
+  })
+
+  it("starts collapsed again after a fresh mount, with no saved open state", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    const view = renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-members-toggle"))
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+
+    view.unmount()
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+  })
+
+  it("hides the card entirely when the roster floor is above the caller's role", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 700,
+      canViewRoster: false,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
-    expect(screen.queryByText("Current members")).not.toBeInTheDocument()
-    expect(screen.getByTestId("overview-project-settings")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Members" })).not.toBeInTheDocument()
+  })
+
+  it("hides the card from a caller who cannot manage the project", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.VIEWER,
+      canViewRoster: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.CONTRIBUTOR }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("hides the card on an archived project", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, deletedAt: "2026-08-01T00:00:00.000Z" }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("lets an org manager change the roster floor from the collapsed header", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /everyone with access/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: ROLE.VIEWER }))
+    expect(card).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("does not offer the floor picker to a caller who cannot edit it", async () => {
+    canEditRosterProgressFloorMock.mockReturnValue(false)
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+    expect(within(badge).queryByRole("button")).not.toBeInTheDocument()
   })
 })
 

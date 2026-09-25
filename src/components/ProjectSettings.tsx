@@ -65,6 +65,12 @@ import {
   normalizeCompletionMaxTokens,
   resolveProvider,
 } from "@/lib/completion/completion-service"
+import {
+  CUSTOM_PRESETS,
+  endpointForPresetChange,
+  presetIdForEndpoint,
+  presetLabel,
+} from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -112,7 +118,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -174,30 +180,6 @@ const CELL_EDITING_FLOOR_OPTIONS: readonly {
   { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
 ]
 
-// Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
-// set per entry: `labelKey` for the two real English descriptions ("Local /
-// self-hosted…", "Other…"), translated at render via presetLabel() below.
-// The rest are brand names — i18n-exempt, left untranslated in every locale
-// like any other product/company name (OpenRouter and OpenAI are already in
-// ATOMIC_TERMS; Groq/Together AI/Mistral/DeepSeek aren't yet, but are the
-// same kind of string).
-const CUSTOM_PRESETS: { id: string; label?: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
-  { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
-  { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
-  { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
-  { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
-  { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
-  { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
-]
-
-/** Resolves a CUSTOM_PRESETS entry's display label: translated when `labelKey`
- * is set, else the literal (untranslated brand name). */
-function presetLabel(t: TFunction, preset: { label?: string; labelKey?: MessageKey }): string {
-  return preset.labelKey ? t(preset.labelKey) : (preset.label ?? "")
-}
-
 /**
  * Re-wraps already-known literal substrings of a translated sentence in inline
  * styling — `t()` only ever returns a plain string, so a template whose English
@@ -228,17 +210,6 @@ function withStyledTerms(
     }
     return <strong key={i}>{part}</strong>
   })
-}
-
-function presetIdForEndpoint(endpoint: string): string {
-  const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
-  if (!trimmed) return "local"
-  for (const p of CUSTOM_PRESETS) {
-    if (!p.endpoint) continue
-    const base = p.endpoint.toLowerCase()
-    if (trimmed === base || trimmed.startsWith(base)) return p.id
-  }
-  return "custom"
 }
 
 interface Baseline {
@@ -914,8 +885,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setPresetId(nextPresetId)
     const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
     if (!preset) return
-    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
-    setEndpoint(nextEndpoint)
+    setEndpoint(endpointForPresetChange(nextPresetId, endpoint))
     setConnected(false)
     setConnectionError(null)
     setModels([])

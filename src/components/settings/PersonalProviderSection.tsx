@@ -9,6 +9,14 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { SettingsGroup } from "@/components/ui/page"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -17,6 +25,13 @@ import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import { t } from "@/lib/i18n/standalone"
 import { customProviderNeedsKey } from "@/lib/completion/completion-service"
+import {
+  CUSTOM_PRESETS,
+  endpointForPresetChange,
+  findPreset,
+  presetIdForEndpoint,
+  presetLabel,
+} from "@/lib/completion/provider-presets"
 import {
   clearUserProviderOverride,
   getUserProviderOverride,
@@ -47,6 +62,10 @@ export function PersonalProviderSection() {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [hasOverride, setHasOverride] = useState(false)
+  // AQU-796: which well-known provider the endpoint currently points at. Held
+  // as state rather than derived, so picking "Other…" sticks even when the
+  // endpoint box is still empty.
+  const [presetId, setPresetId] = useState("local")
 
   const form = useForm({
     defaultValues: {
@@ -71,6 +90,7 @@ export function PersonalProviderSection() {
       form.setFieldValue("endpoint", existing.endpoint)
       form.setFieldValue("model", existing.model ?? "")
       form.setFieldValue("apiKey", existing.apiKey ?? "")
+      setPresetId(presetIdForEndpoint(existing.endpoint))
       setHasOverride(true)
       setOpen(true)
     }
@@ -79,8 +99,24 @@ export function PersonalProviderSection() {
   function handleClear() {
     clearUserProviderOverride()
     form.reset()
+    setPresetId("local")
     setHasOverride(false)
   }
+
+  /**
+   * Picking a preset pre-fills the endpoint so a BYO-key setup never requires
+   * hand-typing a full URL; "Other…" leaves whatever is already there alone.
+   */
+  function handlePresetChange(nextPresetId: string) {
+    if (!findPreset(nextPresetId)) return
+    setPresetId(nextPresetId)
+    form.setFieldValue(
+      "endpoint",
+      endpointForPresetChange(nextPresetId, form.getFieldValue("endpoint")),
+    )
+  }
+
+  const preset = findPreset(presetId)
 
   return (
     <SettingsGroup label={t("settings.personalProvider.groupLabel")}>
@@ -117,6 +153,32 @@ export function PersonalProviderSection() {
             </p>
 
             <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="prov-preset">
+                  {t("projectSettings.advancedLlm.presetLabel")}
+                </FieldLabel>
+                <Select
+                  items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
+                  value={presetId}
+                  onValueChange={(value) => handlePresetChange(value ?? "")}
+                >
+                  <SelectTrigger
+                    id="prov-preset"
+                    aria-label={t("projectSettings.advancedLlm.presetLabel")}
+                    className="bg-background"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {CUSTOM_PRESETS.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{presetLabel(t, p)}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
               <form.Field
                 name="endpoint"
                 children={(field) => {
@@ -131,7 +193,13 @@ export function PersonalProviderSection() {
                         name={field.name}
                         value={field.state.value}
                         onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
+                        // Only the picker is re-derived here — the typed value
+                        // is passed through untouched, so the caret never moves
+                        // (AQU-796 item 3).
+                        onChange={(e) => {
+                          field.handleChange(e.target.value)
+                          setPresetId(presetIdForEndpoint(e.target.value))
+                        }}
                         placeholder="https://openrouter.ai/api/v1"
                         aria-invalid={invalid}
                         autoComplete="off"
@@ -179,7 +247,13 @@ export function PersonalProviderSection() {
                   return (
                     <Field data-invalid={invalid}>
                       <FieldLabel htmlFor="prov-key">
-                        {t("projectSettings.field.apiKey")} <OptionalMark />
+                        {preset?.requiresKey ? (
+                          t("projectSettings.field.apiKeyRequired")
+                        ) : (
+                          <>
+                            {t("projectSettings.field.apiKey")} <OptionalMark />
+                          </>
+                        )}
                       </FieldLabel>
                       <Input
                         id="prov-key"
@@ -188,7 +262,7 @@ export function PersonalProviderSection() {
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
-                        placeholder={t("settings.personalProvider.apiKeyPlaceholder")}
+                        placeholder={preset?.keyHint ?? t("settings.personalProvider.apiKeyPlaceholder")}
                         autoComplete="off"
                         aria-invalid={invalid}
                       />

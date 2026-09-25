@@ -57,6 +57,17 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName?: string | null
+  /**
+   * AQU-894: every file the assignment's resolved cells touch, so the sidebar
+   * can say which files are this person's. `fileId` above is one arbitrary
+   * member of this set and cannot answer that for a multi-file scope.
+   *
+   * OPTIONAL ON THE WIRE on purpose, for the same reason as
+   * `UnitAssignment.chapters`: the SPA and the workers deploy separately, and
+   * a page talking to a worker that predates this field must fall back (to
+   * `fileId`) rather than conclude the person is assigned nothing.
+   */
+  fileIds?: string[]
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */

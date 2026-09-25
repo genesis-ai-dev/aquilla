@@ -23,8 +23,12 @@ import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
 
 interface FileStats { translated: number; validated: number; total: number }
+
+/** Stable empty set, so an omitted `assignedFileIds` doesn't allocate per render. */
+const EMPTY_ASSIGNED: ReadonlySet<string> = new Set<string>()
 
 interface Props {
   projectId: string
@@ -48,6 +52,16 @@ interface Props {
   onExport?: (fileId: string) => void
   /** Opens Assign work scoped to the given file. Hidden when omitted. */
   onAssignWork?: (fileId: string) => void
+  /**
+   * AQU-894: the files the CURRENT USER holds an open assignment on, from
+   * `assignedFileIds()`. Every other row is de-emphasised so "mine" is obvious
+   * in a project with many files — but only while this set is non-empty, so a
+   * team that doesn't assign, and a member with nothing assigned yet, both see
+   * an ordinary file list instead of a wall of grey.
+   *
+   * Omit it (or pass an empty set) to switch the treatment off entirely.
+   */
+  assignedFileIds?: ReadonlySet<string>
   /** Opens the Segmentation dialog for the given file (rendered by the caller). */
   onSegmentation?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
@@ -74,6 +88,7 @@ interface Props {
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  assignedFileIds,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -89,6 +104,12 @@ export function ExpandableFileList({
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
   const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
+  // AQU-894: see shouldDimUnassigned — false is the state that leaves every
+  // row alone, and it is what an unassigned caller and a non-assigning team
+  // both land in without either of them configuring anything. An omitted prop
+  // collapses into the same "nothing assigned" case rather than a second one.
+  const assigned = assignedFileIds ?? EMPTY_ASSIGNED
+  const dimUnassigned = shouldDimUnassigned(assigned)
 
   // AQU-1326: this prefetch is deliberately eager, but on a file OPEN it lands
   // just ahead of the cell stream and takes a slot from it — the sidebar's
@@ -283,6 +304,7 @@ export function ExpandableFileList({
                             expanded={isExpanded}
                             expandable={canExpand}
                             progress={fileProgress.get(file.id)}
+                            unassigned={dimUnassigned && !assigned.has(file.id)}
                             hasSuggestion={suggestionFileIds.has(file.id)}
                             editing={isEditing}
                             onEditCommit={(name) => {

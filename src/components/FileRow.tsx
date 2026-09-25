@@ -43,6 +43,18 @@ interface FileRowProps {
   onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
+  /**
+   * AQU-894: this project uses assignments, the caller holds some, and this
+   * file is not among them. De-emphasises the row so the caller's own files
+   * read as theirs.
+   *
+   * DE-EMPHASIS, NOT A LOCK. The row stays clickable and every action stays
+   * available: an assignment is a coordination hint, not a permission grant
+   * (05-user-stories/assign-cell-to-member.md), so making these rows
+   * unreachable would invent an access rule the server doesn't enforce and
+   * strand anyone who needs a file nobody thought to assign.
+   */
+  unassigned?: boolean
   /** Opens the Segmentation dialog for this file. */
   onSegmentation?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
@@ -55,7 +67,7 @@ export function FileRow(props: FileRowProps) {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
     onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
-    onApplySuggestion,
+    onApplySuggestion, unassigned = false,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -79,9 +91,15 @@ export function FileRow(props: FileRowProps) {
   // exceptional timeline files carry a marker — repeating an icon on every
   // row says nothing.
   const isTimeOrdered = fileOrderedBy(file) === "time"
-  const fileNameTooltip = file.originalName && file.originalName !== file.name
+  const baseNameTooltip = file.originalName && file.originalName !== file.name
     ? t("nav.fileRow.importedAsTooltip", { name: file.name, originalName: file.originalName })
     : file.name
+  // The dimming has to say why, or it reads as "broken" / "still loading".
+  // It rides the name tooltip the row already has rather than adding a second
+  // hover target to a 28px row.
+  const fileNameTooltip = unassigned
+    ? t("nav.fileRow.notAssignedTooltip", { name: baseNameTooltip })
+    : baseNameTooltip
 
   // The same items under both roots: right-click anywhere on the row, or the ⋯
   // button. Two roots because a context menu always anchors to the pointer.
@@ -114,9 +132,13 @@ export function FileRow(props: FileRowProps) {
               // target that opens the file — what "click the sidebar file" should hit.
               data-showcase="sidebar.file"
               data-showcase-name={file.name}
+              data-unassigned={unassigned ? "true" : undefined}
               className={cn(
                 "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
                 active ? "bg-accent text-foreground" : "hover:bg-accent",
+                // AQU-894: recede, don't disappear — and come back to full
+                // strength on hover/focus so the row never feels unusable.
+                unassigned && !active && "opacity-55 hover:opacity-100 focus-within:opacity-100",
               )}
               onClick={() => { if (!editing) onSelect() }}
               onKeyDown={(e) => {
@@ -147,6 +169,13 @@ export function FileRow(props: FileRowProps) {
             </AppTooltip>
           ) : (
             <span className="w-[18px] shrink-0" aria-hidden="true" />
+          )}
+          {/* AQU-894: dimming is invisible to a screen reader, so the reason
+              is also stated in text. Same sentence as the hover tooltip —
+              including "you can still open it", because a row announced only
+              as "not assigned to you" reads as a closed door. */}
+          {unassigned && (
+            <span className="sr-only">{t("nav.fileRow.notAssignedToYou")}</span>
           )}
           {isTimeOrdered && (
             <AppTooltip content={t("nav.fileRow.timelineOrderedTooltip")} side="right">

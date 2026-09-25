@@ -204,31 +204,60 @@ export default defineConfig(({ mode }) => ({
     },
   },
   test: {
-    environment: "happy-dom",
-    setupFiles: ["./src/test-setup.ts"],
-    passWithNoTests: false,
-    exclude: [
-      "**/node_modules/**",
-      "dist/**",
-      ".worktrees/**",
-      ".claude/worktrees/**",
-      ".claire/**",
-      "e2e/**",
-      "smart-tests/journeys/**",
-      "smart-tests/.venv/**",
-      // Each worker has its own vitest config + local node_modules. Running
-      // their tests from root pulls in worker-local deps the root install
-      // doesn't have. deploy-workers.yml runs each worker's tests in its
-      // own directory.
-      "auth-worker/**",
-      "sync-worker/**",
-      "agent-worker/**",
-      "worker/**",
-      // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
-      // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
-      // red by design until implemented, so they must not fail the default
-      // suite.
-      "parity/**",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "app",
+          environment: "happy-dom",
+          setupFiles: ["./src/test-setup.ts"],
+          passWithNoTests: false,
+          exclude: [
+            "**/node_modules/**",
+            "dist/**",
+            ".worktrees/**",
+            ".claude/worktrees/**",
+            ".claire/**",
+            "e2e/**",
+            "smart-tests/journeys/**",
+            "smart-tests/.venv/**",
+            // Each worker has its own vitest config + local node_modules. Running
+            // their tests from root pulls in worker-local deps the root install
+            // doesn't have. deploy-workers.yml runs each worker's tests in its
+            // own directory.
+            "auth-worker/**",
+            "sync-worker/**",
+            "agent-worker/**",
+            "worker/**",
+            // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
+            // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
+            // red by design until implemented, so they must not fail the default
+            // suite.
+            "parity/**",
+            // Owned by the "scripts-node" project below.
+            "scripts/**/*.test.mjs",
+          ],
+        },
+      },
+      {
+        // Deliberately does NOT `extends` the root config, so none of the
+        // browser-facing Vite setup above applies here (AQU-1273).
+        //
+        // `scripts/*.mjs` are plain Node modules that package.json runs with
+        // `node`, never through a bundler — `deploy:workers-build` →
+        // `node scripts/cloudflare-stack-preview.mjs`, for instance. Under the
+        // app project they would be transformed by vite-plugin-node-polyfills,
+        // which swaps `node:crypto` and the `Buffer` global for browser shims
+        // that lack `generateKeyPairSync` and the `base64url` encoding. Testing
+        // a Node CI script against those shims asserts the wrong runtime, so
+        // these run in a plain node environment against the real built-ins.
+        test: {
+          name: "scripts-node",
+          environment: "node",
+          include: ["scripts/**/*.test.mjs"],
+          passWithNoTests: false,
+        },
+      },
     ],
   },
 }))

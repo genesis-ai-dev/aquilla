@@ -5,7 +5,8 @@
 are wired. Dev and prod wrangler set `LANE_READ_WALL=1` on the sync worker and
 the auth worker. Deploy those workers only after the backfill `--apply` has
 run in that environment. Local and e2e leave the flag unset. Slice D
-(write-wall deny) is still not done.
+(write-wall deny) is AQU-1415. The unwired `lane-visibility-authority.ts`
+choke point was deleted in AQU-1417; routes use `src/lib/lanes/read-wall.ts`.
 
 The notes under "Current state" are the pre-wiring snapshot. Routes call the
 wall now, and `project_member_lane_roles.lane` stores `lanes.id`.

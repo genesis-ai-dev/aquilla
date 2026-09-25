@@ -12,6 +12,8 @@ import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
+import { loadTargetLanes } from './lane-read-wall'
+import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -68,6 +70,31 @@ function scopeLaneOf(kind: string, payload: unknown): string {
  * Composition is AND: if any 'lane' scopes exist the event's lane must be among
  * them, AND if any 'file' scopes exist the event's fileId must be among them.
  */
+function enforceFileScopes(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
+  raw: RawEvent<EventKind>,
+): { ok: false; status: 403; reason: string } | null {
+  if (!SCOPE_GATED_KINDS.has(raw.kind)) return null
+  const fileScopes = (scopes ?? []).filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length === 0) return null
+  if (!raw.fileId || !fileScopes.includes(raw.fileId)) {
+    return { ok: false, status: 403, reason: `file '${raw.fileId ?? ''}' not in scope for ${raw.kind}` }
+  }
+  return null
+}
+
+/**
+ * AQU-1415: the lane a self-assign or reassign addresses. `null` when the
+ * event does not name a lane (a reassign that only moves the assignee).
+ * An omitted `targetLang` on create is the empty-string default lane.
+ */
+function assignmentLaneTag(kind: string, payload: unknown): string | null {
+  if (kind !== 'assignment.create' && kind !== 'assignment.reassign') return null
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  if (kind === 'assignment.reassign' && lang === undefined) return null
+  return typeof lang === 'string' ? lang : ''
+}
+
 function enforceScopes(
   scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }>,
   raw: RawEvent<EventKind>,
@@ -82,14 +109,7 @@ function enforceScopes(
     }
   }
 
-  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
-  if (fileScopes.length > 0) {
-    if (!raw.fileId || !fileScopes.includes(raw.fileId)) {
-      return { ok: false, status: 403, reason: `file '${raw.fileId ?? ''}' not in scope for ${raw.kind}` }
-    }
-  }
-
-  return null
+  return enforceFileScopes(scopes, raw)
 }
 
 /**
@@ -180,6 +200,13 @@ export async function authorize<K extends EventKind>(
    * pre-memo behaviour every existing caller/test relies on.
    */
   cache?: RequestCache,
+  /**
+   * AQU-1415: `LANE_READ_WALL`. Unset keeps the additive `scopes` claim.
+   * "1" or "true" denies a below-Maintainer target write that has no
+   * `laneGrants` row for the lane the event addresses. Same switch as the
+   * read wall, so the grant backfill can land before either wall turns on.
+   */
+  laneReadWall?: string,
 ): Promise<AuthorizeResult<K>> {
   // 1. Secret must be configured — misconfigured deployment, not a client error.
   if (!secret) {
@@ -276,9 +303,40 @@ export async function authorize<K extends EventKind>(
       ? await resolveAssignmentAuthority(db, raw.projectId, settings)
       : null
   const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  const wallOn = laneReadWallEnabled(laneReadWall)
+
+  // AQU-1415: when the write wall is on, a grant can elevate the caller
+  // inside one lane, and the absence of a grant denies the write even when
+  // the project role would have been enough. Maintainer+ and platform skip
+  // this; the static role floor below still applies to them.
+  let roleForGate = tokenClaims.role
+  if (
+    wallOn &&
+    SCOPE_GATED_KINDS.has(raw.kind) &&
+    tokenClaims.src !== 'platform' &&
+    tokenClaims.role < ROLE.MAINTAINER
+  ) {
+    if (db == null) {
+      return { ok: false, status: 403, reason: 'lane write wall requires a database' }
+    }
+    const lanes = await loadTargetLanes(db, raw.projectId)
+    const decision = decideLaneWrite({
+      enabled: true,
+      role: tokenClaims.role,
+      src: tokenClaims.src,
+      laneGrants: tokenClaims.laneGrants,
+      laneTag: scopeLaneOf(raw.kind, raw.payload),
+      lanes,
+      requiredRole,
+    })
+    if (decision.action === 'deny') {
+      return { ok: false, status: 403, reason: decision.reason }
+    }
+    if (decision.action === 'allow') roleForGate = decision.effectiveRole
+  }
 
   // Role gate: check that the token's role is sufficient for this event kind.
-  if (tokenClaims.role < requiredRole) {
+  if (roleForGate < requiredRole) {
     // AQU-496: assignment.create self-assign carve-out. A below-lead member
     // (CONTRIBUTOR=400+) may still pass here if (a) a DB handle was supplied,
     // (b) the payload assigns the scope to THEMSELVES (never another user —
@@ -403,10 +461,40 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // AQU-553: after the role floor passes, apply ADDITIVE lane/file scopes. An
-  // absent `scopes` claim is unscoped (skip). Present scopes gate chain-mutating
-  // target.* writes + validate/unvalidate; every other kind falls through.
-  if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
+  // AQU-553 / AQU-1415. Wall off: additive lane/file scopes. An absent
+  // `scopes` claim is unscoped (skip). Wall on: lane access comes from
+  // `laneGrants` (checked above for scope-gated kinds). File scopes stay
+  // on the old claim. Assignment into a lane also needs a grant.
+  if (wallOn) {
+    const fileRejection = enforceFileScopes(
+      tokenClaims.scopes,
+      raw as RawEvent<EventKind>,
+    )
+    if (fileRejection) return fileRejection
+    const assignmentTag = assignmentLaneTag(raw.kind, raw.payload)
+    if (
+      assignmentTag != null &&
+      tokenClaims.src !== 'platform' &&
+      tokenClaims.role < ROLE.MAINTAINER
+    ) {
+      if (db == null) {
+        return { ok: false, status: 403, reason: 'lane write wall requires a database' }
+      }
+      const lanes = await loadTargetLanes(db, raw.projectId)
+      const decision = decideLaneWrite({
+        enabled: true,
+        role: tokenClaims.role,
+        src: tokenClaims.src,
+        laneGrants: tokenClaims.laneGrants,
+        laneTag: assignmentTag,
+        lanes,
+        requiredRole: ROLE.VIEWER,
+      })
+      if (decision.action === 'deny') {
+        return { ok: false, status: 403, reason: decision.reason }
+      }
+    }
+  } else if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
     const scopeRejection = enforceScopes(
       tokenClaims.scopes,
       raw as RawEvent<EventKind>,

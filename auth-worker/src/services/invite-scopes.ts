@@ -13,6 +13,8 @@
 
 import { ROLE } from "../types"
 import type { Env } from "../types"
+import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import type { LaneIdentity } from "../../../src/lib/lanes/read-wall"
 
 /** Max distinct lanes a single invite may carry (defensive bound). */
 export const MAX_INVITE_SCOPE_LANES = 50
@@ -77,18 +79,70 @@ export async function applyInviteLaneScopes(
   createdBy: number,
   finalRole: number,
 ): Promise<void> {
-  if (lanes.length === 0) return
-  if (finalRole >= ROLE.PROJECT_LEAD) return
+  if (finalRole >= ROLE.MAINTAINER || finalRole < ROLE.VIEWER) return
 
-  const now = Date.now()
-  for (const lane of lanes) {
+  // Project lead+ stays unscoped on the old scopes table (AD-12). An empty
+  // lane list is an unscoped invite. Both still need a grant per current
+  // target lane, or the write wall treats "no rows" as "no access".
+  const restrictive = finalRole < ROLE.PROJECT_LEAD && lanes.length > 0
+  if (restrictive) {
+    const now = Date.now()
+    for (const lane of lanes) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO project_member_scopes
+           (project_id, user_id, kind, value, created_by, created_at)
+         VALUES (?, ?, 'lane', ?, ?, ?)
+         ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+      )
+        .bind(projectId, userId, lane, String(createdBy), now)
+        .run()
+    }
+  }
+
+  // AQU-1415: the write wall reads laneGrants (lanes.id). A tag that matches
+  // zero or two lanes is skipped. An empty list grants every current lane.
+  await applyInviteLaneGrants(
+    env,
+    projectId,
+    userId,
+    restrictive ? lanes : [],
+    createdBy,
+    finalRole,
+  )
+}
+
+async function applyInviteLaneGrants(
+  env: Env,
+  projectId: string,
+  userId: number,
+  lanes: readonly string[],
+  createdBy: number,
+  finalRole: number,
+): Promise<void> {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT id, name, legacy_tag FROM lanes
+      WHERE project_id = ? AND role = 'target'`,
+  )
+    .bind(projectId)
+    .all<{ id: string; name: string; legacy_tag: string | null }>()
+  const identities: LaneIdentity[] = results.map((row) => ({
+    id: row.id,
+    name: row.name,
+    legacyTag: row.legacy_tag,
+  }))
+  const plan = planLaneGrants({
+    roleLevel: finalRole,
+    laneScopes: lanes,
+    lanes: identities,
+  })
+  for (const grant of plan.grants) {
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO project_member_scopes
-         (project_id, user_id, kind, value, created_by, created_at)
-       VALUES (?, ?, 'lane', ?, ?, ?)
-       ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+      `INSERT INTO project_member_lane_roles
+         (project_id, user_id, lane, role_level, granted_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )
-      .bind(projectId, userId, lane, String(createdBy), now)
+      .bind(projectId, userId, grant.laneId, grant.level, createdBy)
       .run()
   }
 }

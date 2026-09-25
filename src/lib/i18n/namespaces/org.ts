@@ -75,7 +75,11 @@ export const org = defineNamespace({
     "org.egress.results.noteLine": "Note: {file}: {note}",
 
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
-    "org.switcher.workspaceFallback": "Workspace",
+    // AQU-1113: `org.switcher.workspaceFallback` ("Workspace") was retired —
+    // it was an orphan (translated into 6 locales, referenced by nothing; the
+    // switcher hardcoded an English "Workspace" literal instead) and it named
+    // the same unnamed-org placeholder the breadcrumb already calls
+    // "Organization". The switcher now uses org.breadcrumb.organizationFallback.
     "org.switcher.triggerAriaLabel": "Organization switcher: {org}",
     "org.switcher.searchPlaceholder": "Find an organization…",
     "org.switcher.searchAriaLabel": "Find an organization",
@@ -336,7 +340,7 @@ export const org = defineNamespace({
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
     "org.teamDetail.roleDescriptionViewer":
-      "Viewer (100) — can read all org projects. No edit or management actions.",
+      "Viewer (100) — read-only access. No edit or management actions. Org membership at this level does not open projects until the person is added to a project or team.",
     "org.teamDetail.roleDescriptionCommenter":
       "Commenter (200) — can read and leave comments. Cannot edit content.",
     "org.teamDetail.roleDescriptionReviewer":
@@ -377,7 +381,9 @@ export const org = defineNamespace({
     }),
     "org.memberAccessPanel.orgRoleOnlyNote": "org-role only; no project overrides",
     "org.memberAccessPanel.orgRoleLabel": "Org role:",
-    "org.memberAccessPanel.orgRoleAppliesNote": "— applies to every project in this org.",
+    "org.memberAccessPanel.orgRoleAppliesNote": "— can see every project in this org.",
+    "org.memberAccessPanel.orgRoleNoProjectAccessNote":
+      "— does not grant project access. Add them to a project or team.",
     "org.memberAccessPanel.noOrgRole": "No org-wide role.",
     "org.memberAccessPanel.noGrantsNote": "No direct, team, or creator grants on any project.",
     "org.memberAccessPanel.resolvedLabel": "resolved:",
@@ -430,6 +436,16 @@ export const org = defineNamespace({
     "org.projectOverview.markAsActive": "Mark as Active",
     "org.projectOverview.markAsInactive": "Mark as Inactive",
     "org.projectOverview.archive": "Archive",
+    // Project Download UI (Phase 5) — Tauri desktop only.
+    "org.projectOverview.makeAvailableOffline": "Make available offline",
+    "org.projectOverview.offlineDownloading": "Downloading…",
+    "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
+    "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.removeOfflineCopy": "Remove offline copy",
+    "org.projectOverview.offlineRemoveBlocked": plural({
+      one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
+      other: "Can't remove yet — {count} changes haven't synced to the server. Reconnect and wait for them to sync first.",
+    }),
     "org.projectOverview.customizeStatsAria": "Customize stats",
     // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
@@ -544,7 +560,7 @@ export const org = defineNamespace({
     // tooltip. Distinct from the shorter common.role.*Description blurbs used
     // by MembersMatrixCellEditor/ProjectMembersPage/SharePanel — both are
     // real, separately-live UI copy; see the ROLE_INFO doc comment. --
-    "org.role.descriptionViewer": "Can read all org projects. No edit or management actions.",
+    "org.role.descriptionViewer": "Read-only access. No edit or management actions.",
     "org.role.descriptionCommenter": "Can read and leave comments. Cannot edit content.",
     "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
     "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
@@ -619,7 +635,7 @@ export const org = defineNamespace({
 
     // -- OrgCreateDialog: create-org dialog --
     "org.createDialog.title": "Create organization",
-    "org.createDialog.description": "Give your team a workspace for projects, members, and settings.",
+    "org.createDialog.description": "Give your team an organization for projects, members, and settings.",
     "org.createDialog.nameLabel": "Organization name",
     "org.createDialog.namePlaceholder": "Acme Bible Translation",
     // "Creating…" busy label → common.creating (identical text)
@@ -629,7 +645,7 @@ export const org = defineNamespace({
     // -- OrgRenameDialog: rename-org dialog --
     "org.renameDialog.title": "Rename organization",
     "org.renameDialog.description":
-      "This name is shown across the workspace — in the sidebar, settings, and member lists.",
+      "This name is shown across the organization — in the sidebar, settings, and member lists.",
     "org.renameDialog.genericError": "Couldn't rename your organization.",
 
     // -- OrgRouteGate: route guard for /orgs/:orgId/... --
@@ -736,10 +752,12 @@ export const org = defineNamespace({
 
     // -- OrgMembersTable: org roster table and member-management dialogs --
     "org.membersPage.orgTable.changeRoleDescription":
-      "This updates their organization-level role across every project.",
+      "Maintainer and Owner can see every project in the organization. Contributor and below cannot see projects until added to a project or team.",
     "org.membersPage.orgTable.addMemberTitle": "Add a member",
     "org.membersPage.orgTable.addMemberDescription":
-      "Grant an org-wide role, or invite someone by email who doesn't have an account yet.",
+      "Add someone to this organization, or invite them by email if they don't have an account yet.",
+    "org.membersPage.orgTable.projectAccessNote":
+      "Contributor, Project lead, and Viewer join the organization but cannot see or open projects until they are added to a specific project or team. Only Maintainer and Owner can see every project.",
     "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
     "org.membersPage.orgTable.addMembersTab": "Add members",
     "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
@@ -820,6 +838,12 @@ export const org = defineNamespace({
     }),
     "org.assignWork.clearAllChapters": "Clear all",
     "org.assignWork.selfAssignNote": "Self-assignment is on — you can claim this work for yourself.",
+    // AQU-1308: the assignee picker must never render an empty "Select
+    // member…" when the roster fetch failed — say which failure it was.
+    "org.assignWork.rosterHiddenError":
+      "Your organization restricts who can see this project's member list, so there is no one to pick. Ask an owner or maintainer for access.",
+    "org.assignWork.rosterLoadError":
+      "Couldn’t load this project’s members, so the assignee list is empty. Close the panel and try again.",
 
     // -- AssignedToMe: assignee's open-assignments inbox --
     "org.assignedToMe.selectOrgDescription": "Assignments are scoped to a single organization.",
@@ -872,7 +896,7 @@ export const org = defineNamespace({
       "A role inherited because a group this person belongs to has access to this project. Edit the group's membership to change or remove this grant.",
     "org.accessModelLegend.orgWide.label": "Org-wide",
     "org.accessModelLegend.orgWide.description":
-      "A role that applies to every project in this org because of the person's org-level role. Change the org membership to affect all projects at once.",
+      "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
     "org.accessModelLegend.creator.label": "Creator",
     "org.accessModelLegend.creator.description":
       "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
@@ -941,7 +965,7 @@ export const org = defineNamespace({
       "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
     "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
-      "This role is granted org-wide and applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
+      "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
     "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
@@ -953,10 +977,10 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, their org-wide role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
-      "Access on every project comes from org-wide role; no per-project overrides.",
+      "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",
 
     // -- MembersPanel: shared roster list (per-project and org membership) --
     // "via org" badge → org.membersPage.sourceViaOrg (identical text)
@@ -976,6 +1000,10 @@ export const org = defineNamespace({
     "org.multiProjectInviteDialog.emailModeHint":
       "They'll receive one email per selected project with a single-use invite link.",
     "org.multiProjectInviteDialog.projectsFieldLabel": "Projects",
+    // AQU-1150: filter box above the project checklist.
+    "org.multiProjectInviteDialog.searchPlaceholder": "Search projects…",
+    "org.multiProjectInviteDialog.searchProjectsAriaLabel": "Search projects",
+    // "No projects match your search." → org.orgProjectsDataTable.noSearchMatch (identical text)
     "org.multiProjectInviteDialog.selectProjectAriaLabel": "Select {name}",
     "org.multiProjectInviteDialog.noProjectsAvailable":
       "No projects available — create one first or check back when sync completes.",
@@ -985,6 +1013,16 @@ export const org = defineNamespace({
     }),
     "org.multiProjectInviteDialog.rolesSuffix": " — roles: {roles}",
     "org.multiProjectInviteDialog.sendInvitesButton": "Send invites",
+    // AQU-1149: page-level confirmation. The in-dialog "added"/"invited" row
+    // badges stay; these outlive the dialog so the outcome survives closing it.
+    "org.multiProjectInviteDialog.addedToast": plural({
+      one: "Added {username} to {count} project",
+      other: "Added {username} to {count} projects",
+    }),
+    "org.multiProjectInviteDialog.invitedToast": plural({
+      one: "Invite sent to {email} for {count} project",
+      other: "Invites sent to {email} for {count} projects",
+    }),
 
     // -- RemoveOrgMemberDialog: confirm-and-optionally-cascade org removal --
     "org.removeOrgMemberDialog.title": "Remove {username} from {orgName}?",
@@ -1064,7 +1102,7 @@ export const org = defineNamespace({
     // period) — this is the DataTable's own inline empty-state title, which
     // the source renders without one.
     "org.orgHome.projectsPanel.emptyTitle": "No projects yet",
-    "org.orgHome.organizationsPanel.sectionDescription": "Workspaces you belong to across Aquilla.",
+    "org.orgHome.organizationsPanel.sectionDescription": "Organizations you belong to across Aquilla.",
     // Distinct from org.orgHome.organizationsPanel.noOrganizationsYet ("No
     // organizations yet.", with a period) — this is the DataTable's own
     // empty-state title, which the source renders without one.
@@ -1187,10 +1225,16 @@ export const org = defineNamespace({
     // one project, a dub episode in another, a document in a third — so
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.laneMenuAria": "Language shown: {language}. Choose another.",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
     "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
     "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
+    // AQU-1278. Its own pill rather than a share of "in progress", because
+    // this is the one bucket a manager can empty this week. Both plural forms
+    // are identical for the same reason as its two siblings above: the count
+    // is drawn as a bold numeral beside the phrase, never inside it.
+    "org.projectOverview.plan.summaryNearlyCompleteLabel": plural({ one: "nearly complete", other: "nearly complete" }),
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -1206,21 +1250,33 @@ export const org = defineNamespace({
     "org.projectOverview.plan.statusDone": "Done",
     "org.projectOverview.plan.statusOverdue": "Overdue",
     "org.projectOverview.plan.statusSoon": "Due soon",
+    // AQU-1278. Fifteen characters, one over the ceiling the other statuses
+    // carried. Sam's call was to keep the word and lift the ceiling to 16 for
+    // the whole family rather than shorten this one — the six labels sit in
+    // the same pill and are read against each other, so a translator sizing
+    // one of them is sizing all six.
+    "org.projectOverview.plan.statusNearlyComplete": "Nearly complete",
     "org.projectOverview.plan.statusInProgress": "In progress",
     "org.projectOverview.plan.statusNotStarted": "Not started",
     "org.projectOverview.plan.groupHintOverdue": "past target, not marked done",
     "org.projectOverview.plan.groupHintSoon": "target within a week",
+    // The two numbers ARE the rule — `planNearlyCompleteThreshold` in
+    // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
+    // the function, so a change to one is a change to both; the hint exists
+    // because a group nobody can predict the membership of reads as a bug.
+    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
     // The inspector docked beside the board.
     "org.projectOverview.plan.inspectorAria": "Details for {unit}",
     "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.openInEditor": "Open in the editor",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
-    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
@@ -1243,6 +1299,68 @@ export const org = defineNamespace({
     "org.projectOverview.plan.markedOn": "marked {date}",
     "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
     "org.projectOverview.plan.noTargetDate": "no target date",
+    // ── AQU-1278: the shortfall line ───────────────────────────────────
+    // What a unit still needs, on the row's second line and beside the
+    // inspector's status pill. `planShortfallParts` picks at most two terms,
+    // worst medium first, so these keys are always read as fragments and never
+    // as a sentence. One key per medium because the count governs the noun,
+    // and the join is a key of its own so a language that separates clauses
+    // with a different mark — or with no spaces around it — can say so
+    // instead of inheriting an English middot.
+    "org.projectOverview.plan.shortfallTranslate": plural({ one: "{count} cell to translate", other: "{count} cells to translate" }),
+    "org.projectOverview.plan.shortfallValidate": plural({ one: "{count} cell to validate", other: "{count} cells to validate" }),
+    "org.projectOverview.plan.shortfallRecord": plural({ one: "{count} take to record", other: "{count} takes to record" }),
+    // Never rendered today, and deliberately kept: `AUDIO_JUDGED_ON_RECORDED`
+    // suppresses the audio-validate term because no client emits
+    // `cell.audio.validate` yet (AQU-490 is the missing half), so the count is
+    // zero on every project alive. The words exist so the flip is a constant,
+    // not a copy round.
+    "org.projectOverview.plan.shortfallAudioValidate": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
+    // AQU-1278: the SHORT forms, used when two terms share one line. In full
+    // they read "6 cells to translate \u00b7 8 cells to validate", which wraps in
+    // the narrowest column on the board and takes the row's height with it \u2014
+    // and the second noun is the same word as the first, so the line spends
+    // its width saying "cells" twice. The noun survives in the single-term
+    // case, where there is room and no context to borrow from.
+    "org.projectOverview.plan.shortfallTranslateBrief": plural({ one: "{count} to translate", other: "{count} to translate" }),
+    "org.projectOverview.plan.shortfallValidateBrief": plural({ one: "{count} to validate", other: "{count} to validate" }),
+    "org.projectOverview.plan.shortfallRecordBrief": plural({ one: "{count} to record", other: "{count} to record" }),
+    // Keeps its noun where the other brief forms drop theirs: with both nouns
+    // gone, "6 to validate · 8 to validate" would name one thing twice. Sam's
+    // word for this is "validated", never "sign off" (2026-09-17).
+    "org.projectOverview.plan.shortfallAudioValidateBrief": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
+    "org.projectOverview.plan.shortfallPair": "{first} \u00b7 {second}",
+    // A unit with nothing outstanding that nobody has marked done: it stays in
+    // Overdue where its blown date belongs, and this line is how the row
+    // admits the work itself is finished. Without it that row looks identical
+    // to one with three hundred cells to go.
+    "org.projectOverview.plan.nothingLeft": "Nothing left",
+    // AQU-1278: the second line under that one, on a unit with NO target date.
+    // It used to read "no target date", which is true and useless — the reader
+    // is looking at a finished book and wants to know why it is not in Done.
+    "org.projectOverview.plan.nothingLeftUndone": "not marked done",
+    // AQU-1278: prefixes a row's second line when the unit's assignments have
+    // been read and there are none. Only ever shown for a unit whose
+    // assignments ARE known, so it says "nobody", never "nobody yet loaded".
+    "org.projectOverview.plan.unassignedRow": "unassigned",
+    // Where the outstanding cells actually are. The plural agrees with how
+    // many chapters are in the list, which the caller passes alongside — it is
+    // not in the string, the same arrangement the summary pills use.
+    "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
+    "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
+    // The links out of the plan and into the editor, landing on the first cell
+    // that is actually missing something. Two keys rather than one with a
+    // {kind} placeholder: an inflecting language cannot build "first
+    // untranslated" from a noun it is handed at runtime.
+    "org.projectOverview.plan.goToFirstUntranslated": "Go to first untranslated",
+    "org.projectOverview.plan.goToFirstUnvalidated": "Go to first unvalidated",
+    "org.projectOverview.plan.goToFirstUnrecorded": "Go to first unrecorded",
+    "org.projectOverview.plan.goToFirstUnsigned": "Go to first unvalidated take",
+    // AQU-1278, round 7: what a bar's two percentages stand for, on hover.
+    "org.projectOverview.plan.readoutTranslated": "{done} of {total} translated",
+    "org.projectOverview.plan.readoutValidated": "{done} of {total} validated",
+    "org.projectOverview.plan.readoutRecorded": "{done} of {total} recorded",
+    "org.projectOverview.plan.readoutAudioValidated": "{done} of {total} validated",
     // AQU-1096: the list controls. Neutral throughout — the orphaned
     // filterFiles* keys say "files", which this surface never does.
     "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
@@ -1251,19 +1369,91 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
-    // AQU-1255: the card draws the first few rows and stops. The count lives
-    // in the label so the button says what it opens, to a reader and a screen
-    // reader alike.
-    "org.projectOverview.plan.showAll": "Show all {count}",
-    "org.projectOverview.plan.showFewer": "Show fewer",
     "org.projectOverview.plan.viewStatus": "By status",
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
     "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
-    "org.projectOverview.plan.chapters": "Progress by chapter",
-    "org.projectOverview.plan.sections": "Progress by section",
+    // AQU-1278: fold every group to its header, and back. One button, two labels.
+    "org.projectOverview.plan.collapseAll": "Collapse all",
+    "org.projectOverview.plan.expandAll": "Expand all",
+    "org.projectOverview.plan.collapseAllTooltip": "Fold every group to its header and count.",
+    "org.projectOverview.plan.expandAllTooltip": "Open every group.",
+    // AQU-1278: the in-order arrangement's folders.
+    "org.projectOverview.plan.folderAll": "All files",
+    "org.projectOverview.plan.folderTallyOverdue": plural({ one: "{count} overdue", other: "{count} overdue" }),
+    "org.projectOverview.plan.folderTallySoon": plural({ one: "{count} due soon", other: "{count} due soon" }),
+    "org.projectOverview.plan.folderTallyNearlyComplete": plural({ one: "{count} nearly complete", other: "{count} nearly complete" }),
+    "org.projectOverview.plan.folderTallyInProgress": plural({ one: "{count} in progress", other: "{count} in progress" }),
+    "org.projectOverview.plan.folderTallyNotStarted": plural({ one: "{count} not started", other: "{count} not started" }),
+    "org.projectOverview.plan.folderTallyDone": plural({ one: "{count} done", other: "{count} done" }),
+    // AQU-1278: the heading is just the noun. "Progress by chapter" described
+    // the old stack of per-chapter bars; the grid beneath it now says how it
+    // measures, and the legend sits on this very line saying what the colours
+    // mean, so the words only have to name what is below them.
+    "org.projectOverview.plan.chapters": "Chapters",
+    "org.projectOverview.plan.sections": "Sections",
     "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
     "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
+    // ── AQU-1278: the chapter grid ─────────────────────────────────────
+    // One tile per chapter under the inspector's heading, coloured by what
+    // that chapter is short of. The two summary lines above it answer the
+    // question the grid poses at a glance — how much of this is left — for a
+    // reader who is counting tiles instead of reading them.
+    "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
+    // "all complete", not the bare "complete" this legend would otherwise
+    // read: the catalog already spends that string on autopilot.status.complete
+    // and on the Living Memory brief's status, and the second of those holds a
+    // reviewed entry in duplicate-exceptions.ts. A third key case-folding onto
+    // the same value turns that group into a HARD failure of
+    // no-duplicates.test.ts — an excused group may leave only one other key
+    // colliding — and a swatch label does not earn a fourth exception. The
+    // sense is unchanged: nothing outstanding in either medium.
+    "org.projectOverview.plan.gridLegendComplete": "all complete",
+    "org.projectOverview.plan.gridLegendTextShort": "text short",
+    "org.projectOverview.plan.gridLegendAudioShort": "audio short",
+    // A media file's sections are time ranges, not chapters, so the grid has
+    // nothing to draw. It says why rather than rendering an empty frame, which
+    // reads as a load that failed.
+    // AQU-1278: the chapter card under the grid, opened by clicking a tile.
+    // The title names the chapter the way the reader just clicked it; the line
+    // beside it says what is outstanding in the medium that leads.
+    "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
+    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
+    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
+    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
+    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // The overflow chip at the end of the verse row, when the outstanding
+    // verses outnumber the chips one row can hold.
+    // …and its sibling for a document, which has no sections at all.
+    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
+    // matter — cells with no chapter number, filed before chapter 1.
+    "org.projectOverview.plan.frontMatter": "front matter",
+    "org.projectOverview.plan.tileAria": plural({
+      one: "Chapter {chapter}: {count} cell short",
+      other: "Chapter {chapter}: {count} cells short",
+    }),
+    "org.projectOverview.plan.tileAriaSection": plural({
+      one: "{section}: {count} cell short",
+      other: "{section}: {count} cells short",
+    }),
+    // Audio hangs off the file, not off a target language, so every lane reads
+    // the same recordings — a manager comparing two lanes' audio bars and
+    // finding them identical is seeing the truth, not a stuck filter.
+    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
+    // ── AQU-1278: per-assignment progress ──────────────────────────────
+    // Who owns which slice of a unit, and how far along their slice is.
+    "org.projectOverview.plan.assignedTo": "Assigned to",
+    "org.projectOverview.plan.assign": "Assign",
+    "org.projectOverview.plan.assignmentScope": plural({ one: "{scope} \u00b7 {count} cell", other: "{scope} \u00b7 {count} cells" }),
+    "org.projectOverview.plan.assignmentDue": "due {date}",
+    "org.projectOverview.plan.assignmentNoDeadline": "no deadline",
+    // AQU-1278: the tail of a person's shortfall line — "2 to validate · ch. 12".
+    // Abbreviated because it follows a count on a line three hundred pixels wide.
+    "org.projectOverview.plan.shortfallInChapters": "ch. {list}",
+    "org.projectOverview.plan.unassignedChapters": plural({ one: "{count} chapter is not assigned", other: "{count} chapters are not assigned" }),
+    "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
+    "org.projectOverview.plan.moreAssignees": "{count} more",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -1645,6 +1835,10 @@ export const org = defineNamespace({
         description:
           "Summary shown next to a member's name in the effective-access panel, counting projects with an explicit (direct/team/creator) grant beyond their org role.",
         placeholders: { count: "How many projects the member has explicit access to; also selects the plural form." },
+      },
+      "org.memberAccessPanel.orgRoleNoProjectAccessNote": {
+        description:
+          "Trailing clause after 'Org role: Contributor' (or Viewer / Project lead) on the member access panel (AQU-1107). Explains that this org membership does not open projects; the next sentence tells the owner to add the person to a project or team.",
       },
       "org.memberAccessPanel.teamGrantLabel": {
         description:
@@ -2048,6 +2242,18 @@ export const org = defineNamespace({
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
       },
+      "org.membersPage.orgTable.addMemberDescription": {
+        description:
+          "Dialog subtitle on the org Members 'Add a member' dialog. Explains that the action adds someone to the organization (or invites by email), not that it grants project access.",
+      },
+      "org.membersPage.orgTable.projectAccessNote": {
+        description:
+          "Helper paragraph under the add-member dialog subtitle (AQU-1107). States the rule that Contributor/Project lead/Viewer org membership does not open projects, and that only Maintainer and Owner see every project. Role names stay in this sentence as English role vocabulary matching the picker — they are not placeholders.",
+      },
+      "org.membersPage.orgTable.changeRoleDescription": {
+        description:
+          "Dialog subtitle when an org owner changes a member's organization-level role. Same access rule as org.membersPage.orgTable.projectAccessNote: Maintainer/Owner see every project; Contributor and below do not until added to a project or team.",
+      },
       "org.membersPage.orgTable.copyEmailAriaLabel": {
         description:
           "Accessible name for the small copy-to-clipboard icon button beside a member's " +
@@ -2132,6 +2338,14 @@ export const org = defineNamespace({
         description:
           "Status line above the chapter checkbox list in the Assign work panel, counting how many chapters are currently checked (zero checked means 'whole book').",
         placeholders: { count: "How many chapters are currently checked; also selects the plural form." },
+      },
+      "org.assignWork.rosterHiddenError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list was refused because the organization has restricted who may view rosters. Explains why the dropdown is empty and who to ask.",
+      },
+      "org.assignWork.rosterLoadError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list could not be fetched at all (no access, or a network/server failure). Explains why the dropdown is empty.",
       },
       "org.assignedToMe.cellsProgress": {
         description:
@@ -2297,6 +2511,19 @@ export const org = defineNamespace({
           "dialog's project checklist.",
         placeholders: { name: "The project's name — not translated." },
       },
+      "org.multiProjectInviteDialog.searchPlaceholder": {
+        description:
+          "Placeholder in the filter box above the multi-project invite dialog's " +
+          "project checklist. Typing narrows the visible rows to projects whose " +
+          "name contains what was typed; it never changes what is already checked.",
+        maxLength: 24,
+      },
+      "org.multiProjectInviteDialog.searchProjectsAriaLabel": {
+        description:
+          "Accessible name for that same filter box. The input has no visible " +
+          "label, only the placeholder, so this is what a screen reader announces. " +
+          "No trailing ellipsis — punctuation is read aloud.",
+      },
       "org.multiProjectInviteDialog.projectsSelectedCount": {
         description:
           "Status line under the project checklist in the multi-project invite dialog, counting how many projects are currently checked.",
@@ -2306,6 +2533,22 @@ export const org = defineNamespace({
         description:
           "Trailing clause appended after org.multiProjectInviteDialog.projectsSelectedCount, only when more than one project is checked, listing the distinct roles chosen across them. Leading space is deliberate — it continues the preceding sentence rather than starting a new one.",
         placeholders: { roles: "Comma-joined list of the distinct, already-localized role names chosen across the checked projects." },
+      },
+      "org.multiProjectInviteDialog.addedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog grants an existing user membership, naming who was added and to how many projects. Counts only the projects that succeeded — when some fail, the failures stay as inline errors in the dialog and are not named here.",
+        placeholders: {
+          username: "The added person's username — not translated.",
+          count: "How many projects the grant succeeded on; also selects the plural form.",
+        },
+      },
+      "org.multiProjectInviteDialog.invitedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog sends email invites, naming the recipient address and how many project invites went out. Counts only the invites that were sent — failures stay as inline errors in the dialog.",
+        placeholders: {
+          email: "The recipient's email address — not translated.",
+          count: "How many project invites were sent; also selects the plural form.",
+        },
       },
       "org.removeOrgMemberDialog.title": {
         description: "Confirmation-dialog title naming who is being removed from which organization.",
@@ -2358,6 +2601,12 @@ export const org = defineNamespace({
         description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
         maxLength: 16,
       },
+      "org.projectOverview.plan.laneMenuAria": {
+        description: "Screen-reader name for the menu beside the Plan heading that chooses which target language the plan is counting. Only shown on projects with more than one target language.",
+        placeholders: {
+          language: "The target language the plan is currently showing — a language name or a lane tag. Not translated.",
+        },
+      },
       "org.projectOverview.plan.regionAria": {
         description: "Screen-reader name for the plan list region, which arrow keys navigate.",
       },
@@ -2373,6 +2622,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.summaryInProgressLabel": {
         description:
           "Summary pill. The count is rendered as a bold numeral immediately before this text: \"28\" + \"in progress\". Counts units that are started or due soon but not finished.",
+      },
+      "org.projectOverview.plan.summaryNearlyCompleteLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"9\" + \"nearly complete\". The plural form is selected by that count even though it does not appear in the string. Counts only the units a few cells from finished, which are NOT also counted as in progress.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",
@@ -2403,31 +2656,44 @@ export const org = defineNamespace({
         description: "Screen-reader label for the two stacked audio-progress bars on a plan row.",
         placeholders: { recorded: "Percent recorded — a number.", validated: "Percent validated — a number." },
       },
+      // The six status labels share ONE ceiling, raised 14 → 16 by AQU-1278 to
+      // fit "Nearly complete" without shortening it (Sam's call). They are read
+      // against each other in the same pill, so sizing them apart would only
+      // move the truncation to whichever label a translator wrote longest.
       "org.projectOverview.plan.statusDone": {
         description: "Status of a unit a manager has explicitly marked finished. Can read Done even when its bars are below 100%.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusOverdue": {
         description: "Status of a unit past its target date with no Done mark.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusSoon": {
         description: "Status of a unit whose target date is within a week.",
-        maxLength: 14,
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.statusNearlyComplete": {
+        description:
+          "Status of a started unit whose worse medium is within a few cells of finished — six percent of its cells, or seven cells, whichever is larger. Sits between Due soon and In progress on the board: a blown date still outranks 'almost there'.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusInProgress": {
         description: "Status of a unit with content that is comfortably ahead of its target.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.statusNotStarted": {
         description: "Status of a unit with no translated text and no recorded audio yet.",
-        maxLength: 14,
+        maxLength: 16,
       },
       "org.projectOverview.plan.groupHintOverdue": {
         description: "Right-aligned hint on the Overdue group header, explaining what puts a unit there.",
       },
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
+      },
+      "org.projectOverview.plan.groupHintNearlyComplete": {
+        description:
+          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
       },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",
@@ -2442,6 +2708,10 @@ export const org = defineNamespace({
         description: "Screen-reader name for the detail panel docked beside the plan.",
         placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
       },
+      "org.projectOverview.plan.openFile": {
+        description: "Link from the selected plan unit to its file in the translation editor.",
+        placeholders: { fileName: "The file's name. Not translated." },
+      },
       "org.projectOverview.plan.previousUnit": {
         description: "Tooltip on the up arrow that steps to the previous unit.",
         maxLength: 20,
@@ -2449,6 +2719,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.nextUnit": {
         description: "Tooltip on the down arrow that steps to the next unit.",
         maxLength: 20,
+      },
+      "org.projectOverview.plan.openInEditor": {
+        description: "Tooltip on the detail panel's title and on a chapter card's title; each opens what it names in the editor.",
+        maxLength: 30,
       },
       "org.projectOverview.plan.targetDate": {
         description: "Label for the date a manager plans this unit to be finished by.",
@@ -2461,9 +2735,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.noTargetSet": {
         description: "Shown instead of a date picker to someone who cannot set dates.",
         maxLength: 28,
-      },
-      "org.projectOverview.plan.targetVisibleHint": {
-        description: "Hint under the target-date picker: the date is not private to the person setting it.",
       },
       "org.projectOverview.plan.targetMaintainerOnly": {
         description: "Explains to a non-maintainer why no date control is offered.",
@@ -2555,6 +2826,117 @@ export const org = defineNamespace({
       "org.projectOverview.plan.noTargetDate": {
         description: "Note beside a started unit that nobody has given a target date.",
       },
+      "org.projectOverview.plan.shortfallTranslate": {
+        description:
+          "One term of the shortfall line — the plan row's second line, and the line beside the inspector's status pill. Says how many cells in this unit still have no target text. Read as a fragment, never as a sentence: at most two terms appear, joined by org.projectOverview.plan.shortfallPair.",
+        placeholders: { count: "Cells with no target text yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallValidate": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate): how many cells have target text that nobody has validated yet. Always listed after the translate term, because a cell nobody has written cannot be validated.",
+        placeholders: { count: "Translated cells still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallRecord": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate), for a file that carries recordings: how many cells have no take recorded against them. A 'take' is one recorded clip for one cell.",
+        placeholders: { count: "Cells with no recording yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallAudioValidate": {
+        description:
+          "One term of the shortfall line (see shortfallTranslate): recorded takes nobody has validated yet. Not rendered anywhere today — audio is judged on what has been recorded until the recording-review UI exists (AQU-490), so this count is zero on every project. Translate it anyway; it appears the day that lands.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallTranslateBrief": {
+        description:
+          "The short form of shortfallTranslate, used when TWO shortfall terms share one line on a plan row — \"6 to translate · 8 to validate\". The noun is dropped because the full pair wraps in the narrowest column on the board, and because both terms count the same thing, so saying it twice buys nothing. Keep it as short as the language allows.",
+        placeholders: { count: "Cells with no target text yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallValidateBrief": {
+        description:
+          "The short form of shortfallValidate (see shortfallTranslateBrief): translated cells nobody has validated yet, worded for a line that already carries another term.",
+        placeholders: { count: "Translated cells still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallRecordBrief": {
+        description:
+          "The short form of shortfallRecord (see shortfallTranslateBrief): cells with no take recorded against them, worded for a line that already carries another term.",
+        placeholders: { count: "Cells with no recording yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallAudioValidateBrief": {
+        description:
+          "The short form of shortfallAudioValidate (see shortfallTranslateBrief): recorded takes nobody has validated yet. Unlike the other brief forms it KEEPS its noun, because beside shortfallValidateBrief with both nouns dropped it would read as the same thing said twice. Not rendered today — audio is judged on what has been recorded until AQU-490 ships.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallPair": {
+        description:
+          "Joins the two terms of a shortfall line — \"6 cells to translate · 34 cells to validate\". A key of its own so a language that separates clauses with a different mark, or without spaces around it, can say so. Do not reorder the two: the first is deliberately the worse of the pair.",
+        placeholders: {
+          first: "The worse shortfall term, already translated and formatted — e.g. '6 cells to translate'.",
+          second: "The second shortfall term, already translated and formatted.",
+        },
+      },
+      "org.projectOverview.plan.nothingLeft": {
+        description:
+          "Replaces the shortfall line on a unit with no outstanding work in it. Such a unit can still sit under Overdue — a blown target date outranks a finished one — and this is how its row admits the work itself is done.",
+      },
+      "org.projectOverview.plan.nothingLeftUndone": {
+        description:
+          "Second line of a plan row whose first line reads 'Nothing left' and which has no target date: every cell is done but no manager has marked the unit complete. A lower-case fragment sitting under the line above, not a sentence.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.unassignedRow": {
+        description:
+          "Prefixes a plan row's second line when nobody holds an assignment covering that unit — \"unassigned · 3 hours ago\". A lower-case fragment before a separator, never a standalone label.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.shortfallWhere": {
+        description:
+          "Tail of the inspector's shortfall line, naming which chapters the outstanding cells are in: \"chapters 3, 4 and 9\". The number of chapters in the list selects the plural form and is passed alongside; like the summary pills, it never appears in the string itself.",
+        placeholders: { list: "The chapter numbers, already joined into one list by the caller — e.g. '3, 4 and 9'. Not translated." },
+      },
+      "org.projectOverview.plan.shortfallWhereMore": {
+        description:
+          "Replaces the bare chapter list on a plan row when the outstanding work is spread over more chapters than the row has room to name. The first few are named and the rest are counted, because a row that listed forty numbers would push everything else off the line.",
+        placeholders: {
+          list: "The first few chapter numbers, already joined for this locale.",
+          count: "How many further chapters are short — a number. The plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.goToFirstUntranslated": {
+        description:
+          "Link in the inspector that opens the editor on this unit, scrolled to the first cell with no target text. Separate from its unvalidated sibling rather than built from a shared phrase, because 'first untranslated' inflects as a whole in most languages.",
+      },
+      "org.projectOverview.plan.goToFirstUnvalidated": {
+        description:
+          "Link in the inspector that opens the editor on this unit, scrolled to the first translated cell nobody has validated. Offered where the outstanding work is validation rather than translation.",
+      },
+      "org.projectOverview.plan.goToFirstUnrecorded": {
+        description:
+          "Link in the inspector and on a board row that opens the editor on this unit, scrolled to the first cell with no recorded take. Offered once the unit's text is finished and the outstanding work is recording. On a dubbing project it lands on the subtitle cell whose linked cue has no take.",
+      },
+      "org.projectOverview.plan.goToFirstUnsigned": {
+        description:
+          "Link that opens the editor at the first recorded take nobody has validated (selected and approved). 'Take' is what keeps it apart from goToFirstUnvalidated, which is about text. Not offered today — audio is judged on what has been recorded until AQU-490 ships.",
+      },
+      "org.projectOverview.plan.readoutTranslated": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside a text bar on the plan board and in its inspector: what that percentage stands for, as cells. \"1,530 of 1,533 translated\". Both numbers arrive already formatted for the reader's locale.",
+        placeholders: { done: "Cells with target text, formatted — e.g. '1,530'.", total: "The unit's cells, formatted — e.g. '1,533'." },
+      },
+      "org.projectOverview.plan.readoutValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside a text bar: how many cells are validated, out of the unit's cells. See readoutTranslated.",
+        placeholders: { done: "Validated cells, formatted.", total: "The unit's cells, formatted." },
+      },
+      "org.projectOverview.plan.readoutRecorded": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside an audio bar: cells with a recorded take, out of the bar's own total — which on a dubbing project is the cue sheet's count, not the file's. See readoutTranslated.",
+        placeholders: { done: "Cells with a take, formatted.", total: "Cells the audio is measured against, formatted." },
+      },
+      "org.projectOverview.plan.readoutAudioValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside an audio bar: takes that have been validated, out of the bar's own total. Same English as readoutValidated on purpose — Sam's word for audio validation is 'validated' (2026-09-17); a language that distinguishes the two may.",
+        placeholders: { done: "Validated takes, formatted.", total: "Cells the audio is measured against, formatted." },
+      },
       "org.projectOverview.plan.filterPlaceholder": {
         description:
           "Placeholder in the plan's filter box. Ends in an ellipsis; the matching aria-label does not. Matches a unit's displayed name and its book code.",
@@ -2572,19 +2954,6 @@ export const org = defineNamespace({
           total: "Units in the project \u2014 a number.",
         },
       },
-      "org.projectOverview.plan.showAll": {
-        description:
-          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
-        placeholders: {
-          count: "Rows the list would draw once expanded — a number.",
-        },
-        maxLength: 18,
-      },
-      "org.projectOverview.plan.showFewer": {
-        description:
-          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
-        maxLength: 16,
-      },
       "org.projectOverview.plan.viewStatus": {
         description:
           "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
@@ -2600,11 +2969,64 @@ export const org = defineNamespace({
           "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
         maxLength: 16,
       },
+      "org.projectOverview.plan.collapseAll": {
+        description:
+          "Button in the plan board's toolbar, after the By status / In order toggle, that folds every status group down to its header and count in one click. Shown while at least one group is open; its twin expandAll takes over once all are folded. Disabled in the In order arrangement, which has no groups.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.expandAll": {
+        description:
+          "The same button as collapseAll once every group on the board is folded: one click opens them all. Keep it the same length as collapseAll so the toolbar does not shift between the two.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.collapseAllTooltip": {
+        description: "Hover text of the collapseAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.expandAllTooltip": {
+        description: "Hover text of the expandAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.folderAll": {
+        description:
+          "Header of the single group the plan board's in-order arrangement draws when a project keeps none of its files in folders — every row sits under it, so it can be folded like any folder. Beside the count of rows.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.folderTallyOverdue": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are overdue. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallySoon": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are due soon. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNearlyComplete": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are nearly complete. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyInProgress": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are in progress. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNotStarted": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are not started. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyDone": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are done. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.chapters": {
-        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+        description: "Inspector heading over the grid of chapter tiles for a Bible book. A plural noun naming what is below it, not a sentence — the colour legend shares this line and the grid says how it measures.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.sections": {
-        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+        description: "Inspector heading over the grid of section tiles for a non-Scripture unit — an episode's scenes, a document's headings. The counterpart of the chapters heading; see it.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.chapterCount": {
         description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
@@ -2613,6 +3035,131 @@ export const org = defineNamespace({
       "org.projectOverview.plan.sectionCount": {
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
+      },
+      "org.projectOverview.plan.chaptersShort": {
+        description:
+          "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
+        placeholders: { count: "Chapters with outstanding cells — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chaptersComplete": {
+        description:
+          "Second summary line above the inspector's chapter grid, counting the chapters with nothing outstanding left in them against the unit's total.",
+        placeholders: {
+          done: "Chapters with nothing outstanding — a number.",
+          total: "Chapters in the unit — a number.",
+        },
+      },
+      "org.projectOverview.plan.gridLegendComplete": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter with nothing outstanding in either medium. Read as one of three fragments in a row — 'all complete · text short · audio short' — so keep it a phrase, not a sentence.",
+      },
+      "org.projectOverview.plan.gridLegendTextShort": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter still missing translated or validated text. Read as one of three fragments in a row.",
+      },
+      "org.projectOverview.plan.gridLegendAudioShort": {
+        description:
+          "Legend label under the chapter grid, beside the swatch for a chapter whose text is done but whose recordings are not. Read as one of three fragments in a row.",
+      },
+      "org.projectOverview.plan.chapterTitle": {
+        description:
+          "Heading of the chapter card that opens under the inspector's grid when a reader clicks a tile. A section with no chapter number of its own — a document's \"Scene 4\" — uses its own name instead and never reaches this string.",
+        placeholders: { chapter: "The chapter number — a number, not translated." },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.chapterCellsUntranslated": {
+        description:
+          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
+        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
+        placeholders: {
+          count: "How many takes await validation — a number; the plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.chapterCellsUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
+        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnrecorded": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
+        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.frontMatter": {
+        description:
+          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.tileAria": {
+        description:
+          "Accessible name of one chapter tile in the inspector's grid. A sighted reader gets the colour and the number; a screen-reader user gets this instead, so it must carry both facts on its own.",
+        placeholders: {
+          chapter: "The chapter number — a number, not translated.",
+          count: "Outstanding cells in that chapter — a number, and the one the plural agrees with.",
+        },
+      },
+      "org.projectOverview.plan.tileAriaSection": {
+        description:
+          "Accessible name of a tile that is NOT a numbered chapter — USFM front matter, a one-chapter book, or a document's own section name. Those cannot sit on the numbered grid and must not be announced as \"Chapter Scene 4\", so they name themselves instead.",
+        placeholders: {
+          section: "The section's own key, e.g. a book code or a scene name. Not translated.",
+          count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
+        },
+      },
+      "org.projectOverview.plan.audioSharedAcrossLanes": {
+        description:
+          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
+      },
+      "org.projectOverview.plan.assignedTo": {
+        description:
+          "Label above the inspector's list of the people given part of this unit to work on.",
+      },
+      "org.projectOverview.plan.assign": {
+        description:
+          "Button beside an unassigned slice of a unit that opens the assignee picker — the imperative verb. dialog.assign.submit is the confirm button inside that dialog and reads the same in English by coincidence; a language that splits 'open the picker' from 'commit the choice' needs both.",
+      },
+      "org.projectOverview.plan.assignmentScope": {
+        description:
+          "One row of the inspector's assignment list: what a person has been given and how big it is — \"Chapters 3–9 · 412 cells\". Plural-governed by {count}: a one-cell assignment reads \"· 1 cell\".",
+        placeholders: {
+          scope: "The assigned slice, already formatted by the caller — e.g. 'Chapters 3–9' or a file name. Not translated.",
+          count: "Cells in that slice — a number.",
+        },
+      },
+      "org.projectOverview.plan.assignmentDue": {
+        description:
+          "Tail of an assignment row, saying when that person's slice is due. Lower case: it follows the scope on the same line. org.orgHome.dueDate is the capitalised, standalone version on a project row.",
+        placeholders: { date: "A short calendar date, already formatted." },
+      },
+      "org.projectOverview.plan.assignmentNoDeadline": {
+        description:
+          "Fills the same slot as the due date on an assignment nobody has dated, so the row keeps its shape. Lower case for the same reason.",
+      },
+      "org.projectOverview.plan.shortfallInChapters": {
+        description:
+          "Tail of one person's line in the inspector's Assigned to section, naming which chapters their outstanding work is in — \"2 to validate \u00b7 ch. 12\". Abbreviate 'chapter' the way a reader of this language would in a list: the panel is narrow and the count in front of it has already been shortened for the same reason.",
+        placeholders: {
+          list: "The chapter numbers, already joined into one list by the caller — e.g. '12 and 40'. Not translated.",
+        },
+        maxLength: 12,
+      },
+      "org.projectOverview.plan.unassignedChapters": {
+        description:
+          "Warning under the inspector's assignment list: chapters of this unit nobody has been made responsible for. The count is what makes it actionable, so it stays in the sentence.",
+        placeholders: { count: "Chapters with no assignee — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.everyChapterAssigned": {
+        description:
+          "The reassuring counterpart of the unassigned-chapters warning, shown when nothing in the unit is left over. A full sentence, because it is the end of the story rather than a label.",
+      },
+      "org.projectOverview.plan.moreAssignees": {
+        description:
+          "Overflow chip closing a truncated row of assignee avatars: how many people the row could not fit.",
+        placeholders: { count: "Assignees not shown — a number." },
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:
@@ -2643,6 +3190,21 @@ export const org = defineNamespace({
         description:
           "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
         maxLength: 16,
+      },
+      "org.projectOverview.offlineDownloadingProgress": {
+        description:
+          "Overflow-menu label on ProjectOverview's offline download item (Tauri desktop app, Phase 5), shown while 'Make available offline' is downloading and file-count progress is known. Falls back to org.projectOverview.offlineDownloading before the first file completes.",
+        placeholders: {
+          done: "Files downloaded so far — a number.",
+          total: "Total files in the project being downloaded — a number.",
+        },
+      },
+      "org.projectOverview.offlineRemoveBlocked": {
+        description:
+          "Inline error shown on ProjectOverview (Tauri desktop app, Phase 5) when 'Remove offline copy' is blocked because locally queued writes haven't reached the server yet. Full sentence, two sentences, second is an instruction.",
+        placeholders: {
+          count: "How many locally queued writes haven't synced yet.",
+        },
       },
     },
   },

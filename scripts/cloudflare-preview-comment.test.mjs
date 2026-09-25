@@ -74,6 +74,8 @@ test("posts exact URL/commit, updates own comment, and avoids duplicate unchange
   assert.equal(h.posted.length, 1)
   assert.ok(h.posted[0].body.includes(urls.web))
   assert.ok(h.posted[0].body.includes(env.WORKERS_CI_COMMIT_SHA))
+  assert.ok(h.posted[0].body.includes("This preview build does not run Jev."))
+  assert.ok(h.posted[0].body.includes("NOT VERIFIED"))
   assert.equal(h.calls.at(-1).options.method, "POST")
   await commentOnPreview(h.options)
   assert.equal(h.posted.length, 1)

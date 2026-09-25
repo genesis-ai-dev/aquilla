@@ -5,6 +5,7 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import { orgPathContribution } from "../../../db/shared/project-roles"
+import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -43,8 +44,10 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_PG.prepare(
-    `INSERT INTO organizations (name, owner_user_id)
-     VALUES (?, ?) RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id, billing_scope)
+     VALUES (?, ?, 'personal')
+     ON CONFLICT (owner_user_id) WHERE billing_scope = 'personal'
+     DO UPDATE SET billing_scope = EXCLUDED.billing_scope RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()
@@ -63,7 +66,7 @@ export async function getOrCreateUserOrg(
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
   const inserted = await env.AQUILLA_PG.prepare(
-    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+    "INSERT INTO organizations (name, owner_user_id, billing_scope) VALUES (?, ?, 'team') RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
   await env.AQUILLA_PG.prepare(
@@ -1179,12 +1182,19 @@ interface LaneDbRow {
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   updated_at: number | string | null
+  // AQU-1083: the structural subset of each of the three above, so a lane can
+  // subtract at read time exactly as the headline numbers beside it do.
+  structural_count: number | string | null
+  structural_filled_count: number | string | null
+  structural_validator_histogram: Record<string, number> | string | null
 }
 
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
+  count_structural?: string | null
 }
 
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
@@ -1238,21 +1248,38 @@ async function fetchPortfolioLanes(
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
-              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
+              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
+              fsp.structural_count AS structural_count,
+              fsp.structural_filled_count AS structural_filled_count,
+              fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT ps.project_id AS project_id,
+      // Driven FROM projects, not from project_settings: a project that has
+      // never had a settings row still inherits its org's answer, and inner-
+      // joining the settings table hides exactly those projects. The columns
+      // this used to read come back null for them, which is what they meant
+      // before anyway (default threshold, no registered lanes).
+      `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
-              ps.target_lanes AS target_lanes
-         FROM project_settings ps
-         JOIN projects p ON p.id = ps.project_id
+              ps.target_lanes AS target_lanes,
+              COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
+  // AQU-1083: which projects leave structural cells out. Absent = count them,
+  // so a project with no settings row at all keeps today's numbers.
+  const excluding = new Set(
+    (settingsRows.results ?? [])
+      .filter((row) => row.count_structural === "false")
+      .map((row) => row.project_id),
+  )
   // Accumulate one lane entry per (project, target_lang).
   const acc = new Map<string, Map<string, PortfolioLane>>()
   for (const row of laneRows.results ?? []) {
@@ -1262,9 +1289,20 @@ async function fetchPortfolioLanes(
     const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
     if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
-    entry.totalCells += Number(row.total_count) || 0
-    entry.filledCells += Number(row.filled_count) || 0
-    entry.validatedCells += validatedFromHistogram(row.validator_histogram, threshold)
+    // AQU-1083: subtract per file row, then clamp — a partially backfilled
+    // project must never contribute a negative number to the lane's sum.
+    const drop = excluding.has(row.project_id)
+    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
+    const structuralValidated = drop
+      ? validatedFromHistogram(row.structural_validator_histogram, threshold)
+      : 0
+    entry.totalCells += Math.max(0, (Number(row.total_count) || 0) - structuralTotal)
+    entry.filledCells += Math.max(0, (Number(row.filled_count) || 0) - structuralFilled)
+    entry.validatedCells += Math.max(
+      0,
+      validatedFromHistogram(row.validator_histogram, threshold) - structuralValidated,
+    )
     const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
     if (updatedAt != null && Number.isFinite(updatedAt)) {
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
@@ -1330,6 +1368,145 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
                         AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`
 
+/**
+ * AQU-1083: does this project count structural cells toward progress? Its own
+ * answer, else its org's, else yes.
+ *
+ * MAX() because the surrounding query groups by project and these join 1:1 —
+ * the same reason source_language is read that way. STORED generated columns,
+ * never the settings blob: parsing ~6 MB of JSON per fan-out row is what timed
+ * this dashboard out at 15 seconds in the first place.
+ */
+const PORTFOLIO_EXCLUDE_STRUCTURAL =
+  "COALESCE(MAX(ps.count_structural), MAX(os.count_structural)) = 'false'"
+
+/** `total − structural` when the policy excludes, floored at zero. */
+const lessStructural = (total: string, structural: string) =>
+  `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
+
+/**
+ * The per-project cell rollups.
+ *
+ * ai_drafted follows the policy for the same reason audio does: the client
+ * divides it by total_cells, so shrinking the denominator alone would let a
+ * scripture project whose headings were machine-drafted read over 100%.
+ */
+const PORTFOLIO_CELL_COLUMNS = `
+            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
+            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+
+/** Shared join tail — the org default now has to reach the rollups too. */
+const PORTFOLIO_JOINS = `
+       LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN org_settings os ON os.org_id = p.org_id
+       LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN pu ON pu.project_id = p.id`
+
+/** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
+const PORTFOLIO_UNIT_COLUMNS = `
+            COALESCE(MAX(pu.units_total), 0)           AS units_total,
+            COALESCE(MAX(pu.units_done), 0)            AS units_done,
+            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue`
+
+/**
+ * Audio coverage and validation, with structural cells dropped where a project
+ * excludes them.
+ *
+ * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
+ * divides by the audio total, so leaving audio alone while the text denominator
+ * shrank would let a scripture project whose headings were voiced read over
+ * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
+ * exist.
+ *
+ * `recorded_ms` never takes the exclusion: it measures work that was actually
+ * done rather than progress against a denominator — the same reasoning that
+ * keeps word counts out of this setting.
+ *
+ * Shape matters here. `cell_audio` keys on four columns where `cells` keys on
+ * five, so joining them directly fans out per side and per lane; COUNT(DISTINCT)
+ * would survive that but SUM would not, silently multiplying recorded_ms. And
+ * the structural cell ids are gathered ONCE per excluding project rather than
+ * probed per audio row — for every project that counts headings (all of them,
+ * until someone opts out) that CTE is empty and the join costs nothing. The
+ * previous shape of this query, three correlated subqueries over ~300k rows,
+ * is what caused the 15s dashboard timeout; this must not walk back into it.
+ */
+const portfolioCtes = (orgPredicate: string) => `
+     WITH policy AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded,
+              -- AQU-490: how many validators a TAKE needs on this project, read
+              -- from the generated column rather than the settings blob, which
+              -- runs to several megabytes and is what timed this dashboard out
+              -- at fifteen seconds once already. The regex guard is not
+              -- decoration: the column is TEXT off a jsonb ->>, so a project
+              -- that ever stored a non-integer would abort the whole portfolio
+              -- query with a cast error rather than just reading wrong.
+              GREATEST(1, LEAST(15, COALESCE(
+                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
+                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.${orgPredicate}
+     ), structural_cells AS (
+       SELECT DISTINCT c.project_id, c.file_id, c.cell_id
+         FROM cells c
+         JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
+        WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+     ), au_cells AS MATERIALIZED (
+       -- AQU-490, level one: one row per CELL, carrying the minimum vote count
+       -- across its selected dub takes. Two tracks sound together, so a cell is
+       -- only as validated as its least-validated track, and the minimum turns
+       -- that into a number the level above can simply compare.
+       --
+       -- The role filter is what keeps a media project honest. The shared
+       -- programme audio is attached, selected, to every cell of an imported
+       -- file, so counting it made audio-first-test read as fully recorded with
+       -- 52.9 hours of work done — one clip's duration multiplied across 508
+       -- cells — when almost nothing had been dubbed.
+       -- ONE TAKE PER TRACK. The third of three readers of this definition,
+       -- and the last to get the rule: a generated voice left selected beside
+       -- a real recording is silent, so nobody can judge it, and counting it
+       -- held whole projects' tiles below the board's own number (adversarial
+       -- review, 2026-09-22). The recorded-milliseconds sum below deliberately
+       -- keeps every selected dub take: that is hours of audio present, not
+       -- hours left to judge.
+       SELECT a.project_id, a.file_id, a.cell_id,
+              MIN(a.validator_count) FILTER (
+                WHERE ${takeSoundsOnItsTrackSql('a')}
+              ) AS dub_votes,
+              SUM(a.duration_ms) AS recorded_ms,
+              BOOL_OR(sc.cell_id IS NOT NULL) AS structural
+         FROM cell_audio a
+         LEFT JOIN structural_cells sc
+           ON sc.project_id = a.project_id
+          AND sc.file_id = a.file_id
+          AND sc.cell_id = a.cell_id
+        WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
+        GROUP BY a.project_id, a.file_id, a.cell_id
+     ), au AS MATERIALIZED (
+       -- Level two: count those cells per project, against the project's own
+       -- threshold. A plain join to policy, deliberately -- asking for the
+       -- threshold with a correlated subquery per row is the shape that caused
+       -- the timeout, and it must not come back through this door.
+       SELECT c.project_id,
+              COUNT(*) FILTER (WHERE NOT c.structural) AS audio_cells,
+              COUNT(*) FILTER (
+                WHERE NOT c.structural AND c.dub_votes >= pol.audio_threshold
+              ) AS validated_audio_cells,
+              COALESCE(SUM(c.recorded_ms), 0) AS recorded_ms
+         FROM au_cells c
+         JOIN policy pol ON pol.project_id = c.project_id
+        GROUP BY c.project_id
+     ), pu AS MATERIALIZED (
+       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
+     )`
+
 export type PortfolioPageOpts = {
   q: string
   limit: number
@@ -1380,38 +1557,15 @@ export async function listOrgPortfolioPage(
   //  - pu (AQU-1097): plan-unit counts per project, same 1:1 MATERIALIZED
   //    shape as au, bounded to the same org set.
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-        GROUP BY ca.project_id
-     ), pu AS MATERIALIZED (
-       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))`)}
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+    `${portfolioCtes(`org_id IN (${placeholders})`)}
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,
-            COALESCE(MAX(pu.units_total), 0)           AS units_total,
-            COALESCE(MAX(pu.units_done), 0)            AS units_done,
-            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
-       LEFT JOIN pu ON pu.project_id = p.id
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
+       FROM projects p${PORTFOLIO_JOINS}
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
         ${extraWhereSql}
@@ -1419,7 +1573,10 @@ export async function listOrgPortfolioPage(
       ORDER BY ${orderSql}
       ${limitSql}`,
   ).bind(
-    ...uniqueOrgIds,
+    // Org scopes in CTE order: the AQU-1083 policy, the audio scope inside it,
+    // the plan-unit counts (preceded by their AoE cutoff date), then the outer
+    // WHERE.
+    ...uniqueOrgIds, ...uniqueOrgIds,
     aoeTodayIso(now), ...uniqueOrgIds,
     ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
@@ -1833,6 +1990,22 @@ export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
  * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
+/**
+ * AQU-1083: the org's default for whether structural cells — chapter headings,
+ * section titles, book names — count toward progress.
+ *
+ * TRUE unless an org says otherwise, which is what every project does today, so
+ * nothing moves when this ships. An org that wants its percentages to describe
+ * only translated content opts out, and a project may still override it.
+ */
+export const DEFAULT_COUNT_STRUCTURAL_CELLS = true
+
+export async function getOrgCountStructuralCells(env: Env, orgId: number): Promise<boolean> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  const raw = (settings as Record<string, unknown>)?.countStructuralCells
+  return typeof raw === "boolean" ? raw : DEFAULT_COUNT_STRUCTURAL_CELLS
+}
+
 export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
   const settings = await loadOrgSettingsBlob(env, orgId)
   return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)
@@ -1854,6 +2027,143 @@ export async function getTermbaseEditMinRoleForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   return getTermbaseEditMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1083: the org default a project inherits when it has no answer of its
+ * own. Null for a project with no org — there is no default to inherit, which
+ * the caller renders as the built-in "count them".
+ *
+ * This rides on the project's SETTINGS response rather than its project
+ * record, deliberately: an open editor re-reads its settings on a remote
+ * change frame and on window focus, and never re-reads the project record at
+ * all. Putting it here is what lets an org-level flip reach a workspace that
+ * is already open.
+ */
+export async function getOrgCountStructuralCellsForProject(
+  env: Env,
+  projectId: string,
+): Promise<boolean | null> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return null
+  return getOrgCountStructuralCells(env, project.org_id)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1037: configurable work-assignment floor
+//
+// Covers assignment.create/reassign/unassign in sync-worker (file, chapter,
+// and target-lane-pinned work) plus changeset routing in auth-worker. The
+// unset fallback preserves the historical PROJECT_LEAD requirement.
+// ──────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_ASSIGNMENT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
+
+/** Resolve the minimum project role allowed to assign work in an org. */
+export async function getAssignmentMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "assignmentMinRole", DEFAULT_ASSIGNMENT_MIN_ROLE)
+}
+
+/** Resolve assignment authority through a project's org. */
+export async function getAssignmentMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_ASSIGNMENT_MIN_ROLE
+  return getAssignmentMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1308: the assign-work picker IS the roster — you cannot route work to
+ * someone you cannot name. `rosterViewMinRole` (AQU-485, default MAINTAINER
+ * 600) and `assignmentMinRole` (AQU-1037, default PROJECT_LEAD 500) are
+ * independent floors, and the assignment floor ships *below* the roster
+ * floor. So out of the box a project lead is authorized to assign work while
+ * being forbidden to read the roster the picker needs: the API gate
+ * contradicts the UI gate, the members fetch 403s with `rosterHidden`, and
+ * every partner org's Assignee dropdown renders empty.
+ *
+ * Resolve the effective project-roster floor as the LOWER of the two: anyone
+ * the org lets assign work may enumerate that project's members. An org that
+ * genuinely wants the roster hidden from its leads must raise
+ * `assignmentMinRole` to match — one coherent contract instead of two
+ * silently-conflicting defaults. Everyone below the assignment floor stays
+ * subject to `rosterViewMinRole` exactly as before, so AQU-485's
+ * safe-by-default promise for contributors/reviewers/viewers is untouched.
+ *
+ * Scoped to the per-project roster (the picker's source). The org-wide
+ * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
+ * project-scoped authority and confers no org-wide roster visibility.
+ */
+export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const [rosterFloor, assignmentFloor] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+  ])
+  return Math.min(rosterFloor, assignmentFloor)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1086: configurable project-language edit floor
+//
+// Second write-gating permission-policy key, built on exactly the same
+// org_settings plumbing as termbaseEditMinRole above. It answers "who may
+// change a project's source/target language and its extra target lanes" —
+// Project managers (project_lead 500) running day-to-day projects hit wrong
+// or reset languages and today must escalate to a Maintainer for a routine
+// correction.
+//
+// The default is MAINTAINER (600), i.e. today's behaviour byte-for-byte: an
+// org opts in by lowering the floor to PROJECT_LEAD. This is the opposite
+// choice from the termbase floor (which defaults to 500 to close a
+// pre-existing client/server divergence) and matches the read floors —
+// other partners deliberately keep languages maintainer-only.
+//
+// Scope is the language keys ONLY. Lowering this floor must never widen
+// write access to AI config, validation, health, timeline, or anything else
+// in the settings blob — enforcement is the language-scoped carve-out in
+// routes/project-settings.ts, which keys off the CHANGED keys of a write.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for editing a project's languages when the org hasn't set one. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 600 // ROLE.MAINTAINER
+
+/**
+ * Resolve the effective language-edit floor for an org (falls back to the
+ * MAINTAINER default when the org hasn't configured one, or configured a
+ * value outside the role ladder).
+ */
+export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "languageEditMinRole", DEFAULT_LANGUAGE_EDIT_MIN_ROLE)
+}
+
+/**
+ * Resolve the language-edit floor that applies to a project, via its org.
+ * Projects with no org (personal / not-yet-attached) fall back to the same
+ * MAINTAINER default — there is no org policy to consult.
+ */
+export async function getLanguageEditMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  return getLanguageEditMinRole(env, project.org_id)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

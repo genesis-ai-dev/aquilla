@@ -89,7 +89,11 @@ export function RulesSettingsSection({
   //
   // NOTE the ordering: `getToken` is declared ABOVE `useRules` now, where it
   // used to sit below. useConcepts needs it, and useRules needs useConcepts.
-  const { concepts: localConcepts } = useConcepts({
+  // AQU-1340: `error` is read too. Dropping it left this list quietly short of
+  // every terminology rule whenever the concepts read failed — the exact
+  // disagreement with the editor the comment above warns about, with no hint
+  // on screen that anything was missing.
+  const { concepts: localConcepts, error: conceptsError } = useConcepts({
     projectId,
     getToken,
     tokenReady: !!jwt,
@@ -130,28 +134,39 @@ export function RulesSettingsSection({
   }
 
   return (
-    <RulesSurface
-      embedded
-      project={project}
-      projectId={projectId}
-      userRules={userRules}
-      builtinRules={builtinRules}
-      addRule={addRule}
-      updateRule={updateRule}
-      deleteRule={deleteRule}
-      setBuiltinOverride={setBuiltinOverride}
-      infractions={infractions}
-      cells={cells}
-      completionSettings={project.completionSettings}
-      orgRules={orgRules}
-      canEditOrgRules={canEditOrgSettings}
-      patchOrgSettings={patchOrgSettings}
-      orgSettingsVersion={orgSettingsVersion}
-      promotionRequests={promotionRequests}
-      canRequestPromotion={canRequestPromotion}
-      requestPromotion={requestPromotion}
-      editingRuleId={editingRuleId}
-      setEditingRuleId={setEditingRuleId}
-    />
+    <>
+      {conceptsError && (
+        <div
+          role="alert"
+          data-testid="rules-terminology-unavailable"
+          className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          {t("rules.terminologyUnavailableNotice")}
+        </div>
+      )}
+      <RulesSurface
+        embedded
+        project={project}
+        projectId={projectId}
+        userRules={userRules}
+        builtinRules={builtinRules}
+        addRule={addRule}
+        updateRule={updateRule}
+        deleteRule={deleteRule}
+        setBuiltinOverride={setBuiltinOverride}
+        infractions={infractions}
+        cells={cells}
+        completionSettings={project.completionSettings}
+        orgRules={orgRules}
+        canEditOrgRules={canEditOrgSettings}
+        patchOrgSettings={patchOrgSettings}
+        orgSettingsVersion={orgSettingsVersion}
+        promotionRequests={promotionRequests}
+        canRequestPromotion={canRequestPromotion}
+        requestPromotion={requestPromotion}
+        editingRuleId={editingRuleId}
+        setEditingRuleId={setEditingRuleId}
+      />
+    </>
   )
 }

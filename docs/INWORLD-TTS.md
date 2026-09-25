@@ -77,9 +77,9 @@ tabs). Freeform describes a voice in English (30–1000 characters). Structured
 is a textarea of the exact profile the model receives as `key: value` lines
 (`dialect`, `gender`, `age`, `emotion`, `tone`, `pitch`, `volume`, `speed`,
 `clarity`, `fluency`, `personality`, `texture`, `environment`) and posts
-`designPromptMode: DESIGN_PROMPT_MODE_VERBATIM`. Both modes show five
-starting-point chips under the prompt (Agent, Narrator, Companion, Instructor,
-Pirate) that fill English copy for that mode; the chip labels are translated,
+`designPromptMode: DESIGN_PROMPT_MODE_VERBATIM`. Both modes show four
+starting-point chips under the prompt (Agent, Narrator, Instructor, Pirate)
+that fill English copy for that mode; the chip labels are translated,
 the inserted prompt is not. Both modes pick a
 **Language** and **Accent** (one `languageCode` such as `en-US` /
 `en-scottish` / `kbt` — Inworld has no separate accent field), and a preview script

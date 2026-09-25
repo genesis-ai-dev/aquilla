@@ -1,14 +1,26 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamsList } from "./TeamsList"
+
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
 const listTeamsPage = vi.fn()
@@ -138,14 +150,7 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
 
   /** Base UI Select: options live in a portaled listbox. */
   async function pickVisibility(optionName: RegExp) {
-    fireEvent.click(screen.getByRole("combobox", { name: /filter teams by visibility/i }))
-    const option = await screen.findByRole("option", { name: optionName })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-    await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
-    })
+    await pickSelectOption(/filter teams by visibility/i, optionName)
   }
 
   it("renders the visibility select and defaults to Internal only", async () => {

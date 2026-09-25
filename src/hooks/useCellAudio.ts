@@ -279,6 +279,10 @@ export function useCellAudio(
     }
   }, [attachmentUrl, project.id, fileId, getSyncToken, t])
 
+  // The tick re-arms itself every frame. It schedules through this ref (kept
+  // pointed at the latest closure just below) rather than by name, so each frame
+  // runs the current callback (react-hooks/immutability).
+  const tickPlayheadRef = useRef<() => void>(() => {})
   const tickPlayhead = useCallback(() => {
     const a = audioRef.current
     if (!a) return
@@ -290,8 +294,9 @@ export function useCellAudio(
       return // onpause → stopTicking
     }
     setCurrentTime(a.currentTime)
-    rafRef.current = requestAnimationFrame(tickPlayhead)
+    rafRef.current = requestAnimationFrame(() => tickPlayheadRef.current())
   }, [])
+  tickPlayheadRef.current = tickPlayhead
 
   const startTicking = useCallback(() => {
     if (rafRef.current != null) return

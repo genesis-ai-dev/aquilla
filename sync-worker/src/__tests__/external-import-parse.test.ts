@@ -649,6 +649,176 @@ describe('artifact parse — stage (REST)', () => {
   })
 })
 
+// ── REST: USFM content-only + front-matter parity (AQU-1283) ─────────────────
+
+/** Mirrors the Acts import that surfaced AQU-1283: intro block, running
+ *  header + title, an in-body section heading, a verse with footnote / \add /
+ *  nested \+bk / mid-verse \p carrying a USFM `~`, and a dangling trailing \p. */
+const USFM_ACTS = [
+  '\\id ACT Test Bible',
+  '\\h Деяния',
+  '\\toc1 Деяния апостолов',
+  '\\mt1 Деяния апостолов',
+  '\\imt Введение',
+  '\\ip Эта книга написана Лукой.',
+  '\\io1 План книги \\ior 1:1–8:3\\ior*',
+  '\\ili1 Первый пункт',
+  '\\c 1',
+  '\\s1 Обещание Святого Духа',
+  '\\p',
+  '\\v 4 Однажды, обедая вместе с ними\\f + \\fr 1:4 \\ft Или: «\\fqa Однажды, собрав их…\\ft »\\f*, Он велел \\add им\\add* не покидать \\+bk Иерусалим\\+bk*.',
+  '\\p —~Это то, о чём говорил Отец.',
+  '\\v 5 Иоанн крестил водой.',
+  '\\p',
+].join('\r\n')
+
+const ACT_1_4_TEXT =
+  'Однажды, обедая вместе с ними, Он велел им не покидать Иерусалим.\n— Это то, о чём говорил Отец.'
+
+/** The cells the in-app importer (parseUsfmLossless, AQU-634) drops when the
+ *  project opts out of front matter: identification + title + introduction.
+ *  Section headings stay. The agent path must agree with the browser. (\ili
+ *  is not a paratext kind the lossless parser emits as a cell in EITHER mode,
+ *  so it is absent from this list on purpose.) */
+const FRONT_MATTER_TEXTS = [
+  'Деяния',
+  'Деяния апостолов', // \toc1 and \mt1 both carry it → two cells
+  'Введение',
+  'Эта книга написана Лукой.',
+  'План книги 1:1–8:3',
+]
+const FRONT_MATTER_CELL_COUNT = FRONT_MATTER_TEXTS.length + 1
+
+interface UsfmCell {
+  content: string
+  type?: string
+  canonicalRef?: string
+  metadata?: { usfmNotes?: { kind: string; caller: string; ref: string; text: string }[] }
+}
+
+async function setImportExcludeFrontMatter(value: boolean) {
+  await tdb.pg.query(
+    `INSERT INTO project_settings (project_id, settings, version) VALUES ($1, $2, 1)
+     ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    [PROJECT, JSON.stringify({ importExcludeFrontMatter: value })],
+  )
+}
+
+async function stagedCells(): Promise<UsfmCell[]> {
+  const stored = await tdb.rows<{ commands: unknown }>('changesets')
+  expect(stored).toHaveLength(1)
+  const commands = (
+    typeof stored[0].commands === 'string' ? JSON.parse(stored[0].commands) : stored[0].commands
+  ) as PlanImportCommand[]
+  return commands[0].cells as UsfmCell[]
+}
+
+describe('artifact parse — USFM content-only fidelity (AQU-1283)', () => {
+  it('preview cells carry no USFM markers: footnotes move to metadata.usfmNotes, ~ becomes a space, trailing \\p vanishes', async () => {
+    const artifactId = await upload(env, leadToken, 'Acts.usfm', USFM_ACTS)
+    const res = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as PreviewBody & { excludeFrontMatter: unknown }
+    const cells = body.sampleCells as unknown as UsfmCell[]
+    expect(body.totalCells).toBe(cells.length)
+
+    // WHY: the agent:usfm profile is content-only — agents draft from `value`
+    // and never run the SPA's display transform.
+    for (const cell of cells) expect(cell.content).not.toContain('\\')
+    expect(body.warnings.some((w) => w.code === 'residual-markup')).toBe(false)
+
+    const v4 = cells.find((c) => c.canonicalRef === 'ACT 1:4')!
+    expect(v4.content).toBe(ACT_1_4_TEXT)
+    expect(v4.metadata?.usfmNotes).toEqual([
+      { kind: 'footnote', caller: '+', ref: '1:4', text: 'Или: « Однажды, собрав их… »' },
+    ])
+    const v5 = cells.find((c) => c.canonicalRef === 'ACT 1:5')!
+    expect(v5.content).toBe('Иоанн крестил водой.')
+    expect(v5.metadata).toBeUndefined()
+    // \ior inside the intro outline unwraps like any character marker.
+    expect(cells.map((c) => c.content)).toContain('План книги 1:1–8:3')
+    expect(cells.map((c) => c.content)).toContain('Обещание Святого Духа')
+
+    // No request override and no project setting → the default, and it says so.
+    expect(body.excludeFrontMatter).toEqual({ value: false, source: 'default' })
+  })
+
+  it('commits exactly what the preview showed — marker-free values and the footnote side field', async () => {
+    const artifactId = await upload(env, leadToken, 'Acts.usfm', USFM_ACTS)
+    const preview = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    const previewBody = (await preview.json()) as PreviewBody
+
+    const staged = (await handleExternalArtifactsRequest(
+      parseReq(leadToken, artifactId, { stage: true }),
+      env,
+    ))!
+    expect(staged.status).toBe(200)
+    const stageBody = (await staged.json()) as StageBody & { parse: { excludeFrontMatter: unknown } }
+    expect(stageBody.parse.totalCells).toBe(previewBody.totalCells)
+    expect(stageBody.parse.excludeFrontMatter).toEqual({ value: false, source: 'default' })
+    for (const cell of await stagedCells()) expect(cell.content).not.toContain('\\')
+
+    const commit = (await handleExternalChangesetsRequest(commitReq(leadToken, stageBody.changeset.id), env))!
+    expect(commit.status).toBe(200)
+    const receipt = ((await commit.json()) as { receipt: { fileId: string } }).receipt
+    const rows = await tdb.rows<{ side: string; value: string; file_id: string; metadata: unknown }>('cells')
+    const source = rows.filter((c) => c.side === 'source' && c.file_id === receipt.fileId)
+    expect(source).toHaveLength(previewBody.totalCells)
+    for (const row of source) expect(row.value).not.toContain('\\')
+    const v4 = source.find((c) => c.value === ACT_1_4_TEXT)!
+    const meta = (typeof v4.metadata === 'string' ? JSON.parse(v4.metadata) : v4.metadata) as UsfmCell['metadata']
+    expect(meta?.usfmNotes?.[0].text).toBe('Или: « Однажды, собрав их… »')
+  })
+
+  it('honours the project importExcludeFrontMatter setting in preview AND commit, like the in-app importer', async () => {
+    await setImportExcludeFrontMatter(true)
+    const artifactId = await upload(env, leadToken, 'Acts.usfm', USFM_ACTS)
+
+    const preview = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    expect(preview.status).toBe(200)
+    const previewBody = (await preview.json()) as PreviewBody & { excludeFrontMatter: unknown }
+    expect(previewBody.excludeFrontMatter).toEqual({ value: true, source: 'project-setting' })
+    const previewTexts = previewBody.sampleCells.map((c) => c.content)
+    for (const text of FRONT_MATTER_TEXTS) expect(previewTexts).not.toContain(text)
+    expect(previewTexts).toContain('Обещание Святого Духа')
+    expect(previewTexts).toContain(ACT_1_4_TEXT)
+    expect(previewBody.totalCells).toBe(3) // \s1 + 2 verses
+
+    const staged = (await handleExternalArtifactsRequest(
+      parseReq(leadToken, artifactId, { stage: true }),
+      env,
+    ))!
+    expect(staged.status).toBe(200)
+    const stageBody = (await staged.json()) as StageBody & { parse: { excludeFrontMatter: unknown } }
+    expect(stageBody.parse.excludeFrontMatter).toEqual({ value: true, source: 'project-setting' })
+    expect(stageBody.parse.totalCells).toBe(3)
+
+    const commit = (await handleExternalChangesetsRequest(commitReq(leadToken, stageBody.changeset.id), env))!
+    expect(commit.status).toBe(200)
+    const receipt = ((await commit.json()) as { receipt: { fileId: string } }).receipt
+    const rows = await tdb.rows<{ side: string; value: string; file_id: string }>('cells')
+    const values = rows.filter((c) => c.side === 'source' && c.file_id === receipt.fileId).map((c) => c.value)
+    expect(values).toHaveLength(3)
+    for (const text of FRONT_MATTER_TEXTS) expect(values).not.toContain(text)
+    expect(values).toContain('Обещание Святого Духа')
+  })
+
+  it('an explicit excludeFrontMatter in the request overrides the project setting', async () => {
+    await setImportExcludeFrontMatter(true)
+    const artifactId = await upload(env, leadToken, 'Acts.usfm', USFM_ACTS)
+    const res = (await handleExternalArtifactsRequest(
+      parseReq(leadToken, artifactId, { excludeFrontMatter: false }),
+      env,
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as PreviewBody & { excludeFrontMatter: unknown }
+    expect(body.excludeFrontMatter).toEqual({ value: false, source: 'request' })
+    const texts = body.sampleCells.map((c) => c.content)
+    for (const text of FRONT_MATTER_TEXTS) expect(texts).toContain(text)
+    expect(body.totalCells).toBe(3 + FRONT_MATTER_CELL_COUNT)
+  })
+})
+
 // ── MCP: preview_import / prepare_import ─────────────────────────────────────
 
 async function callMcpTool(

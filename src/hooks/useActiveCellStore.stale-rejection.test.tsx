@@ -76,7 +76,7 @@ const FILE_ROWS = [row("c1", "source", "hello"), row("c1", "target", "hola", { e
 /** Default stream: serves FILE_ROWS for either side. */
 function serveStream(rows: CellRow[] = FILE_ROWS) {
   streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-    await onPage(rows.filter((r) => r.side === side), true)
+    await onPage(rows.filter((r) => !side || r.side === side), true)
   })
 }
 
@@ -244,7 +244,7 @@ describe("I3: queue, don't drop", () => {
     streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
       streams++
       if (streams === 1) await gate.promise
-      await onPage(FILE_ROWS.filter((r) => r.side === side), true)
+      await onPage(FILE_ROWS.filter((r) => !side || r.side === side), true)
     })
     const { result } = renderStore()
     await waitFor(() => expect(streams).toBe(1))
@@ -255,12 +255,11 @@ describe("I3: queue, don't drop", () => {
     expect(streams).toBe(1)
 
     gate.resolve()
-    // Initial load = 2 stream calls (target + source). The stream mock reports
-    // no cursor, so the queued soft pass is a full re-stream: exactly one more
-    // pair (the two queued requests coalesce), then nothing.
-    await waitFor(() => expect(streams).toBe(4))
+    // One paired stream per load. No cursor means the queued soft pass
+    // re-streams once; the two queued requests coalesce.
+    await waitFor(() => expect(streams).toBe(2))
     await new Promise((r) => setTimeout(r, 20))
-    expect(streams).toBe(4)
+    expect(streams).toBe(2)
     expect(deltaMock).not.toHaveBeenCalled()
   })
 })
@@ -343,11 +342,31 @@ describe("I4: cache hygiene", () => {
     serveStream()
     rerender({ fileId: "f2" })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // f2's own load — one stream pair.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    // f2's own load — one complete-row stream.
+    expect(streamMock).toHaveBeenCalledTimes(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
     // The old f1 retry never fires.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    expect(streamMock).toHaveBeenCalledTimes(2)
     expect(result.current.isError).toBe(false)
   })
+})
+
+it("counts both source and target entries in paired progress and clears it on completion", async () => {
+  const gate = deferred<void>()
+  const pairs = Array.from({ length: 10 }, (_, i) => [row(String(i), "source", "source"), row(String(i), "target", "target")]).flat()
+  streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side, onMeta, _lane, paired) => {
+    expect(side).toBeUndefined()
+    expect(paired).toBe(true)
+    onMeta?.({ total: 20, maxServerSeq: 1, projectEpoch: 1 })
+    await onPage(pairs, false)
+    await gate.promise
+    await onPage([], true)
+  })
+  const { result } = renderStore()
+  await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 20, total: 20 }))
+  expect(new Set(result.current.store.toRows().map(r => r.cellId)).size).toBe(10)
+  await act(async () => { gate.resolve(); await gate.promise })
+  await waitFor(() => expect(result.current.loadProgress).toBeNull())
+  expect(result.current.isLoading).toBe(false)
+  expect(result.current.store.toRows()).toHaveLength(20)
 })

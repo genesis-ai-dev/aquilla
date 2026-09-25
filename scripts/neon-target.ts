@@ -4,9 +4,11 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
+import { childArgs, type NeonTargetCommand } from "./neon-target-args"
 
 type Target = "production" | "dev"
-type Command = "status" | "apply" | "baseline" | "backfill-progress" | "backfill-activity"
+// One union, owned by neon-target-args.ts, so the two files cannot drift apart.
+type Command = NeonTargetCommand
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
@@ -34,7 +36,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress|backfill-activity>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|verify-lanes>")
   process.exit(1)
 }
 
@@ -46,7 +48,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "verify-lanes") return value
   usage()
 }
 
@@ -223,13 +225,12 @@ async function main() {
   const command = parseCommand(process.argv[3])
   const env = await resolvePgEnv(target)
 
-  console.log(`neon-target ${target} ${command} -> ${env.NEON_PG_HOST}`)
-  const script = command === "backfill-progress"
-    ? "scripts/neon-backfill-progress.ts"
-    : command === "backfill-activity"
-      ? "scripts/neon-backfill-activity.ts"
-      : "scripts/neon-migrate.ts"
-  const args = command.startsWith("backfill-") ? [script] : [script, command]
+  // Everything after the command reaches a backfill or verify script as its
+  // own flags (`--missing-books`, `--apply`, `--require-complete`). See
+  // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
+  const passthrough = process.argv.slice(4)
+  const args = childArgs(command, passthrough)
+  console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))
 }
 

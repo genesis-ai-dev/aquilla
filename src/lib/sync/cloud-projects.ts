@@ -55,6 +55,9 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1086: the org's effective language-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  languageEditMinRole?: number | null
   /** AQU-1002: the org's effective comment floors — the minimum role to open a
    *  thread, and to resolve/reopen a thread someone else opened. Returned by
    *  the single-project endpoint; absent on the list endpoint / older servers,
@@ -480,6 +483,10 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // callers read as the PROJECT_LEAD default.
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
+  }
+  // AQU-1086: same for the org's language-edit floor.
+  if (summary.languageEditMinRole !== undefined) {
+    record.languageEditMinRole = summary.languageEditMinRole
   }
   // AQU-1002: same treatment for the comment floors — absent leaves them
   // undefined, which the comment surfaces read as the stock defaults.

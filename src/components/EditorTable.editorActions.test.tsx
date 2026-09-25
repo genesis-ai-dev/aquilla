@@ -245,7 +245,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
    */
   async function openRailOverflow(row?: HTMLElement) {
     const scope = row ? within(row) : screen
-    fireEvent.click(await scope.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await scope.findByRole("button", { name: /^More actions · Translation for/ }))
   }
 
   // ── AQU-200 regression guard ───────────────────────────────────────────────
@@ -268,7 +268,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       .map((b) => b.getAttribute("aria-label") ?? "")
 
     // ONE overflow trigger for the whole rail — not one per action group.
-    expect(directLabels.filter((l) => l === "More actions")).toHaveLength(1)
+    expect(directLabels.filter((l) => l.startsWith("More actions · Translation for"))).toHaveLength(1)
 
     // The lower-frequency actions are NOT direct buttons any more. This is the
     // half that regresses if someone promotes "just one" back onto the rail.
@@ -418,7 +418,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     fireEvent.click(within(firstRow!).getByRole("button", { name: "Translate with AI" }))
     await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!)
+    const activation = secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!
+    expect(activation).toHaveAttribute("role", "button")
+    expect(activation).toHaveAccessibleName(/Translation for .*: hello/)
+    fireEvent.keyDown(activation, { key: " " })
     await waitFor(() => expect(secondRow!.querySelector(".ProseMirror")).not.toBeNull())
     expect(secondRow).toContainElement(document.activeElement as HTMLElement)
 

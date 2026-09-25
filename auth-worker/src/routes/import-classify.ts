@@ -10,6 +10,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
+import { admitChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
+import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -25,6 +27,7 @@ const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 const MAX_SAMPLE_CHARS = 12_000
 const MIN_IMPORT_ROLE = 500
+const CLASSIFY_MAX_TOKENS = 1200
 
 const classifyRequestSchema = z.object({
   projectId: z.string().trim().min(1).max(255),
@@ -136,17 +139,48 @@ imports.post(
       "SELECT org_id FROM projects WHERE id = ?",
     ).bind(input.projectId).first<{ org_id: number | null }>()
     const orgId = project?.org_id ?? 0
-    const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-    if (!credits.ok) {
-      return c.json({
-        error: "credit_cap_exceeded",
-        reason: credits.reason,
-        message: "LLM credit cap reached. Contact your org admin.",
-      }, 429)
+    // Same local scripted-provider rehearsal gate as chat: one non-streaming
+    // provider call reserved before the request and settled from reported cost.
+    let usage: ChatUsage | undefined
+    const weekly = weeklyUsageActive(c.env, c.req.url)
+    if (weekly === "unavailable") return c.json({ error: "usage_rehearsal_unavailable" }, 503)
+    if (weekly === "on") {
+      // Enforced usage never funds an unowned project from org 0.
+      if (orgId <= 0) return c.json({ error: "forbidden" }, 403)
+      const suppliedId = c.req.header("Idempotency-Key")
+      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
+        return c.json({ error: "invalid_request_id" }, 400)
+      }
+      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
     }
-    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    if (!usage) {
+      const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+      if (!credits.ok) {
+        return c.json({
+          error: "credit_cap_exceeded",
+          reason: credits.reason,
+          message: "LLM credit cap reached. Contact your org admin.",
+        }, 429)
+      }
+      const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+    }
 
+    if (usage) {
+      try {
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: input.projectId,
+          model, promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS })
+        // A repeated key never starts another provider call.
+        if (!created) return c.json({ error: "usage_request_already_admitted" }, 409)
+      } catch (error) {
+        if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
+          return c.json({ error: "weekly_ai_allowance_exhausted", message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 429)
+        }
+        if (error instanceof Error && error.message === "Model price unavailable") return c.json({ error: "model_price_unavailable" }, 503)
+        return c.json({ error: "usage_accounting_unavailable" }, 503)
+      }
+    }
     try {
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
@@ -158,7 +192,7 @@ imports.post(
           model,
           messages: promptFor(input),
           temperature: 0,
-          max_tokens: 1200,
+          max_tokens: CLASSIFY_MAX_TOKENS,
           stream: false,
           ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },
@@ -177,6 +211,10 @@ imports.post(
         choices?: Array<{ message?: { content?: string } }>
         usage?: { cost?: number }
       }
+      // The provider charged for this response even when the recipe below is
+      // unusable, so settle before validating content. Upstream errors above
+      // keep the reservation: their charge is uncertain, not proven free.
+      if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
       const content = data.choices?.[0]?.message?.content
       if (!content) {
         return c.json({ error: "invalid_import_classification", message: "Classifier returned no recipe." }, 502)
@@ -196,8 +234,10 @@ imports.post(
       const cost = typeof data.usage?.cost === "number" && data.usage.cost > 0
         ? data.usage.cost * 100
         : 1
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(input.sample))
+      if (!usage) {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(input.sample))
+      }
       return c.json({ classification: classification.data })
     } catch (error) {
       console.error("Import classification failed:", error)

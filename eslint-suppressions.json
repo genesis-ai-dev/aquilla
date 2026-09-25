@@ -81,7 +81,7 @@
   },
   "src/components/ProjectCreateDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 10
+      "count": 6
     }
   },
   "src/components/ProjectSettings/LocalModelsSection.tsx": {
@@ -107,11 +107,6 @@
   "src/components/ProjectSettings/MondaySetupWizard.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 7
-    }
-  },
-  "src/components/RuleSuggestDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
     }
   },
   "src/components/StaffLanePopover.tsx": {
@@ -236,7 +231,7 @@
   },
   "src/components/org/TeamsList.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 6
     }
   },
   "src/components/settings/OrgProviderSection.tsx": {

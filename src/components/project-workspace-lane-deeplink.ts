@@ -37,25 +37,53 @@ export function resolveDeepLinkLaneFromSearchParams(
   )
 }
 
-/** Open the editor at a proposed Autopilot draft in the given language lane. */
-export function draftReviewHref(
+/**
+ * Open the editor on one cell of one file, in one lane.
+ *
+ * This is the single "take me to that cell" link builder — Autopilot draft
+ * review used to own it under the name `draftReviewHref`, and AQU-1278's plan
+ * board ("go to the first outstanding cell") is the second, unrelated caller.
+ *
+ * The contract, in the order the editor applies it:
+ *
+ * - `lane` is ALWAYS emitted, including as the empty `?lane=` that means
+ *   "Project default". That is deliberate and it is the part callers get
+ *   wrong: `resolveDeepLinkLane` reads an ABSENT lane param as "no deep-link
+ *   intent, leave whatever lane the editor last had". So a link built by a
+ *   surface that is itself lane-scoped — a plan row for one target language, a
+ *   draft in one Autopilot run's language — must always pass `targetLang`, or
+ *   the user lands on the right cell in the WRONG language and reads someone
+ *   else's translation as their own.
+ * - `cellId` is the row to scroll to. It is optional because a file-level link
+ *   ("open this file") is a legitimate use; without it nothing is scrolled.
+ * - `flash` appends `&flash=1`, which makes ProjectWorkspace briefly highlight
+ *   the row it scrolled to. Pass it whenever the LINK TEXT made a promise
+ *   about a specific cell: a scroll with no marker looks, from the user's
+ *   chair, exactly like a link that did nothing. It rides with `cellId` only —
+ *   there is nothing to flash without a row, and the reader ignores it there.
+ */
+export function editorCellHref(
   projectId: string,
   fileId: string,
   cellId?: string | null,
   targetLang = "",
+  flash = false,
 ): string {
   const lane = `lane=${encodeURIComponent(targetLang)}`
   const query = cellId
-    ? `cellId=${encodeURIComponent(cellId)}&${lane}`
+    ? `cellId=${encodeURIComponent(cellId)}&${lane}${flash ? "&flash=1" : ""}`
     : lane
   return `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}?${query}`
 }
 
-/** @deprecated Use draftReviewHref. Kept for existing default-lane callers. */
+/** @deprecated Use editorCellHref. Autopilot's original name for it. */
+export const draftReviewHref = editorCellHref
+
+/** @deprecated Use editorCellHref. Kept for existing default-lane callers. */
 export function defaultLaneDraftReviewHref(
   projectId: string,
   fileId: string,
   cellId?: string | null,
 ): string {
-  return draftReviewHref(projectId, fileId, cellId, "")
+  return editorCellHref(projectId, fileId, cellId, "")
 }

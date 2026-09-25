@@ -89,10 +89,10 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
-    // React Compiler is RC and expensive at compile time. Skip it for the
-    // test build — the compiler isn't what we're testing, and including it
-    // turned the E2E orchestrator into a memory hog on dev machines.
-    ...(mode === "test" ? [] : [babel({ presets: [reactCompilerPreset()] })]),
+    // Keep routine tests cheap, but let typing diagnostics exercise the same
+    // compiler as the normal local/release app: E2E_REACT_COMPILER=1.
+    ...(mode === "test" && process.env.E2E_REACT_COMPILER !== "1"
+      ? [] : [babel({ presets: [reactCompilerPreset()] })]),
     tailwindcss(),
     // isomorphic-git pulls in node:crypto, node:buffer, etc.
     nodePolyfills({
@@ -113,6 +113,11 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ],
+  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
+  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
+  worker: {
+    format: "es",
+  },
   resolve: {
     alias: [
       // The SPA consumes live workspace source during dev/tests/build, while
@@ -150,6 +155,14 @@ export default defineConfig(({ mode }) => ({
       // pre-bundled so the first transcribe click does not re-optimize the
       // main graph.
       "@huggingface/transformers",
+      // src/lib/offline/store.ts isn't statically reachable yet (Tauri-only,
+      // not wired into App.tsx), so Vite's crawler never discovers this deep
+      // Effect-based dependency tree on cold start. Without pre-inclusion,
+      // the first call to getOfflineStore() triggers a mid-session
+      // re-optimize + full reload (white screen, cleared console).
+      "@livestore/livestore",
+      "@livestore/adapter-web",
+      "@livestore/react",
     ],
   },
   build: {
@@ -201,6 +214,8 @@ export default defineConfig(({ mode }) => ({
       ".claude/worktrees/**",
       ".claire/**",
       "e2e/**",
+      "smart-tests/journeys/**",
+      "smart-tests/.venv/**",
       // Each worker has its own vitest config + local node_modules. Running
       // their tests from root pulls in worker-local deps the root install
       // doesn't have. deploy-workers.yml runs each worker's tests in its

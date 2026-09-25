@@ -40,8 +40,10 @@ vi.mock("../steps/IntentStep", () => ({
   ),
 }))
 vi.mock("../steps/OrgStep", () => ({ OrgStep: () => <div>Org step</div> }))
-vi.mock("../steps/ProjectStep", () => ({ ProjectStep: () => <div>Project step</div> }))
-vi.mock("../steps/ReadyStep", () => ({ ReadyStep: () => <div>Ready step</div> }))
+vi.mock("../steps/ProjectStep", () => ({ ProjectStep: ({ onCreated, onSkip }: {
+  onCreated: (project: { id: string }) => void; onSkip: () => void
+}) => <div><p>Project step</p><button onClick={() => onCreated({ id: "new-project" })}>Create project</button><button onClick={onSkip}>Skip project</button></div> }))
+vi.mock("../steps/ReadyStep", () => ({ ReadyStep: ({ onFinish }: { onFinish: () => void }) => <button onClick={onFinish}>Finish setup</button> }))
 
 vi.mock("@/lib/analytics-consent", () => ({
   hasAnalyticsConsentBeenSet: () => true, // skip privacy
@@ -54,14 +56,15 @@ vi.mock("@/context/OrgContext", () => ({
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: null }),
 }))
+const navigate = vi.fn()
 vi.mock("react-router-dom", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-router-dom")>()),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }))
 
-function renderWizard() {
+function renderWizard(path = "/onboarding") {
   return render(
-    <MemoryRouter initialEntries={["/onboarding"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/onboarding" element={<OnboardingWizard />} />
       </Routes>
@@ -97,4 +100,25 @@ describe("OnboardingWizard — Personal vs Team fork", () => {
     await waitFor(() => expect(screen.getByText("Project step")).toBeInTheDocument())
     expect(screen.queryByText("Org step")).not.toBeInTheDocument()
   })
+})
+
+it.each(["create", "skip"])("keeps the paid selection after new-account %s completion", async action => {
+  renderWizard("/onboarding?offer=pro&interval=monthly&quantity=1&audience=individual")
+  await advanceToIntent()
+  fireEvent.click(screen.getByRole("button", { name: "Just me" }))
+  if (action === "create") {
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }))
+  } else {
+    fireEvent.click(screen.getByRole("button", { name: "Skip project" }))
+  }
+  expect(navigate).toHaveBeenCalledWith("/billing/select?offer=pro&interval=month&quantity=1")
+})
+it("preserves the ordinary created-project destination without a paid selection", async () => {
+  renderWizard()
+  await advanceToIntent()
+  fireEvent.click(screen.getByRole("button", { name: "Just me" }))
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }))
+  fireEvent.click(screen.getByRole("button", { name: "Finish setup" }))
+  expect(navigate).toHaveBeenCalledWith("/project/new-project/editor", { state: { openSetupChecklist: true } })
 })

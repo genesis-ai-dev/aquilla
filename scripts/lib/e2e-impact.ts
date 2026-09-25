@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/.*agent-connect|src\/.*(?:ConnectAgent|agent-connect|ApiTokensSection)|db\/.*agent_authorizations)/i,
     sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
   },
@@ -20,7 +24,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   },
   {
     source: /^(?:src\/(?:pages|components|lib)\/(?:org|team|preferences)|auth-worker\/.*(?:org|team|member))/i,
-    sentinels: ["e2e/specs/orgs/account-switcher.smoke.spec.ts"],
+    sentinels: [
+      "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+      "e2e/specs/orgs/members.smoke.spec.ts",
+    ],
   },
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
@@ -34,6 +41,16 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   },
   {
     source: /^(?:src\/(?:components|lib)\/(?:rule|check|qa|lqa)|sync-worker\/.*(?:rule|validation|check))/i,
+    sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
+  },
+  {
+    // Style-rule library + applicability graph (AQU-934). `src/lib/scripture`
+    // (the book→genre map feeding applicability) matches no other domain.
+    // NOTE: the graph's shared module lives at `db/shared/style-rules.ts`, and
+    // `db/` sits outside PRODUCT_RUNTIME, so no domain rule can select for it —
+    // same dead spot the `db/shared/knowledge` alternative above already has.
+    // Its auth-worker route and client consumers are covered here instead.
+    source: /^(?:auth-worker\/src\/routes\/style-rules|src\/lib\/scripture\/|src\/hooks\/useStyleRules)/i,
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
   },
   {
@@ -83,7 +100,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|index\.html$)/
+const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")
@@ -136,6 +153,14 @@ export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: s
   for (const rawFile of changedFiles) {
     const file = normalize(rawFile)
     if (!file) continue
+
+    if (file === "src/components/CellActionRail.tsx") {
+      add(["e2e/specs/editor/comments.smoke.spec.ts"], `${file} exposes the cell comment menu`)
+    }
+    if (/^(?:smart-tests\/|scripts\/smart-tests(?:-pr|-parallel)?\.(?:ts|mjs)$|scripts\/smart-test-comment\.mjs$)/.test(file)) {
+      add(["e2e/specs/editor/import-and-edit.smoke.spec.ts"], `${file} affects smart testing`)
+      continue
+    }
 
     if (/^e2e\/specs\/.*\.smoke\.spec\.tsx?$/.test(file)) {
       add([file], `${file} changed`)

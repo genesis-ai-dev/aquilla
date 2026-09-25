@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { AdminBillingSection } from "./AdminBillingSection"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import type { AdminBillingOrg, AdminBillingPlans } from "@/lib/frontier/admin"
 
 vi.mock("@/lib/frontier/admin", () => ({
@@ -72,10 +73,21 @@ const ORG: AdminBillingOrg = {
   wordsPerCredit: 100,
 }
 
+/** Enterprise partner with a persisted capacity period — the AQU-1212 case. */
+const ENTERPRISE_ORG: AdminBillingOrg = {
+  ...ORG,
+  orgId: 2,
+  orgName: "Biblica",
+  plan: "enterprise",
+  periodStart: "2026-01-01T00:00:00.000Z",
+  periodEnd: "2026-01-29T00:00:00.000Z",
+  languageCount: 5,
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockPlans.mockResolvedValue(CATALOG)
-  mockOrgs.mockResolvedValue([ORG])
+  mockOrgs.mockResolvedValue([ORG, ENTERPRISE_ORG])
   mockSave.mockResolvedValue({ plan: CATALOG.plan, version: 2, warnings: [] })
   mockGrant.mockResolvedValue()
 })
@@ -106,5 +118,88 @@ describe("AdminBillingSection", () => {
     render(<AdminBillingSection jwt="jwt" />)
     fireEvent.click(await screen.findByTestId("grant-words-1"))
     await waitFor(() => expect(mockGrant).toHaveBeenCalledWith("jwt", 1, 100_000, "admin courtesy grant"))
+  })
+
+  // AQU-1212: an admin provisioning a partner org must be able to find it. With
+  // every org on one unfiltered page, the assignment controls are unreachable
+  // at partner scale (150+ orgs), so the search field is part of the contract.
+  it("filters the org table by name so a partner org can be found", async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    expect(await screen.findByTestId("admin-words-1")).toBeDefined()
+    expect(screen.getByTestId("admin-words-2")).toBeDefined()
+
+    fireEvent.change(screen.getByLabelText("Search organizations…"), { target: { value: "Biblica" } })
+
+    await waitFor(() => expect(screen.queryByTestId("admin-words-1")).toBeNull())
+    expect(screen.getByTestId("admin-words-2")).toBeDefined()
+  })
+
+  it("finds an org by its numeric id", async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    await screen.findByTestId("admin-words-1")
+
+    fireEvent.change(screen.getByLabelText("Search organizations…"), { target: { value: "2" } })
+
+    await waitFor(() => expect(screen.queryByTestId("admin-words-1")).toBeNull())
+    expect(screen.getByTestId("admin-words-2")).toBeDefined()
+  })
+
+  // AQU-1212: "capacity" is meaningless without the period it applies to. The
+  // API already returned periodStart/periodEnd; the table used to discard them.
+  it("shows the capacity period an assignment applies to", async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const period = await screen.findByTestId("admin-period-2")
+    // Format through the same helper the cell uses, so this asserts "both ends
+    // of the period are rendered" rather than pinning a locale/timezone string.
+    expect(period.textContent).toContain(fmtShortCalendarDate(ENTERPRISE_ORG.periodStart))
+    expect(period.textContent).toContain(fmtShortCalendarDate(ENTERPRISE_ORG.periodEnd))
+    expect(period.textContent).not.toMatch(/No period set/)
+  })
+
+  it("says so plainly when an org has no billing period on record", async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const period = await screen.findByTestId("admin-period-1")
+    expect(period.textContent).toMatch(/No period set/)
+  })
+})
+
+describe("AdminBillingSection — AQU-942: the resolved shell survives revalidation", () => {
+  it("shows a first-load placeholder only before anything resolves", async () => {
+    let release: (plans: AdminBillingPlans) => void = () => {}
+    mockPlans.mockImplementationOnce(
+      () => new Promise<AdminBillingPlans>((resolve) => { release = resolve }),
+    )
+    render(<AdminBillingSection jwt="jwt" />)
+
+    expect(screen.getByRole("status", { name: "Loading billing" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+
+    release(CATALOG)
+    expect(await screen.findByTestId("admin-billing")).toBeDefined()
+    expect(screen.queryByRole("status", { name: "Loading billing" })).toBeNull()
+  })
+
+  it("keeps the catalog form and org table mounted while a grant revalidates", async () => {
+    // WHY: `act` re-fetches after every grant/reset, flipping `loading` back
+    // on. Gating the section on `loading` blanked the whole tab after each
+    // action, losing the table's sort/scroll and flashing the form away.
+    render(<AdminBillingSection jwt="jwt" />)
+    await screen.findByTestId("save-field-plan")
+
+    let release: (plans: AdminBillingPlans) => void = () => {}
+    mockPlans.mockImplementationOnce(
+      () => new Promise<AdminBillingPlans>((resolve) => { release = resolve }),
+    )
+    fireEvent.click(screen.getByTestId("grant-words-1"))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+
+    expect(screen.getByTestId("admin-billing")).toBeDefined()
+    expect(screen.getByTestId("save-field-plan")).toBeDefined()
+    expect(screen.queryByRole("status", { name: "Loading billing" })).toBeNull()
+
+    release(CATALOG)
+    await waitFor(() => expect(screen.getByTestId("admin-billing")).toBeDefined())
   })
 })

@@ -40,7 +40,7 @@ export type SessionRejection =
   | "hydration_error"
 
 export type SessionResolution =
-  | { ok: true; user: AuthUser; payload: JWTPayload }
+  | { ok: true; user: AuthUser; payload: JWTPayload; sessionKey: string }
   | { ok: false; reason: SessionRejection }
 
 /**
@@ -107,6 +107,18 @@ export async function resolveSession(
   // per isolate for SESSION_CACHE_TTL_MS (see lib/session-cache.ts for the
   // accepted cross-isolate revocation window). The password_changed_at cutoff
   // still runs on every hit — it only needs the cached row and the token.
+  //
+  // [Pen test] Auth & session mgmt (2026-09-21, OPS-35): this key doubles as
+  // the request's *session identity* and is handed to callers as
+  // `sessionKey`. It is the one value in this file that names THIS token
+  // rather than its bearer, which is what a per-session (as opposed to
+  // per-account) authorization state has to be bound to — see
+  // `requireAdminElevation`. Reusing the cache key rather than reading
+  // `payload.jti` directly is deliberate: `sessionCacheKey` already handles
+  // pre-`jti` tokens by falling back to a SHA-256 of the raw token, so a
+  // binding built on it covers legacy tokens too, and neither arm stores a
+  // replayable secret (a `jti` is already denylisted in the clear in
+  // `revoked_tokens`; the fallback is a hash).
   const cacheKey = await sessionCacheKey(payload, token)
   let user = getCachedSession(cacheKey)
 
@@ -150,7 +162,7 @@ export async function resolveSession(
     }
   }
 
-  return { ok: true, user, payload }
+  return { ok: true, user, payload, sessionKey: cacheKey }
 }
 
 /**
@@ -219,5 +231,6 @@ export const authMiddleware = async (
 
   c.set("user", resolved.user)
   c.set("tokenPayload", resolved.payload)
+  c.set("sessionKey", resolved.sessionKey)
   await next()
 }

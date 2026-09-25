@@ -34,11 +34,16 @@
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
+// The system prompt resolves top-level `settings.systemPrompt` first (the key
+// PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
+// SPA keeps in sync), then DEFAULT_SYSTEM_PROMPT (AQU-1283).
+//
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
 import {
@@ -272,7 +277,13 @@ export async function buildPromptPreview(
   // target language (resolveActiveTargetLanguage, project-workspace-lane-target.ts).
   const targetLanguage = targetLang || stringSetting(settings, "targetLanguage")
 
-  const systemPrompt = stringSetting(completion, "systemPrompt") || DEFAULT_SYSTEM_PROMPT
+  // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
+  // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
+  // the nested copy is the fallback for projects that only ever set it there.
+  const systemPrompt =
+    stringSetting(settings, "systemPrompt") ||
+    stringSetting(completion, "systemPrompt") ||
+    DEFAULT_SYSTEM_PROMPT
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
@@ -535,13 +546,21 @@ async function loadPrecedingContext(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "LEFT JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.sequence_index IS NOT NULL AND s.sequence_index < ? " +
         "  AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index DESC LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.sequenceIndex, args.count)
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.sequenceIndex,
+      args.count,
+    )
     .all<ContextRow>()
 
   return rows.results
@@ -576,7 +595,9 @@ async function loadValidatedFallback(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.cell_id != ? AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index NULLS LAST, s.cell_id " +
@@ -585,7 +606,13 @@ async function loadValidatedFallback(
         // enough net for token overlap while staying a cheap query.
         "LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.cellId, Math.min(2000, args.limit * 20))
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.cellId,
+      Math.min(2000, args.limit * 20),
+    )
     .all<ContextRow>()
 
   const pairs = rows.results

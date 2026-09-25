@@ -1,54 +1,50 @@
 import JSZip from "jszip"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { filesToProjectEntries } from "./file-entries"
+import {
+  buildParatextPtxprintZip,
+  PARATEXT_BOOK_PATH,
+  PTXPRINT_HELPER_PATH,
+} from "../parsers/__fixtures__/paratext-ptxprint-zip"
 
-/** A real Paratext-shaped ZIP whose `entryName` member reports unreadable size
- *  metadata once JSZip has loaded it — the AQU-1406 failure, which a hand-built
- *  archive cannot express (a size header is always a valid uint32). */
-async function zipWithUnreadableEntry(entryName: string): Promise<File> {
-  const zip = new JSZip()
-  zip.file("Settings.xml", "<ScriptureText/>")
-  zip.file("01GENsibtatar.SFM", "\\id GEN\n\\c 1\n\\v 1 Text")
-  zip.file("44ACTSibtatar.SFM", "\\id ACT\n\\c 1\n\\v 1 Text")
-  zip.file("shared/ptxprint/Default/FRTlocal.sfm", "\\id FRT\n\\mt PTXprint helper")
-  const bytes = await zip.generateAsync({ type: "arraybuffer" })
-
-  const load = JSZip.loadAsync.bind(JSZip)
-  vi.spyOn(JSZip, "loadAsync").mockImplementation(async (data, options) => {
-    const loaded = await load(data, options)
-    const entry = loaded.files[entryName] as unknown as { _data: { uncompressedSize?: number } }
-    entry._data.uncompressedSize = undefined
-    return loaded
-  })
-  return new File([bytes], "sibtatar.zip")
+/** The reported export, as real bytes — no stubbing of JSZip. */
+function exportWithUnreadableMember(member: string): File {
+  return new File([buildParatextPtxprintZip(member)], "sibtatar.zip")
 }
 
 describe("AQU-1406 — an unreadable support member does not fail a Paratext ZIP", () => {
-  afterEach(() => vi.restoreAllMocks())
-
   it("skips a PTXprint helper with bad size metadata and imports every book", async () => {
-    const zip = await zipWithUnreadableEntry("shared/ptxprint/Default/FRTlocal.sfm")
-
-    const entries = await filesToProjectEntries([zip])
+    const entries = await filesToProjectEntries([exportWithUnreadableMember(PTXPRINT_HELPER_PATH)])
 
     expect(entries.map((entry) => entry.name)).toEqual(expect.arrayContaining([
       "Settings.xml",
-      "01GENsibtatar.SFM",
-      "44ACTSibtatar.SFM",
+      "01GENSibtatar.SFM",
+      PARATEXT_BOOK_PATH,
     ]))
-    expect(entries.map((entry) => entry.name))
-      .not.toContain("shared/ptxprint/Default/FRTlocal.sfm")
+    expect(entries.map((entry) => entry.name)).not.toContain(PTXPRINT_HELPER_PATH)
     expect(entries.skippedEntries).toEqual([
-      { name: "shared/ptxprint/Default/FRTlocal.sfm", reason: "skipped (not scripture content)" },
+      { name: PTXPRINT_HELPER_PATH, reason: "skipped (not scripture content)" },
     ])
     // The package artifact still holds the original bytes, helper included.
     expect(entries.sourceArtifact?.name).toBe("sibtatar.zip")
   })
 
-  it("still fails, naming the file, when a book has bad size metadata", async () => {
-    const zip = await zipWithUnreadableEntry("44ACTSibtatar.SFM")
+  it("preserves the uploaded export byte-for-byte, skipped helper included", async () => {
+    const bytes = buildParatextPtxprintZip(PTXPRINT_HELPER_PATH)
 
-    await expect(filesToProjectEntries([zip]))
+    const entries = await filesToProjectEntries([new File([bytes], "sibtatar.zip")])
+    const preserved = await entries.sourceArtifact!.bytes()
+
+    // Round-trip export re-reads the original archive, so skipping a member for
+    // import must not rewrite the package. (Its *content* stays unextractable —
+    // the size the archive declares for it is garbage — but that is the input's
+    // defect, not something the importer should paper over.)
+    expect(new Uint8Array(preserved)).toEqual(bytes)
+    expect(Object.keys((await JSZip.loadAsync(preserved)).files)).toContain(PTXPRINT_HELPER_PATH)
+  })
+
+  it("still fails, naming the file, when a book has bad size metadata", async () => {
+    await expect(filesToProjectEntries([exportWithUnreadableMember(PARATEXT_BOOK_PATH)]))
       .rejects.toThrow(/invalid size metadata: 44ACTSibtatar\.SFM/)
   })
 

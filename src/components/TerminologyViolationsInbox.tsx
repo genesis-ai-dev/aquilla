@@ -12,7 +12,7 @@
  * scan only runs when the user is looking at this surface.
  */
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, ShieldAlert } from "lucide-react"
+import { ChevronDown, ChevronRight, FileText, ShieldAlert } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -22,6 +22,7 @@ import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { checkRules } from "@/lib/rules/rule-engine"
 import {
   groupTerminologyInfractions,
+  violationCellRef,
   type ConceptViolationGroup,
 } from "@/lib/terminology/violations-inbox"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -35,9 +36,18 @@ interface Props {
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
   /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
   termMatching?: TermMatchingSettings
+  /** AQU-663: project files, so an infringing-cell row can name the file it is
+   *  in instead of exposing ids. Optional — rows degrade to no file affordance. */
+  files?: Array<{ id: string; name: string }>
 }
 
-export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell, termMatching }: Props) {
+export function TerminologyViolationsInbox({
+  concepts,
+  cells,
+  onJumpToCell,
+  termMatching,
+  files,
+}: Props) {
   const t = useT()
   // Compile active concepts → rules and evaluate over the loaded cells. This is
   // the same derive-on-read path the editor uses; it only runs while mounted
@@ -61,6 +71,12 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell, term
     for (const c of cells) m.set(c.id, c)
     return m
   }, [cells])
+
+  const fileNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const f of files ?? []) m.set(f.id, f.name)
+    return m
+  }, [files])
 
   const totalViolations = useMemo(
     () => groups.reduce((s, g) => s + g.count, 0),
@@ -104,6 +120,7 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell, term
                 key={g.conceptId}
                 group={g}
                 cellById={cellById}
+                fileNameById={fileNameById}
                 onJumpToCell={onJumpToCell}
               />
             ))}
@@ -117,10 +134,12 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell, term
 function ConceptViolationRow({
   group,
   cellById,
+  fileNameById,
   onJumpToCell,
 }: {
   group: ConceptViolationGroup
   cellById: Map<string, CellData>
+  fileNameById: Map<string, string>
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }) {
   const t = useT()
@@ -163,7 +182,15 @@ function ConceptViolationRow({
         <ul className="mt-2 space-y-1 ps-6">
           {group.infractions.map((inf, i) => {
             const cell = cellById.get(inf.cellId)
-            const label = cell?.cellLabel ?? inf.cellId
+            // AQU-663: the row names the cell by its ref/tag, never by the raw
+            // internal id — that id told the reviewer nothing about which verse
+            // was in breach. `violationCellRef` returns null when the cell has
+            // no nameable ref, and the placeholder below is localized.
+            const label = violationCellRef(cell) ?? t("terminology.violations.unnamedCell")
+            const fileName = fileNameById.get(inf.fileId)
+            const fileTitle = fileName
+              ? t("terminology.violations.inFile", { file: fileName })
+              : null
             const preview = cell?.translated?.trim() || cell?.original?.trim() || ""
             return (
               <li
@@ -194,6 +221,16 @@ function ConceptViolationRow({
                   </button>
                 ) : (
                   <span className="shrink-0 font-medium">{label}</span>
+                )}
+                {fileTitle && (
+                  <span
+                    className="flex shrink-0 items-center gap-1 text-muted-foreground"
+                    title={fileTitle}
+                  >
+                    <FileText className="h-3 w-3" aria-hidden="true" />
+                    <span className="sr-only">{fileTitle}</span>
+                    <span className="hidden max-w-[10rem] truncate sm:inline">{fileName}</span>
+                  </span>
                 )}
                 {preview && (
                   <span className="truncate text-muted-foreground">{preview}</span>

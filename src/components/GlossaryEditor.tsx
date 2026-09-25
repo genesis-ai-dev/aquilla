@@ -751,8 +751,15 @@ export function GlossaryEditor({
               concepts={concepts}
               cells={detailCells}
               termMatching={project?.termMatching}
+              // AQU-663: lets a row name the file the infringing cell is in.
+              files={projectFiles}
               onJumpToCell={({ cellId, fileId }) => {
-                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
+                // `&flash=1` (AQU-1278) because the row named a specific cell
+                // by its ref — a scroll with nothing marking the landed row is
+                // indistinguishable from a link that did nothing. No `lane=`:
+                // this inbox is not lane-scoped, and an emitted lane param
+                // would override whatever lane the editor was last on.
+                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}&flash=1`)
               }}
             />
           )}

@@ -182,6 +182,19 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Hidden cells leave every export (AQU-1423). The existing export smoke
+  (`e2e/specs/editor/export.smoke.spec.ts`, row 38 above) already crosses the
+  layers this touches, and hiding adds no new cross-layer contract — it adds a
+  predicate to a scoping step that journey already exercises. So the coverage is
+  narrower and closer to the failure: `src/lib/export/validation-scope.test.ts`
+  for the predicate, `src/lib/export/hidden-cells-export.test.ts` for the
+  producer/consumer seam (real cells through the real scoping step into the REAL
+  text exporters, asserting the parked line is absent in BOTH languages — the
+  failure here is not a missing line but a present one in the source language),
+  `src/components/ExportDialog.hiddenCells.test.tsx` for the round-trip formats
+  and the dialog's per-format note, and
+  `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
+  plan against real Postgres.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

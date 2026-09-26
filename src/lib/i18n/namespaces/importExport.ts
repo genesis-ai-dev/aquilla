@@ -566,6 +566,14 @@ export const importExport = defineNamespace({
     "importExport.dialog.structuralNoteLegacy":
       "This file was imported before we recorded where each paragraph came from, so content " +
       "added or removed here can\u2019t be placed in it.",
+    // AQU-1423: a SECOND line beside the note above, and only on a file that
+    // has cells hidden in the app. Every format that can drop content drops
+    // them; InDesign cannot, and a person handing that file to a typesetter has
+    // to know the parked text is still in it.
+    "importExport.dialog.hiddenNoteDropped": "Cells hidden here are left out.",
+    "importExport.dialog.hiddenNoteKeepsOriginal":
+      "Cells hidden here can\u2019t be dropped from this kind of file, so they keep their " +
+      "original text \u2014 they carry no translation.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -1443,6 +1451,21 @@ export const importExport = defineNamespace({
           "paragraph. Those files are matched to the document by POSITION, where inserting or " +
           "dropping a paragraph would shift every later one onto the wrong text, so added and " +
           "removed content cannot be carried at all.",
+      },
+      "importExport.dialog.hiddenNoteDropped": {
+        description:
+          "AQU-1423. A second line beside the structural note, shown only when this file has " +
+          "cells hidden in the app, for a format that can drop content (USFM, Word, " +
+          "PowerPoint). 'Left out' deliberately matches the removed-cell wording — a reader " +
+          "should not have to work out whether hiding and removing differ in the delivered " +
+          "file, because they do not.",
+      },
+      "importExport.dialog.hiddenNoteKeepsOriginal": {
+        description:
+          "AQU-1423. The same line for a format that CANNOT drop a paragraph — InDesign, " +
+          "sdbh-xml, and a Word/PowerPoint file imported before we recorded paragraph " +
+          "locators. The hidden cell's original text stays in the exported file with no " +
+          "translation over it, which someone handing the file to a typesetter must know.",
       },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",

@@ -299,24 +299,44 @@ export function buildCellData(
   const original = decodeHtmlEntities(source?.value ?? "")
 
   const activeValidators = stats?.activeValidators ?? []
+
+  // AQU-1364: when audit stats are loaded for a cell they are the
+  // authoritative validator list for its CURRENT head. They carry the
+  // optimistic outbox overlay (`lib/sync/audit-stats-overlay.ts`), and
+  // `cell.validate`/`cell.unvalidate` always refetch them
+  // (`isStatsDerivableKind` excludes the validation pair), so an unvalidate
+  // shows up there at once. The denormalized `cells.validated` /
+  // `cells.endorsement_count` columns on the target row only refresh when the
+  // ROW itself is refetched, which a validation event does not trigger.
+  // Preferring the row therefore left a just-unvalidated cell reading
+  // "validated" with a full endorsement count — pinning its health bar at
+  // 100% long after the validation was removed.
+  //
+  // Resolve the precedence exactly once here, mirroring
+  // `validationContribution` in useActiveCellStore.ts, which already resolves
+  // progress this way: audit stats win when present, the row's denormalized
+  // columns are the fallback (no stats loaded yet, local projects,
+  // mid-migration states). Postgres encodes the same
+  // "validators-meet-threshold" gate at the projection layer (AQU-279 made it
+  // threshold-aware; AQU-280 aligned the client progress surfaces onto it), so
+  // the two agree at rest and differ only while the row is stale.
+  const endorsementCount = stats
+    ? activeValidators.length
+    : Math.max(0, target?.endorsementCount ?? source?.endorsementCount ?? 0)
+  const validatedForStatus = stats
+    ? activeValidators.length >= requiredValidations
+    : (target?.validated ?? activeValidators.length >= requiredValidations)
+
   const validationStatus: ValidationStatus =
     !translated.trim()
       ? "empty"
       : activeValidators.length > 0
         ? classifyValidators(activeValidators, username, requiredValidations)
-        : target?.validated
-          ? "full-others"
-          : "none"
-
-  // Prefer the target row's `validated` flag as the source of truth for the
-  // simple "is it green?" UI. When no stats are present, this is the only
-  // available signal — Postgres encodes the "validators-meet-threshold" gate at the
-  // projection layer (AQU-279 made this threshold-aware; AQU-280 aligns all
-  // client progress surfaces to consume this flag). Falls back to the
-  // activeValidators count only when the server flag is absent (local projects
-  // or mid-migration states).
-  const validatedForStatus =
-    target?.validated ?? activeValidators.length >= requiredValidations
+        : stats
+          ? "none"
+          : target?.validated
+            ? "full-others"
+            : "none"
 
   const startMs = source?.startMs ?? target?.startMs ?? null
   const endMs = source?.endMs ?? target?.endMs ?? null
@@ -357,7 +377,7 @@ export function buildCellData(
     type: target?.type ?? source?.type ?? "text",
     status: deriveStatus(translated, validatedForStatus),
     validationStatus,
-    endorsementCount: target?.endorsementCount ?? source?.endorsementCount ?? 0,
+    endorsementCount,
     activeValidators,
     validationHistory: EMPTY_VALIDATION_HISTORY,
     history: EMPTY_HISTORY,

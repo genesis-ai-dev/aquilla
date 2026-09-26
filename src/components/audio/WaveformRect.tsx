@@ -244,8 +244,13 @@ export function WaveformRect({
         <TakeValidatedBadge state={validation} label={validationLabel} testId={testId ? `${testId}-validated` : undefined} />
       )}
 
+      {/* The overlay spans the body to centre its message, but only the
+          message takes the pointer: the corner buttons and the edge lines stay
+          reachable under it (a "Load waveform" take still plays). */}
       {status && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center">{status}</div>
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <div className="pointer-events-auto">{status}</div>
+        </div>
       )}
       {children}
     </div>

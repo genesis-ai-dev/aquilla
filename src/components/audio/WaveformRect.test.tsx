@@ -81,6 +81,22 @@ describe("WaveformRect", () => {
     expect(onSeek).toHaveBeenCalledWith(0.25)
   })
 
+  // Found on the live walk (2026-09-25): the message overlay spans the body,
+  // and while it took the pointer a take showing "missing" or "Load waveform"
+  // could not be played from its corner at all.
+  it("lets the corner buttons through a status message; only the message takes the pointer", () => {
+    render(
+      <WaveformRect
+        peaks={null} height={56} testId="w" onTogglePlay={() => {}} playLabel="Play"
+        status={<button type="button">Load waveform</button>}
+      />,
+    )
+    const message = screen.getByRole("button", { name: "Load waveform" })
+    const overlay = message.parentElement!.parentElement!
+    expect(overlay.className).toContain("pointer-events-none")
+    expect(message.parentElement!.className).toContain("pointer-events-auto")
+  })
+
   it("shows the validated tick", () => {
     render(<WaveformRect peaks={peaks} height={56} validation="full" validationLabel="Validated" testId="w" />)
     expect(screen.getByTestId("w-validated")).toHaveAttribute("aria-label", "Validated")

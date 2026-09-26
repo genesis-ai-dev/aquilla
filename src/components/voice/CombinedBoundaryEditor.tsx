@@ -11,10 +11,12 @@
 // No silence/ASR auto-detection: the dividers ARE the boundaries. They default
 // to a proportional-by-text-length split as a starting guess.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Pause, Play, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { CellWaveform } from "@/components/CellWaveform"
+import { WaveformRect, type WaveformEdge } from "@/components/audio/WaveformRect"
+import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
+import { TRIM_NUDGE_COARSE_SEC, TRIM_NUDGE_SEC } from "@/lib/audio/trim-edit"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -77,12 +79,12 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
   } as unknown as CodexCell), [cells, audioId, url])
 
   const audio = useCellAudio(project, cellForAudio, fileId)
-  const { duration, isPlaying, currentTime, seek, play, pause, setTrim } = audio
+  const { duration, isPlaying, currentTime, seek, play, pause, setTrim, peaks, requestPeaks } = audio
 
-  // The <CellWaveform> below (strategy="eager") decodes peaks on mount, which
-  // also yields `duration` — so we don't issue a second, differently-binned
-  // requestPeaks here (two concurrent decodes raced and surfaced a spurious
-  // "Retry waveform" even when one succeeded).
+  // Decode the clip's peaks on open (it also yields `duration`, which places
+  // the cuts). ONE request at the shared bin count — two differently-binned
+  // decodes once raced and surfaced a spurious "Retry waveform".
+  useEffect(() => { void requestPeaks(WAVEFORM_BINS) }, [requestPeaks])
 
   // N-1 internal cut times (seconds). Initialized proportional to text length
   // once the clip duration is known; the user drags from there.
@@ -103,13 +105,6 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
   // Which segment is currently being previewed (for highlight).
   const [activeSeg, setActiveSeg] = useState<number | null>(null)
 
-  const boxRef = useRef<HTMLDivElement | null>(null)
-  const fracFromX = (clientX: number): number => {
-    const el = boxRef.current
-    if (!el) return 0
-    const r = el.getBoundingClientRect()
-    return clamp((clientX - r.left) / Math.max(1, r.width), 0, 1)
-  }
 
   const segBounds = useCallback((i: number): { start: number; end: number } => {
     const c = cuts ?? []
@@ -118,15 +113,29 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
     return { start, end }
   }, [cuts, n, duration])
 
-  const moveCut = (idx: number, clientX: number) => {
+  const moveCutTo = (idx: number, t: number) => {
     if (!cuts || duration <= 0) return
-    const t = fracFromX(clientX) * duration
     const lo = (idx === 0 ? 0 : cuts[idx - 1]) + 0.05
     const hi = (idx === n - 2 ? duration : cuts[idx + 1]) - 0.05
     const next = cuts.slice()
     next[idx] = clamp(t, lo, hi)
     setCuts(next)
   }
+
+  // Each divider is a split point: the same plain, opaque line every trim edge
+  // is (Sam, 2026-09-25) — the resize cursor is its only decoration.
+  const edges: WaveformEdge[] = cuts && duration > 0
+    ? cuts.map((cut, idx) => ({
+        key: `cut-${idx}`,
+        at: cut / duration,
+        label: t("audio.boundaryEditor.dividerLabel", { index: idx + 1 }),
+        valueText: fmt(cut),
+        editable: true,
+        onDrag: (f: number) => moveCutTo(idx, f * duration),
+        onNudge: (dir: -1 | 1, coarse: boolean) =>
+          moveCutTo(idx, cut + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC)),
+      }))
+    : []
 
   const previewSeg = (i: number) => {
     const { start, end } = segBounds(i)
@@ -177,7 +186,6 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
     }
   }, [cuts, saving, n, duration, cells, project.id, fileId, audioId, url, voiceId, referenceAudioId, username, pause, onSaved, onClose])
 
-  const playheadPct = duration > 0 ? clamp(currentTime / duration, 0, 1) * 100 : 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
@@ -198,68 +206,43 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
           {t("audio.boundaryEditor.description")}
         </p>
 
-        {/* Waveform + dividers. */}
-        <div ref={boxRef} className="relative select-none">
-          <CellWaveform controller={audio} height={72} strategy="eager" />
-
-          {/* Playhead. */}
-          {duration > 0 && (
-            <div className="pointer-events-none absolute inset-y-0 w-px bg-primary/70" style={{ left: `${playheadPct}%` }} aria-hidden />
-          )}
-
-          {/* Segment hit-areas (click to preview) with alternating tint. */}
+        {/* The combined clip, drawn as a timeline chip, one split line per
+            boundary. Click a part to hear that line. */}
+        <WaveformRect
+          peaks={peaks}
+          height={72}
+          playing={isPlaying}
+          progress={duration > 0 ? currentTime / duration : null}
+          onTogglePlay={() => { if (isPlaying) pause(); else void play() }}
+          playLabel={t("editor.audio.play")}
+          stopLabel={t("common.pause")}
+          edges={edges}
+          status={duration <= 0 ? (
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" /> {t("audio.boundaryEditor.loadingClip")}
+            </span>
+          ) : undefined}
+          testId="boundary-waveform"
+        >
+          {/* Segment hit-areas (click to preview), under the split lines. */}
           {cuts && duration > 0 && cells.map((_, i) => {
             const { start, end } = segBounds(i)
-            const leftPct = (start / duration) * 100
-            const widthPct = ((end - start) / duration) * 100
             return (
               <AppTooltip key={i} content={t("audio.boundaryEditor.previewSegment", { snippet: snippet(cells[i], i) })}>
                 <button
                   type="button"
                   onClick={() => previewSeg(i)}
                   className={cn(
-                    "absolute inset-y-0 border-l border-transparent transition-colors",
-                    activeSeg === i ? "bg-primary/15" : i % 2 ? "bg-foreground/[0.03]" : "bg-transparent",
-                    "hover:bg-primary/10",
+                    "absolute inset-y-0 transition-colors",
+                    activeSeg === i ? "bg-foreground/[0.08]" : i % 2 ? "bg-foreground/[0.03]" : "bg-transparent",
+                    "hover:bg-foreground/[0.06]",
                   )}
-                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                  style={{ left: `${(start / duration) * 100}%`, width: `${((end - start) / duration) * 100}%` }}
                 />
               </AppTooltip>
             )
           })}
-
-          {/* Draggable dividers. */}
-          {cuts && duration > 0 && cuts.map((cut, idx) => {
-            const leftPct = (cut / duration) * 100
-            return (
-              <div
-                key={idx}
-                role="slider"
-                aria-label={t("audio.boundaryEditor.dividerLabel", { index: idx + 1 })}
-                aria-valuemin={0}
-                aria-valuemax={Math.round(duration)}
-                aria-valuenow={Math.round(cut)}
-                onPointerDown={(e) => {
-                  e.preventDefault(); e.stopPropagation()
-                  e.currentTarget.setPointerCapture?.(e.pointerId)
-                  moveCut(idx, e.clientX)
-                }}
-                onPointerMove={(e) => { if (e.buttons === 1) { e.stopPropagation(); moveCut(idx, e.clientX) } }}
-                className="absolute inset-y-0 z-10 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
-                style={{ left: `${leftPct}%` }}
-              >
-                <div className="mx-auto h-full w-0.5 bg-primary" />
-                <div className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-primary" />
-              </div>
-            )
-          })}
-
-          {duration <= 0 && (
-            <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" /> {t("audio.boundaryEditor.loadingClip")}
-            </div>
-          )}
-        </div>
+        </WaveformRect>
 
         {/* Per-line list with durations. */}
         <ul className="mt-3 max-h-40 space-y-0.5 overflow-y-auto text-xs">

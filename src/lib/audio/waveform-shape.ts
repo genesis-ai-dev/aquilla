@@ -1,8 +1,8 @@
 // The shape a clip's peaks are drawn as. (AQU-646)
 //
-// Surface-neutral on purpose: the timeline draws it as an SVG path string and
-// the Recording tab draws it onto a canvas, and Sam asked for both to look like
-// the same take. Anything that knows about pixels-per-second, viewBoxes or
+// Surface-neutral on purpose: the timeline chip and the shared waveform
+// rectangle every other surface uses (components/audio/WaveformRect) both draw
+// it as an SVG path, and Sam asked for every surface to look like the same take. Anything that knows about pixels-per-second, viewBoxes or
 // canvas contexts belongs to the caller, not here.
 //
 // A FILLED ENVELOPE, NOT BARS. Bars were inherited from the Recording tab's

@@ -313,3 +313,192 @@ describe("flushNow", () => {
     adapter.close()
   })
 })
+
+// ── Flush triggering (AQU-1003 follow-up) ─────────────────────────────────
+//
+// The adapter used to flush ONLY from the reconciler's `onOpen`. On a desktop
+// that is online and stays connected, the socket never reopens, so offline-
+// routed writes (OFFLINE_ROUTABLE_KINDS in src/lib/sync/outbox.ts) sat in
+// `event_queue` indefinitely while downstream kept working over the same open
+// socket — "Tauri pulls changes down but never pushes them up".
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out")
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
+function queueCommit(id: string): void {
+  store.commit(
+    events.eventQueued({
+      id,
+      projectId: "proj1",
+      fileId: "file1",
+      cellId: "GEN 1:1",
+      kind: "target.cell.commit",
+      payload: { value: "hola" },
+      parentId: "head-1",
+      author: "dev@local.test",
+      schemaVersion: 1,
+      clientTs: new Date(),
+      createdAt: new Date(),
+    }),
+  )
+}
+
+describe("flush triggering", () => {
+  it("flushes a newly queued write without waiting for a reconnect", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 }),
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+    await drainMicrotasks()
+    // The socket is already open and stays open — exactly the state in which
+    // the old reconnect-only trigger never fired again.
+    FakeWebSocket.instances[0].open()
+    await drainMicrotasks()
+    fetchImpl.mockClear()
+
+    queueCommit("q1")
+
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
+
+    adapter.close()
+  })
+
+  it("coalesces writes that land together into one POST", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ accepted: [{ id: "q1" }, { id: "q2" }] }), { status: 200 }),
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 30,
+    })
+    await drainMicrotasks()
+    fetchImpl.mockClear()
+
+    queueCommit("q1")
+    queueCommit("q2")
+
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    const body = JSON.parse(init.body as string) as { events: Array<{ id: string }> }
+    expect(body.events.map((e) => e.id)).toEqual(["q1", "q2"])
+
+    adapter.close()
+  })
+
+  it("retries a failed flush on a backoff rather than spinning", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("offline")
+    })
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 20,
+      maxFlushRetryMs: 500,
+    })
+    await drainMicrotasks()
+    fetchImpl.mockClear()
+
+    queueCommit("q1")
+
+    // Retried at ~20ms, ~40ms, ~80ms: several attempts, nowhere near the
+    // thousands a re-entrant subscription→flush→revert loop would produce.
+    await waitFor(() => fetchImpl.mock.calls.length >= 2)
+    await new Promise((r) => setTimeout(r, 150))
+    expect(fetchImpl.mock.calls.length).toBeLessThan(12)
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toMatchObject({
+      status: "pending",
+    })
+
+    adapter.close()
+  })
+
+  it("stops flushing once closed", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 }),
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 10,
+    })
+    await drainMicrotasks()
+    fetchImpl.mockClear()
+
+    adapter.close()
+    queueCommit("q1")
+    await new Promise((r) => setTimeout(r, 60))
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toMatchObject({
+      status: "pending",
+    })
+  })
+})
+
+describe("flush on construction", () => {
+  it("sends work queued by a previous session without waiting for the socket", async () => {
+    // The relaunch case: the app was closed with unsynced writes still in
+    // `event_queue`. Nothing opens the FakeWebSocket here and nothing calls
+    // flushNow(), so the POST can only come from the construction-time arm.
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 }),
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+    expect(FakeWebSocket.instances[0].readyState).not.toBe(FakeWebSocket.OPEN)
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
+
+    adapter.close()
+  })
+})

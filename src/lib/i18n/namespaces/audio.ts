@@ -314,8 +314,17 @@ export const audio = defineNamespace({
       "Saved recordings jump to the next line. Uploaded files stay here.",
     "audio.recordingModal.autoAdvanceOffDescription":
       "Saved recordings stay on this line, and so do uploaded files.",
+    "audio.recordingModal.filmFollowTitle": "Film plays along",
+    "audio.recordingModal.filmFollowOnDescription": "Playing a take plays the film with it",
+    "audio.recordingModal.filmFollowOffDescription": "The film stays still while you listen",
     "audio.recordingModal.countdownTitle": "Countdown",
-    "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
+    "audio.recordingModal.countdownFastDescription": "3-2-1, half a second each",
+    "audio.recordingModal.countdownNormalDescription": "3-2-1, one second each",
+    "audio.recordingModal.countdownSlowDescription": "3-2-1, a second and a half each",
+    "audio.recordingModal.countdownSpeedOff": "Off",
+    "audio.recordingModal.countdownSpeedFast": "Fast",
+    "audio.recordingModal.countdownSpeedNormal": "Normal",
+    "audio.recordingModal.countdownSpeedSlow": "Slow",
     "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
     "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
@@ -1854,9 +1863,10 @@ export const audio = defineNamespace({
       "audio.recordingModal.settingsAriaLabel": {
         description:
           "Screen-reader name of the gear button at the end of the recorder's " +
-          "bottom strip. It opens a small menu holding three preferences: whether " +
-          "to move on to the next line after each save, whether a 3-2-1 countdown " +
-          "runs before each take, and whether that countdown beeps.",
+          "bottom strip. It opens a small menu of recorder preferences: whether " +
+          "to move on to the next line after each save, whether the film plays " +
+          "along when a take is played back, how fast the 3-2-1 countdown runs " +
+          "before each take (or whether it runs at all), and whether it beeps.",
       },
       "audio.recordingModal.countdownTitle": {
         description:
@@ -1865,11 +1875,71 @@ export const audio = defineNamespace({
           "count-in itself, not an instruction.",
         maxLength: 24,
       },
-      "audio.recordingModal.countdownOnDescription": {
+      "audio.recordingModal.filmFollowTitle": {
         description:
-          "One-line description under that preference while the countdown is ON: " +
-          "pressing Record counts three, two, one and then starts capturing.",
+          "Name of a preference in the recorder's gear menu, shown only on lines " +
+          "that have a film: whether playing a take back (after Stop, or the saved " +
+          "take on the ready screen) also plays the film in sync with it, so the " +
+          "take can be judged against the picture. A short label, not an instruction.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.filmFollowOnDescription": {
+        description:
+          "One-line description under that preference while it is ON: pressing " +
+          "play on a take also plays the film from the matching moment.",
         maxLength: 40,
+      },
+      "audio.recordingModal.filmFollowOffDescription": {
+        description:
+          "One-line description under that preference while it is OFF: the film " +
+          "does not move when a take is played back.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownFastDescription": {
+        description:
+          "One-line description under that preference while the FAST count is " +
+          "chosen: pressing Record counts three, two, one at half a second per " +
+          "number, then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownNormalDescription": {
+        description:
+          "One-line description under that preference while the NORMAL count is " +
+          "chosen (the default): pressing Record counts three, two, one at one " +
+          "second per number, then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownSlowDescription": {
+        description:
+          "One-line description under that preference while the SLOW count is " +
+          "chosen: pressing Record counts three, two, one at a second and a half " +
+          "per number, then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownSpeedOff": {
+        description:
+          "First of four side-by-side choices under 'Countdown' in the recorder's " +
+          "gear menu: no count at all — pressing Record starts capturing at once. " +
+          "Four choices share a narrow row, so keep it to one short word.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedFast": {
+        description:
+          "Second of the four countdown choices: count three, two, one at half a " +
+          "second per number. One short word; the row is narrow.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedNormal": {
+        description:
+          "Third of the four countdown choices, and the default: count three, two, " +
+          "one at one second per number. One short word; the row is narrow.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedSlow": {
+        description:
+          "Fourth of the four countdown choices: count three, two, one at a second " +
+          "and a half per number. One short word; the row is narrow.",
+        maxLength: 8,
       },
       "audio.recordingModal.countdownOffDescription": {
         description:

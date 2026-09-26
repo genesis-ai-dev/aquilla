@@ -8,14 +8,15 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, Clapperboard, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { setRecordingFilmFollow, useRecordingFilmFollow } from "@/lib/store/recording-film-follow-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
@@ -60,7 +61,14 @@ import {
 } from "@/lib/store/recording-video-collapsed-pref"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
-import { useRecordingCountdown, setRecordingCountdown } from "@/lib/store/recording-countdown-pref"
+import {
+  COUNTDOWN_SPEEDS,
+  countdownStepMs,
+  setRecordingCountdownSpeed,
+  useRecordingCountdownSpeed,
+  type CountdownSpeed,
+} from "@/lib/store/recording-countdown-pref"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
@@ -315,10 +323,15 @@ export function AudioRecordingModal({
   // counting phase at all — no numbers, no GO, no tones, no film lead-in — for
   // the operator grinding through short lines who has stopped needing the cue.
   // Persisted per device; ON is the default, so nothing changes uninvited.
-  const countdownEnabled = useRecordingCountdown()
+  // AQU-1210: one four-way choice — Off, or a count of 0.5s / 1s / 1.5s.
+  const countdownSpeed = useRecordingCountdownSpeed()
+  const countdownStep = countdownStepMs(countdownSpeed)
+  const countdownEnabled = countdownStep != null
   // SUB-50: saving jumps to the next cell — great on a pass down the file,
   // wrong when working one line over and over. Persisted per device.
   const autoAdvance = useRecordingAutoAdvance()
+  // AQU-1210: playing a take back plays the film along with it (a setting).
+  const filmFollow = useRecordingFilmFollow()
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // SUB-52 + the button-focus rule below need each other: Space on a focused
   // button activates THAT button, so the dialog must not OPEN with a button
@@ -778,13 +791,14 @@ export function AudioRecordingModal({
   // and again when a take lands in PREVIEW, where `leadIn` is null and
   // `running` is false, so the surface simply rewinds and stays paused.
   //
-  // Running the film under the preview player is a NON-GOAL, not an oversight:
-  // unmuted it talks over the take, and muted it drifts the moment the user
-  // scrubs the audio, because scrubbing an <audio> publishes nothing for a
-  // picture to follow. Mirroring one element's clock onto another is a real sync
-  // engine, and this codebase has deliberately centralised that behind the two
-  // video singletons the surface is forbidden to touch. Review-against-picture
-  // is a legitimate want and a separate piece of work.
+  // Playing the take back then plays the picture along with it (AQU-1210 —
+  // Sam asked for it, as a setting). That USED to be a non-goal, because a
+  // bare <audio controls> published nothing for a picture to follow and a
+  // scrub left the film behind. The preview is now the take's own player, so
+  // the surface is handed the take's position every frame (`follow`) and
+  // re-seeks on drift — no clock is mirrored through the video singletons,
+  // which the surface still may not touch. The film's sound keeps its own
+  // mute setting.
   useEffect(() => {
     if (phase === "counting" || phase === "preview") setArmNonce((n) => n + 1)
   }, [phase])
@@ -899,7 +913,7 @@ export function AudioRecordingModal({
       // start() falls through to its own un-armed path and the take begins when
       // the mic does. No artificial wait is inserted to cover that: the whole
       // point of the preference is not waiting.
-      if (!countdownEnabled) {
+      if (countdownStep == null) {
         void recorder.start()
         return
       }
@@ -914,11 +928,13 @@ export function AudioRecordingModal({
       // always had.
       void recorder.prewarm()
       // The film rolls the run-up to the line and lands on it at zero. Fixed
-      // from the countdown's own length so the two cues cannot drift apart.
-      setLeadIn({ zeroAtMs: Date.now() + COUNTDOWN_FROM * 1000 })
+      // from the countdown's own length so the two cues cannot drift apart —
+      // at whatever speed the count runs.
+      setLeadIn({ zeroAtMs: Date.now() + COUNTDOWN_FROM * countdownStep })
       countdown.start({
         beep: beepEnabled,
         from: COUNTDOWN_FROM,
+        stepMs: countdownStep,
         onDone: () => {
           // ZERO. The countdown says "now", the film is on the line's first
           // frame, and the take begins — one instant, not three. `leadIn` is
@@ -931,7 +947,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdownEnabled, countdown, recorder, session?.jwt, online, stayOnThisLine])
+  }, [beepEnabled, countdownStep, countdown, recorder, session?.jwt, online, stayOnThisLine])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -1589,6 +1605,39 @@ export function AudioRecordingModal({
   // The take on the ready screen wears its own track's colour (Sam,
   // 2026-09-26), as it does on the timeline and in the Audio view.
   const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
+
+  // ── AQU-1210: FILM PLAY-ALONG ─────────────────────────────────────────────
+  // Where the take being played back belongs in the film: where its sample
+  // zero will sit on the timeline, plus how far into it the player is. For the
+  // preview that is where Save WILL put it (the same composed window Save
+  // sends, so a moved head plays against the picture it will land on); for the
+  // ready screen's take it is where the timeline puts it now.
+  const previewAnchorSec = (() => {
+    if (!filmFollow || !stoppedTake || !previewDefaults || activeCell.startTime == null) return null
+    const { laneOffsetMs } = composeTakeWindow({
+      cue: { startTime: activeCell.startTime },
+      defaults: previewDefaults,
+      operator: operatorTrim
+        ? {
+            startMs: operatorTrim.start == null ? null : Math.round(operatorTrim.start * 1000),
+            endMs: operatorTrim.end == null ? null : Math.round(operatorTrim.end * 1000),
+          }
+        : null,
+      durationMs: previewDurationMs,
+    })
+    return laneOffsetMs != null
+      ? activeCell.startTime + laneOffsetMs / 1000
+      : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
+  })()
+  const readyAnchorSec = filmFollow && readyAtt
+    ? targetChipGeom(activeCell, readyAtt as unknown as ChipAtt)?.anchor ?? null
+    : null
+  const filmFollowTarget =
+    displayPhase === "preview" && previewAnchorSec != null
+      ? { filmSec: previewAnchorSec + preview.currentTime, playing: preview.isPlaying }
+      : (displayPhase === "idle" || displayPhase === "error") && readyAnchorSec != null
+        ? { filmSec: readyAnchorSec + readyAudio.currentTime, playing: readyAudio.isPlaying }
+        : null
   const targetOverrun = targetSec != null && elapsedMs / 1000 > targetSec
   const isNearLimit = recorder.isNearLimit
   // From the countdown onwards there is a take being made or already made, and
@@ -1655,6 +1704,7 @@ export function AudioRecordingModal({
               running={displayPhase === "recording"}
               armNonce={armNonce}
               leadIn={leadIn}
+              follow={filmFollowTarget}
             />
             <AppTooltip content={t("audio.recordingModal.collapseFilmTooltip")}>
               <Button
@@ -2480,7 +2530,7 @@ export function AudioRecordingModal({
                     </Button>
                   }
                 />
-                <PopoverContent align="end" side="top" className="w-64 p-1.5">
+                <PopoverContent align="end" side="top" className="w-72 p-1.5">
                   <button
                     type="button"
                     data-testid="rec-auto-advance"
@@ -2500,30 +2550,71 @@ export function AudioRecordingModal({
                       </span>
                     </span>
                   </button>
+                  {/* AQU-1210: play-along. Only offered on a line with a film —
+                      everywhere else there is nothing for it to do. */}
+                  {filmUrl != null && (
+                    <button
+                      type="button"
+                      data-testid="rec-film-follow"
+                      aria-pressed={filmFollow}
+                      onClick={() => setRecordingFilmFollow(!filmFollow)}
+                      className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
+                    >
+                      <Clapperboard
+                        className={cn("mt-0.5 h-4 w-4 shrink-0", filmFollow ? "text-foreground" : "text-muted-foreground/50")}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium">{t("audio.recordingModal.filmFollowTitle")}</span>
+                        <span className="block text-[11px] leading-snug text-muted-foreground">
+                          {filmFollow
+                            ? t("audio.recordingModal.filmFollowOnDescription")
+                            : t("audio.recordingModal.filmFollowOffDescription")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   {/* AQU-1209. Sits ABOVE the beep because it governs it: with
                       the count off there is nothing left to beep, which is what
-                      the disabled state below says. */}
-                  <button
-                    type="button"
-                    data-testid="rec-countdown"
-                    aria-pressed={countdownEnabled}
-                    onClick={() => setRecordingCountdown(!countdownEnabled)}
-                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
-                  >
+                      the disabled state below says. AQU-1210 (Sam, 25 Sep):
+                      one four-way choice — Off, Fast, Normal, Slow — where the
+                      on/off switch was. */}
+                  <div data-testid="rec-countdown" data-speed={countdownSpeed} className="flex w-full items-start gap-2.5 rounded-md p-2">
                     {countdownEnabled ? (
                       <Timer className="mt-0.5 h-4 w-4 shrink-0" />
                     ) : (
                       <TimerOff className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
                     )}
-                    <span className="min-w-0">
-                      <span className="block text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
-                      <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {countdownEnabled
-                          ? t("audio.recordingModal.countdownOnDescription")
-                          : t("audio.recordingModal.countdownOffDescription")}
+                    <span className="min-w-0 flex-1 space-y-1.5">
+                      <span className="block">
+                        <span className="block text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
+                        <span className="block text-[11px] leading-snug text-muted-foreground">
+                          {countdownSpeed === "off"
+                            ? t("audio.recordingModal.countdownOffDescription")
+                            : countdownSpeed === "fast"
+                              ? t("audio.recordingModal.countdownFastDescription")
+                              : countdownSpeed === "slow"
+                                ? t("audio.recordingModal.countdownSlowDescription")
+                                : t("audio.recordingModal.countdownNormalDescription")}
+                        </span>
                       </span>
+                      <SegmentTabs<CountdownSpeed>
+                        value={countdownSpeed}
+                        onValueChange={setRecordingCountdownSpeed}
+                        aria-label={t("audio.recordingModal.countdownTitle")}
+                        listClassName="w-full"
+                        options={COUNTDOWN_SPEEDS.map((speed) => ({
+                          value: speed,
+                          label: speed === "off"
+                            ? t("audio.recordingModal.countdownSpeedOff")
+                            : speed === "fast"
+                              ? t("audio.recordingModal.countdownSpeedFast")
+                              : speed === "slow"
+                                ? t("audio.recordingModal.countdownSpeedSlow")
+                                : t("audio.recordingModal.countdownSpeedNormal"),
+                        }))}
+                      />
                     </span>
-                  </button>
+                  </div>
                   {/* Not applicable rather than gone: the operator keeps their
                       beep setting, sees why it cannot be reached, and gets it
                       back untouched the moment the count is on again. */}

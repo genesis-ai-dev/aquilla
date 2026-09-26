@@ -230,3 +230,40 @@ describe("the take after Stop", () => {
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
   })
 })
+
+// AQU-1210 (Sam, 2026-09-25): on a film line, playing the kept part plays the
+// film along with it — from the moment the take will sit on once saved.
+describe("the film plays along with the preview", () => {
+  const filmProject = {
+    ...project, files: [{ id: "f1", name: "ep.vtt", coreMediaUrl: "https://cdn.example.com/ep.mp4" }],
+  } as unknown as ProjectRecord
+
+  it("rolls the film from the line's first frame when the kept part plays", async () => {
+    const ready = vi.spyOn(window.HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(4)
+    // happy-dom plays nothing; stand in for the element reporting that it started.
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+      this.onplay?.(new Event("play"))
+      return Promise.resolve()
+    })
+    try {
+      render(
+        <AudioRecordingModal
+          open project={filmProject} cells={[cell]} activeCellId="c1" username="sam"
+          onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+        />,
+      )
+      await previewShown()
+      const film = screen.getByTestId("rec-video") as HTMLVideoElement
+      expect(play.mock.contexts).not.toContain(film)
+
+      fireEvent.click(screen.getByTestId("rec-preview-waveform-play"))
+      // The kept part starts at the pre-roll's end, which Save anchors on the
+      // cue: the film rolls from the line's first frame, 10s.
+      await waitFor(() => expect(play.mock.contexts).toContain(film))
+      expect(film.currentTime).toBeCloseTo(10, 1)
+    } finally {
+      ready.mockRestore()
+      play.mockRestore()
+    }
+  })
+})

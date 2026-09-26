@@ -13022,11 +13022,13 @@ export function ProjectWorkspace() {
                     // own comments in TimelineEditor for why absent, not
                     // disabled.
                     onRenameTrack={canReorderTracks ? handleRenameTrack : undefined}
+                    // Colour rides the same clearance alone (Sam, 2026-09-26):
+                    // how a track looks, not what the timeline holds.
+                    onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
                     trackEditing={
                       canEditTracks
                         ? {
                             onAdd: handleAddTrack,
-                            onSetColor: handleSetTrackColor,
                             onLeaveFolder: handleLeaveFolder,
                             onMoveToScope: handleMoveTrackToScope,
                             onCreateFolderFrom: handleCreateFolderFrom,

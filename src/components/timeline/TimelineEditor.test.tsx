@@ -2117,7 +2117,6 @@ describe("TimelineEditor — rows come from the track model", () => {
 
   const editingActions = () => ({
     onAdd: vi.fn((_spec: { kind: string; name: string }) => "new-track-id"),
-    onSetColor: vi.fn(),
     onLeaveFolder: vi.fn(),
     onMoveToScope: vi.fn(),
     onCreateFolderFrom: vi.fn((_ids: readonly string[]) => "new-folder-id"),
@@ -2434,8 +2433,8 @@ describe("TimelineEditor — rows come from the track model", () => {
   // The picker dialog that briefly stood between the menu and the colour went
   // with the custom colours that needed it.
   it("recolours every selected track in one call, one value each", () => {
-    const editing = editingActions()
-    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const onSetTrackColor = vi.fn()
+    render(selectable({ trackEditing: editingActions(), onSetTrackColor, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
@@ -2443,22 +2442,44 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.click(screen.getByText("Colour 2 tracks"))
     fireEvent.click(screen.getByText("Magenta"))
 
-    expect(editing.onSetColor).toHaveBeenCalledTimes(1)
+    expect(onSetTrackColor).toHaveBeenCalledTimes(1)
     // ONE CALL, ONE VALUE PER TRACK — the payload's shape never depended on
     // where the colour came from. The value is the preset's ID, not its hex:
     // what an id LOOKS like is this build's business, not the project's.
-    const [updates] = editing.onSetColor.mock.calls[0] as [{ trackId: string; color: string }[]]
+    const [updates] = onSetTrackColor.mock.calls[0] as [{ trackId: string; color: string }[]]
     expect([...updates].sort((a, b) => a.trackId.localeCompare(b.trackId))).toEqual([
       { trackId: "target-audio", color: "magenta" },
       { trackId: "trk-es", color: "magenta" },
     ])
   })
 
+  // Sam, 2026-09-26: colour rides the maintainer clearance ALONE, like rename —
+  // the Audio view offers it on projects that never turn track editing on, so
+  // the timeline must not hide it behind the setting either.
+  it("offers a colour with track editing OFF, and nothing that restructures", () => {
+    const onSetTrackColor = vi.fn()
+    render(selectable({ onSetTrackColor, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    fireEvent.click(screen.getByText("Colour"))
+    fireEvent.click(screen.getByText("Cyan"))
+    expect(onSetTrackColor).toHaveBeenCalledWith([{ trackId: "target-audio", color: "cyan" }])
+    fireEvent.contextMenu(named("Spanish"))
+    expect(screen.queryByText(/^Delete/)).toBeNull()
+    expect(screen.queryByText(/folder/i)).toBeNull()
+  })
+
+  it("offers no colour without the clearance", () => {
+    render(selectable({ onRenameTrack: undefined, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    expect(screen.queryByText(/^Colour/)).toBeNull()
+  })
+
   // Stage 3c, Sam's revision: ALL of them or none. Colouring "the two of these
   // five that can take one" is a partial success the menu cannot describe.
   it("offers a colour only when EVERY selected track can take one", () => {
-    const editing = editingActions()
-    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    render(selectable({ trackEditing: editingActions(), onSetTrackColor: vi.fn(), tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     // Two colourable rows on their own: offered.
     fireEvent.click(named("Target audio"))
@@ -3616,7 +3637,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
         })}
         onRetimeSubtitle={() => {}}
         onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
-          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onAdd: vi.fn(), onLeaveFolder: vi.fn(),
           onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
         }}
       />,
@@ -3642,7 +3663,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
         })}
         onRetimeSubtitle={() => {}}
         onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
-          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onAdd: vi.fn(), onLeaveFolder: vi.fn(),
           onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
         }}
       />,
@@ -3780,7 +3801,7 @@ describe("TimelineEditor — the lifted row follows the drop it is aiming at", (
         tracks={folded()}
         onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
         trackEditing={{
-          onAdd: () => "x", onSetColor: () => {}, onLeaveFolder: () => {},
+          onAdd: () => "x", onLeaveFolder: () => {},
           onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {},
         }}
       />,

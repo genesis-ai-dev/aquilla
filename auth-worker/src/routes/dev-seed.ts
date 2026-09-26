@@ -198,6 +198,11 @@ async function upsertOrgSettingFloor(
       settings = {}
     }
   }
+  // A later dev login must not undo a floor an owner just set. The seed only
+  // fills the key in when the org has never chosen one — otherwise switching
+  // to alice/carol via /__dev/login snaps "only owners" back to the local
+  // contributor default and the roster looks unsaved.
+  if (row && typeof settings[key] === "number" && Number.isFinite(settings[key])) return
   settings[key] = value
   const json = JSON.stringify(settings)
   if (row) {

@@ -1278,6 +1278,26 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
   })
 
+  it("hides the Team card as well when the roster floor is owner-only", async () => {
+    // The Team card lists the same people. Leaving it open for a maintainer,
+    // under "Only maintainers & owners can see this", is the roster floor
+    // appearing not to stick.
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: false,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
+  })
+
   it("hides the card entirely when the roster floor is above the caller's role", async () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
@@ -1343,6 +1363,20 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: ROLE.VIEWER }))
     expect(card).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("does not offer the floor picker to a project owner who is not an org owner", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
   })
 
   it("does not offer the floor picker to a caller who cannot edit it", async () => {

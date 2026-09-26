@@ -384,7 +384,7 @@ export function ProjectOverview() {
   // roster read.
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
   const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
-  const { activeOrgId, refreshAccessibleProjects } = useActiveOrg()
+  const { activeOrgId, activeOrg, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -490,12 +490,21 @@ export function ProjectOverview() {
   // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
   // is what gates viewing here per useOrgSettings' AD-12 max-wins contract —
   // a project-only invitee's project.syncRole can exceed their (absent) org
-  // role. Editing the floor is still an org-role (owner-only) action, so
-  // canEditVisibility below intentionally reads the org role, not the
-  // project role.
+  // role. Editing the floor is an org-owner action. Passing the project role
+  // into useOrgSettings made a project owner who is only an org maintainer
+  // look allowed to save; the server 403'd and the badge snapped back to
+  // "only maintainers & owners".
   const projectRoleLevel = project?.syncRole?.level ?? null
-  const orgSettings = useOrgSettings(portfolioOrgId, projectRoleLevel, projectRoleLevel)
-  const canEditVisibility = canEditRosterProgressFloor(projectRoleLevel)
+  const orgRoleLevel = activeOrg?.role?.level ?? null
+  const orgSettings = useOrgSettings(portfolioOrgId, orgRoleLevel, projectRoleLevel)
+  const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
+  // Names on the Team card are the roster. A progress floor of maintainer
+  // must not keep that card (and its "maintainers & owners" badge) open after
+  // the roster floor was raised to owner-only.
+  const teamNamesFloor = Math.max(
+    orgSettings.memberProgressViewMinRole,
+    orgSettings.rosterViewMinRole,
+  )
 
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
@@ -2198,7 +2207,7 @@ export function ProjectOverview() {
                   on the org overview) — a lower-role account must not see
                   this card exist at all, not an empty/placeholder version. */}
               <SectionVisibilityGate
-                minRole={orgSettings.memberProgressViewMinRole}
+                minRole={teamNamesFloor}
                 viewerRoleLevel={projectRoleLevel}
                 ready={orgSettings.hasFetched}
               >

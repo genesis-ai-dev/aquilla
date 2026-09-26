@@ -16,7 +16,16 @@ const LANE = ""
 
 let t: TestDb
 
-beforeAll(async () => { t = await makeTestDb() })
+beforeAll(async () => {
+  t = await makeTestDb()
+  // AQU-1423 / AQU-1422: `cells.hidden_at` is migration 0112, which lands with
+  // AQU-1422. This branch is cut from dev without it (one issue = one branch),
+  // so the suite adds the column it reads rather than skipping the cases that
+  // matter — these tests exercise the real query against real Postgres either
+  // way. `IF NOT EXISTS` makes the statement a no-op once 0112 is in
+  // schema.sql, at which point these four lines can go.
+  await t.pg.query(`ALTER TABLE cells ADD COLUMN IF NOT EXISTS hidden_at BIGINT`)
+})
 afterAll(async () => { await t.close() })
 beforeEach(async () => { await t.reset() })
 
@@ -45,6 +54,16 @@ async function translation(cellId: string, value: string, lane = LANE, validated
     `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, validated, event_id, last_edit_at)
      VALUES ($1, $2, $3, 'target', $4, $5, $6, $7, 1)`,
     [PROJECT, FILE, cellId, lane, value, validated ? 1 : 0, `tgt-${cellId}-${lane}`],
+  )
+}
+
+/** AQU-1422's "Hide cell": the source row is still there, with `hidden_at`
+ *  stamped. Source side only — hiding is per cell, not per lane. */
+async function hide(cellId: string): Promise<void> {
+  await t.pg.query(
+    `UPDATE cells SET hidden_at = 1
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+    [PROJECT, FILE, cellId],
   )
 }
 
@@ -288,5 +307,141 @@ describe("buildUsfmExportPlan — validated-only (AQU-1148)", () => {
     await deleteEvent("c4", { cellId: "c4", value: "x", canonicalRef: "GEN 1:4" })
 
     expect([...((await validatedPlan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+  })
+})
+
+// AQU-1423: a hidden cell is indistinguishable from an untranslated one from
+// here — both simply have no translation to write — so without this the hide is
+// silently undone at export and the parked verse ships in the SOURCE language.
+// That is the bug, and it is invisible: the file is valid and looks finished.
+describe("buildUsfmExportPlan — verses the editor HID (AQU-1423)", () => {
+  it("removes a hidden verse from the file, marker and all", async () => {
+    await verse("c4", "GEN 1:4")
+    await verse("c5", "GEN 1:5")
+    await hide("c4")
+
+    expect([...((await plan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+  })
+
+  it("removes it even when it HAS a translation", async () => {
+    // The dangerous case, and the reason `remove` rather than a blank override:
+    // an absent or empty override is the serializer's "fall back to the
+    // client's original words" signal, so there is no value that means
+    // "emit nothing". The serializer tests `remove` BEFORE the override lookup.
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Traduction terminée.")
+    await hide("c4")
+
+    const { overrides, edits } = await plan()
+    expect([...(edits.remove ?? [])]).toEqual(["GEN 1:4"])
+    // The override may still be present — `remove` wins — but if that ordering
+    // ever changes, this is the assertion that says which one moved.
+    expect(overrides.get("GEN 1:4")).toBe("Traduction terminée.")
+  })
+
+  it("leaves the verses around it alone", async () => {
+    await verse("c4", "GEN 1:4")
+    await verse("c5", "GEN 1:5")
+    await verse("c6", "GEN 1:6")
+    await translation("c5", "Cinq.")
+    await hide("c4")
+    await hide("c6")
+
+    const { overrides, edits } = await plan()
+    expect([...(edits.remove ?? [])].sort()).toEqual(["GEN 1:4", "GEN 1:6"])
+    expect(overrides.get("GEN 1:5")).toBe("Cinq.")
+  })
+
+  it("carries deleted AND hidden verses together", async () => {
+    // Independent lists that mean the same thing to the serializer. A change
+    // that replaced one with the other would silently undo every deletion the
+    // moment anybody hid a cell.
+    await verse("c5", "GEN 1:5")
+    await hide("c5")
+    await deleteEvent("c4", { cellId: "c4", value: "x", canonicalRef: "GEN 1:4" })
+
+    expect([...((await plan()).edits.remove ?? [])].sort()).toEqual(["GEN 1:4", "GEN 1:5"])
+  })
+
+  it("keeps a hidden ADDED cell out of the additions", async () => {
+    // An added cell has no verse address, so there is nothing for `remove` to
+    // drop — nothing else would stop its text being written into the verse it
+    // follows, and it would arrive in the delivered file as finished content.
+    await verse("c4", "GEN 1:4")
+    await addedCell("a1", "c4")
+    await addedCell("a2", "c4")
+    await translation("a1", "Ligne visible.")
+    await translation("a2", "Ligne masquée.")
+    await hide("a2")
+
+    expect((await plan()).edits.appendAfter?.get("GEN 1:4")).toEqual(["Ligne visible."])
+  })
+
+  it("still places an addition that FOLLOWS a hidden added cell", async () => {
+    // The anchor chain walks through the hidden cell to reach the verse. Losing
+    // that would silently drop the visible addition too — a different bug, with
+    // the same symptom (content missing from the export).
+    await verse("c4", "GEN 1:4")
+    await addedCell("a1", "c4")
+    await addedCell("a2", "a1")
+    await translation("a1", "Masquée.")
+    await translation("a2", "Visible.")
+    await hide("a1")
+
+    expect((await plan()).edits.appendAfter?.get("GEN 1:4")).toEqual(["Visible."])
+  })
+
+  it("brings the verse back when the cell is shown again", async () => {
+    // Reversibility is the whole design of "Hide cell", and it has to reach the
+    // delivered file — otherwise a hide is a one-way door in the export.
+    await verse("c4", "GEN 1:4")
+    await hide("c4")
+    expect([...((await plan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+
+    await t.pg.query(
+      `UPDATE cells SET hidden_at = NULL
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c4' AND side = 'source'`,
+      [PROJECT, FILE],
+    )
+    expect((await plan()).edits.remove).toBeUndefined()
+  })
+
+  it("leaves a file with nothing hidden exactly as it was", async () => {
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Quatre.")
+
+    const { overrides, edits } = await plan()
+    expect([...overrides]).toEqual([["GEN 1:4", "Quatre."]])
+    expect(edits.remove).toBeUndefined()
+    expect(edits.appendAfter).toBeUndefined()
+  })
+
+  it("does not read a hide off a TARGET row", async () => {
+    // Hiding is per cell, not per lane: the flag lives on the shared source row.
+    // A target row created AFTER a hide carries no flag of its own, so a plan
+    // that consulted target rows would let exactly the row that must stay
+    // parked reappear — and, here, would park a visible one.
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Quatre.")
+    await t.pg.query(
+      `UPDATE cells SET hidden_at = 1
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c4' AND side = 'target'`,
+      [PROJECT, FILE],
+    )
+
+    const { overrides, edits } = await plan()
+    expect(edits.remove).toBeUndefined()
+    expect(overrides.get("GEN 1:4")).toBe("Quatre.")
+  })
+
+  it("does not reach into another file or project", async () => {
+    await verse("c4", "GEN 1:4")
+    await t.pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, hidden_at, event_id, last_edit_at)
+       VALUES ($1, 'other-file', 'c4', 'source', '', 's', 'GEN 1:4', 1, 'h-other', 1)`,
+      [PROJECT],
+    )
+
+    expect((await plan()).edits.remove).toBeUndefined()
   })
 })

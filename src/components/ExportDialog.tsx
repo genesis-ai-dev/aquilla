@@ -54,6 +54,9 @@ import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/ex
 import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
+  dropHiddenCells,
+  hasHiddenCells,
+  hiddenRoundTripRemovals,
   scopeCellsForExport,
   scopeRoundTripCells,
   validatedOnly as isValidatedOnlyMode,
@@ -464,6 +467,41 @@ export function ExportDialog({
     return null
   }, [nativeFormatId, cells])
 
+  /**
+   * AQU-1423: what this native export does with cells PARKED here ("Hide cell",
+   * AQU-1422), in plain words, and only on a file that actually has some.
+   *
+   * A second line rather than a rewrite of the four `structuralNote` strings
+   * above, for two reasons. Added and removed content is a property of the
+   * FILE's history and those notes show whenever the format is native; hiding is
+   * reversible and current, so a file with nothing parked should say nothing
+   * about it. And the two answers diverge: every format that can drop content
+   * drops a hidden cell, but IDML cannot, and that difference is exactly what a
+   * person about to hand the file to a typesetter needs told.
+   *
+   * Null on a rendered format (md, txt, csv, …) — those build the file from the
+   * cell list, which no longer contains the hidden cell at all, so there is
+   * nothing surprising to explain.
+   */
+  const hiddenNote = useMemo(() => {
+    if (!nativeFormatId) return null
+    if (!hasHiddenCells(cells)) return null
+    // No locators means no paragraph can be placed OR dropped, so a hidden cell
+    // keeps the client's words here as well — the same answer IDML gives, for a
+    // different reason, and the legacy note above already explains why.
+    if ((nativeFormatId === "docx" || nativeFormatId === "pptx") && !hasPackageLocators(cells)) {
+      return "importExport.dialog.hiddenNoteKeepsOriginal" as const
+    }
+    if (nativeFormatId === "docx" || nativeFormatId === "pptx" || nativeFormatId === "usfm") {
+      return "importExport.dialog.hiddenNoteDropped" as const
+    }
+    // IDML, and sdbh-xml: their engines refuse structural change by design.
+    if (nativeFormatId === "idml" || nativeFormatId === "sdbh-xml") {
+      return "importExport.dialog.hiddenNoteKeepsOriginal" as const
+    }
+    return null
+  }, [nativeFormatId, cells])
+
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -611,9 +649,14 @@ export function ExportDialog({
             !isDefaultTrackSlot(slot) && Boolean(c.attachments?.[audioId]?.url),
         )
       }) === true
-    if (hasTake(audioCells)) return audioCells!
-    if (hasTake(cells)) return cells
-    return audioCells ?? cells
+    // AQU-1423: parked cells leave the audio deliverables too. Applied to the
+    // RESULT rather than to each candidate, so the "which list has the takes"
+    // decision above is unchanged — a file whose only recording hangs off a
+    // hidden cell still picks the list that holds it, and then drops that one
+    // segment, instead of silently falling through to a take-less list.
+    if (hasTake(audioCells)) return dropHiddenCells(audioCells!)
+    if (hasTake(cells)) return dropHiddenCells(cells)
+    return dropHiddenCells(audioCells ?? cells)
   }, [audioCells, cells])
 
   /**
@@ -1125,7 +1168,14 @@ export function ExportDialog({
         // indistinguishable from an untranslated one, and the exporter keeps
         // the client's original words for a line somebody deliberately took
         // out. Fails soft to an empty list — never blocks the download.
-        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        // AQU-1423: and what it has PARKED. A hidden cell's paragraph leaves
+        // the document by the same mechanism, because clearing its translation
+        // alone would ship the client's original words for a cell somebody
+        // deliberately hid.
+        const removedCells = [
+          ...await fetchRemovedCells({ projectId, fileId: activeFileId, getToken }),
+          ...hiddenRoundTripRemovals(cells),
+        ]
         // AQU-1148: a non-validated cell keeps its place (the package is located
         // through it) but carries no translation, so the exporter leaves that
         // paragraph's original words alone — as it already does when untranslated.
@@ -1156,7 +1206,10 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         // See the docx branch above.
-        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const removedCells = [
+          ...await fetchRemovedCells({ projectId, fileId: activeFileId, getToken }),
+          ...hiddenRoundTripRemovals(cells),
+        ]
         // AQU-1148: see the docx branch above.
         const result = await exportPptx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
         const baseName = buildExportStem(false)
@@ -1442,7 +1495,12 @@ export function ExportDialog({
         }
         const byCellId = new Map<string, string>()
         for (const f of projectFileCells) {
-          for (const c of f.cells) {
+          // AQU-1423: a parked cell contributes no translation, so the skeleton
+          // keeps its own words for that sense — the answer the dialog's hidden
+          // note gives for this format, whose injector cannot drop content.
+          // (This branch does not apply the validated-only content mode either;
+          // that predates this change and is not narrowed here.)
+          for (const c of dropHiddenCells(f.cells)) {
             if (c.translated) byCellId.set(c.id, c.translated)
           }
         }
@@ -1525,8 +1583,12 @@ export function ExportDialog({
         // source-language filler in a validated-only file. Not applied to the
         // audio cues: cue text is the recording's own script, and audio
         // validation is a separate flag (AQU-508 / AQU-965).
+        // AQU-1423: the cues get the hidden filter but NOT the content mode —
+        // hiding is a property of the cell, validation is the person's choice
+        // about this download, and the comment above says why the mode skips
+        // them.
         const filteredCells = opts?.audioCues
-          ? (audioCells ?? [])
+          ? dropHiddenCells(audioCells ?? [])
           : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
@@ -2073,6 +2135,7 @@ export function ExportDialog({
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
               {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
               {structuralNote && ` ${t(structuralNote)}`}
+              {hiddenNote && ` ${t(hiddenNote)}`}
             </p>
           </div>
         )}

@@ -641,7 +641,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.titleLabel": "Project title",
     "projectSettings.systemPrompt.label": "System prompt",
     "projectSettings.systemPrompt.navDescription":
-      "What this project is producing and how translations should read",
+      "The standing instructions behind every AI draft — how the AI should write, " +
+      "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
     "projectSettings.voice.studioLabel": "Voice Studio",
     "projectSettings.localModels.onDeviceLabel": "On-device models",

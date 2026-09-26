@@ -310,7 +310,8 @@ export const agent = defineNamespace({
     "agent.brief.prefillFromText": "Pre-fill from text",
     "agent.brief.summaryOutOfDate": "Summary out of date",
     "agent.brief.capturePurpose":
-      "Capture this project's purpose, audience, and standards so the AI drafts to your brief.",
+      "Capture this project's purpose, audience, and standards so the AI drafts to " +
+      "your brief — or skip it and start translating without one.",
     "agent.brief.createBrief": "Create brief",
     "agent.brief.noSummaryYet": "No summary generated yet.",
     "agent.brief.editBrief": "Edit brief",

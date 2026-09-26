@@ -52,6 +52,13 @@ export type EventKind =
   // cells.event_id (the AD-9 staleness comparison depends on the source head
   // moving only when content changes) and replays unconditionally on rebuild.
   | 'source.cell.reanchor'
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row. Deliberately NOT a
+  // reuse of source.cell.delete, which hard-deletes the projection row: the
+  // whole point is that the source text, every lane's translation, recordings,
+  // comments and validations survive and come back on show. Hiding is per CELL,
+  // not per lane, which is why one source-side kind covers every language.
+  | 'source.cell.visibility.set'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -273,6 +280,10 @@ export interface EventPayloads {
     valueHtml?: string
     /** Optional canonical current target HTML; text/history stay untouched. */
     targetHtml?: string
+  }
+  'source.cell.visibility.set': {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
   }
 
   // ── Target-side ────────────────────────────────────────────────────────

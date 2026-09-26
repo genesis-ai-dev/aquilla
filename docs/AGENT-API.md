@@ -1015,3 +1015,57 @@ API. Four gaps, all on the path every partner USFM import takes.
   into a `ProjectSetup` body with every blank named. `GET /api/v1/external/skills` serves
   the sequencing prose itself, so the workflow lives in one server-owned place instead of
   each partner's chat history.
+
+## Status addendum (2026-09-26, AQU-1426 — HideCell / ShowCell)
+
+AQU-1422 gave the editor a reversible **Hide cell**: a per-cell park flag that takes a row
+out of translation and out of every export without deleting anything. Two commands give an
+agent the same act, implemented in `sync-worker/src/external/commands-hide-cell.ts`:
+
+- **`HideCell`** `{ fileId, cellId }` → `source.cell.visibility.set` with `hidden: true`.
+- **`ShowCell`** `{ fileId, cellId }` → the same kind with `hidden: false`.
+
+**Why they exist.** Before them an agent's only way to get a cell out of a file was
+`DeleteCell`, which hard-deletes the row and is refused outright while the cell owns a
+comment, a validator or an audio take. A stray heading or an import artefact needed the
+destructive tool or a human. Hiding deletes nothing: source text, every lane's translation,
+recordings, comments and validations survive and come back untouched on `ShowCell`.
+
+Both are **sugar over `EmitEvents`**, exactly like `RenameFile` — prepare desugars them and
+hands the plan to the EmitEvents engine, so existence checks, prepare-time event ids, the
+approval gate, the provenance envelope and the `/events` perimeter round-trip are the same
+code path every other command uses. The staged plan you read back therefore holds
+`source.cell.visibility.set` events, not a `HideCell` entry.
+
+The kind is deliberately **NOT** on `ALLOWED_EMIT_KINDS`: the raw EmitEvents door still
+refuses it, and these two named commands are the only way in. That is what makes the act
+discoverable (`describe_command`, the role-filtered index, `get_capabilities.commands`) and
+what lets the discovery surfaces say the thing that matters — this is the reversible one.
+
+Rules:
+
+- **`PROJECT_LEAD`**, taken from `REQUIRED_ROLE['source.cell.visibility.set']` rather than
+  restated, so this surface cannot drift below the perimeter that would refuse the event.
+  A Contributor-scoped credential gets the standard role error and nothing is staged.
+- Several may share one changeset, but they cannot mix with other command kinds, and hides
+  cannot mix with shows — the approval page groups its effect lines by event kind, and one
+  sentence cannot honestly describe both directions. Naming one cell twice is refused too.
+- Prepare refuses a cell that does not exist, or one already in the state asked for: a plan
+  whose whole effect is nothing is not worth a human's approval.
+- Commit re-checks that the **source row** still exists (the flag lives there, so a surviving
+  target row is not enough) but deliberately does **not** re-check the current visibility: the
+  compiled event *sets* the flag rather than toggling it, so a human hiding the same cell
+  between prepare and approval leaves commit landing exactly the state that was approved.
+- Hiding is per **cell**, not per lane — one command hides the row in every target language.
+- Cell reads over REST and the MCP `read_content` tool carry an explicit `hidden` boolean per
+  cell, stamped at the agent boundary (`stampCellVisibility` in `read-routes.ts`). The shared
+  serializer still OMITS the key on a visible row for the SPA's sake (a 30k-cell Bible file
+  would pay ~15 bytes a row for a field false on all but a handful); an agent gets the
+  explicit boolean because an absent key is indistinguishable from "this server does not know
+  about hiding". The flag rides the SOURCE row, so a cell's visibility is resolved from there
+  and stamped onto every row of that cell; a cell whose source row is not in the payload at
+  all (possible on a `since=` delta read) carries no `hidden` key rather than a false one.
+
+Out of scope here, each its own issue: the editor's own menu item and reveal toggle
+(AQU-1422), exports (AQU-1423), progress/health/drafting/search (AQU-1424), the Codex
+migration (AQU-1425).

@@ -42,6 +42,13 @@ import {
 } from './commands-membership'
 import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
 import { renameFileToEmitEvents } from './commands-rename-file'
+import {
+  isVisibilityCommand,
+  requestedHidden,
+  visibilityToEmitEvents,
+  VISIBILITY_MAX_COMMANDS,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 import { prepareSetBrief } from './commands-set-brief'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
@@ -419,6 +426,95 @@ export async function prepareChangesetCore(
       id,
       autonomyMode,
       renameFileToEmitEvents(renameFiles),
+      env,
+      resolvedRole.level,
+    )
+  }
+
+  // HideCell / ShowCell (AQU-1426): sugar over EmitEvents, like RenameFile.
+  // Desugared AFTER its own live-state preconditions, because the EmitEvents
+  // engine collects cell references only for the kinds it knows — it would stage
+  // a hide of a cell that does not exist without a word. The role gate above
+  // already enforced the PROJECT_LEAD floor (requiredRoleForCommand returns
+  // `source.cell.visibility.set`'s own perimeter floor verbatim), so a plan the
+  // caller could never commit is refused rather than staged.
+  const visibility: VisibilityCommand[] = validated.commands.filter(isVisibilityCommand)
+  if (visibility.length > 0) {
+    if (visibility.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    if (visibility.length > VISIBILITY_MAX_COMMANDS) {
+      return errorResponse(
+        'validation_failed',
+        `too many HideCell/ShowCell commands in one changeset (max ${VISIBILITY_MAX_COMMANDS})`,
+      )
+    }
+    // One DIRECTION per changeset. Not a technical limit — the approval page
+    // groups its effect lines by event kind, and hide and show are one kind, so
+    // a mixed plan would render as a single sentence that is a lie in one
+    // direction. "Park these" and "bring these back" are also two different
+    // decisions to ask a human to consent to.
+    const wantHidden = requestedHidden(visibility[0])
+    const mixed = visibility.find((c) => requestedHidden(c) !== wantHidden)
+    if (mixed) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot share one changeset — stage the hides and the shows as two plans',
+      )
+    }
+    // A cell named twice in one plan is a caller mistake, not a batch: the
+    // second command is a no-op the approver cannot see, and the "already in
+    // that state" check below would not catch it (both are checked against the
+    // same live row).
+    const seen = new Set<string>()
+    for (const c of visibility) {
+      const key = laneCellKey(c.fileId, c.cellId)
+      if (seen.has(key)) {
+        return errorResponse(
+          'validation_failed',
+          `${c.kind} names cell ${c.cellId} in file ${c.fileId} twice — one entry per cell`,
+        )
+      }
+      seen.add(key)
+    }
+    const visibilityStates = await resolveCellStates(
+      db,
+      projectId,
+      visibility.map((c) => ({ fileId: c.fileId, cellId: c.cellId })),
+    )
+    for (const c of visibility) {
+      const state = visibilityStates.get(laneCellKey(c.fileId, c.cellId))
+      if (!state?.sourceExists) {
+        return errorResponse(
+          'validation_failed',
+          `cell ${c.cellId} does not exist in file ${c.fileId}`,
+        )
+      }
+      // Refusing the no-op is the point: an agent that believes it hid a cell it
+      // had already hidden has lost track of the file, and staging a plan whose
+      // whole effect is nothing wastes a human's approval. Commit does NOT
+      // re-check this — the compiled event SETS a flag rather than toggling one,
+      // so a human hiding the same cell in between leaves commit landing exactly
+      // the state that was approved (idempotent), not a stale plan.
+      if (state.sourceHidden === requestedHidden(c)) {
+        return errorResponse(
+          'validation_failed',
+          requestedHidden(c)
+            ? `cell ${c.cellId} in file ${c.fileId} is already hidden`
+            : `cell ${c.cellId} in file ${c.fileId} is not hidden`,
+        )
+      }
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      visibilityToEmitEvents(visibility),
       env,
       resolvedRole.level,
     )

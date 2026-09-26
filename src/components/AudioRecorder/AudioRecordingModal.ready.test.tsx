@@ -156,6 +156,18 @@ describe("the selected take, before recording", () => {
     expect(player.selected.at(-1)).toBe("audio-c1-3.wav")
   })
 
+  // Live walk, 2026-09-25: a 3.06s take read "3.1s" above a bar reading
+  // "0:03.0". Both round the tenths down now.
+  it("states the length exactly as the bar under it does", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-3.wav",
+      attachments: { "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3", durationMs: 3060 }) },
+    })
+    render(modalEl())
+    expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 3 · 3.0s")
+    expect(screen.getByText("0:03.0")).toBeInTheDocument()
+  })
+
   it("shows today's empty window on a line with no take", () => {
     render(modalEl())
     expect(screen.queryByTestId("rec-ready-take")).toBeNull()

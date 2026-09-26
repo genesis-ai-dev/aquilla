@@ -2039,7 +2039,9 @@ export function AudioRecordingModal({
                     <p className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
                         label: readyAtt.label ?? t("audio.takesStrip.takeFallback"),
-                        seconds: ((readyKeptMs ?? 0) / 1000).toFixed(1),
+                        // Tenths rounded DOWN, as the target bar below
+                        // prints them — the two must never disagree.
+                        seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
                       })}
                     </p>
                     <TakeWaveform

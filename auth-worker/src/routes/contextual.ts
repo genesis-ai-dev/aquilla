@@ -23,6 +23,7 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { visibleSourceSql } from "../lib/hidden-cells-scope"
 import { ROLE, type Env } from "../types"
 import { errorJson, requireRole } from "./_contextual-helpers"
 import { runAiGuard } from "../lib/ai-budget"
@@ -866,7 +867,10 @@ async function readinessCellCounts(
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''`,
+          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            -- AQU-1424: a parked cell is not untranslated work waiting for
+            -- autopilot, so it leaves both of these counts.
+            AND ${visibleSourceSql('s')}`,
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()

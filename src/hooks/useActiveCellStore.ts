@@ -13,6 +13,7 @@ import {
 } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { isStructuralCell } from "@/lib/cells/structural"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
@@ -110,6 +111,10 @@ export interface CellSummary {
   sequenceIndex?: number
   medium?: CellData["medium"]
   transcription?: string
+  /** AQU-1424: true while this cell is parked with "Hide cell". Mirrors
+   *  `CellData.hidden`, which is read from the SOURCE row only. Absent on a
+   *  visible cell. */
+  hidden?: boolean
   selectedGeneratedVoiceAudioId?: string
   /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
   hasOwnTake?: boolean
@@ -724,6 +729,10 @@ export class CellStore {
       transcription: view.transcription,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
+      // AQU-1424: so the surfaces that read SUMMARIES rather than rows — the
+      // chapter health builder's `isExcluded`, and batch drafting's target list —
+      // can apply the same predicate without reaching back into the store's rows.
+      hidden: view.hidden,
     }
     const entry = {
       version,
@@ -1734,6 +1743,14 @@ export class CellStore {
       && previousSource.canonicalRef === source.canonicalRef
       && (previousTarget.canonicalRef ?? previousSource.canonicalRef) === (target.canonicalRef ?? source.canonicalRef)
       && (previousSource.type ?? previousTarget.type) === (source.type ?? target.type)
+      // AQU-1424: a row whose ONLY change is its hidden flag is not "unchanged" —
+      // it moves the file's and the chapter's progress, so it has to take the
+      // full-rebuild branch. The whole-file `replaceRows` path gets this for free
+      // (`sameRow` deep-compares), but this per-cell path enumerates its fields,
+      // and the targeted read after a hide is exactly the one that lands here.
+      // Without it the percentage stayed put until the next reload, which is the
+      // thing this slice promises not to happen.
+      && previousSource.hidden === source.hidden
       && navigationStartMs(previousSource, previousTarget) === navigationStartMs(source, target)
       && sameJsonData(previousSource.metadata ?? previousTarget.metadata ?? null, source.metadata ?? target.metadata ?? null)
       && countNumericFootnotes(previousTarget.value) === countNumericFootnotes(target.value)
@@ -2072,7 +2089,20 @@ export class CellStore {
       // else. This snapshot is the local overlay the sidebar paints while an
       // edit is in flight; without the same rule the file bar would jump to
       // the unsubtracted total on every keystroke and settle back after.
-      if (source && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
+      // AQU-1424: a cell parked with "Hide cell" is not work, so it leaves BOTH
+      // the numerator and the denominator — hiding the last untranslated verse of
+      // a 10-cell file reads 100%, and showing it again reads 90%. The server's
+      // projection applies the same predicate, so this local overlay and the
+      // authoritative figure agree instead of the bar jumping between them.
+      //
+      // Read off the SOURCE row, never the target: hiding is per cell, not per
+      // lane, and a target row created after the hide carries no flag of its own.
+      // Deliberately a SEPARATE condition from the structural test beside it —
+      // structural is project policy about which cells count, hidden is a person
+      // taking one row out of the work, and collapsing them would make a project
+      // that counts headings also start counting parked ones.
+      if (source && !isHiddenCell(source)
+        && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
         const audit = this.ctx.auditStats.get(id)
         const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
         const authoritative = audit !== undefined || target?.endorsementCount !== undefined
@@ -2203,8 +2233,16 @@ export class CellStore {
         // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
         // still draws a square for a heading, and jumping to the chapter still
         // lands on it. Only the fraction beside the chapter name changes.
+        const sourceRow = this.sourceById.get(cellId)
+        // AQU-1424: the chapter's fraction excludes parked cells, on BOTH id
+        // lists this runs over — the display list (which drops them outright) and
+        // the store's own `order` (which keeps them, and is what the sidebar's
+        // chapter grid reads). Gating here rather than at the caller is what
+        // makes the two agree; the grid still draws the square, and the health
+        // builder's `isExcluded` is what colours it "not counted".
+        if (isHiddenCell(sourceRow)) continue
         if (this.ctx.countStructural === false
-          && isStructuralCell(this.sourceById.get(cellId)?.type)) continue
+          && isStructuralCell(sourceRow?.type)) continue
         total += 1
         const index = displayIndexByCellId.get(cellId)
         const value = index === undefined ? 0 : flags[index]

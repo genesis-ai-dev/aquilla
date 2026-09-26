@@ -151,7 +151,9 @@ const STATE_FILE = ".migrate-state.json"
 // sweep re-derives every project once.
 // v3: milestone cells are retracted instead of migrated as pairs (AQU-930).
 // v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
-const CONTENT_LOGIC_VERSION = 4
+// v5: cells Codex parked with the eye icon (`data.hidden`) migrate hidden —
+//     source.cell.visibility.set, NOT a retraction (AQU-1425).
+const CONTENT_LOGIC_VERSION = 5
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }

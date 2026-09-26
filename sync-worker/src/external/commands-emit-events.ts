@@ -90,7 +90,16 @@ export const EMIT_EVENTS_MAX_EVENTS = 200
  * kind that forgets its phrasing degrades to today's output rather than an
  * empty line.
  */
-export function emitKindEffectLabel(kind: string, count: number): string {
+export function emitKindEffectLabel(
+  kind: string,
+  count: number,
+  /** AQU-1426: one representative payload from the group. Only consulted by
+   *  kinds whose sentence depends on the payload — `source.cell.visibility.set`
+   *  carries BOTH hide and show, and "N cells changed visibility" is not a thing
+   *  a translation manager can consent to. Prepare refuses a plan that mixes the
+   *  two directions, so one sample speaks for the whole group. */
+  sample?: Record<string, unknown>,
+): string {
   const n = count
   const s = (one: string, many: string) => (n === 1 ? `${one}` : `${n} ${many}`)
   switch (kind) {
@@ -104,6 +113,10 @@ export function emitKindEffectLabel(kind: string, count: number): string {
     case 'cell.unvalidate': return `Remove validation from ${s('a translation', 'translations')}`
     case 'cell.backtranslation.set': return `Save a back-translation for ${s('a line', 'lines')}`
     case 'target.cell.repin': return `Clear the "source changed" flag on ${s('a line', 'lines')}`
+    case 'source.cell.visibility.set':
+      return sample?.hidden === false
+        ? `Bring ${s('a hidden line', 'hidden lines')} back into the file`
+        : `Hide ${s('a line', 'lines')} from translators and from every export`
     case 'file.rename': return `Rename ${s('a file', 'files')}`
     case 'file.delete': return `Move ${s('a file', 'files')} to the trash`
     case 'file.restore': return `Restore ${s('a file', 'files')} from the trash`

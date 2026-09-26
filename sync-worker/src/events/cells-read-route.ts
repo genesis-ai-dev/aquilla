@@ -110,6 +110,10 @@ interface CellRowRaw {
   metadata: Record<string, unknown> | string | null
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
   lane_id: string | null
+  /** AQU-1422: epoch-ms the cell was parked, NULL when visible. Only ever set
+   *  on the shared source row — see the column comment in db/postgres/schema.sql.
+   *  Absent on a pre-0112 database or a hand-built fixture. */
+  hidden_at?: number | null
 }
 
 interface CellRowOut {
@@ -140,6 +144,13 @@ interface CellRowOut {
   metadata: Record<string, unknown> | null
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
   laneId?: string | null
+  /**
+   * AQU-1422: true while this cell is parked. OMITTED (not `false`) on a visible
+   * row — a 30k-cell Bible file would otherwise pay ~15 bytes per row for a field
+   * that is false on effectively all of them. Only ever emitted on the SOURCE
+   * row; consumers resolve a cell's visibility from there.
+   */
+  hidden?: boolean
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -200,6 +211,9 @@ function mapRow(row: CellRowRaw): CellRowOut {
     cameraState: row.camera_state,
     metadata: parseMetadata(row.metadata),
     laneId: row.lane_id ?? null,
+    // Absent, not `false`, on a visible row — keeps this shape identical to
+    // cell-row-serialize.ts's (guarded by the by-ids byte-identity test).
+    ...(row.hidden_at != null ? { hidden: true as const } : {}),
   }
 }
 
@@ -717,7 +731,7 @@ export async function handleCellsReadRequest(
     "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state, metadata, lane_id"
+    "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell

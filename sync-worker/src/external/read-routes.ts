@@ -224,6 +224,48 @@ async function handleExternalFiles(
   return Response.json(paginate(body.files, offset, limit))
 }
 
+/**
+ * AQU-1426: give every cell row an EXPLICIT `hidden` boolean before it leaves
+ * the agent boundary.
+ *
+ * The internal serializer OMITS the key on a visible row on purpose (AQU-1422) —
+ * it serves the SPA, where a 30k-cell Bible file would pay ~15 bytes a row for a
+ * field that is false on all but a handful. An agent reading the API has the
+ * opposite problem: an absent key is indistinguishable from "this server does
+ * not know about hiding", and the whole point of the flag is that an agent can
+ * SEE what is parked and skip it. So the explicit boolean is stamped here, at
+ * the boundary, exactly where the authorship scrub is — not by loosening the
+ * shared serializer.
+ *
+ * The flag lives on the SOURCE row only (hiding is per cell, not per lane), so a
+ * cell's visibility is resolved from its source row and stamped onto every row
+ * of that cell — a target row of a parked cell reads `hidden: true` rather than
+ * making the caller join the two itself. A cell with no source row IN THIS
+ * PAYLOAD (a `since=` delta read can carry a lone target row) keeps no `hidden`
+ * key at all: reporting `false` there would be asserting a visibility this
+ * response never read.
+ */
+export function stampCellVisibility(cells: readonly unknown[]): unknown[] {
+  const isRow = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v)
+  const hiddenByCell = new Map<string, boolean>()
+  for (const row of cells) {
+    if (!isRow(row) || row.side !== "source") continue
+    const cellId = row.cellId
+    if (typeof cellId !== "string") continue
+    hiddenByCell.set(cellId, row.hidden === true)
+  }
+  if (hiddenByCell.size === 0) return [...cells]
+  return cells.map((row) => {
+    if (!isRow(row)) return row
+    const cellId = row.cellId
+    if (typeof cellId !== "string") return row
+    const hidden = hiddenByCell.get(cellId)
+    if (hidden === undefined) return row
+    return { ...row, hidden }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/projects/:projectId/files/:fileId/cells
 // ---------------------------------------------------------------------------
@@ -270,12 +312,14 @@ async function handleExternalFileCells(
   // edited by Anna" is the whole point — so the scrub happens HERE, at the
   // agent boundary, rather than in the shared serializer.
   const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
-  const cells = await scrubAuthorField(
-    body.cells ?? [],
-    "lastEditor",
-    policy,
-    env.SYNC_SECRET_KEY,
-    projectId,
+  const cells = stampCellVisibility(
+    await scrubAuthorField(
+      body.cells ?? [],
+      "lastEditor",
+      policy,
+      env.SYNC_SECRET_KEY,
+      projectId,
+    ),
   )
   await recordAgentRead(env.AQUILLA_PG, {
     credentialId: authed.ctx.credential.credentialId,

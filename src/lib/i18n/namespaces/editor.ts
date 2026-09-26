@@ -172,13 +172,6 @@ export const editor = defineNamespace({
     "editor.attachments.openInDrawer": "Show in the attachments panel",
     "editor.attachments.cellGroupUnlabelled": "Unlabelled cell",
 
-    // — Audio crop popover ————————————————————————————————————————
-    "editor.crop.open": "Crop audio",
-    "editor.crop.title": "Crop",
-    "editor.crop.reset": "Reset to full clip",
-    "editor.crop.start": "Crop start",
-    "editor.crop.end": "Crop end",
-
     // — Empty / loading / error states where the table would be ——————
     "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
     "editor.file.loadErrorTitle": "Couldn't load this file",
@@ -2449,33 +2442,6 @@ export const editor = defineNamespace({
           "has no canonical reference (no verse address) to name it by. A noun " +
           "phrase standing in for that missing label.",
         maxLength: 20,
-      },
-      "editor.crop.open": {
-        description:
-          "Screen-reader name of the scissors button that opens the crop popover " +
-          "for a cell's recording. Cropping trims the start and end of the clip " +
-          "non-destructively — nothing is re-encoded or deleted.",
-      },
-      "editor.crop.title": {
-        description:
-          "Heading of the crop popover. A noun naming the operation (trimming the " +
-          "start/end of an audio clip), not an imperative.",
-        maxLength: 14,
-      },
-      "editor.crop.reset": {
-        description:
-          "Screen-reader name of the small reset control in the crop popover, which " +
-          "clears both trim points so the whole recording plays again.",
-      },
-      "editor.crop.start": {
-        description:
-          "Screen-reader name of the draggable handle marking where the cropped " +
-          "clip begins. A noun phrase naming the handle, not a command.",
-      },
-      "editor.crop.end": {
-        description:
-          "Screen-reader name of the draggable handle marking where the cropped " +
-          "clip stops. A noun phrase naming the handle, not a command.",
       },
       "editor.file.loadErrorTitleNamed": {
         description:

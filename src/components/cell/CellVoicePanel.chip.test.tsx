@@ -63,11 +63,23 @@ describe("CellVoicePanel take tools", () => {
     expect(tools!.compareDocumentPosition(seek) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
-  it("keeps crop, volume, and clone visible without hover", () => {
+  it("keeps volume and clone visible without hover", () => {
     renderChip()
-    expect(screen.getByRole("button", { name: "Crop audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Volume" })).toBeVisible()
     expect(screen.getByRole("button", { name: /clone/i })).toBeVisible()
+  })
+
+  // Sam, 2026-09-25: trim right on the card. The scissors popover is retired.
+  it("trims on the waveform itself, with no crop popover", () => {
+    renderChip()
+    expect(screen.queryByRole("button", { name: "Crop audio" })).toBeNull()
+    expect(screen.getByRole("slider", { name: "Start of the kept audio" })).toBeInTheDocument()
+    expect(screen.getByRole("slider", { name: "End of the kept audio" })).toBeInTheDocument()
+  })
+
+  it("plays from the waveform's corner, not a button over its middle", () => {
+    renderChip()
+    expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
   })
 
   it("makes the narrator select as tall as the take-tool buttons", () => {
@@ -106,9 +118,8 @@ describe("CellVoicePanel take tools", () => {
     expect(volume).toHaveAttribute("aria-expanded", "true")
   })
 
-  it("shows tooltips on crop and volume", async () => {
+  it("shows a tooltip on volume", async () => {
     renderChip()
-    await expectTooltip(screen.getByRole("button", { name: "Crop audio" }), "Crop audio")
     await expectTooltip(screen.getByRole("button", { name: "Volume" }), "Volume")
   })
 

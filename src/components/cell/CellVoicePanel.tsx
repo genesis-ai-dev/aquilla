@@ -17,16 +17,14 @@
 // keeps its own element. The app-wide audio-coordinator still guarantees
 // only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CopyPlus, Pause, Play, Volume2, VolumeX } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { CopyPlus, Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
-import { CropButton } from "./CropEditor"
+import { TakeWaveform } from "@/components/audio/TakeWaveform"
+import { takeBadgeState } from "./audio-validation-state"
 import { VoiceCombobox } from "@/components/voice/VoiceCombobox"
-import { audioIdSeededWith } from "@/lib/audio/upload"
-import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -83,70 +81,6 @@ function fmtTime(s: number): string {
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
 
-// Deterministic bar heights (%) seeded off the cell id, so a line's waveform is
-// stable across renders. Purely decorative — the real clip isn't decoded; the
-// strip doubles as the seek surface. Heights are taller toward the middle.
-function buildBars(seed: string, n: number): number[] {
-  let s = 0
-  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0
-  const out: number[] = []
-  for (let i = 0; i < n; i++) {
-    s = (s * 1103515245 + 12345) >>> 0
-    const r = (s % 1000) / 1000
-    const env = Math.sin((i / Math.max(1, n - 1)) * Math.PI) // 0 → 1 → 0
-    out.push(Math.round(22 + (30 + r * 48) * (0.45 + 0.55 * env)))
-  }
-  return out
-}
-
-/** A waveform-styled seek surface: decorative bars that fill as the clip plays
- *  and seek on click/drag. Keeps slider semantics for a11y. */
-function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f: number) => void; seed: string }) {
-  const t = useT()
-  const ref = useRef<HTMLDivElement | null>(null)
-  const bars = useMemo(() => buildBars(seed, 56), [seed])
-  const fracFromClientX = (clientX: number): number => {
-    const el = ref.current
-    if (!el) return 0
-    const r = el.getBoundingClientRect()
-    return clamp01((clientX - r.left) / Math.max(1, r.width))
-  }
-  const handleDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture?.(e.pointerId)
-    onSeek(fracFromClientX(e.clientX))
-  }
-  const handleMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.buttons !== 1) return
-    onSeek(fracFromClientX(e.clientX))
-  }
-  const active = clamp01(fraction)
-  return (
-    <div
-      ref={ref}
-      role="slider"
-      aria-label={t("common.seek")}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(active * 100)}
-      tabIndex={0}
-      onPointerDown={handleDown}
-      onPointerMove={handleMove}
-      className="flex h-full touch-none items-center gap-px"
-    >
-      {bars.map((h, i) => {
-        const on = (i + 0.5) / bars.length <= active
-        return (
-          <span
-            key={i}
-            className={cn("flex-1 rounded-md transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
-            style={{ height: `${h}%` }}
-          />
-        )
-      })}
-    </div>
-  )
-}
 
 function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
   const t = useT()
@@ -279,25 +213,8 @@ export function CellVoicePanel({
 
   const ownedAudio = useCellAudio(project, cellForAudio, cell.fileId)
   const audio = controller ?? ownedAudio
-  const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
+  const { currentTime, duration, play, setVolume } = audio
 
-  // Round 5: is the panel playing the SHARED imported source clip? Then the
-  // playback window is the cell's section on the film timeline (never the
-  // whole film), and the crop tool goes away — a crop here would silently
-  // overwrite the section's stored source trim (retime the section in the
-  // timeline instead).
-  const isSourceClip =
-    cell.medium === "media" &&
-    playableId != null &&
-    playableId === cell.selectedAudioId &&
-    !audioIdSeededWith(playableId, cell.id)
-  const sectionWindow =
-    isSourceClip &&
-    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
-    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
-    cell.endTime > cell.startTime
-      ? { start: cell.startTime, end: cell.endTime }
-      : null
 
   // Volume is a per-device preference (localStorage), pushed into the player.
   const pref = useCellPref(projectId, cell.id)
@@ -311,28 +228,15 @@ export function CellVoicePanel({
   // itself — the attachment's trimStartMs/trimEndMs, which the timeline chip
   // and the Recording tab read too. It used to be copied into a per-device,
   // per-LINE preference, so switching the line to another take carried the old
-  // take's trim across. Source clips keep their section as the window: that is
-  // the section's timing, not a trim, and is never edited here.
+  // take's trim across. The shared SOURCE clip's window is its section's
+  // timing (round 5), never a trim, and is not edited here — retime the
+  // section on the timeline.
   const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
   const kept = keptWindowSec(cell, playableId, playableAtt)
-  const storedStart = sectionWindow ? sectionWindow.start : kept.start
-  const storedEnd = sectionWindow ? sectionWindow.end : kept.end
-  // While a line is being dragged, the drag's value leads; the stored window
-  // catches up once the trim event lands (the optimistic overlay makes that
-  // near-instant). Reset whenever the take changes.
-  const [draftTrim, setDraftTrim] = useState<{ audioId: string | null; start: number | null; end: number | null } | null>(null)
-  const draftLive = draftTrim && draftTrim.audioId === playableId ? draftTrim : null
-  const trimStart = draftLive ? draftLive.start : storedStart
-  const trimEnd = draftLive ? draftLive.end : storedEnd
-  useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim, playableId])
+  const isSourceClip = kept.kind === "section"
 
-  const changeTrim = useCallback((start: number | null, end: number | null) => {
-    if (!playableId || isSourceClip) return
-    setDraftTrim({ audioId: playableId, start, end })
-  }, [playableId, isSourceClip])
-
-  // Persist on release (or after an arrow-key nudge): one event per gesture,
-  // not one per pointer move.
+  // Trimmed right on the card (Sam, 2026-09-25; the Crop popover is retired).
+  // One event per finished drag or nudge.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
     if (!playableId || isSourceClip) return
     const att = cell.attachments?.[playableId]
@@ -350,14 +254,7 @@ export function CellVoicePanel({
       author: username,
     })
   }, [playableId, isSourceClip, cell.attachments, cell.fileId, cell.id, cell.selectedAudioId, projectId, username, targetLang])
-  // The crop popover reports every pointer move; debounce its persist so a drag
-  // is one event.
-  const cropCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const cropChange = useCallback((start: number | null, end: number | null) => {
-    changeTrim(start, end)
-    if (cropCommitTimer.current) clearTimeout(cropCommitTimer.current)
-    cropCommitTimer.current = setTimeout(() => commitTrim(start, end), 500)
-  }, [changeTrim, commitTrim])
+
 
   // Generate → autoplay: when the magic button generates a fresh take, start
   // playback as soon as the attachment lands (a re-render flips `hasTake`).
@@ -390,12 +287,6 @@ export function CellVoicePanel({
     void generate(true, voiceId)
   }, [isVoicing, canGenerate, projectId, onAssign, generate])
 
-  // The play/pause button only appears once a line is voiced.
-  const onPrimary = useCallback(() => {
-    if (isVoicing || !hasTake) return
-    if (isPlaying) pause()
-    else void play()
-  }, [isVoicing, hasTake, isPlaying, pause, play])
 
   // Order the cast for the combobox list: most-recently-used voices first so the
   // ones you reach for are right at the top. The whole cast (60+ voices) lives
@@ -423,6 +314,7 @@ export function CellVoicePanel({
     ...(targetLang ? { targetLang } : {}),
   })
   const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
+  const cardBadge = playableAtt ? takeBadgeState(playableAtt, username, audioValidation.validationRequirement) : null
 
   if (isParatext) return null
 
@@ -433,14 +325,11 @@ export function CellVoicePanel({
     )
   }
 
-  const audioLoading = audioState === "loading"
-  // Scrubber maps over the cropped window (full clip when untrimmed).
-  const effStart = trimStart ?? 0
-  const effEnd = trimEnd ?? duration
+  // The running time is over the part that plays (the whole clip untrimmed).
+  const effStart = kept.start ?? 0
+  const effEnd = kept.end ?? duration
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
-  const fraction = effDur > 0 ? effCurrent / effDur : 0
-  const primaryLabel = isPlaying ? t("common.pause") : t("editor.audio.play")
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
@@ -455,11 +344,6 @@ export function CellVoicePanel({
           variant="inline"
         />
       )}
-      {/* Round 5: no crop on the shared source clip — its window is the
-          section's timing; retime the section in the timeline. */}
-      {!isSourceClip && (
-        <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={cropChange} />
-      )}
       <VolumeButton volume={volume} onChange={changeVolume} />
       <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
         <CopyPlus className="h-3.5 w-3.5" />
@@ -472,27 +356,28 @@ export function CellVoicePanel({
       className="rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
       dir="ltr"
     >
-      {/* Voiced: waveform with a centered play/pause + running time. Crop /
-          volume / clone live on the cast row below — never on the waveform. */}
+      {/* Voiced: the real recording, drawn as its timeline chip (AQU-1217 —
+          these bars used to be generated from the cell id, the same whatever
+          was recorded). Play from its corner, trim by dragging its lines, the
+          running time bottom-left. Volume / clone live on the cast row below. */}
       {hasTake && (
-        <div className="relative mb-2 h-12">
-          <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <Button
-              type="button"
-              size="icon-lg"
-              variant="default"
-              onClick={onPrimary}
-              aria-label={primaryLabel}
-              className="shadow-md"
-            >
-              {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-            </Button>
-          </div>
-          <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
+        <TakeWaveform
+          controller={audio}
+          audioId={playableId}
+          kept={kept}
+          height={48}
+          kind={playableId === cell.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+          strategy={project.audioMediaStrategy ?? "lazy"}
+          trimEditable={!isSourceClip}
+          onCommitTrim={commitTrim}
+          validation={cardBadge === "self" || cardBadge === "full" ? cardBadge : null}
+          className="mb-2"
+          testId="voice-card-waveform"
+        >
+          <span className="pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
             {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
           </span>
-        </div>
+        </TakeWaveform>
       )}
 
       {/* Unvoiced: a quiet hint above the cast strip (hidden while voicing —

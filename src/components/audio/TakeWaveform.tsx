@@ -223,7 +223,7 @@ export function TakeWaveform({
       validationLabel={validation === "full"
         ? t("workspace.targetAudioLane.takeValidated")
         : t("workspace.targetAudioLane.takeValidatedByYou")}
-      onSeek={viewLen > 0 && peaks && peaks.length > 0 ? (f) => seek(viewStart + f * viewLen) : undefined}
+      onSeek={viewLen > 0 ? (f) => seek(viewStart + f * viewLen) : undefined}
       seekLabel={t("common.seek")}
       edges={edges}
       status={status}

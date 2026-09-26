@@ -47,6 +47,13 @@ export interface CodexData {
   /** Codex cell-merge marker: the cell's content was absorbed into another
    *  cell (heading consolidation, verse-range merge) and Codex hides it. */
   merged?: boolean;
+  /** Codex Source Editing Mode eye icon: the cell is PARKED — dropped from the
+   *  normal view, progress and every exporter, but its data is kept and an
+   *  unhide brings it back. Written on both the `.source` and the paired
+   *  `.codex` cell; unhide writes `false` rather than removing the key
+   *  (AQU-1425). Reversible, so unlike `deleted`/`merged` it must NOT migrate
+   *  as a retraction. */
+  hidden?: boolean;
   originalText?: string;
   globalReferences?: string[];
   /**

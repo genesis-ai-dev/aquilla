@@ -153,6 +153,11 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- The Assigned-to-me inbox never reports an answer it does not have: no
+  "You have no open assignments." while the scoped read is outstanding (the org
+  directory resolves asynchronously, so this is the normal cold-load path), and
+  an org switch returns to the skeleton rather than showing the previous org's
+  rows (AQU-1251 — `AssignedToMe.test.tsx`, `AssignedToMe.orgSwitch.test.tsx`).
 - DOM navigation and editing: plan inspector editor link, filename keyboard
   access, corpus rename input, read-surface button activation, and cell labels
   (`PlanInspector.test.tsx`, `ProjectOverview.test.tsx`, `FileRow.test.tsx`,

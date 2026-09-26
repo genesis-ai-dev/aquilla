@@ -118,6 +118,21 @@ describe("AQU-1308 — project-lead access to the assignee picker's roster", () 
     expect(res.status).toBe(200)
   })
 
+  it("an owner-only roster floor is not lowered to the assignment floor for a maintainer", async () => {
+    await seedOrgAndProject()
+    // assignmentMinRole stays at its default (project lead, 500). The old
+    // min() made the effective floor 500, so a maintainer still received the
+    // roster and the badge looked like it had snapped back to maintainers.
+    await setOrgSettings({ rosterViewMinRole: 700 })
+    const maintainer = await getProjectMembers("mia")
+    expect(maintainer.status).toBe(403)
+    const hidden = (await maintainer.json()) as { rosterHidden?: boolean; members?: unknown }
+    expect(hidden.rosterHidden).toBe(true)
+    expect(hidden.members).toBeUndefined()
+
+    expect((await getProjectMembers("olive")).status).toBe(200)
+  })
+
   it("maintainer and owner behavior is unchanged", async () => {
     await seedOrgAndProject()
     await setOrgSettings({ rosterViewMinRole: 600 })

@@ -30,8 +30,15 @@ export function renderWithTooltips(ui: ReactElement) {
 /**
  * Hover `trigger` and assert the tooltip that opens carries `expected`.
  *
- * base-ui opens the tooltip even for a `disabled` trigger, which is what keeps
- * a gated control's "why is this disabled?" explanation reachable.
+ * ⚠️ AQU-959 — this helper cannot prove a *disabled* control explains itself.
+ * happy-dom dispatches pointer events on disabled elements; a real browser does
+ * not, and `buttonVariants` adds `disabled:pointer-events-none` on top. So
+ * hovering a disabled trigger opens the tooltip here and stays silent in
+ * production — which is exactly how a partner met a dead "New voice" mid-demo
+ * while this helper reported the tooltip reachable. `AppTooltip` now wraps a
+ * natively-disabled child in a focusable, non-disabled stand-in trigger; assert
+ * THAT (`[data-slot="tooltip-disabled-trigger"]`, and that the trigger is not
+ * itself `[disabled]`), because asserting the hover is a false green.
  */
 export async function expectTooltip(trigger: Element, expected: string | RegExp) {
   // Await the complete browser hover sequence (pointerover/enter/move plus

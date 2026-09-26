@@ -2015,12 +2015,14 @@ export function AudioRecordingModal({
                 <div className="relative">
                   <AudioWaveform
                     stream={recorder.stream}
-                    height={44}
-                    // Grey while the countdown runs — the mic is hot, the take
-                    // has not begun — and red from zero. Same element, same
-                    // audio graph, different ink (Sam, 2026-08-14).
+                    // The ready strip's heights, so Record → Stop → preview
+                    // never moves the buttons below it.
+                    height={showFilm ? 40 : 56}
+                    targetSec={targetSec}
+                    // An empty body while the countdown runs — the mic is hot,
+                    // the take has not begun — growing from zero (AQU-1210).
+                    // Same element, same audio graph (Sam, 2026-08-14).
                     tone={displayPhase === "recording" ? "live" : "armed"}
-                    className="rounded-md border bg-muted/40"
                   />
                   {/* Zero's visual beat. The count block above flips to REC
                       within a frame of GO, so without this the word GO is

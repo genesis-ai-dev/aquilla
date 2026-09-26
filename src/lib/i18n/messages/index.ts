@@ -18,5 +18,6 @@ import { ms } from "./ms"
 import { ar } from "./ar"
 import { zh_Hans } from "./zh-Hans"
 import { zh_Hant } from "./zh-Hant"
+import { fr } from "./fr"
 
-export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant }
+export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant, fr }

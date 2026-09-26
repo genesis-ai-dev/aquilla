@@ -163,6 +163,13 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- AI availability after an offline → online cycle (AQU-1377): a health probe forced
+  while the browser is offline records no snapshot, the browser `online` event forces
+  a fresh probe that re-enables the AI controls, and a batch refused because the
+  service is unreachable surfaces an explicit banner instead of a silent no-op
+  (`frontier-health.test.tsx`, `useCompletion.unavailable.test.ts`). UI gating only —
+  no data, access or committed artifact is at risk, so per the rules above this stays
+  RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
 - Project settings pane links / toggles (except rename/save persistence smoke)

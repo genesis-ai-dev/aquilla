@@ -11,6 +11,7 @@ import {
   dismissBatchCompletionSummary,
   incrementBatchCompletionDone,
   incrementBatchCompletionFailed,
+  reportBatchCompletionUnavailable,
 } from "@/lib/completion/batch-completion"
 
 describe("CompletionBulkProgressBanner", () => {
@@ -28,6 +29,30 @@ describe("CompletionBulkProgressBanner", () => {
     render(<CompletionBulkProgressBanner />)
     expect(screen.getByText("Translating")).toBeInTheDocument()
     expect(screen.getByText("0/90")).toBeInTheDocument()
+  })
+
+  it("says so when a batch was refused because the AI service is unreachable (AQU-1377)", () => {
+    // completeBatch used to `return` here, so the click produced no banner at
+    // all and the feature looked broken until a reload.
+    reportBatchCompletionUnavailable()
+    render(<CompletionBulkProgressBanner />)
+
+    expect(screen.getByText(/AI service unavailable/)).toBeInTheDocument()
+    expect(screen.queryByText("Translating")).not.toBeInTheDocument()
+
+    // Dismissible by the same close button the failure summary uses.
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }))
+    expect(screen.queryByText(/AI service unavailable/)).not.toBeInTheDocument()
+  })
+
+  it("does not talk over a batch that is still generating (AQU-1377)", () => {
+    resetBatchCompletionState(90)
+    reportBatchCompletionUnavailable()
+    render(<CompletionBulkProgressBanner />)
+
+    // The live progress bar is the more useful thing on screen.
+    expect(screen.getByText("Translating")).toBeInTheDocument()
+    expect(screen.queryByText(/AI service unavailable/)).not.toBeInTheDocument()
   })
 
   it("shows an honest failure summary once the run finishes with skipped cells (AQU-361)", () => {

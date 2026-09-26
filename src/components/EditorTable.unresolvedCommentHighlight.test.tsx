@@ -161,6 +161,20 @@ function accentedRow(id: string) {
   return document.querySelector(`[data-cell-id="${id}"] [data-unresolved-comments="true"]`)
 }
 
+/**
+ * The attribute says the row believes it is accented; this says the accent is
+ * actually drawn. Asserting both is the point — the attribute alone would keep
+ * passing if a refactor dropped the styling, and the class alone cannot be told
+ * apart from AQU-599's ring. `09-design-and-ux.md`'s "verify a specific visual
+ * state" exception is exactly this case.
+ */
+function hasLeadingEdgeAccent(id: string): boolean {
+  const el = accentedRow(id)
+  if (!el) return false
+  const className = el.getAttribute("class") ?? ""
+  return className.includes("before:bg-blue-500") && className.includes("before:start-0")
+}
+
 function row(id: string) {
   return document.querySelector(`[data-cell-id="${id}"]`)
 }
@@ -192,6 +206,7 @@ describe("EditorTable — highlight open comments (AQU-1259)", () => {
     // Live, with no reload and no remount — the AC's "enable the toggle →
     // rows are visibly marked" is a same-session promise.
     expect(accentedRow("cell-a")).toBeTruthy()
+    expect(hasLeadingEdgeAccent("cell-a")).toBe(true)
     expect(accentedRow("cell-b")).toBeNull()
 
     act(() => {
@@ -205,7 +220,7 @@ describe("EditorTable — highlight open comments (AQU-1259)", () => {
     setUnresolvedCommentHighlight(true)
     renderTable()
 
-    expect(accentedRow("cell-a")).toBeTruthy()
+    expect(hasLeadingEdgeAccent("cell-a")).toBe(true)
     expect(accentedRow("cell-b")).toBeNull()
   })
 

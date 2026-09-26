@@ -89,7 +89,7 @@ beforeEach(() => {
   try { localStorage.removeItem("aq.exportdlg.v1") } catch { /* ignore */ }
   mockProjectCells.mockReturnValue({
     files: [], isLoading: false, isTruncated: false,
-  } as ReturnType<typeof useProjectCells>)
+  } as unknown as ReturnType<typeof useProjectCells>)
   mockChapter.mockResolvedValue({
     blob: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }),
     extension: "wav",

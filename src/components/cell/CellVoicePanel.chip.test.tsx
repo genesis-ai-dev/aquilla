@@ -34,11 +34,11 @@ const settings = { voices, defaultVoiceId: "v-mary" } as ProjectTtsSettings
 const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
 
 describe("CellVoicePanel take tools", () => {
-  function renderChip() {
+  function renderChip(p: ProjectRecord = project) {
     return renderWithTooltips(
       <CellVoicePanel
         cell={cell}
-        project={project}
+        project={p}
         projectId="proj-1"
         settings={settings}
         voices={voices}
@@ -50,6 +50,20 @@ describe("CellVoicePanel take tools", () => {
       />,
     )
   }
+
+  // Sam, 2026-09-26: the Audio view brings over the media view's colours — the
+  // take wears its file's dub-track colour, stored with the file.
+  it("wears the file's dub-track colour, a generated voice at its lighter strength", () => {
+    renderChip({ ...project, files: [{ id: "file-1", trackOverrides: { "target-audio": { color: "azure" } } }] } as unknown as ProjectRecord)
+    const card = screen.getByTestId("voice-card-waveform")
+    expect(card.style.getPropertyValue("--tl-track-hue")).toBe("#2489eb")
+    expect(card.className).toContain("bg-[color:var(--tl-track-gen)]")
+  })
+
+  it("is the media view's default green when the file has no colour", () => {
+    renderChip()
+    expect(screen.getByTestId("voice-card-waveform").style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+  })
 
   it("sits beside the voice picker, not over the waveform", () => {
     renderChip()

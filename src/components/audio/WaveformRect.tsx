@@ -5,8 +5,9 @@
 // same filled outline from the same peaks, same 40% ink, same 6px corners and
 // 1px border, same way of showing progress (the body darkens up to the play
 // point, with the white hairline) and the same 16px corner buttons. Only its
-// size changes, and off the timeline its body is neutral grey rather than a
-// track's colour.
+// size changes. Its colour is its track's (Sam, 2026-09-26 — the grey body of
+// the first cut is gone): the caller passes the track's custom properties
+// (lib/timeline/take-colors), and grey is only the fallback when none are.
 //
 // What it adds that a timeline chip never shows:
 //
@@ -59,6 +60,9 @@ export interface WaveformRectProps {
   height: number
   /** A recorded take or a generated voice: the chip's two body strengths. */
   kind?: "take" | "generated"
+  /** The track's colour, as the chip's custom properties (take-colors.ts).
+   *  Absent draws the neutral grey ladder. */
+  trackVars?: Record<string, string>
   /** The part that plays, as fractions of the whole clip. Outside it is faded. */
   keep?: { start: number; end: number } | null
   /** Playback position as a fraction of the whole clip; drawn only while `playing`. */
@@ -97,6 +101,7 @@ export function WaveformRect({
   peaks,
   height,
   kind = "take",
+  trackVars = NEUTRAL_TRACK_VARS,
   keep = null,
   progress = null,
   playing = false,
@@ -152,14 +157,14 @@ export function WaveformRect({
       ref={boxRef}
       data-testid={testId}
       className={cn(
-        // The chip's own body, with its colour ladder spoken in grey.
+        // The chip's own body, in its track's colour ladder.
         "group/wave relative touch-none select-none overflow-hidden rounded-[6px] border",
         trackChipClass(kind),
         showProgress && trackChipPlayingClass(kind),
         className,
       )}
       style={{
-        ...NEUTRAL_TRACK_VARS,
+        ...trackVars,
         height,
         ...(showProgress ? { "--tl-play-x": pct(progress!) } : {}),
         ...style,

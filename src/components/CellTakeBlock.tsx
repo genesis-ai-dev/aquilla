@@ -28,6 +28,7 @@ import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { takeBadgeState } from "./cell/audio-validation-state"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -237,7 +238,15 @@ function CellTakeBlockView({
         audioId={selectedAudioId}
         kept={kept}
         height={56}
-        kind={isGenerated ? "generated" : "take"}
+        // In its track's colour (Sam, 2026-09-26): a source section in the
+        // source row's lighter blue, a take in its own track's.
+        kind={isGenerated || kept.kind === "section" ? "generated" : "take"}
+        trackVars={takeTrackVars({
+          files: project.files,
+          fileId: owner.fileId,
+          slot: attachment?.slot,
+          sourceSection: kept.kind === "section",
+        })}
         strategy={project.audioMediaStrategy ?? "lazy"}
         trimEditable={editable}
         onCommitTrim={commitTrim}

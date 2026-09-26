@@ -16,6 +16,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
   RECORDING_SLOT,
@@ -1521,6 +1522,9 @@ export function AudioRecordingModal({
 
   const displayPhase: Phase = phase
   const elapsedMs = recorder.elapsedMs
+  // The take on the ready screen wears its own track's colour (Sam,
+  // 2026-09-26), as it does on the timeline and in the Audio view.
+  const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
   const targetOverrun = targetSec != null && elapsedMs / 1000 > targetSec
   const isNearLimit = recorder.isNearLimit
   // From the countdown onwards there is a take being made or already made, and
@@ -2052,6 +2056,7 @@ export function AudioRecordingModal({
                       // strip shrinks rather than push Record out of place.
                       height={showFilm ? 40 : 56}
                       kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+                      trackVars={readyTrackVars}
                       strategy="eager"
                       validation={readyBadge === "self" || readyBadge === "full" ? readyBadge : null}
                       testId="rec-ready-waveform"

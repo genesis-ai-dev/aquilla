@@ -35,6 +35,7 @@ import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -366,7 +367,15 @@ export function CellVoicePanel({
           audioId={playableId}
           kept={kept}
           height={48}
-          kind={playableId === cell.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+          // A source section wears the lighter rung, as the source row's own
+          // chips do; a take the dub track's (or its own track's) colour.
+          kind={isSourceClip || playableId === cell.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+          trackVars={takeTrackVars({
+            files: project.files,
+            fileId: cell.fileId,
+            slot: playableAtt?.slot,
+            sourceSection: isSourceClip,
+          })}
           strategy={project.audioMediaStrategy ?? "lazy"}
           trimEditable={!isSourceClip}
           onCommitTrim={commitTrim}

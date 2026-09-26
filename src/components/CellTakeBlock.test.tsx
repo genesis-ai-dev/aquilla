@@ -168,6 +168,46 @@ describe("which part of the recording it plays", () => {
   })
 })
 
+// Sam, 2026-09-26: off the timeline a take wears its TRACK'S colour, the one
+// stored with its file — not grey.
+describe("its colour", () => {
+  const hue = () => screen.getByTestId("cell-take-waveform").style.getPropertyValue("--tl-track-hue")
+  const withFiles = (trackOverrides: Record<string, unknown>) =>
+    ({ ...project, files: [{ id: "cue-sibling", trackOverrides }] }) as unknown as ProjectRecord
+
+  it("is the file's dub-track colour for its main recording", () => {
+    draw({ project: withFiles({ "target-audio": { color: "violet" } }) })
+    expect(hue()).toBe("#865deb")
+  })
+
+  it("is the media view's default green where nobody picked one", () => {
+    draw()
+    expect(hue()).toBe("#40c06e")
+  })
+
+  it("is an added track's own colour for a take made on it", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const onTrack = { ...owner, attachments: { [id]: { ...owner.attachments![id], slot: "trk-es" } } } as unknown as CellData
+    draw({
+      owner: onTrack,
+      project: withFiles({ "target-audio": { color: "violet" }, "trk-es": { kind: "audio", name: "Spanish", order: 4, color: "amber" } }),
+    })
+    expect(hue()).toBe("#eba720")
+  })
+
+  it("is the source row's lighter blue for a source-audio section", () => {
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(), startTime: 17.6, endTime: 23.1, selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src" } },
+    } as unknown as CellData
+    draw({ owner, project: withFiles({ "target-audio": { color: "violet" } }) })
+    expect(hue()).toBe("#0e9bd6")
+    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-gen)]")
+  })
+})
+
 // Sam, 2026-09-25: trim right where you see it. The Crop popover is retired.
 describe("trimming in place", () => {
   function sized() {

@@ -48,6 +48,8 @@ export interface TakeWaveformProps {
   kept: KeptWindow
   height: number
   kind?: "take" | "generated"
+  /** The take's track colour (take-colors.ts); grey when absent. */
+  trackVars?: Record<string, string>
   /** The project's media strategy: "stream"/"manual" wait for a click. */
   strategy?: AudioMediaStrategy
   /** Offer draggable trim edges. Ignored for a source-audio section. */
@@ -69,6 +71,7 @@ export function TakeWaveform({
   kept,
   height,
   kind = "take",
+  trackVars,
   strategy = "lazy",
   trimEditable = false,
   onCommitTrim,
@@ -208,6 +211,7 @@ export function TakeWaveform({
       peaks={drawnPeaks}
       height={height}
       kind={kind}
+      trackVars={trackVars}
       keep={keep}
       playing={isPlaying}
       progress={viewLen > 0 ? toFrac(currentTime) : null}

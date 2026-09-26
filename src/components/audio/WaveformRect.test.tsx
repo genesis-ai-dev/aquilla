@@ -26,6 +26,13 @@ describe("WaveformRect", () => {
     expect(root.style.getPropertyValue("--tl-track-take")).toContain("color-mix")
   })
 
+  it("wears the track colour it is given instead of grey", () => {
+    render(<WaveformRect peaks={peaks} height={56} testId="w" trackVars={{ "--tl-track-hue": "#da2b84", "--tl-track-take": "rgba(218, 43, 132, 0.67)" }} />)
+    const root = screen.getByTestId("w")
+    expect(root.style.getPropertyValue("--tl-track-hue")).toBe("#da2b84")
+    expect(root.style.getPropertyValue("--tl-track-take")).toBe("rgba(218, 43, 132, 0.67)")
+  })
+
   it("draws the body alone with no peaks yet", () => {
     render(<WaveformRect peaks={[]} height={56} testId="w" />)
     expect(screen.queryByTestId("w-shape")).toBeNull()

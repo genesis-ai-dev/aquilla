@@ -120,10 +120,10 @@ function entry(over: Record<string, unknown>) {
   }]])
 }
 
-function modalEl(targetSlot?: string) {
+function modalEl(targetSlot?: string, p: ProjectRecord = project) {
   return (
     <AudioRecordingModal
-      open project={project} cells={[cell]} activeCellId="c1" username="sam" targetSlot={targetSlot}
+      open project={p} cells={[cell]} activeCellId="c1" username="sam" targetSlot={targetSlot}
       onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
     />
   )
@@ -154,6 +154,18 @@ describe("the selected take, before recording", () => {
     // 3.6s against a 2.5s cue: over at a glance, before anyone records.
     expect(screen.getByText("0:03.6")).toBeInTheDocument()
     expect(player.selected.at(-1)).toBe("audio-c1-3.wav")
+  })
+
+  // Sam, 2026-09-26: the take wears its track's colour, the one stored with
+  // its file — the same one the timeline and the Audio view draw it in.
+  it("wears its file's dub-track colour", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-3.wav",
+      attachments: { "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }) },
+    })
+    const coloured = { ...project, files: [{ id: "f1", trackOverrides: { "target-audio": { color: "violet" } } }] } as unknown as ProjectRecord
+    render(modalEl(undefined, coloured))
+    expect(screen.getByTestId("rec-ready-waveform").style.getPropertyValue("--tl-track-hue")).toBe("#865deb")
   })
 
   // Live walk, 2026-09-25: a 3.06s take read "3.1s" above a bar reading

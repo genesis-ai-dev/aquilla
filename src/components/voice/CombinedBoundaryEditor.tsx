@@ -27,6 +27,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 
@@ -211,6 +212,9 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         <WaveformRect
           peaks={peaks}
           height={72}
+          // A generated voice on the file's dub track, in that track's colour.
+          kind="generated"
+          trackVars={takeTrackVars({ files: project.files, fileId, slot: "generatedVoice" })}
           playing={isPlaying}
           progress={duration > 0 ? currentTime / duration : null}
           onTogglePlay={() => { if (isPlaying) pause(); else void play() }}

@@ -367,6 +367,7 @@ export const editor = defineNamespace({
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.highlightUnresolvedComments": "Highlight open comments",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -3003,6 +3004,16 @@ export const editor = defineNamespace({
           "Label of the switch that turns the per-row health ribbon, rule " +
           "infractions, and the confidence overlay on or off. Turning it off " +
           "lightens the editor on very large files. Applies to this browser only.",
+        maxLength: 32,
+      },
+      "editor.view.highlightUnresolvedComments": {
+        description:
+          "Label of the switch that marks every row still carrying an unresolved " +
+          "comment thread with a strong accent down its leading edge, so a reviewer " +
+          "can scan a long file for the rows that still need them. 'Open' here means " +
+          "not yet resolved — the opposite of closed, not 'opened on screen'. Rows " +
+          "keep their small always-on comment badge when this is off. Applies to " +
+          "this browser only.",
         maxLength: 32,
       },
       "editor.view.targetKeyTerms": {

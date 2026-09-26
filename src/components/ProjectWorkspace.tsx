@@ -102,7 +102,10 @@ import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAud
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
-import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import {
+  openCommentsCellFromSearchParams,
+  resolveDeepLinkLaneFromSearchParams,
+} from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
@@ -1063,6 +1066,30 @@ export function ProjectWorkspace() {
   }, [searchParams, routeFileId])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
+
+  // AQU-1259: a link from a comment surface (`&comments=1`) also OPENS that
+  // cell's thread, where a bare `?cellId=` only scrolls to the row.
+  //
+  // Deliberately not routed through `pendingCellScrollRef`: the drawer does not
+  // need the editor mounted or the row found. It renders as soon as the cell
+  // exists in the store (`commentsCell` below resolves to null until then), so
+  // parking the id here survives the cell stream without spending any of the
+  // scroll machine's attempt budget — and a cell the file no longer has simply
+  // never opens a panel instead of retrying.
+  //
+  // Keyed to `searchParams` only, which react-router memoizes on
+  // `location.search` — so this re-asserts the link's intent when a NEW link
+  // arrives and never on a re-render. That is what lets the user close the
+  // drawer and have it stay closed while they keep working in the file, without
+  // needing a "already consumed" ref that would then swallow a second click on
+  // the same thread. One aside at a time, like every other opener here.
+  useEffect(() => {
+    const cellId = openCommentsCellFromSearchParams(searchParams)
+    if (!cellId) return
+    setDrawerRuleId(null)
+    setHistoryCellId(null)
+    setCommentsCellId(cellId)
+  }, [searchParams])
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
   // LLM). Findings are session-local: held here, never persisted or synced.
   const [checkOpen, setCheckOpen] = useState(false)

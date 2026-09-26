@@ -7,6 +7,11 @@ import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
 } from "@/lib/store/milestone-split-pref"
+import {
+  getUnresolvedCommentHighlight,
+  resetUnresolvedCommentHighlightCacheForTests,
+  setUnresolvedCommentHighlight,
+} from "@/lib/store/unresolved-comment-highlight-pref"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -53,6 +58,8 @@ beforeEach(() => {
   localStorage.clear()
   resetMilestoneSplitCacheForTests()
   setMilestoneSplit(false)
+  resetUnresolvedCommentHighlightCacheForTests()
+  setUnresolvedCommentHighlight(false)
 })
 
 afterEach(() => {
@@ -275,5 +282,51 @@ describe("ViewSettingsMenu direction display", () => {
     })
     expect(handlers.onTargetDirectionModeChange).not.toHaveBeenCalled()
     expect(handlers.onSourceDirectionModeChange).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1259 (B): the reviewer's opt-in scanning view lives beside the other
+// editor view toggles and is a device preference, like the milestone split.
+describe("ViewSettingsMenu — highlight open comments", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Highlight open comments" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setUnresolvedCommentHighlight(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no rows to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
   })
 })

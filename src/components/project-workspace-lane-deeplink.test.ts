@@ -3,6 +3,8 @@ import {
   defaultLaneDraftReviewHref,
   draftReviewHref,
   editorCellHref,
+  editorCommentHref,
+  openCommentsCellFromSearchParams,
   resolveDeepLinkLane,
   resolveDeepLinkLaneFromSearchParams,
 } from './project-workspace-lane-deeplink'
@@ -90,5 +92,66 @@ describe('editorCellHref', () => {
     expect(draftReviewHref).toBe(editorCellHref)
     expect(draftReviewHref('p1', 'f1', 'c1', 'es')).toBe(editorCellHref('p1', 'f1', 'c1', 'es'))
     expect(defaultLaneDraftReviewHref('p1', 'f1', 'c1')).toBe(editorCellHref('p1', 'f1', 'c1', ''))
+  })
+})
+
+// AQU-1259: a link that came from a comment surface opens the thread, not just
+// the row. The flag and the reader are one rule, tested together.
+describe('comment deep links', () => {
+  it('builds a cell link carrying the open-comments flag', () => {
+    expect(editorCommentHref('p1', 'f1', 'c1'))
+      .toBe('/project/p1/editor/file/f1?cellId=c1&comments=1')
+  })
+
+  it('omits the flag when there is no cell, since no thread is named', () => {
+    expect(editorCommentHref('p1', 'f1', null)).toBe('/project/p1/editor/file/f1')
+    expect(editorCommentHref('p1', 'f1')).toBe('/project/p1/editor/file/f1')
+  })
+
+  it('emits no lane, so a thread never moves the reader between languages', () => {
+    // A comment belongs to a cell, not to one target language. `editorCellHref`
+    // always emits `?lane=`; this builder must not, or opening a thread would
+    // silently switch the lane the reviewer was reading.
+    expect(editorCommentHref('p1', 'f1', 'c1')).not.toContain('lane')
+  })
+
+  it('percent-encodes every segment it interpolates', () => {
+    const href = editorCommentHref('p 1', 'file/1', 'cell 2')
+    expect(href).toBe('/project/p%201/editor/file/file%2F1?cellId=cell%202&comments=1')
+    const params = new URL(href, 'https://app.test').searchParams
+    expect(params.get('cellId')).toBe('cell 2')
+    expect(params.get('comments')).toBe('1')
+  })
+
+  it('reads the cell back only when the flag and the cell are both present', () => {
+    const read = (search: string) =>
+      openCommentsCellFromSearchParams(new URLSearchParams(search))
+
+    expect(read('?cellId=c1&comments=1')).toBe('c1')
+    // The bare scroll link every other surface builds must not force a panel
+    // open — that is the whole reason the flag exists.
+    expect(read('?cellId=c1')).toBeNull()
+    expect(read('?cellId=c1&lane=fr&flash=1')).toBeNull()
+    // The flag alone names no cell.
+    expect(read('?comments=1')).toBeNull()
+    expect(read('')).toBeNull()
+  })
+
+  it('accepts only the exact flag value the builder writes', () => {
+    const read = (search: string) =>
+      openCommentsCellFromSearchParams(new URLSearchParams(search))
+
+    expect(read('?cellId=c1&comments=true')).toBeNull()
+    expect(read('?cellId=c1&comments=0')).toBeNull()
+    expect(read('?cellId=c1&comments=')).toBeNull()
+  })
+
+  it('round-trips its own link through the reader', () => {
+    // The producer/consumer seam: a renamed param or a changed flag value has
+    // to fail here rather than leaving both halves internally consistent and
+    // the feature dead.
+    const href = editorCommentHref('p1', 'f1', 'cell 2')
+    const params = new URL(href, 'https://app.test').searchParams
+    expect(openCommentsCellFromSearchParams(params)).toBe('cell 2')
   })
 })

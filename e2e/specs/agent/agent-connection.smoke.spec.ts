@@ -20,7 +20,6 @@ test("browser consent delivers a project credential to the agent; revocation blo
   await expect(alice.getByRole("button", { name: "Authorize agent", exact: true })).toBeDisabled()
   await consent.chooseProject(seeded.projectName)
   await expect(alice.getByRole("combobox", { name: "Project" })).toContainText(seeded.projectName)
-  await alice.screenshot({ path: "/private/tmp/aqu-1205-consent.png", fullPage: true })
   await consent.authorize(grant.user_code)
   const tokenResponse = await fetch(`${auth}/api/v2/agent-connect/token`, {
     method: "POST", headers: { "Content-Type": "application/json" },

@@ -87,6 +87,16 @@ describe("E2E determinism guardrails", () => {
       ) {
         violations.push(`${relative}: bypasses Workspace.waitForEditor readiness contract`)
       }
+      // AQU-1312: a screenshot/trace/video written to an absolute path only
+      // exists on the OS it was typed on. `/private/tmp` is macOS-only, so the
+      // sink threw ENOENT on Linux and the spec died before its first
+      // assertion — a red smoke gate that said nothing about the app. Artifacts
+      // belong in Playwright's own output directory, which the web config
+      // already fills on failure (`screenshot: "only-on-failure"`), so reach for
+      // `testInfo.outputPath()` or drop the line rather than naming a directory.
+      for (const match of source.matchAll(/\bpath:\s*(["'`])((?:\/|[A-Za-z]:\\)[^"'`]*)\1/g)) {
+        violations.push(`${relative}: absolute artifact path ${match[2]}`)
+      }
     }
 
     expect(violations).toEqual([])

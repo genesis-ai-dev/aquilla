@@ -241,7 +241,10 @@ export function VoiceLibraryPanel({
           AQU-365: disabled below the maintainer floor (viewers/contributors
           get a tooltip explaining why, not a silent no-op after a modal). */}
       <div className="border-t p-3">
-        <AppTooltip content={voiceDenialReason ?? undefined}>
+        <AppTooltip
+          content={voiceDenialReason ?? undefined}
+          disabledTriggerClassName="w-full"
+        >
           <Button
             type="button"
             variant="outline"

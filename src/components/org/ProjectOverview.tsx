@@ -469,6 +469,10 @@ export function ProjectOverview() {
   // AQU-1171: the Members card starts collapsed on every mount. The open
   // state lives only in this render — a reload always returns to the header.
   const [membersOpen, setMembersOpen] = useState(false)
+  // AQU-1172: the Team card uses the same header expand/collapse as Members,
+  // but starts expanded — assignments are part of the overview working
+  // surface. Collapse is per-page-load only; a reload always opens it.
+  const [teamOpen, setTeamOpen] = useState(true)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -2202,9 +2206,33 @@ export function ProjectOverview() {
                 viewerRoleLevel={projectRoleLevel}
                 ready={orgSettings.hasFetched}
               >
-                <div className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.team")}</h2>
+                <div
+                  className={cn(
+                    "relative rounded-lg border bg-card px-5",
+                    teamOpen ? "py-5" : "py-3",
+                    sectionTintClass(orgSettings.memberProgressViewMinRole),
+                  )}
+                  data-testid="overview-team-card"
+                  data-expanded={teamOpen ? "true" : "false"}
+                >
+                  <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
+                    {/* Heading wraps the button: a button may only contain
+                        phrasing content, and an h2 inside it is invalid. */}
+                    <h2 className="contents">
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        aria-expanded={teamOpen}
+                        aria-controls="overview-team-panel"
+                        data-testid="overview-team-toggle"
+                        onClick={() => setTeamOpen((open) => !open)}
+                      >
+                        {teamOpen
+                          ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                          : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                        {t("editor.navTitle.team")}
+                      </button>
+                    </h2>
                     <SectionVisibilityBadge
                       minRole={orgSettings.memberProgressViewMinRole}
                       canEdit={canEditVisibility}
@@ -2212,79 +2240,83 @@ export function ProjectOverview() {
                       description={t("org.projectOverview.teamVisibilityDescription")}
                     />
                   </div>
-                  {workload.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {workload.map((w) => {
-                        const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
-                        const isSelected = w.username != null && w.username === selectedMemberUsername
-                        return (
-                          <li key={w.userId} className="flex items-center gap-3 text-sm">
-                            {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                            <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
-                                <InitialsAvatar
-                                  name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
-                                  size="sm"
-                                  className="shrink-0"
-                                />
-                                <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
-                              </span>
-                            </AppTooltip>
-                            <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                              <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                            </span>
-                            <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-                              {t("org.projectOverview.openAssignmentsStat", {
-                                count: w.openAssignments,
-                                percent: bidiIsolate(`${donePct}%`),
-                              })}
-                            </span>
-                            {/* AQU-498: select a teammate to see their recent actions +
-                                files-worked-on rollup. Sits inside this SAME
-                                memberProgressViewMinRole gate, so no separate
-                                permission plumbing is needed here. */}
-                            {w.username != null && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
-                                aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
-                                aria-pressed={isSelected}
-                                onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
-                              >
-                                {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
-                              </Button>
-                            )}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
+                  {teamOpen && (
+                    <div id="overview-team-panel">
+                      {workload.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {workload.map((w) => {
+                            const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                            const isSelected = w.username != null && w.username === selectedMemberUsername
+                            return (
+                              <li key={w.userId} className="flex items-center gap-3 text-sm">
+                                {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
+                                <AppTooltip content={w.username ?? String(w.userId)}>
+                                  <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
+                                    <InitialsAvatar
+                                      name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
+                                      size="sm"
+                                      className="shrink-0"
+                                    />
+                                    <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
+                                  </span>
+                                </AppTooltip>
+                                <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                </span>
+                                <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
+                                  {t("org.projectOverview.openAssignmentsStat", {
+                                    count: w.openAssignments,
+                                    percent: bidiIsolate(`${donePct}%`),
+                                  })}
+                                </span>
+                                {/* AQU-498: select a teammate to see their recent actions +
+                                    files-worked-on rollup. Sits inside this SAME
+                                    memberProgressViewMinRole gate, so no separate
+                                    permission plumbing is needed here. */}
+                                {w.username != null && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                    aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
+                                    aria-pressed={isSelected}
+                                    onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                                  >
+                                    {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
+                                  </Button>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
 
-                  {selectedMemberUsername && (
-                    <MemberActivityPanel
-                      projectId={id}
-                      username={selectedMemberUsername}
-                      getToken={getMemberActivityToken}
-                      onClose={() => setSelectedMemberUsername(null)}
-                    />
-                  )}
+                      {selectedMemberUsername && (
+                        <MemberActivityPanel
+                          projectId={id}
+                          username={selectedMemberUsername}
+                          getToken={getMemberActivityToken}
+                          onClose={() => setSelectedMemberUsername(null)}
+                        />
+                      )}
 
-                  {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                    <div className="mt-3 pt-3 border-t">
-                      <AssignWork
-                        projectId={id}
-                        files={project?.files ?? []}
-                        jwt={jwt ?? ""}
-                        author={session?.username ?? ""}
-                        targetLang={selectedLaneTag ?? ""}
-                        roleLevel={project?.syncRole?.level ?? 0}
-                        allowSelfAssignment={orgSettings.allowSelfAssignment}
-                        assignmentMinRole={orgSettings.assignmentMinRole}
-                        onAssigned={handleAssigned}
-                      />
+                      {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                        <div className="mt-3 pt-3 border-t">
+                          <AssignWork
+                            projectId={id}
+                            files={project?.files ?? []}
+                            jwt={jwt ?? ""}
+                            author={session?.username ?? ""}
+                            targetLang={selectedLaneTag ?? ""}
+                            roleLevel={project?.syncRole?.level ?? 0}
+                            allowSelfAssignment={orgSettings.allowSelfAssignment}
+                            assignmentMinRole={orgSettings.assignmentMinRole}
+                            onAssigned={handleAssigned}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

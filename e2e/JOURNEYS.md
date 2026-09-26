@@ -165,6 +165,7 @@ UI chrome that used to be one smoke file per click is covered under
   (except survives-refresh, which stays smoke)
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
+- Project overview Team and Members cards expand/collapse on their headers independently (Team expanded by default, Members collapsed; no persistence) — covered in RTL (`ProjectOverview.test.tsx`)
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)

@@ -21,10 +21,10 @@ import { StaffLanePopover } from "./StaffLanePopover"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
-function renderPopover() {
+function renderPopover(orgId: number | null = 1) {
   return render(
     <MemoryRouter>
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />
+      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={orgId} />
     </MemoryRouter>,
   )
 }
@@ -41,6 +41,17 @@ const mockOrgMembers = [
   { userId: 11, username: "mark", role: { level: 400, name: "contributor" } },
 ]
 
+// AQU-731: the roster's *state* is the thing under test for the
+// "Staff does nothing" reports, so every field is overridable per test.
+type RosterOverride = Partial<{
+  members: typeof mockOrgMembers
+  isLoading: boolean
+  error: string | null
+  rosterHidden: boolean
+  rosterAccessDenied: boolean
+}>
+let mockRoster: RosterOverride = {}
+
 vi.mock("@/hooks/useOrg", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/hooks/useOrg")>()
   return {
@@ -50,8 +61,11 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
+      ...mockRoster,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
       remove: vi.fn(async () => {}),
       listMemberProjects: vi.fn(async () => []),
     })),
@@ -114,6 +128,7 @@ function pickMaria() {
 }
 
 beforeEach(() => {
+  mockRoster = {}
   mockProjectMembers = []
   mockAddProjectMember.mockClear()
   mockFetchMemberScopes.mockClear()
@@ -235,5 +250,86 @@ describe("StaffLanePopover", () => {
 
     const invite = screen.getByRole("link", { name: /invite them to the project/i })
     expect(invite).toHaveAttribute("href", "/project/proj-1/settings/members")
+  })
+
+  // AQU-731 — "the staff button wasn't even working for me". The popover did
+  // open; it just told every operator whose org roster it could not read that
+  // their organization was empty, which is indistinguishable from a dead
+  // control. Each of these four states must name itself, and none of them may
+  // claim the org is empty. The reason is asserted via `data-reason` so the
+  // wording can be translated or reworded without silently dropping a state.
+  describe("roster is unavailable (the 'Staff does nothing' reports)", () => {
+    function blockedRow() {
+      return screen.getByTestId("staff-lane-roster-blocked")
+    }
+
+    it("says the roster is still loading rather than that the org is empty", () => {
+      mockRoster = { members: [], isLoading: true }
+      renderPopover()
+      openPopover()
+
+      expect(blockedRow()).toHaveAttribute("data-reason", "loading")
+      expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("names org policy when the roster is hidden (AQU-485), not an empty org", () => {
+      mockRoster = { members: [], rosterHidden: true }
+      renderPopover()
+      openPopover()
+
+      expect(blockedRow()).toHaveAttribute("data-reason", "hidden")
+      expect(screen.getByText(/hides its member list/i)).toBeInTheDocument()
+      expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("tells a non-org-member project admin that they can't see the roster", () => {
+      mockRoster = { members: [], rosterAccessDenied: true }
+      renderPopover()
+      openPopover()
+
+      expect(blockedRow()).toHaveAttribute("data-reason", "no-access")
+      expect(screen.getByText(/can’t see this organization’s member list/i)).toBeInTheDocument()
+      expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("surfaces the server's own message when the roster fetch failed", () => {
+      mockRoster = { members: [], error: "org roster request failed (429)" }
+      renderPopover()
+      openPopover()
+
+      expect(blockedRow()).toHaveAttribute("data-reason", "error")
+      expect(screen.getByText("org roster request failed (429)")).toBeInTheDocument()
+    })
+
+    it("says no org is in context when orgId is null, instead of firing no fetch silently", () => {
+      mockRoster = { members: [] }
+      renderPopover(null)
+      openPopover()
+
+      expect(blockedRow()).toHaveAttribute("data-reason", "no-org")
+      expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("keeps the invite path reachable in every blocked state, so the control is never a dead end", () => {
+      mockRoster = { members: [], rosterAccessDenied: true }
+      renderPopover()
+      openPopover()
+
+      expect(screen.getByRole("link", { name: /invite them to the project/i })).toHaveAttribute(
+        "href",
+        "/project/proj-1/settings/members",
+      )
+      // Nothing to type into, so the box must not invite a search that can't run.
+      expect(screen.getByPlaceholderText(/search your organization/i)).toBeDisabled()
+    })
+
+    it("still reports a genuinely empty org as empty", () => {
+      mockRoster = { members: [] }
+      renderPopover()
+      openPopover()
+
+      expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
+      expect(screen.getByText(/no one in your organization yet/i)).toBeInTheDocument()
+    })
   })
 })

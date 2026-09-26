@@ -10,6 +10,16 @@
 // Reused verbatim (pinned prop contract) by OrgHome lane sub-rows,
 // ProjectOverview lane rows, and the members matrix.
 //
+// AQU-731 — the roster this popover searches is the ORG roster, and there are
+// four ways it can come back empty that are not "your org has no members":
+// the org id isn't known yet/at all, the fetch is still in flight, org policy
+// hides the roster (AQU-485), or the caller simply isn't an org member (a
+// project admin staffing a lane need not be one). All four used to render the
+// single line "No one in your organization yet.", which is why the control was
+// reported as doing nothing: the popover opened, claimed the org was empty,
+// and offered no way forward. Each state now names itself and points at the
+// project-invite path, which works without org-roster access.
+//
 // Leads/maintainers (effective role >= project_lead) can't be lane-scoped —
 // the server rejects PUT scopes for them with 400 ("scopes are for
 // contributor/reviewer roles"), since leads see every language by design.
@@ -65,6 +75,19 @@ const MAX_RESULTS = 20
 
 type Phase = "idle" | "submitting" | "done" | "error"
 
+/** AQU-731: the ways the org roster can be unsearchable, each with its own
+ * message. `null` (see `rosterBlocked`) means the roster is usable. */
+type RosterBlocked = "no-org" | "loading" | "hidden" | "no-access" | "error"
+
+/** `error` is absent on purpose — that branch shows the server's own message
+ * and falls back to `rosterLoadFailed`, so it is handled at the call site. */
+const ROSTER_BLOCKED_KEY = {
+  "no-org": "org.staffLanePopover.rosterNoOrg",
+  loading: "org.staffLanePopover.rosterLoading",
+  hidden: "org.staffLanePopover.rosterHidden",
+  "no-access": "org.staffLanePopover.rosterNoAccess",
+} as const satisfies Record<Exclude<RosterBlocked, "error">, string>
+
 export function StaffLanePopover({
   projectId,
   lane,
@@ -80,7 +103,13 @@ export function StaffLanePopover({
   const location = useLocation()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { members: orgMembers } = useOrgMembers(orgId)
+  const {
+    members: orgMembers,
+    isLoading: rosterLoading,
+    error: rosterError,
+    rosterHidden,
+    rosterAccessDenied,
+  } = useOrgMembers(orgId)
   const { members: projectMembers, refresh: refreshProjectMembers } = useProjectMembers(projectId)
 
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
@@ -98,6 +127,24 @@ export function StaffLanePopover({
     const pool = q ? orgMembers.filter((m) => m.username.toLowerCase().includes(q)) : orgMembers
     return pool.slice(0, MAX_RESULTS)
   }, [orgMembers, query])
+
+  /**
+   * Why the roster can't be searched, or null when it can. Ordered most
+   * specific first: a missing org id means the fetch never even fired, so it
+   * outranks the loading flag (which stays false in that case).
+   */
+  const rosterBlocked: RosterBlocked | null =
+    orgId == null
+      ? "no-org"
+      : rosterLoading
+        ? "loading"
+        : rosterHidden
+          ? "hidden"
+          : rosterAccessDenied
+            ? "no-access"
+            : rosterError !== null
+              ? "error"
+              : null
 
   function reset() {
     setQuery("")
@@ -243,14 +290,26 @@ export function StaffLanePopover({
                 placeholder={t("org.staffLanePopover.searchPlaceholder")}
                 aria-label={t("org.teamDetail.searchOrgMembersAriaLabel")}
                 className="h-8 ps-7 text-xs"
+                disabled={rosterBlocked !== null}
               />
             </div>
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
-              {results.length === 0 ? (
+              {rosterBlocked !== null ? (
+                <li
+                  data-testid="staff-lane-roster-blocked"
+                  data-reason={rosterBlocked}
+                  className="flex items-center justify-center gap-1.5 px-2 py-3 text-center text-[11px] text-muted-foreground"
+                >
+                  {rosterBlocked === "loading" && <Spinner className="size-3" />}
+                  {rosterBlocked === "error"
+                    ? (rosterError ?? t("org.staffLanePopover.rosterLoadFailed"))
+                    : t(ROSTER_BLOCKED_KEY[rosterBlocked])}
+                </li>
+              ) : results.length === 0 ? (
                 <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
                   {orgMembers.length === 0
-                    ? "No one in your organization yet."
-                    : "No org members match."}
+                    ? t("org.staffLanePopover.rosterEmpty")
+                    : t("org.staffLanePopover.rosterNoMatch")}
                 </li>
               ) : (
                 results.map((m) => (

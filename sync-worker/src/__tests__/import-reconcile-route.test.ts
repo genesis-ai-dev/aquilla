@@ -68,6 +68,74 @@ describe('planImportReconciliation', () => {
     expect(plan.retainedMissing).toEqual(['retained-cell'])
   })
 
+  // AQU-1394 — a docx whose every unit key shifted because a paragraph was
+  // inserted at the top. Identity matching finds nothing; content matching has
+  // to land each surviving paragraph back on its own cell, or the translations
+  // already sitting on those cells are stranded.
+  describe('content matching (AQU-1394)', () => {
+    const paragraph = (index: number, value: string): ExistingImportCell => ({
+      cellId: `cell-${index}`, eventId: `event-${index}`, value, valueHtml: null,
+      type: 'paragraph', canonicalRef: null,
+      anchorCellId: index === 0 ? null : `cell-${index - 1}`,
+      startMs: null, endMs: null, sequenceIndex: index, medium: null,
+      metadata: importMetadata(`docx:p${index}`, index),
+    })
+    const incoming = (index: number, value: string) => ({
+      id: `incoming-event-${index}`, cellId: `incoming-cell-${index}`, value,
+      anchorCellId: index === 0 ? null : `incoming-cell-${index - 1}`,
+      type: 'paragraph', sequenceIndex: index,
+      metadata: importMetadata(`docx:p${index}`, index),
+    })
+
+    it('adopts the old cell when the unit keys all shift', () => {
+      const existing = [paragraph(0, 'Alpha.'), paragraph(1, 'Beta.'), paragraph(2, 'Gamma.')]
+      const plan = planImportReconciliation(
+        [incoming(0, 'Preface.'), incoming(1, 'Alpha.'), incoming(2, 'Beta.'), incoming(3, 'Gamma.')],
+        existing,
+      )
+
+      // Every unit key still resolves, but each now names the paragraph above
+      // it. None of those pairs is locked, so content matching hands each old
+      // cell back to the paragraph that still reads the same, and only the
+      // preface is left as new.
+      expect(plan.cells.map((cell) => cell.finalCellId))
+        .toEqual(['incoming-cell-0', 'cell-0', 'cell-1', 'cell-2'])
+      expect(plan.cells.map((cell) => cell.matchKind))
+        .toEqual(['new', 'content-exact', 'content-ice', 'content-ice'])
+      expect(plan.cells.map((cell) => cell.matchBand))
+        .toEqual(['new', 'exact', 'ice', 'ice'])
+      expect(plan.cells.map((cell) => cell.parentId))
+        .toEqual([null, 'event-0', 'event-1', 'event-2'])
+      expect(plan.retainedMissing).toEqual([])
+    })
+
+    it('does not resurrect a cell whose paragraph was deleted', () => {
+      const existing = [paragraph(0, 'Alpha.'), paragraph(1, 'Dropped.'), paragraph(2, 'Gamma.')]
+      const plan = planImportReconciliation([incoming(0, 'Alpha.'), incoming(1, 'Gamma.')], existing)
+
+      // "Alpha." is unchanged, so its unit-key pair is locked; "Gamma." follows
+      // its text to cell-2 and the deleted paragraph's cell is retained.
+      expect(plan.cells.map((cell) => cell.finalCellId)).toEqual(['cell-0', 'cell-2'])
+      expect(plan.cells.map((cell) => cell.matchKind)).toEqual(['unit-key', 'content-exact'])
+      expect(plan.cells.map((cell) => cell.matchBand)).toEqual(['exact', 'exact'])
+      expect(plan.retainedMissing).toEqual(['cell-1'])
+    })
+
+    it('reads the previous order from the anchor chain, not the row order', () => {
+      const shuffled = [paragraph(2, 'Gamma.'), paragraph(0, 'Alpha.'), paragraph(1, 'Beta.')]
+      const plan = planImportReconciliation(
+        [incoming(0, 'Alpha.'), incoming(1, 'Beta.'), incoming(2, 'Gamma.')],
+        shuffled,
+      )
+      expect(plan.cells.map((cell) => cell.matchBand)).toEqual(['ice', 'ice', 'ice'])
+    })
+
+    it('leaves a genuinely new file entirely new', () => {
+      const plan = planImportReconciliation([incoming(0, 'Alpha.')], [])
+      expect(plan.cells[0]).toMatchObject({ matchKind: 'new', matchBand: 'new', parentId: null })
+    })
+  })
+
   it('rejects ambiguous identities instead of guessing', () => {
     const duplicate = (cellId: string): ExistingImportCell => ({
       cellId, eventId: `${cellId}-event`, value: cellId, valueHtml: null,

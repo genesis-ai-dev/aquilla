@@ -174,6 +174,10 @@ export interface ReconcileImportResult {
   added: number
   changed: number
   unchanged: number
+  /** AQU-1394: units whose source AND both neighbours are unchanged ("101%"). */
+  ice: number
+  /** AQU-1394: units whose source is unchanged but whose context moved ("100%"). */
+  exact: number
   retainedMissing: number
   importedTargets: number
 }

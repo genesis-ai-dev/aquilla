@@ -50,6 +50,29 @@ describe("ExamplePanel", () => {
     expect(await screen.findByText(/Dios dijo que haya luz/)).toBeInTheDocument()
   })
 
+  // WHY (AQU-1264): the popup is portalled and position-fixed, so an unbounded
+  // list of long example pairs simply runs off the bottom of the viewport with
+  // nothing to scroll — the page behind it scrolls instead. The height cap and
+  // the scroller must sit on the element that actually holds the examples, not
+  // on a wrapper, or the content still overflows past the cap.
+  it("caps the examples popup to the available height and scrolls it in place", async () => {
+    render(<ExamplePanel examples={examples} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /2 examples/i }))
+    await screen.findByText(/In the beginning God created/)
+
+    const popup = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+    expect(popup).not.toBeNull()
+    // the examples live inside the element carrying the scroll affordances
+    expect(popup!).toContainElement(screen.getByText(/God said let there be light/))
+
+    const classes = popup!.className
+    expect(classes).toContain("max-h-(--available-height)")
+    expect(classes).toContain("overflow-y-auto")
+    // wheel/trackpad momentum must not chain into the editor grid behind it
+    expect(classes).toContain("overscroll-contain")
+  })
+
   it("renders nothing when there are no examples", () => {
     const { container } = render(<ExamplePanel examples={[]} />)
     expect(container.firstChild).toBeNull()

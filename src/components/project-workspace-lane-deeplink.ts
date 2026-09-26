@@ -87,3 +87,51 @@ export function defaultLaneDraftReviewHref(
 ): string {
   return editorCellHref(projectId, fileId, cellId, "")
 }
+
+/**
+ * Query flag on an editor cell link: also OPEN that cell's comment thread
+ * (AQU-1259), rather than only scrolling the row into view.
+ *
+ * The distinction is the whole point of the flag. `?cellId=` is a position —
+ * every surface that links into the editor uses it, and none of them wants a
+ * side panel forced open. A link that came from a comment is different: the
+ * user clicked a specific thread, so landing them on the row with the thread
+ * still collapsed makes them hunt for the thing they just clicked. Only the
+ * comment surfaces set this, and only they should.
+ */
+export const OPEN_COMMENTS_PARAM = "comments"
+
+/**
+ * The cell whose comment thread a deep link asks to have open, or `null`.
+ *
+ * Requires BOTH halves: the flag alone names no cell, and `?cellId=` alone is
+ * the ordinary scroll-into-view link every other surface builds. Reading them
+ * together here — rather than in the component — is what keeps "which links
+ * open a panel" one testable rule instead of a condition buried in an effect.
+ */
+export function openCommentsCellFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): string | null {
+  if (searchParams.get(OPEN_COMMENTS_PARAM) !== "1") return null
+  const cellId = searchParams.get("cellId")
+  return cellId ? cellId : null
+}
+
+/**
+ * Open the editor on one cell AND open that cell's comment thread.
+ *
+ * Deliberately not a flag on `editorCellHref`: that builder always emits
+ * `?lane=`, and the comment surfaces are not lane-scoped — a thread belongs to
+ * a cell, not to one target language, so forcing a lane here would silently
+ * move the reader into a language they were not reading (see
+ * `resolveDeepLinkLane` on why an ABSENT lane is the correct "leave it alone").
+ */
+export function editorCommentHref(
+  projectId: string,
+  fileId: string,
+  cellId?: string | null,
+): string {
+  const base = `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}`
+  if (!cellId) return base
+  return `${base}?cellId=${encodeURIComponent(cellId)}&${OPEN_COMMENTS_PARAM}=1`
+}

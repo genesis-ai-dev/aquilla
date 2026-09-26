@@ -146,6 +146,7 @@ import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
+import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -4756,6 +4757,13 @@ function EditorRow({
 }: EditorRowProps) {
   const t = useT()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
+  // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
+  // speech-bubble badge below already say "this row has an open comment" once
+  // you are looking at the row; neither survives a scroll past at reading
+  // speed, which is how a consultant works through a file of notes. When this
+  // preference is on, the same rows also carry a solid leading-edge accent.
+  // Per-row subscription, like the media-cursor and presence hooks above it.
+  const highlightUnresolvedComments = useUnresolvedCommentHighlight()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -6506,6 +6514,14 @@ function EditorRow({
         // reason as the line above: the ring it draws is the same gold as
         // multi-select's, so a class check cannot tell the two apart.
         data-queue-row={isQueueRow ? "true" : undefined}
+        // AQU-1259: the reviewer-scanning accent is on this row. Exposed as an
+        // attribute for the same reason as the two above — the accent is one
+        // more blue mark on a row that can already carry AQU-599's blue ring,
+        // so a class check could not tell the opt-in view from the always-on
+        // indicator.
+        data-unresolved-comments={
+          highlightUnresolvedComments && openCommentCount > 0 ? "true" : undefined
+        }
         tabIndex={0}
         aria-label={t("editor.row.cellAria", { ref: cellRef })}
         className={cn(
@@ -6532,6 +6548,15 @@ function EditorRow({
           isMultiSelected && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Open-comments accent — a soft inset ring.
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
+          // AQU-1259: the opt-in scanning accent — a solid bar down the row's
+          // leading edge. A pseudo-element rather than another ring or a tint:
+          // a row can already be multi-selected, the media cursor, the queue
+          // row or mid-synth, and every one of those states owns the ring and
+          // the background. Adding a fifth competitor there would make the
+          // comment accent the one that loses on exactly the rows a reviewer is
+          // working. `start-0` keeps it on the reading edge in RTL.
+          highlightUnresolvedComments && openCommentCount > 0 &&
+            "before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-blue-500 before:content-['']",
           // Timeline cursor (media lens): sky ring, same language as the
           // selected chip's ring.
           isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",

@@ -170,6 +170,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Preferences toggles / theme / app font size (except persist-reload)
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
+- Comment visibility polish (AQU-1259): the comments page's **Open file** link carries `&comments=1` so arriving in the editor opens that cell's thread instead of only scrolling to the row — the link/reader contract in `project-workspace-lane-deeplink.test.ts`, the page half (unresolved and resolved) in `CommentsPage.test.tsx`. The opt-in **Highlight open comments** editor setting and the leading-edge accent it draws on rows with an unresolved thread are in `ViewSettingsMenu.test.tsx` and `EditorTable.unresolvedCommentHighlight.test.tsx`; AQU-599's always-on badge is unchanged.
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
 - Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav

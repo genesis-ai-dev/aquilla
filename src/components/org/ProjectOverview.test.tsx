@@ -1365,6 +1365,26 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     expect(card).toHaveAttribute("data-expanded", "false")
   })
 
+  it("lets an org owner change the roster floor from the all-organizations view", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
+      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.tagName).toBe("BUTTON")
+    expect(badge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
+  })
+
   it("does not offer the floor picker to a project owner who is not an org owner", async () => {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue([

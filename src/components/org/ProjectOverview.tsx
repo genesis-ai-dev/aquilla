@@ -384,7 +384,7 @@ export function ProjectOverview() {
   // roster read.
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
   const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
-  const { activeOrgId, activeOrg, refreshAccessibleProjects } = useActiveOrg()
+  const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -494,8 +494,17 @@ export function ProjectOverview() {
   // into useOrgSettings made a project owner who is only an org maintainer
   // look allowed to save; the server 403'd and the badge snapped back to
   // "only maintainers & owners".
+  // The role has to come from membership in the org whose settings we patch.
+  // `activeOrg` is null on All organizations, which is the normal view when
+  // someone belongs to more than one org — the badge then rendered as a
+  // static label, so an owner who had raised the floor could not lower it.
   const projectRoleLevel = project?.syncRole?.level ?? null
-  const orgRoleLevel = activeOrg?.role?.level ?? null
+  const orgRoleLevel =
+    (portfolioOrgId != null
+      ? orgs.find((org) => org.id === portfolioOrgId)?.role.level
+      : undefined)
+    ?? (activeOrg?.id === portfolioOrgId ? activeOrg.role.level : null)
+    ?? null
   const orgSettings = useOrgSettings(portfolioOrgId, orgRoleLevel, projectRoleLevel)
   const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
   // Names on the Team card are the roster. A progress floor of maintainer

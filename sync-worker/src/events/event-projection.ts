@@ -27,6 +27,7 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import { visibleSourceSql } from './hidden-cells-scope'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
@@ -248,6 +249,21 @@ function fileCountersSql(scope: FileCountersScope): string {
                 (SELECT COUNT(*) FROM (
                    SELECT 1 FROM cells
                     WHERE project_id = f.project_id AND file_id = f.id
+                      -- AQU-1424: a cell parked with Hide cell is not work, so it
+                      -- leaves the file's denominator. The correlated lookup reads the
+                      -- SHARED SOURCE ROW rather than each row's own hidden_at: the flag
+                      -- lives only there (hiding is per cell, not per lane), and a target
+                      -- row created after the hide carries none of its own. One indexed
+                      -- probe per group, covered by 0112's partial index.
+                      AND NOT EXISTS (
+                        SELECT 1 FROM cells hidden_src
+                         WHERE hidden_src.project_id = cells.project_id
+                           AND hidden_src.file_id = cells.file_id
+                           AND hidden_src.cell_id = cells.cell_id
+                           AND hidden_src.side = 'source'
+                           AND COALESCE(hidden_src.target_lang, '') = ''
+                           AND hidden_src.hidden_at IS NOT NULL
+                      )
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
@@ -283,6 +299,16 @@ function fileCountersSql(scope: FileCountersScope): string {
             AND s.cell_id = c.cell_id
             AND s.side = 'source'
           WHERE f.project_id = ?${narrow}
+            -- AQU-1424: every FILTERed counter above is gated here once rather than
+            -- one by one. Alias s IS the shared source row, so its hidden_at answers for
+            -- the whole cell; c.hidden_at would let every target row of a parked cell
+            -- through, since the flag never lands on a target row.
+            --
+            -- IS NULL is doing double duty on purpose, and the LEFT JOINs need it to: an
+            -- absent s reads as VISIBLE, which keeps both the source-less rows AQU-1068
+            -- creates and the all-null row of an empty file. That empty row is what
+            -- drives the counters to 0 instead of leaving them stale.
+            AND ${visibleSourceSql('s')}
           GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,

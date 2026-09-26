@@ -7,6 +7,8 @@
 // scope by a human ref range ("MRK 4", "MRK 4:1-20"). Encoding it here means
 // it is correct on every call instead of re-derived (or fumbled) per run.
 
+import { visibleSourceSql } from '../../hidden-cells-scope'
+
 export interface CellPair {
   cellId: string
   canonicalRef: string | null
@@ -216,7 +218,14 @@ export async function selectCellPairs(
          ON t.project_id = s.project_id AND t.file_id = s.file_id
         AND t.cell_id = s.cell_id AND t.side = 'target'${lanePredicate}
        WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-         AND s.target_lang = ''`,
+         AND s.target_lang = ''
+         -- AQU-1424: a parked cell is not work, and THIS is the one selector both
+         -- the autopilot tick and the agent's read/draft tools go through, so the
+         -- predicate belongs here rather than at each caller's status filter.
+         -- Autopilot never returns to a hidden cell, Draft-all spends no credits
+         -- on it, and an agent asked to translate everything untranslated in this
+         -- file neither reports nor drafts it.
+         AND ${visibleSourceSql('s')}`,
     )
     .bind(...(scope.targetLang === undefined
       ? [projectId, scope.fileId]

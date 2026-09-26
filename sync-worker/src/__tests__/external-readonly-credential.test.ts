@@ -33,6 +33,7 @@ import { handleExternalReadRequest } from '../external/read-routes'
 import { sessionPrincipal } from '../external/session-routes'
 import { mintInternalSyncToken } from '../external/token-bridge'
 import { ExternalError } from '../external/errors'
+import { callTool } from '../external/mcp-handlers'
 import { mintApiToken, validateApiCredential } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -201,6 +202,36 @@ describe('read-only credential — read surfaces still work', () => {
     expect(body.hints.access).toMatch(/read-only/)
     // The mode hint must not promise an approval flow that cannot happen.
     expect(body.hints.mode).toMatch(/not applicable/)
+  })
+
+  it('reports the same ceiling through the MCP twin of /me', async () => {
+    // The REST and MCP adapters must not disagree about what a token may do. An
+    // MCP-only agent that never calls /me would otherwise learn the ceiling from
+    // a refusal instead of from discovery.
+    const readCred = await validateApiCredential(
+      tdb.db,
+      await credToken(tdb, { credentialId: CRED_READ, access: 'read' }),
+    )
+    const identity = await callTool(
+      'get_identity_and_scope',
+      {},
+      { AQUILLA_PG: tdb.db } as never,
+      readCred!,
+      'tok',
+    )
+    const capabilities = await callTool(
+      'get_capabilities',
+      {},
+      { AQUILLA_PG: tdb.db } as never,
+      readCred!,
+      'tok',
+    )
+    const payload = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0].text) as Record<string, unknown>
+
+    expect(payload(identity).access).toBe('read')
+    expect(payload(capabilities).credentialAccess).toBe('read')
+    expect(String(payload(capabilities).accessCeiling)).toMatch(/scope_denied/)
   })
 
   it('reads a project’s files and cells exactly like a read-write token', async () => {

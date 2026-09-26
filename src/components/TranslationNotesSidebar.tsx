@@ -1,6 +1,15 @@
 // Translation Notes sidebar (AQU-179)
 //
 // Shows all TN rows matching the currently focused cell's canonicalRef.
+//
+// AQU-527: a note also shows the **original-language phrase** it is about. Only
+// the `Note` column is translatable, so both TN importers keep the prose as the
+// cell value and carry `Quote`/`Occurrence`/`SupportReference` in
+// `cells.metadata` — which this panel used to ignore, leaving a translator
+// reading "here, the word Now introduces the next event" with no δὲ in sight.
+// UW called that their single biggest gap ("we're basically editing blind",
+// 2026-07-09 demo). `@/lib/notes/note-metadata` reads the bucket, so a cell
+// from the DCS resource route and one from the direct TSV import render alike.
 // Reads from the server's cells-read route for every "tsv"-typed file in the
 // project (those are TN imports — other TSV files could be CSV-bilingual but
 // the canonicalRef filter ensures only bible-ref anchored notes surface).
@@ -27,6 +36,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import {
+  readNoteReferenceMetadata,
+  supportReferenceLabel,
+  type NoteReferenceMetadata,
+} from "@/lib/notes/note-metadata"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -36,7 +50,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 // sentinel keeps the pattern consistent and future-proof.
 const PROJECT_SENTINEL_FILE_ID = "__project__"
 
-export interface TnNote {
+export interface TnNote extends NoteReferenceMetadata {
   /** Source file name */
   fileName: string
   fileId: string
@@ -139,6 +153,7 @@ export function TranslationNotesSidebar({
                   fileId: tnFile.fileId,
                   body: cell.value,
                   rowIndex,
+                  ...readNoteReferenceMetadata(cell.metadata),
                 })
               }
               rowIndex++
@@ -262,11 +277,44 @@ interface NoteCardProps {
 }
 
 function NoteCard({ note, showDivider }: NoteCardProps) {
+  const t = useT()
   return (
     <div className={cn("px-3 py-2.5", showDivider && "border-t border-dashed")}>
+      {/* The phrase the note is about, first — a note read without it is the
+          "editing blind" complaint AQU-527 came from. `dir="auto"` lets the
+          first strong character decide, so a Hebrew quote lays out RTL inside
+          an LTR panel; `lang` is what picks a script-appropriate font and tells
+          a screen reader which language to voice. */}
+      {note.quote && (
+        <div className="mb-1.5 border-s-2 border-primary/40 ps-2">
+          {/* Announced, not drawn: sighted readers get the phrase's position and
+              rule; a screen-reader user would otherwise hear bare Greek. It sits
+              OUTSIDE the `dir="auto"` element on purpose — an English span in
+              front of the quote would make the first strong character Latin and
+              lay a Hebrew phrase out left-to-right. */}
+          <span className="sr-only">{t("editor.tn.originalPhraseLabel")}</span>
+          <p
+            {...(note.quoteScript ? { lang: note.quoteScript } : {})}
+            dir="auto"
+            className="text-sm leading-relaxed text-foreground"
+          >
+            {note.quote}
+          </p>
+          {note.occurrence !== null && (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {t("editor.tn.occurrence", { n: note.occurrence })}
+            </span>
+          )}
+        </div>
+      )}
       <p className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">
         {note.body}
       </p>
+      {note.supportReference && (
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          {t("editor.tn.support", { article: supportReferenceLabel(note.supportReference) })}
+        </p>
+      )}
     </div>
   )
 }

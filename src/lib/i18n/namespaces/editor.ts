@@ -436,6 +436,9 @@ export const editor = defineNamespace({
     "editor.tn.hide": "Hide translation notes",
     "editor.tn.focusHint": "Focus a translation cell to see notes for that verse.",
     "editor.tn.noneForRef": "No translation notes for {ref}.",
+    "editor.tn.originalPhraseLabel": "Original-language phrase this note is about:",
+    "editor.tn.occurrence": "occurrence {n}",
+    "editor.tn.support": "See: {article}",
 
     // — eBible target-import review panel ————————————————————————————
     "editor.ebible.matched": plural({
@@ -3392,6 +3395,37 @@ export const editor = defineNamespace({
             "The verse reference in focus, e.g. 'MAT 3:16'. From the data — do not " +
             "translate. The app renders it in a monospace face, so keep it a " +
             "placeholder rather than writing a reference into the sentence.",
+        },
+      },
+      "editor.tn.originalPhraseLabel": {
+        description:
+          "Screen-reader-only label read immediately before a note's quoted Hebrew " +
+          "or Greek phrase, which is otherwise announced as bare foreign text with " +
+          "no introduction. Never drawn on screen, so length is free. 'Original " +
+          "language' means the language the scripture was written in, not the " +
+          "project's source language. Ends with a colon: the phrase follows.",
+      },
+      "editor.tn.occurrence": {
+        description:
+          "Marker under a note's quoted phrase when the verse contains that phrase " +
+          "more than once and the note addresses a later instance — so '2' means " +
+          "the second occurrence in this verse. Shown only for the 2nd and beyond. " +
+          "Lower case, no period: it is a caption, not a sentence, on one 10px line.",
+        maxLength: 18,
+        placeholders: {
+          n: "Which instance in the verse, as a numeral of 2 or more. Not translated.",
+        },
+      },
+      "editor.tn.support": {
+        description:
+          "Footer line of a note card, linking it to the translation-academy article " +
+          "it draws on. 'See:' introduces the article name that follows. One 10px " +
+          "line under the note prose.",
+        maxLength: 24,
+        placeholders: {
+          article:
+            "Name of the reference article, derived from the note's support reference, " +
+            "e.g. 'figs merism'. English resource identifier — not translated.",
         },
       },
       "editor.ebible.matched": {

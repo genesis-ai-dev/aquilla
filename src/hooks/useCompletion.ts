@@ -57,10 +57,11 @@ import {
   isBatchCompletionCancelled,
   getBatchCompletionSignal,
   cancelBatchCompletion,
+  reportBatchCompletionUnavailable,
 } from "@/lib/completion/batch-completion"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
-import { useFrontierHealth } from "@/lib/completion/frontier-health"
+import { useFrontierHealth, checkFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -544,7 +545,20 @@ export function useCompletion(
   //   - The in-flight fetch/stream receives the AbortSignal and terminates immediately.
   //   - Already-committed cells are unaffected; partial streaming text is discarded.
   const completeBatch = useCallback(async (allRequested: CellData[]) => {
-    if (!isConfigured || !isAvailable) return
+    if (!isConfigured) return
+    // AQU-1377: a cached "unavailable" could be a stale negative left by a probe
+    // that fired while the network was down, in which case the service is fine
+    // and the user's click should just work. Re-probe on demand (forced, so it
+    // bypasses the TTL) before refusing, and when it really is unreachable say
+    // so — this used to `return` silently, making the click a no-op with no
+    // banner, no drafts and no error until the page was reloaded.
+    if (!isAvailable) {
+      const okNow = provider === "frontier" ? await checkFrontierHealth(true) : true
+      if (!okNow) {
+        reportBatchCompletionUnavailable()
+        return
+      }
+    }
 
     // SUB-28: untranscribed media sections have NO source text (the filename
     // doesn't count) — skip them instead of asking the model to "translate"

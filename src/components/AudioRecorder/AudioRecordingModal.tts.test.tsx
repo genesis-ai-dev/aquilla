@@ -70,7 +70,23 @@ const transcribeCell = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {})
 vi.mock("@/lib/audio/transcribe", () => ({
   transcribeCell: (...args: unknown[]) => transcribeCell(...args),
 }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it is inert.
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"

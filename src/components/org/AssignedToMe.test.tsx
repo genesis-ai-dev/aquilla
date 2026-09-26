@@ -77,6 +77,33 @@ describe("AssignedToMe", () => {
     expect(document.querySelector(".animate-pulse")).toBeTruthy()
   })
 
+  // AQU-1251: the regression guard for the flake. `loading` used to be a
+  // `useState` the fetch effect flipped, so between "the org directory resolved"
+  // and "the effect for that org ran" the table rendered with a stale
+  // `loading === false` — an authoritative "You have no open assignments." for a
+  // request that had not been made yet. It is now derived from whether the held
+  // result matches the current `(jwt, orgId)`, so that render cannot exist.
+  //
+  // The org resolves asynchronously here (listMyOrgs is a promise), which is the
+  // window the bug lived in; the assignments read never settles, so the ONLY
+  // correct state for the whole test is "loading".
+  it("never paints an empty state while the active org's assignments are unresolved", async () => {
+    mockGetMy.mockImplementation(() => new Promise(() => {}))
+    renderInbox()
+
+    // The table only mounts once an org is active, so this resolves exactly at
+    // the render the stale flag used to corrupt.
+    await screen.findByPlaceholderText("Search assignments…")
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
+
+    // And it stays loading — nothing resolved it, so nothing may dismiss it.
+    // A fixed wait would only prove the machine was slow; poll the mock instead.
+    await waitFor(() => expect(mockGetMy).toHaveBeenCalledWith("jwt", 1))
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
+  })
+
   it("aggregates the caller's open assignments across projects with progress", async () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.

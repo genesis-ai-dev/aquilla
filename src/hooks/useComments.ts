@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { v7 as uuidv7 } from "uuid"
 import { enqueueEvent } from "@/lib/sync/events-emit"
 import { fetchCommentCounts, fetchCommentsForProject } from "@/lib/sync/comments-read"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import type { CommentCounts, CommentRecord } from "@/lib/sync/comments-read-types"
 import type { CommentScope } from "@/lib/sync/outbox-types"
 
@@ -247,6 +248,28 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       return
     }
     refresh().catch(() => {/* refresh sets isError */})
+  }, [projectId, tokenReady, refresh])
+
+  // AQU-817: refetch when the tab regains focus — the drift mitigation every
+  // other read hook already has (useCells, useCellValidators, useCellHistory,
+  // useCellsAuditStats, useProjectSettings, useStaleSourceCells).
+  //
+  // Until this, the comments list had exactly ONE live path: an `event.applied`
+  // comment frame arriving over the project socket. Per AD-1 the ProjectSync DO
+  // holds no durable state and never replays, so a frame that lands while this
+  // client's socket is down — a sync-worker redeploy, a DO eviction, a network
+  // blip, a sleeping laptop — is lost to this client *permanently*. Unlike
+  // cells (AQU-845), nothing re-armed the comments read afterwards, so a
+  // collaborator's thread stayed invisible until a full page reload. That is
+  // the reported failure: a contributor's comment never reached another member
+  // sitting in the same cell, while traffic the other direction arrived fine —
+  // the asymmetry is whose socket had the gap, not anyone's role.
+  useEffect(() => {
+    if (!projectId) return
+    if (tokenReady === false) return
+    return subscribeWindowRegainedFocus(() => {
+      refresh().catch(() => {/* refresh sets isError */})
+    })
   }, [projectId, tokenReady, refresh])
 
   /**

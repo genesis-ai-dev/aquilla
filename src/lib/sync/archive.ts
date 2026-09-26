@@ -43,6 +43,8 @@ export interface ProjectStateResponse {
   orgId: number | null
   /** AQU-822: the org's effective termbase-edit floor (absent on older servers). */
   termbaseEditMinRole?: number | null
+  /** AQU-1086: the org's effective language-edit floor (absent on older servers). */
+  languageEditMinRole?: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */

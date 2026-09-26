@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
+import { isReleaseBranch } from "./release-plan.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -10,10 +11,12 @@ const deploymentManifest = JSON.parse(
 ) as {
   surfaces: Record<string, {
     directory: string
+    requiredSecrets: string[]
     requiredBindings: Record<string, string>
     environments: Record<string, {
       worker: string
       routes: string[]
+      requiredSecrets?: string[]
       plainText: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
@@ -65,7 +68,7 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["workflow_dispatch", "main", "production", "production", "api.aquilla.app"],
+    ["workflow_dispatch", "release/2026/09/23", "production", "production", "api.aquilla.app"],
     ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
     ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
   ])(
@@ -84,7 +87,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["feature/example", "development", "staging", "", "release"])(
+  it.each(["feature/example", "development", "staging", "", "release", "main", "release/2026/9/23", "release/2026/09/23/hotfix"])(
     "rejects unauthorized live deployment ref %j",
     (refName) => {
       const result = spawnSync(
@@ -98,26 +101,29 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["main", "dev"])(
-    "enforces the expected %s branch for explicit live deployments",
-    (expectedBranch) => {
+  it.each([
+    ["release/2026/09/23", "release"],
+    ["dev", "dev"],
+  ])(
+    "allows %s for the %s deploy guard",
+    (branch, guardArg) => {
       const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
       const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
 
       try {
-        expect(spawnSync("git", ["init", "-b", expectedBranch], { cwd: tempRepo }).status).toBe(0)
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
 
-        const allowed = spawnSync("bash", [guard, expectedBranch], {
+        const allowed = spawnSync("bash", [guard, guardArg], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(allowed.status).toBe(0)
 
         const rejected = spawnSync("bash", [guard, "feature/example"], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(rejected.status).not.toBe(0)
         expect(rejected.stderr).toContain("requires branch 'feature/example'")
@@ -126,6 +132,87 @@ describe("worker deployment environment contract", () => {
       }
     },
   )
+
+  // Production must only ship from a dated release branch so every live version maps to a calver tag.
+  it.each(["main", "dev", "release/2026/9/23", "release/latest"])(
+    "refuses a production deploy from %s",
+    (branch) => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync("bash", [guard, "release"], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
+        })
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("release/YYYY/MM/DD")
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    },
+  )
+
+  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // day. Four checkers each decide whether a branch name counts as a release
+  // branch: the three shell scripts here, plus isReleaseBranch in
+  // release-plan.mjs. One shared table is what keeps their four regexes in
+  // step; a shared helper alone doesn't catch a script that forgot to call it.
+  describe.each([
+    ["release/2026/09/24", true],
+    ["release/2026/09/24-01", true],
+    ["release/2026/9/23", false],
+    ["release/2026/09/24-1", false],
+    ["release/2026/09/24-001", false],
+    ["release/latest", false],
+  ])("release branch name %j", (branch, accepted) => {
+    it(`isReleaseBranch returns ${accepted}`, () => {
+      expect(isReleaseBranch(branch)).toBe(accepted)
+    })
+
+    it(`verify-deploy-branch.sh ${accepted ? "accepts" : "rejects"} it as "release"`, () => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync(
+          "bash",
+          [path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh"), "release"],
+          { cwd: tempRepo, encoding: "utf8", env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch } },
+        )
+        expect(result.status === 0).toBe(accepted)
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    })
+
+    it(`tag-release.sh ${accepted ? "accepts" : "rejects"} it as the current branch`, () => {
+      // Run outside any git repo so `git symbolic-ref` fails and the script
+      // falls back to GITHUB_REF_NAME instead of this repo's real branch.
+      const result = spawnSync("bash", [path.join(REPO_ROOT, "scripts", "tag-release.sh")], {
+        cwd: tmpdir(),
+        encoding: "utf8",
+        env: { GITHUB_REF_NAME: branch, GITHUB_ACTIONS: "true" },
+      })
+      if (accepted) {
+        expect(result.stderr).not.toContain("requires a release/YYYY/MM/DD branch")
+      } else {
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("requires a release/YYYY/MM/DD branch")
+      }
+    })
+
+    it(`resolve-deployment-target.sh ${accepted ? "accepts" : "rejects"} it as a live ref`, () => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", branch],
+        { encoding: "utf8", env: {} },
+      )
+      expect(result.status === 0).toBe(accepted)
+      if (accepted) expect(result.stdout).toContain("wrangler_environment=production")
+    })
+  })
 
   it("keeps account_id above the first TOML table", () => {
     const config = readRepoFile("sync-worker", "wrangler.toml")
@@ -137,11 +224,11 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh main"],
-    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh release"],
+    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh release"],
   ])(
     "keeps the unnamed profile in %s away from production",
     (file, localName, productionName, guardCommand) => {
@@ -314,7 +401,7 @@ describe("worker deployment environment contract", () => {
     const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
-    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
+    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh release")
     expect(agentPackage.scripts?.deploy).toContain("--env=production")
     expect(agentPackage.scripts?.["deploy:staging"]).toBeUndefined()
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
@@ -377,13 +464,13 @@ describe("worker deployment environment contract", () => {
     const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
 
     for (const row of [
-      "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
+      "| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
       "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
     ]) {
       expect(matrix).toContain(row)
     }
 
-    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`release/YYYY/MM/DD` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
@@ -401,6 +488,47 @@ describe("worker deployment environment contract", () => {
       .toContain("This Worker has only production and development")
   })
 
+  // AQU-762: dev.aquilla.app ran for weeks with no OPENROUTER_API_KEY on
+  // aquilla-dev-identity, so every AI surface 500'd and nothing said where the key
+  // was supposed to live. Secrets attach to a Worker NAME and do not copy between
+  // environments, so adding a required secret — or a whole environment — without
+  // documenting where it must be provisioned is the exact silent regression.
+  it("documents where every required Worker secret is provisioned per environment", () => {
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    const sectionStart = matrix.indexOf("## Worker secrets (per environment)")
+    const sectionEnd = matrix.indexOf("## Deployment ownership")
+    expect(sectionStart).toBeGreaterThan(-1)
+    expect(sectionEnd).toBeGreaterThan(sectionStart)
+    const secrets = matrix.slice(sectionStart, sectionEnd)
+
+    // Match each Worker's own table row, not the section as a whole — a secret named
+    // anywhere in the prose must not satisfy the environment that actually needs it.
+    const rows = secrets.split("\n").filter((line) => line.startsWith("| ") && line.endsWith(" |"))
+
+    for (const surfaceConfig of Object.values(deploymentManifest.surfaces)) {
+      for (const expected of Object.values(surfaceConfig.environments)) {
+        const row = rows.filter((line) => line.includes(`\`${expected.worker}\``))
+        expect(row, `one table row for ${expected.worker}`).toHaveLength(1)
+        expect(row[0], `${expected.worker} directory`).toContain(`\`${surfaceConfig.directory}\``)
+        const required = [...surfaceConfig.requiredSecrets, ...(expected.requiredSecrets ?? [])]
+        for (const name of required) {
+          expect(row[0], `${expected.worker} row must list ${name}`).toContain(`\`${name}\``)
+        }
+      }
+    }
+
+    // The provisioning command and the fail-closed deploy check are the two things an
+    // operator needs; neither lives anywhere else a human reads.
+    expect(secrets).toContain("wrangler secret put")
+    expect(secrets).toContain("wrangler secret list")
+    expect(secrets).toContain("missing required secret binding")
+    // No admin-console fallback exists for the AI key (routes/admin.ts tunes models and
+    // budgets only), so the docs must not imply one.
+    expect(secrets).toContain("There is no runtime fallback")
+    expect(readRepoFile("auth-worker", "src", "routes", "admin.ts"))
+      .not.toContain("OPENROUTER_API_KEY")
+  })
+
   it("uses explicit environments and live checks in every local deploy command", () => {
     const rootPackage = JSON.parse(readRepoFile("package.json")) as {
       scripts?: Record<string, string>
@@ -408,7 +536,7 @@ describe("worker deployment environment contract", () => {
     const scripts = rootPackage.scripts ?? {}
 
     for (const [target, environment, branch] of [
-      ["aquilla", "production", "main"],
+      ["aquilla", "production", "release"],
       ["aquilla:dev", "development", "dev"],
     ] as const) {
       for (const [surface, manifestSurface] of [
@@ -562,5 +690,124 @@ describe("worker deployment environment contract", () => {
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+  })
+})
+
+// AQU-854: Aquilla telemetry moved from PostHog US Cloud to PostHog EU Cloud.
+// The region is encoded in the ingest hostname, so there is no runtime signal
+// that it is wrong — a single producer left on `us.i.posthog.com` keeps
+// shipping browser analytics, session replays and worker error logs into a US
+// processor, silently and indefinitely. The only durable guard is that no live
+// config or producer default can name a US host at all, and that the deploy
+// config states the EU host explicitly rather than leaning on the code
+// default. The retired US *project token* must also not survive the cutover:
+// posting it to an EU endpoint would authenticate against nothing while still
+// putting the old credential on the wire.
+describe("PostHog EU region contract (AQU-854)", () => {
+  // The live config + every producer of a PostHog host. Vendored third-party
+  // docs under .claude/skills and .agents/skills are excluded on purpose:
+  // they are upstream PostHog samples, not Aquilla configuration.
+  const LIVE_POSTHOG_FILES = [
+    ["src", "lib", "posthog.ts"],
+    ["src", "lib", "posthog-host.ts"],
+    ["auth-worker", "src", "posthog-logs.ts"],
+    ["sync-worker", "src", "posthog-logs.ts"],
+    ["agent-worker", "src", "posthog-logs.ts"],
+    ["auth-worker", "src", "types.ts"],
+    ["agent-worker", "src", "types.ts"],
+    ["auth-worker", "wrangler.toml"],
+    ["sync-worker", "wrangler.toml"],
+    ["agent-worker", "wrangler.toml"],
+    ["config", "cloudflare-deployments.json"],
+    [".env.example"],
+    ["auth-worker", ".dev.vars.example"],
+    ["sync-worker", ".dev.vars.example"],
+    ["scripts", "posthog-ops-setup.mjs"],
+  ] as const
+
+  // Assembled rather than written out so this guard does not itself reintroduce
+  // the retired token as a grep-able literal.
+  const RETIRED_US_PROJECT_TOKEN = ["phc", "oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"].join("_")
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s names no US PostHog host",
+    (_label, segments) => {
+      const contents = readRepoFile(...segments)
+
+      expect(contents).not.toContain("us.i.posthog.com")
+      expect(contents).not.toContain("us.posthog.com")
+    },
+  )
+
+  it.each(LIVE_POSTHOG_FILES.map((segments) => [path.join(...segments), segments] as const))(
+    "%s does not carry the retired US project token",
+    (_label, segments) => {
+      expect(readRepoFile(...segments)).not.toContain(RETIRED_US_PROJECT_TOKEN)
+    },
+  )
+
+  it.each([
+    ["auth-worker", "identity"],
+    ["sync-worker", "sync"],
+    ["agent-worker", "agent sandbox"],
+  ])("%s declares the EU ingest host alongside every POSTHOG_KEY it sets", (directory) => {
+    const config = readRepoFile(directory, "wrangler.toml")
+    const hostDeclarations = config.match(/^POSTHOG_HOST = "https:\/\/eu\.i\.posthog\.com"$/gm) ?? []
+    const keyDeclarations = config.match(/^POSTHOG_KEY = /gm) ?? []
+
+    // Every [vars] / [env.*.vars] block that configures a key also pins the
+    // region, so no deployable profile falls back to the code default.
+    expect(keyDeclarations.length).toBeGreaterThan(0)
+    expect(hostDeclarations).toHaveLength(keyDeclarations.length)
+  })
+
+  it.each([
+    ["src/lib/posthog-host.ts", ["src", "lib", "posthog-host.ts"]],
+    ["auth-worker/src/posthog-logs.ts", ["auth-worker", "src", "posthog-logs.ts"]],
+    ["sync-worker/src/posthog-logs.ts", ["sync-worker", "src", "posthog-logs.ts"]],
+    ["agent-worker/src/posthog-logs.ts", ["agent-worker", "src", "posthog-logs.ts"]],
+  ] as const)("%s defaults its ingest host to EU in code", (_label, segments) => {
+    expect(readRepoFile(...segments)).toContain(
+      'POSTHOG_EU_INGEST_HOST = "https://eu.i.posthog.com"',
+    )
+  })
+
+  it("documents the EU host in the SPA and worker env examples", () => {
+    expect(readRepoFile(".env.example")).toContain("VITE_POSTHOG_HOST=https://eu.i.posthog.com")
+    for (const directory of ["auth-worker", "sync-worker"]) {
+      expect(readRepoFile(directory, ".dev.vars.example")).toContain(
+        'POSTHOG_HOST="https://eu.i.posthog.com"',
+      )
+    }
+  })
+
+  it("retires the US project token in the deployment manifest without pinning the host", () => {
+    // Blank until the EU project token exists (account-side dependency); a
+    // blank key makes `shipLog` a no-op instead of posting a retired token.
+    // The plainText check above asserts this against the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+
+    // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
+    // environment-guard turns every identity plainText key into a hard runtime
+    // requirement — an unset one makes the Worker answer 503 — so pinning a
+    // telemetry variable there would couple identity availability to
+    // telemetry configuration. The region is enforced on the wrangler
+    // profiles themselves by the per-worker check above, which also covers
+    // agent-worker (absent from this manifest entirely).
+    for (const surface of ["identity", "sync"]) {
+      expect(
+        deploymentManifest.surfaces[surface].environments.production.plainText,
+      ).not.toHaveProperty("POSTHOG_HOST")
+    }
+  })
+
+  it("points the one-off ops script at the EU control plane with a per-run project id", () => {
+    const script = readRepoFile("scripts", "posthog-ops-setup.mjs")
+
+    expect(script).toContain('const HOST = "https://eu.posthog.com"')
+    // The US project's numeric id is meaningless on the EU control plane, so it
+    // must not be baked in — that would silently target the retired project.
+    expect(script).toContain("process.env.POSTHOG_PROJECT_ID")
+    expect(script).not.toContain("401628")
   })
 })

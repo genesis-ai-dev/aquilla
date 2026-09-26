@@ -8,7 +8,7 @@
 // The pure store helpers still return the full next array; this module turns
 // that into the smallest set of `term.*` events that takes the projection
 // from `prev` to `next`. Every write lands in the outbox like any other event.
-import type { Concept, TermRendering } from "./types"
+import type { Concept, TermMatchOptions, TermRendering } from "./types"
 import {
   emitTermApprove,
   emitTermCreate,
@@ -29,6 +29,24 @@ export interface ConceptDeltaInput {
 function sameRenderings(a: TermRendering[], b: TermRendering[]): boolean {
   if (a.length !== b.length) return false
   return a.every((r, i) => r.rendering === b[i].rendering && r.status === b[i].status)
+}
+
+/**
+ * AQU-1271: compare match options on VALUE, not on serialization. `match` is a
+ * JSONB column, so a concept read back from the projection can carry the same
+ * options under a different key order than `pruneMatch` emitted — a plain
+ * `JSON.stringify` compare would then report a change on every unrelated edit
+ * and emit a pointless `term.update`. Form lists are sets, so they sort too.
+ */
+function sameMatch(a: TermMatchOptions | undefined, b: TermMatchOptions | undefined): boolean {
+  const norm = (m: TermMatchOptions | undefined) =>
+    JSON.stringify({
+      foldMarks: m?.foldMarks ?? null,
+      affixes: m?.affixes ?? null,
+      forms: [...(m?.forms ?? [])].sort(),
+      excludedForms: [...(m?.excludedForms ?? [])].sort(),
+    })
+  return norm(a) === norm(b)
 }
 
 /**
@@ -77,6 +95,12 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
     }
     if (Boolean(c.caseSensitive) !== Boolean(was.caseSensitive)) {
       update.caseSensitive = Boolean(c.caseSensitive)
+      changed = true
+    }
+    if (!sameMatch(c.match, was.match)) {
+      // `{}` (not undefined) so clearing every option actually reaches the
+      // projector — same reason `notes` clears with "".
+      update.match = c.match ?? {}
       changed = true
     }
     if (changed) ids.push(await emitTermUpdate(update))

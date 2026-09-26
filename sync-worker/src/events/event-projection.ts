@@ -25,6 +25,10 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { commentAuthorLabel } from './comment-authorship'
+import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+
+export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -77,6 +81,10 @@ function countWords(text: string): number {
 export function buildBulkTargetCellCommitStmt(
   db: AquillaDb,
   events: PersistedEvent<'target.cell.commit'>[],
+  // AQU-1240: project's resolved default-lane tag (see laneOfEvent). Undefined
+  // => legacy '' , byte-identical while no resolver is wired. All events in one
+  // bulk statement share a project, so a single tag applies.
+  projectDefaultLane?: string | null,
 ): AquillaStatement {
   if (events.length === 0) throw new Error('buildBulkTargetCellCommitStmt: empty events')
   const byCellLane = new Map<string, PersistedEvent<'target.cell.commit'>>()
@@ -85,7 +93,7 @@ export function buildBulkTargetCellCommitStmt(
       throw new Error(`target.cell.commit event ${event.id} is missing fileId or cellId`)
     }
     const payload = event.payload as EventPayloads['target.cell.commit']
-    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload)}`, event)
+    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload, projectDefaultLane)}`, event)
   }
 
   const rows = [...byCellLane.values()]
@@ -93,11 +101,12 @@ export function buildBulkTargetCellCommitStmt(
   for (const event of rows) {
     const payload = event.payload as EventPayloads['target.cell.commit']
     const value = payload.value ?? ''
+    const lane = laneOfEvent(event.kind, payload, projectDefaultLane)
     binds.push(
       event.projectId,
       event.fileId,
       event.cellId,
-      laneOfEvent(event.kind, payload),
+      lane,
       value,
       payload.valueHtml ?? null,
       event.id,
@@ -107,16 +116,18 @@ export function buildBulkTargetCellCommitStmt(
       countWords(value),
       contentHash(value),
       payload.ai_suggestion ? 1 : 0,
+      // AQU-1240 slice 5: resolve this row's opaque lane_id from (project, tag).
+      ...laneIdResolveBinds('target', event.projectId, lane),
     )
   }
   const placeholders = Array(rows.length)
-    .fill("(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)")
+    .fill(`(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
     .join(',\n')
   return db.prepare(
     `INSERT INTO cells (
       project_id, file_id, cell_id, side, target_lang, value, value_html, type,
       canonical_ref, anchor_cell_id, event_id, source_event_id,
-      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted
+      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
     ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
       value = excluded.value,
@@ -129,7 +140,8 @@ export function buildBulkTargetCellCommitStmt(
       content_hash = excluded.content_hash,
       validated = 0,
       endorsement_count = 0,
-      ai_drafted = excluded.ai_drafted`,
+      ai_drafted = excluded.ai_drafted,
+      lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
   ).bind(...binds)
 }
 
@@ -140,11 +152,35 @@ export function buildBulkTargetCellCommitStmt(
  * all lanes and never carry a lane). Part of the cells row key and, for
  * non-default lanes, of the AD-2 chain slot (chain-claims.ts
  * laneQualifiedParentKey).
+ *
+ * AQU-1240 (the replay shim): `projectDefaultLane` is the real lane tag the
+ * eliminated '' default lane was named for this project (under v2, the
+ * lanes table's legacy_tag; resolver wired at the enable step). When known, a
+ * target event with an absent/'' `targetLang` resolves to that tag instead of
+ * '', so that '' and the tag denote the SAME lane at every read/replay/auth
+ * site and 4-then-5 / 5-then-4 converge (design §2.5, §6).
+ *
+ * BEHAVIOR-NEUTRAL WHILE NO RESOLVER IS WIRED: the 3rd arg is undefined until
+ * the enable step, so this returns '' , and every
+ * key/scope is byte-identical to pre-1240. The '' -> tag flip is switched on
+ * ONLY together with slice 4 (stop writing '') and slice 5 (backfill); enabling
+ * it earlier forks history against new writes. Absent 3rd arg == legacy null.
+ *
+ * NOTE (deferred hardening, design §2.3/§2.5): post-cutover the resolver gains
+ * a project_settings.target_language fallback and THROWS when a legacy-shaped
+ * event meets a project with no mapping — "cannot determine the lane" is only
+ * safely answered by refusing. Not enabled here; it would take down projection
+ * for every unmapped project while the table is still empty.
  */
-export function laneOfEvent(kind: string, payload: unknown): string {
+export function laneOfEvent(
+  kind: string,
+  payload: unknown,
+  projectDefaultLane?: string | null,
+): string {
   if (!kind.startsWith('target.cell.')) return ''
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
-  return typeof lang === 'string' ? lang : ''
+  if (typeof lang === 'string' && lang !== '') return lang
+  return projectDefaultLane != null && projectDefaultLane !== '' ? projectDefaultLane : ''
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -170,42 +206,84 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * AQU-1083 adds the structural_* trio: the same cell/filled/approved counts
+ * restricted to cells whose SOURCE row is a heading or paratext. Membership is
+ * a property of the source row, but filled and approved count TARGET rows whose
+ * own type is null, so every row resolves its type through the paired source
+ * via idx_cells_pair_lookup. They are maintained unconditionally — no counter
+ * here knows anything about the setting — so a reader that excludes structural
+ * cells subtracts, and the policy can be toggled without reprojecting.
+ *
+ * Driven FROM `files` rather than from `cells` so a file whose cells have all
+ * been deleted is still reset to zero. The per-project form relied on that.
+ *
  * cell_count deliberately avoids COUNT(DISTINCT cell_id): that sorts the whole
  * row set (value included, ~170 B/row) and spilled to disk on every
  * 30K+-cell file under prod's 4 MB work_mem (4.6 GB temp over 8.6 days).
  * GROUP BY cell_id over cells_pkey (project_id, file_id, cell_id, …) is an
  * ordered Index Only Scan + Group — no sort at any work_mem. Guarded by
- * __tests__/hot-query-plans.test.ts.
+ * __tests__/hot-query-plans.test.ts. The structural cell count needs no
+ * DISTINCT at all: a cell has exactly one source row, so counting structural
+ * SOURCE rows is the distinct count.
  *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
-export function fileCountersRecomputeStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-  serverTs: number,
-): AquillaStatement {
-  return db
-    .prepare(
-      `WITH counters AS (
-         SELECT (SELECT COUNT(*) FROM (
+/** Which files the CTE gathers: one, every file in the project, or (AQU-557,
+ *  POST /migrate/finalize) the project narrowed to an `IN (…)` list of that
+ *  many ids. Bind order follows the SQL: projectId, the id(s), serverTs,
+ *  projectId. */
+type FileCountersScope = 'file' | 'project' | { fileIds: number }
+
+function fileCountersSql(scope: FileCountersScope): string {
+  const narrow =
+    scope === 'file'
+      ? ' AND f.id = ?'
+      : scope === 'project'
+        ? ''
+        : ` AND f.id IN (${Array.from({ length: scope.fileIds }, () => '?').join(', ')})`
+  return `WITH counters AS (
+         SELECT f.id AS file_id,
+                (SELECT COUNT(*) FROM (
                    SELECT 1 FROM cells
-                    WHERE project_id = ? AND file_id = ?
+                    WHERE project_id = f.project_id AND file_id = f.id
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
-                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+                COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND TRIM(value) != ''
+                  WHERE c.side = 'target' AND TRIM(c.value) != ''
                 )::integer AS filled_count,
-                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
-                MAX(last_edit_at) AS last_edit_at,
+                COALESCE(SUM(c.word_count) FILTER (WHERE c.side = 'target'), 0)::integer AS word_count,
+                MAX(c.last_edit_at) AS last_edit_at,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND ai_drafted = 1
-                )::integer AS ai_drafted_count
-           FROM cells
-          WHERE project_id = ? AND file_id = ?
+                  WHERE c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS ai_drafted_count,
+                COUNT(*) FILTER (
+                  WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+                )::integer AS structural_cell_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND TRIM(c.value) != ''
+                )::integer AS structural_filled_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext') AND c.validated = 1
+                )::integer AS structural_approved_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS structural_ai_drafted_count
+           FROM files f
+           LEFT JOIN cells c
+             ON c.project_id = f.project_id
+            AND c.file_id = f.id
+           LEFT JOIN cells s
+             ON s.project_id = c.project_id
+            AND s.file_id = c.file_id
+            AND s.cell_id = c.cell_id
+            AND s.side = 'source'
+          WHERE f.project_id = ?${narrow}
+          GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,
          approved_count = counters.approved_count,
@@ -213,16 +291,84 @@ export function fileCountersRecomputeStmt(
          word_count = counters.word_count,
          last_edit_at = counters.last_edit_at,
          ai_drafted_count = counters.ai_drafted_count,
+         structural_cell_count = counters.structural_cell_count,
+         structural_filled_count = counters.structural_filled_count,
+         structural_approved_count = counters.structural_approved_count,
+         structural_ai_drafted_count = counters.structural_ai_drafted_count,
          updated_at = ?
         FROM counters
-       WHERE files.id = ? AND files.project_id = ?`,
+       WHERE files.id = counters.file_id AND files.project_id = ?`
+}
+
+export function fileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  serverTs: number,
+): AquillaStatement {
+  return db.prepare(fileCountersSql('file')).bind(projectId, fileId, serverTs, projectId)
+}
+
+/**
+ * AQU-490: re-derive one take's vote count from `cell_audio_validators`.
+ *
+ * A COUNT rather than an increment, so replaying the log twice cannot drift it
+ * — the same property that makes `cells.endorsement_count` safe where a stamped
+ * `cells.validated` is not. Every writer of a validator row runs this
+ * afterwards, which is now exactly two: validate and unvalidate. Trim used to
+ * be the third and no longer touches votes at all.
+ */
+export function audioValidatorCountRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  audioId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `UPDATE cell_audio
+          SET validator_count = (
+            SELECT COUNT(*) FROM cell_audio_validators v
+             WHERE v.project_id = cell_audio.project_id
+               AND v.file_id    = cell_audio.file_id
+               AND v.cell_id    = cell_audio.cell_id
+               AND v.audio_id   = cell_audio.audio_id
+          )
+        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
     )
-    .bind(
-      projectId, fileId,
-      projectId, fileId,
-      serverTs,
-      fileId, projectId,
-    )
+    .bind(projectId, fileId, cellId, audioId)
+}
+
+/**
+ * The same counters for every file in a project, in one statement — or, with
+ * `fileIds`, for just those files (AQU-557: POST /migrate/finalize names the
+ * files a push touched so a wide project is not rescanned on every chunk).
+ *
+ * Used by the rebuild and by POST /migrate/finalize, which both replay a whole
+ * project and defer per-event counter maintenance. Both used to carry their own
+ * hand-written copy of the SQL above — and one of them had already drifted,
+ * silently leaving `ai_drafted_count` behind. AQU-1083 would have made that
+ * worse in a way nobody would notice: a rebuild would have quietly restored
+ * headings to the totals a project had chosen to exclude. One builder, three
+ * scopes.
+ *
+ * An empty `fileIds` list means the whole project, never "no files": a caller
+ * that computed an empty scope must not silently skip the repair, and the
+ * unscoped recompute is a superset of any scope.
+ */
+export function projectFileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  serverTs: number,
+  fileIds?: readonly string[] | null,
+): AquillaStatement {
+  if (!fileIds?.length) {
+    return db.prepare(fileCountersSql('project')).bind(projectId, serverTs, projectId)
+  }
+  return db
+    .prepare(fileCountersSql({ fileIds: fileIds.length }))
+    .bind(projectId, ...fileIds, serverTs, projectId)
 }
 
 /**
@@ -278,12 +424,14 @@ export function buildBulkSourceCellCreateStmt(
       p.cameraState ?? null,
       // OBS parity: extensible per-cell metadata bucket, JSON-encoded for JSONB.
       p.metadata != null ? JSON.stringify(p.metadata) : null,
+      // AQU-1240 slice 5: resolve this source row's opaque lane_id.
+      ...laneIdResolveBinds('source', event.projectId, ''),
     )
   }
   // AQU-538: bulk import is source-only; source rows always live on the
   // default lane (target_lang = '', a literal — no bind).
   const placeholders = Array(rows.length)
-    .fill("(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb)")
+    .fill(`(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql('source')})`)
     .join(',\n')
   return db
     .prepare(
@@ -292,7 +440,8 @@ export function buildBulkSourceCellCreateStmt(
         canonical_ref, anchor_cell_id, event_id, source_event_id,
         last_editor, last_edit_at, validated, word_count, content_hash,
         start_ms, end_ms,
-        medium, sequence_index, transcription, camera_state, metadata
+        medium, sequence_index, transcription, camera_state, metadata,
+        lane_id
       ) VALUES ${placeholders}
       ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
         side           = excluded.side,
@@ -313,13 +462,14 @@ export function buildBulkSourceCellCreateStmt(
         sequence_index = excluded.sequence_index,
         transcription  = excluded.transcription,
         camera_state   = excluded.camera_state,
-        metadata       = excluded.metadata`,
+        metadata       = excluded.metadata,
+        lane_id        = COALESCE(excluded.lane_id, cells.lane_id)`,
     )
     .bind(...binds)
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -394,6 +544,16 @@ export function buildEventProjectionStmts(
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
     validationCount?: number
+    /**
+     * AQU-1240: the project's resolved default-lane tag (under v2, from the
+     * lanes table's legacy_tag), passed to laneOfEvent so a lane-less target
+     * event keys at that tag. Undefined/null => legacy '' (the state while no
+     * resolver is wired), so leaving it unset here is
+     * byte-identical to pre-1240. The live route wires + memoizes it only at
+     * the enable step (with slices 4/5); resolving + passing it before then,
+     * without also always emitting the tag on the wire, would fork history.
+     */
+    projectDefaultLane?: string | null
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -421,6 +581,36 @@ export function buildEventProjectionStmts(
   const gateBinds: unknown[] = gate
     ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id, event.parentId]
     : []
+
+  // The same gate, for a statement that is NOT against `cells`.
+  //
+  // `HEAD_CAS` names a `cells` column, so it is only legal in a statement whose
+  // own target is that table. AQU-1068's dependent cleanup (validators, takes,
+  // pairings, comments, waivers, back-translations, morph rows) is not, and
+  // pasting `gateAnd` onto it produced `missing FROM-clause entry for table
+  // "cells"` — a hard Postgres error that failed the whole transaction, so a
+  // parented `source.cell.delete` 500'd and the removal was lost. Every in-app
+  // removal sends a parent, so this broke the feature outright; it survived
+  // 1,700 green tests because every cascade test builds a parent-less event,
+  // where `gate` is undefined and both fragments are empty strings.
+  //
+  // The head check is preserved as a SUBQUERY instead: same predicate, legal
+  // anywhere. It has to be, or a delete that lost the CAS would still strip a
+  // surviving cell of everything hanging off it. That is why these statements
+  // are emitted BEFORE the `cells` DELETE — they run in batch order, so the row
+  // whose head they are testing is still there when they ask.
+  const HEAD_EXISTS =
+    'EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ? AND event_id = ?)'
+  const dependentGateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_EXISTS}` : ''
+  /** Binds for `dependentGateAnd`. The side and lane are the caller's, so the
+   *  subquery tests the SAME row the accompanying `cells` write does. */
+  const dependentGateBindsFor = (side: string, lane: string): unknown[] =>
+    gate
+      ? [
+          gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id,
+          gate.projectId, gate.fileId, gate.cellId, side, lane, event.parentId,
+        ]
+      : []
 
   switch (event.kind) {
     case 'source.cell.create':
@@ -475,7 +665,7 @@ export function buildEventProjectionStmts(
       // AQU-538: the lane is part of the row key. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
       // own row beside its siblings.
-      const lane = laneOfEvent(event.kind, p)
+      const lane = laneOfEvent(event.kind, p, opts?.projectDefaultLane)
       stmts.push(
         db
           .prepare(
@@ -484,8 +674,9 @@ export function buildEventProjectionStmts(
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
-              medium, sequence_index, transcription, camera_state, metadata
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb${gateWhere}
+              medium, sequence_index, transcription, camera_state, metadata,
+              lane_id
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -505,7 +696,8 @@ export function buildEventProjectionStmts(
               sequence_index = excluded.sequence_index,
               transcription  = excluded.transcription,
               camera_state   = excluded.camera_state,
-              metadata       = excluded.metadata${gateConflictWhere}`,
+              metadata       = excluded.metadata,
+              lane_id        = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
           )
           .bind(
             event.projectId,
@@ -530,6 +722,7 @@ export function buildEventProjectionStmts(
             transcription,
             cameraState,
             metadata,
+            ...laneIdResolveBinds(side, event.projectId, lane),
             ...gateBinds,
           ),
       )
@@ -636,7 +829,7 @@ export function buildEventProjectionStmts(
         const aiDrafted = tp.ai_suggestion ? 1 : 0
         // AQU-538: the lane this commit addresses ('' = default lane). Part of
         // the row key — each lane's first commit INSERTs that lane's row.
-        const lane = laneOfEvent(event.kind, tp)
+        const lane = laneOfEvent(event.kind, tp, opts?.projectDefaultLane)
 
         // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
         // *.cell.create time and never overwritten by target commits.
@@ -660,8 +853,8 @@ export function buildEventProjectionStmts(
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                ai_drafted, ai_draft
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?${gateWhere}
+                ai_drafted, ai_draft, lane_id
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -674,7 +867,8 @@ export function buildEventProjectionStmts(
                 validated         = 0,
                 endorsement_count = 0,
                 ai_drafted        = excluded.ai_drafted,
-                ai_draft          = excluded.ai_draft${gateConflictWhere}`,
+                ai_draft          = excluded.ai_draft,
+                lane_id           = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
             )
             .bind(
               event.projectId,
@@ -691,6 +885,7 @@ export function buildEventProjectionStmts(
               hash,
               aiDrafted,
               aiDrafted ? JSON.stringify(tp.ai_draft ?? null) : null,
+              ...laneIdResolveBinds('target', event.projectId, lane),
               ...gateBinds,
             ),
         )
@@ -865,12 +1060,164 @@ export function buildEventProjectionStmts(
       // lane 'fr' leaves the default lane and every sibling lane intact.
       // Source deletes bind lane '' (source rows always live on '').
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
-      const lane = laneOfEvent(event.kind, event.payload)
+      const lane = laneOfEvent(event.kind, event.payload, opts?.projectDefaultLane)
+      const dependentGateBinds = dependentGateBindsFor(side, lane)
 
       // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
       // the cells row so the OLD value is still readable for the 'delete'
       // command.
 
+      // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
+      //
+      // Nothing in the schema references `cells`, so nothing cascades — and
+      // until this feature only an EMPTY line a person had added by hand could
+      // be removed, which is precisely why that restriction existed. Removing
+      // an imported cell is the new capability, and an imported cell is exactly
+      // the one likely to carry validations, takes, pairings and comments.
+      // Left behind, every one of them points at a row that no longer exists.
+      //
+      // THIS BELONGS IN THE PROJECTION, not in the route. Projection tables are
+      // rebuilt by replaying the event log (rebuild.ts), and a rebuild wipes
+      // only `cells`, `cell_validators` and `file_section_progress` — so
+      // cleanup done anywhere else would simply never be re-applied, and the
+      // orphans would come back the first time somebody rebuilt. Replaying
+      // these is safe: deleting what is already gone is a no-op.
+      //
+      // Gated exactly as the `cells` DELETE below is — a delete that LOST its
+      // chain slot must not strip the surviving cell of its dependents — but
+      // through `dependentGateAnd`, which expresses the head check as a
+      // subquery because these statements do not target `cells` (see the
+      // fragment's own note). They are emitted BEFORE that DELETE so the row
+      // they are testing still exists when they run.
+      const dependentBinds = [event.projectId, event.fileId, event.cellId]
+      if (event.kind === 'source.cell.delete') {
+        // THE TRANSLATIONS GO WITH THE SOURCE, in every lane.
+        //
+        // The client used to batch one `target.cell.delete` per lane beside
+        // this event, and that was wrong twice over.
+        //
+        // Correctness: those deletes are parent-less tombstones, so they apply
+        // unconditionally — while THIS event still has to win its chain slot.
+        // A source delete that went stale therefore left the cell in place and
+        // took its translations anyway.
+        //
+        // Permissions: `target.cell.delete` floors at CONTRIBUTOR and is not
+        // governed by `cellEditingFloor`, so once the tier list grew Commenter
+        // and Reviewer rungs (AQU-1068 review), a person the project had
+        // explicitly admitted could add a cell and then not remove one —
+        // `enqueueEvents` threw before writing anything, so the row left the
+        // screen with no request sent and no rollback. Making the removal a
+        // source-side act throughout puts the whole cascade under the one
+        // gate that is supposed to govern it.
+        //
+        // Bound by cell only: every lane's row goes, which is what deleting
+        // the cell means. A single lane is still removed on its own by its own
+        // `target.cell.delete`, and that path is untouched.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cells
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        // The whole cell is going, so every lane's validators go with it —
+        // they are keyed on the cell and would outlive the rows above.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        // Takes: SOFT-deleted, the same shape `cell.audio.remove` uses (a
+        // `deleted` flag, not a DELETE). The R2 bytes outlive the row either
+        // way — an orphan sweep is separate work — and keeping the row keeps
+        // the object key discoverable for it.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET deleted = 1, selected = 0
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        // Pairings: TOMBSTONED (`linked = 0`), not deleted, because that is
+        // what unlinking means here — the schema comment on cell_links spells
+        // out why a hard delete would let a replayed import-time linker
+        // resurrect an edge. The cell can sit at either end of the pair.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_links SET linked = 0
+               WHERE project_id = ?
+                 AND ((from_file_id = ? AND from_cell_id = ?)
+                   OR (to_file_id = ? AND to_cell_id = ?))${dependentGateAnd}`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              event.fileId,
+              event.cellId,
+              ...dependentGateBinds,
+            ),
+        )
+        // Comments: soft-deleted exactly as `comment.delete` does it, so a
+        // thread on a removed cell reads as deleted rather than as a thread
+        // pointing nowhere. Replies carry the same cell scope as their root.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND scope_kind = 'cell' AND deleted_at IS NULL${dependentGateAnd}`,
+            )
+            .bind(event.serverTs, event.serverTs, ...dependentBinds, ...dependentGateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_waivers
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_backtranslations
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        // Morph analysis is written by the /import-morph route, never by an
+        // event — so this DELETE is its only cleanup path anywhere. Harmless
+        // on replay for the same reason as the rest.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_word_morph
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+      } else {
+        // A target delete removes ONE lane. Only that lane's validators go;
+        // the cell and every sibling lane stay exactly as they were.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, lane, ...dependentGateBinds),
+        )
+      }
+
+      // LAST, deliberately: every statement above tests this row's head with
+      // `HEAD_EXISTS`, and they run in batch order.
       stmts.push(
         db
           .prepare(
@@ -879,9 +1226,22 @@ export function buildEventProjectionStmts(
           )
           .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
       )
+
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
-      return ['cells', 'files']
+      return event.kind === 'source.cell.delete'
+        ? [
+            'cells',
+            'files',
+            'cell_validators',
+            'cell_audio',
+            'cell_links',
+            'comments',
+            'cell_waivers',
+            'cell_backtranslations',
+            'cell_word_morph',
+          ]
+        : ['cells', 'files', 'cell_validators']
     }
 
     case 'source.cell.reorder':
@@ -893,7 +1253,7 @@ export function buildEventProjectionStmts(
       const side = event.kind === 'target.cell.reorder' ? 'target' : 'source'
       // AQU-538: reorder advances one lane's chain head; source reorders bind
       // lane '' (source rows always live on '').
-      const lane = laneOfEvent(event.kind, p)
+      const lane = laneOfEvent(event.kind, p, opts?.projectDefaultLane)
       stmts.push(
         db
           .prepare(
@@ -948,12 +1308,13 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cell_validators (
-                project_id, file_id, cell_id, target_lang, event_id, username, decided_ts
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
               ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
-                decided_ts = excluded.decided_ts
+                decided_ts = excluded.decided_ts,
+                lane_id    = COALESCE(excluded.lane_id, cell_validators.lane_id)
               WHERE excluded.decided_ts > cell_validators.decided_ts`,
             )
             .bind(
@@ -961,6 +1322,7 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               lane,
+              ...laneIdResolveBinds('target', event.projectId, lane),
               p.editEventId,
               event.author,
               event.serverTs,
@@ -1194,8 +1556,8 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+              timings_json, selected, deleted, event_id, created_ts, role, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1209,7 +1571,24 @@ case 'cell.audio.attach': {
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
-              event_id           = excluded.event_id`,
+              event_id           = excluded.event_id,
+              -- AQU-490: created_by is FILL-ONLY, and deliberately so. A
+              -- re-attach is routine — the transcription lands ~800ms after
+              -- every recording, trims persist, timings refresh — and each
+              -- carries the author of whoever triggered it. Assigning it here
+              -- would hand a take's authorship to the last person who touched
+              -- it, which on a project with self-validation off would then
+              -- refuse the real recorder permission to validate their own take.
+              created_by         = COALESCE(cell_audio.created_by, excluded.created_by),
+              -- role is NOT NULL (pre-0096 rows defaulted to 'dub'), so it
+              -- cannot be COALESCEd into place. It may only ever be PROMOTED to
+              -- 'source': a re-import is authoritative and repairs a row the
+              -- rollout's filename heuristic missed, while a routine re-attach
+              -- — which always binds 'dub' because it says nothing about role —
+              -- must never demote the shared programme audio to a dub and gate
+              -- every cell of that file on somebody validating it.
+              role               = CASE WHEN excluded.role = 'source' THEN 'source'
+                                        ELSE cell_audio.role END`,
           )
           .bind(
             event.projectId,
@@ -1230,6 +1609,11 @@ case 'cell.audio.attach': {
             p.timings ? JSON.stringify(p.timings) : null,
             event.id,
             event.serverTs,
+            // AQU-490: 'source' only when the attach says so — an import
+            // declaring the shared programme audio. Everything else is a dub,
+            // which is what the default and every historical row mean.
+            p.role === 'source' ? 'source' : 'dub',
+            event.author,
           ),
       )
       // AQU-646: an attach may carry the ASR transcript of a media segment.
@@ -1319,6 +1703,22 @@ case 'cell.audio.attach': {
             p.audioId,
           ),
       )
+      // A TRIM KEEPS ITS VOTES (Sam, 2026-09-21, reversing his earlier call).
+      // This used to delete the take's validator rows on the reasoning that
+      // trimming changes what a validator heard. It is the same take: no new
+      // audio_id is minted, the samples are untouched, and only the playback
+      // window moves — usually by a fraction of a second, to clip a breath.
+      // Making a reviewer re-listen to a whole line for that is not a rule
+      // anyone would defend out loud. Denoise is the genuinely derived case
+      // and is unaffected: it mints a `dn-` id and attaches it, so its take
+      // starts unvalidated for free.
+      //
+      // Dropping the delete also makes this handler honest with the rollup
+      // set below it. `cell.audio.trim` is deliberately absent from
+      // AUDIO_ROLLUP_KINDS because trim "changes no count" — yet it has been
+      // zeroing validator_count with no progress recompute behind it, so the
+      // board went on reporting a trimmed line as validated. Now that is true
+      // rather than merely unnoticed.
       return ['cell_audio']
     }
 
@@ -1448,36 +1848,67 @@ case 'cell.audio.attach': {
 
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate': {
-      // AQU-508: audio validation, distinct from the text-side cell.validate.
-      // A reviewer approves (or withdraws approval of) one clip — the cell's
-      // selected take. Approval is keyed by audio_id, so re-recording (which
-      // attaches + selects a new clip) leaves the old take approved but no
-      // longer selected; the rollup requires selected = 1, so the cell drops
-      // back to "needs re-validation" until the new take is approved.
+      // AQU-490: one vote per person per TAKE, counted against the project's
+      // threshold when somebody reads — the same shape as the text-side
+      // cell.validate, and for the same reason: a boolean could not say "this
+      // project needs two reviewers", and a stamped boolean goes stale the
+      // moment the threshold moves or the projection is rebuilt.
+      //
+      // The vote is keyed by audio_id, so re-recording (which attaches and
+      // selects a NEW take) leaves the old take's votes intact but no longer
+      // counted — every rollup reads the cell's SELECTED takes, so the cell
+      // drops back to needing validation until the new one earns its own.
       const p = event.payload as EventPayloads['cell.audio.validate']
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
       if (event.kind === 'cell.audio.validate') {
+        // Presence IS the vote (no is_active column), so a repeat validate is
+        // an upsert that only moves the timestamp forward. The decided_ts
+        // guard keeps an out-of-order replay from winding it back.
         stmts.push(
           db
             .prepare(
-              `UPDATE cell_audio SET approved = 1, approved_by = ?, approved_ts = ?
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              `INSERT INTO cell_audio_validators (
+                 project_id, file_id, cell_id, audio_id, username, decided_ts
+               ) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(project_id, file_id, cell_id, audio_id, username)
+               DO UPDATE SET decided_ts = excluded.decided_ts
+                 WHERE excluded.decided_ts > cell_audio_validators.decided_ts`,
             )
-            .bind(event.author, event.serverTs, event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.audioId,
+              event.author,
+              event.serverTs,
+            ),
         )
       } else {
+        // A maintainer may strip somebody else's vote by naming them; anyone
+        // else removes their own. The role gate lives in route.ts — by the
+        // time an event reaches the projection the question is settled.
+        const up = event.payload as EventPayloads['cell.audio.unvalidate']
+        const targetUsername =
+          typeof up.targetUsername === 'string' && up.targetUsername.trim()
+            ? up.targetUsername.trim()
+            : event.author
         stmts.push(
           db
             .prepare(
-              `UPDATE cell_audio SET approved = 0, approved_by = NULL, approved_ts = NULL
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              `DELETE FROM cell_audio_validators
+                WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                  AND audio_id = ? AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(event.projectId, event.fileId, event.cellId, p.audioId, targetUsername),
         )
       }
-      return ['cell_audio']
+      // Re-derive the take's count from the table rather than incrementing it,
+      // so a replay is idempotent — the same reason cells.endorsement_count is
+      // a COUNT and not a running total.
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
     }
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
@@ -1623,8 +2054,8 @@ case 'cell.audio.attach': {
             // is an idempotent no-op rather than a duplicate concept.
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
-              status, case_sensitive, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?, ?, ?, NULL)
+              status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -1635,6 +2066,7 @@ case 'cell.audio.attach': {
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.author,
             event.serverTs,
             event.serverTs,
@@ -1659,6 +2091,7 @@ case 'cell.audio.attach': {
                renderings     = COALESCE(?::text::jsonb, renderings),
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
+               match_options  = COALESCE(?::text::jsonb, match_options),
                updated_at     = ?
              WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
           )
@@ -1667,6 +2100,7 @@ case 'cell.audio.attach': {
             p.renderings === undefined ? null : JSON.stringify(p.renderings),
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.serverTs,
             p.conceptId,
             event.projectId,
@@ -1737,18 +2171,32 @@ case 'cell.audio.attach': {
       const scopeKind = scope.kind
       const fileId = scopeKind === 'cell' ? scope.fileId : scopeKind === 'file' ? scope.fileId : null
       const cellId = scopeKind === 'cell' ? scope.cellId : null
+      // AQU-1233: author_id is always the human the credential was minted by —
+      // permissions, foreign-comment floors and "my comments" filters all key
+      // on it. The agent marker rides author_label, which is what the comments
+      // UI renders (`authorLabel ?? authorId`), so a reviewer sees who is
+      // answering AND that a tool typed it.
+      const authorLabel = commentAuthorLabel(event.author, p.viaAgent)
       stmts.push(
         db
           .prepare(
             // AQU-692: created_for_translated stores the target-text snapshot
             // captured on the client at thread-creation time. Null for replies,
             // non-cell scopes, and legacy events that predate the field.
+            //
+            // AQU-1296: the conflict target is the PROJECT-SCOPED key. Comment
+            // ids collide across projects (the importer leaves
+            // `payload.commentId` as the raw legacy id), and conflicting on
+            // `comment_id` alone meant the first project to claim an id owned
+            // the only row that could exist — every later project's insert was
+            // dropped in silence. Same-project replay is still a no-op, which
+            // is what the deterministic commentCreateEventId design relies on.
             `INSERT INTO comments (
               comment_id, project_id, scope_kind, file_id, cell_id,
               parent_comment_id, body, resolved, author_id, author_label,
               created_at, updated_at, deleted_at, created_for_translated
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
-            ON CONFLICT(comment_id) DO NOTHING`,
+            ON CONFLICT(project_id, comment_id) DO NOTHING`,
           )
           .bind(
             p.commentId,
@@ -1759,7 +2207,7 @@ case 'cell.audio.attach': {
             p.parentCommentId,
             p.body,
             event.author,
-            event.author,
+            authorLabel,
             event.serverTs,
             event.serverTs,
             p.createdForTranslated ?? null,
@@ -1774,24 +2222,28 @@ case 'cell.audio.attach': {
       // Maintainer+ foreign path: author_id check dropped so they can edit
       //   any comment. The route layer has already rejected the event if the
       //   caller is not the author AND does not have maintainer(600)+ role.
+      //
+      // AQU-1296: `project_id` is part of the match on BOTH paths. Comment ids
+      // are only unique within a project, so matching on `comment_id` alone let
+      // an edit in project A rewrite project B's same-id row.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(p.body, event.serverTs, p.commentId, event.author),
+            .bind(p.body, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -1802,24 +2254,25 @@ case 'cell.audio.attach': {
       // Soft-delete: preserve the row so threads remain navigable.
       // Body cleared; deleted_at set. UI renders "[deleted]".
       // Maintainer+ foreign path: author_id check dropped (same logic as edit).
+      // AQU-1296: project-scoped on both paths, as comment.edit above.
       const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
       if (isMaintainer) {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId),
         )
       } else {
         stmts.push(
           db
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+               WHERE project_id = ? AND comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
             )
-            .bind(event.serverTs, event.serverTs, p.commentId, event.author),
+            .bind(event.serverTs, event.serverTs, event.projectId, p.commentId, event.author),
         )
       }
       return ['comments']
@@ -1837,13 +2290,17 @@ case 'cell.audio.attach': {
       //   caller is not the comment author and is below that floor. The
       //   projection logic is the same either way (no author filter on resolve
       //   — ownership was already enforced upstream).
+      //
+      // AQU-1296: project-scoped — resolving a thread in project A must not
+      // flip project B's same-id thread.
       stmts.push(
         db
           .prepare(
             `UPDATE comments SET resolved = ?, updated_at = ?
-             WHERE comment_id = ? AND parent_comment_id IS NULL AND deleted_at IS NULL`,
+             WHERE project_id = ? AND comment_id = ?
+               AND parent_comment_id IS NULL AND deleted_at IS NULL`,
           )
-          .bind(p.resolved ? 1 : 0, event.serverTs, p.commentId),
+          .bind(p.resolved ? 1 : 0, event.serverTs, event.projectId, p.commentId),
       )
       return ['comments']
     }
@@ -2157,15 +2614,16 @@ case 'cell.audio.attach': {
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                upstream_event_id, upstream_seq, tombstoned_at
-              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?)
+                upstream_event_id, upstream_seq, tombstoned_at, lane_id
+              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
               ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
                 upstream_event_id = excluded.upstream_event_id,
                 upstream_seq      = excluded.upstream_seq,
-                tombstoned_at     = excluded.tombstoned_at
+                tombstoned_at     = excluded.tombstoned_at,
+                lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
               WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
             )
             .bind(
@@ -2180,6 +2638,7 @@ case 'cell.audio.attach': {
               p.upstream.eventId,
               upstreamSeq,
               event.serverTs,
+              ...laneIdResolveBinds('source', event.projectId, ''),
             ),
         )
         if (!opts?.deferFileCounters)
@@ -2199,11 +2658,11 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at
+              upstream_event_id, upstream_seq, tombstoned_at, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL
+              ?, ?, NULL, ${laneIdResolveSql('source')}
             )
             ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               value             = excluded.value,
@@ -2225,7 +2684,8 @@ case 'cell.audio.attach': {
               metadata          = COALESCE(excluded.metadata, cells.metadata),
               upstream_event_id = excluded.upstream_event_id,
               upstream_seq      = excluded.upstream_seq,
-              tombstoned_at     = NULL
+              tombstoned_at     = NULL,
+              lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
             WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
           )
           .bind(
@@ -2251,6 +2711,7 @@ case 'cell.audio.attach': {
             p.metadata != null ? JSON.stringify(p.metadata) : null,
             p.upstream.eventId,
             upstreamSeq,
+            ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )
       if (!opts?.deferFileCounters)

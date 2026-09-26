@@ -34,7 +34,7 @@ describe("billing client", () => {
     await expect(startBillingCheckout("jwt", 7, "field")).resolves.toBe("https://checkout.stripe.com/c/session")
     const init = fetchMock.mock.calls[0][1] as RequestInit
     expect(init.method).toBe("POST")
-    expect(init.body).toBe(JSON.stringify({ kind: "field", packs: 1 }))
+    expect(init.body).toBe(JSON.stringify({ kind: "field", packs: 1, billingInterval: "monthly" }))
   })
 
   it("POSTs the customer portal", async () => {

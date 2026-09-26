@@ -224,6 +224,35 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     expect(rollback.every((p) => p.value === "")).toBe(true)
   })
 
+  // AQU-1142: a translated WebVTT delivered by a subtitling partner must
+  // populate the open file's target column. Cues match cells positionally
+  // (cue N → cell N) because VTT-sourced cells don't carry canonical refs,
+  // and the review screen labels rows by timecode rather than an internal id.
+  it("AQU-1142: routes a .vtt drop into the review step, matched positionally, with timecode labels", async () => {
+    const VTT_FIXTURE = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "First cue translated",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "Second&nbsp;cue translated",
+    ].join("\n")
+    renderPanel()
+    await selectFile(makeFile(VTT_FIXTURE, "episode.vtt"))
+    // Went straight to review — not the "unsupported file type" error path.
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    // Positional matching triggers the order-match warning.
+    expect(screen.getByText(/matched .* in order/i)).toBeInTheDocument()
+    // Rows are labelled by the cue's timecode, never by an internal UUID.
+    expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
+    expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
+    // &nbsp; must be decoded before it can reach a target cell.
+    expect(screen.getByText("Second cue translated")).toBeInTheDocument()
+    expect(screen.queryByText(/&nbsp;/)).not.toBeInTheDocument()
+  })
+
   // WHY: while a slow enqueue is in flight the Import button must be disabled so
   // a second click can't re-optimistic-patch and re-enqueue the same cells.
   it("disables the Import button while an enqueue is in flight (no double-submit)", async () => {
@@ -248,5 +277,106 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
       resolveImport({ committedCount: 2, skippedCount: 0 })
       await new Promise((r) => setTimeout(r, 0))
     })
+  })
+})
+
+// ── AQU-1144: subtitle (.srt / .sbv) target import ───────────────────────────
+//
+// WHY: dubbing vendors deliver SRT/SBV, not spreadsheets. The panel must route
+// those extensions through the cue parsers, land on the review screen with the
+// cue's TIMECODE as the row label (cue cells have opaque uuid group ids, so a
+// UUID would be the only alternative), and match positionally — which means the
+// order-match warning has to be visible before anything commits.
+
+describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
+  const SRT_FIXTURE = [
+    "1",
+    "00:00:01,000 --> 00:00:04,000",
+    "First cue translation",
+    "",
+    "2",
+    "00:00:05,500 --> 00:00:08,250",
+    "Second cue translation",
+    "",
+  ].join("\n")
+
+  const SBV_FIXTURE = [
+    "0:00:01.000,0:00:04.000",
+    "First cue translation",
+    "",
+    "0:00:05.500,0:00:08.250",
+    "Second cue translation",
+    "",
+  ].join("\n")
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  it("reaches the review step for a .srt file, labelled by cue timecode", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.getByText("00:00:01,000 --> 00:00:04,000")).toBeInTheDocument()
+    expect(screen.getByText("00:00:05,500 --> 00:00:08,250")).toBeInTheDocument()
+    // Positional matching is lossy if the cue count drifts, so the user must be
+    // warned to eyeball alignment before importing.
+    expect(screen.getByText(/matched to cells in order/i)).toBeInTheDocument()
+  })
+
+  it("reaches the review step for a .sbv file, labelled by cue timecode", async () => {
+    renderPanel()
+    await selectFile(makeFile(SBV_FIXTURE, "episode-101-tpi.sbv"))
+
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.getByText("0:00:01.000,0:00:04.000")).toBeInTheDocument()
+  })
+
+  it("never shows the SRT numeric cue counters as incoming translations", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+    await screen.findByText(/review matches/i)
+
+    expect(screen.getByText("First cue translation")).toBeInTheDocument()
+    expect(screen.getByText("Second cue translation")).toBeInTheDocument()
+    // The "1"/"2" counter lines are structural, not text to translate.
+    expect(screen.queryByText("1")).not.toBeInTheDocument()
+    expect(screen.queryByText("2")).not.toBeInTheDocument()
+  })
+
+  it("tags the uploaded source artifact with the subtitle format, not csv", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+    await screen.findByText(/review matches/i)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import 2/i }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    const opts = vi.mocked(applyEBibleTargetImport).mock.calls[0][2] as {
+      sourceArtifact: { format: string; name: string }
+    }
+    expect(opts.sourceArtifact.format).toBe("srt")
+  })
+
+  it("reports a subtitle file with no cues instead of an empty review screen", async () => {
+    renderPanel()
+    await selectFile(makeFile("this file has no cues at all\n", "broken.srt"))
+
+    expect(await screen.findByText(/no subtitle cues found/i)).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+
+  it("still rejects a genuinely unsupported extension", async () => {
+    renderPanel()
+    await selectFile(makeFile("whatever", "notes.rtf"))
+
+    expect(await screen.findByText(/unsupported file type/i)).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
   })
 })

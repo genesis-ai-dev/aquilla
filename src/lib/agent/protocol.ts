@@ -80,7 +80,7 @@ export type AgentFrame =
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
   | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }
-  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number }
+  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 

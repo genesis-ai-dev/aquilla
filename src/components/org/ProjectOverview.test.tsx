@@ -31,11 +31,56 @@ const useProject = vi.fn()
 const refresh = vi.fn()
 vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
 
+// AQU-1277: the PM picker calls useProjectMembers, which fetches
+// /api/v2/projects/:id/members. Unmocked that reached production identity for
+// real. None of these tests assert on the roster, so an empty one is enough.
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: vi.fn(async () => {}),
+    add: vi.fn(async () => null),
+    addMany: vi.fn(async () => []),
+    remove: vi.fn(async () => {}),
+    changeRole: vi.fn(async () => null),
+  }),
+}))
+
 const archiveProjectRemote = vi.fn()
 const unarchiveProjectRemote = vi.fn()
 vi.mock("@/lib/sync/archive", () => ({
   archiveProjectRemote: (...a: unknown[]) => archiveProjectRemote(...a),
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
+}))
+
+// Project Download UI (Phase 5) — off (browser SPA behavior) by default;
+// the "ProjectOverview offline" describe block below flips these on.
+let tauriRuntime = false
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => tauriRuntime,
+}))
+const fakeOfflineStore = { id: "fake-offline-store" }
+let offlineStoreValue: { store: unknown; loading: boolean; error: Error | null } = {
+  store: null,
+  loading: false,
+  error: null,
+}
+vi.mock("@/context/OfflineStoreContext", () => ({
+  useOfflineStore: () => offlineStoreValue,
+}))
+const downloadProjectOffline = vi.fn()
+const removeOfflineProject = vi.fn((..._a: unknown[]) => ({ ok: true }))
+const getOfflineQueueDepth = vi.fn((..._a: unknown[]) => 0)
+let offlineProjectStatus: { projectId: string; status: string } | null = null
+let downloadProgressValue: { filesDone: number; filesTotal: number } | null = null
+vi.mock("@/lib/offline/download", () => ({
+  downloadProjectOffline: (...a: unknown[]) => downloadProjectOffline(...a),
+  removeOfflineProject: (...a: unknown[]) => removeOfflineProject(...a),
+  getOfflineQueueDepth: (...a: unknown[]) => getOfflineQueueDepth(...a),
+  useOfflineProjectStatus: () => offlineProjectStatus,
+  useDownloadProgress: () => downloadProgressValue,
 }))
 
 type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
@@ -129,6 +174,10 @@ vi.mock("@/lib/sync/sync-token", () => ({
 const fetchProjectFiles = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+  // download.ts (Phase 5, imported transitively by ProjectOverview.tsx) reads
+  // this export at module scope for its default deps — never actually
+  // invoked by these tests, which don't exercise the offline download flow.
+  streamFileCells: vi.fn(),
 }))
 const fetchProjectPlan = vi.fn()
 const setPlanUnit = vi.fn()
@@ -183,8 +232,14 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  countStructuralCells: true,
+  countStructuralOverrides: 0,
+  resetCountStructuralOverrides: vi.fn(),
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
@@ -261,6 +316,12 @@ beforeEach(async () => {
   // whether a test sees units depends on which test ran before it.
   fetchSyncToken.mockResolvedValue({ token: "tok" })
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
+  tauriRuntime = false
+  offlineStoreValue = { store: null, loading: false, error: null }
+  offlineProjectStatus = null
+  downloadProgressValue = null
+  removeOfflineProject.mockReturnValue({ ok: true })
+  getOfflineQueueDepth.mockReturnValue(0)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -758,6 +819,68 @@ describe("ProjectOverview archive/restore", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+describe("ProjectOverview offline (Tauri desktop, Phase 5)", () => {
+  beforeEach(() => {
+    tauriRuntime = true
+    offlineStoreValue = { store: fakeOfflineStore, loading: false, error: null }
+  })
+
+  it("shows Make available offline even for a viewer with no other overflow permissions", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Make available offline" })
+    fireEvent.click(item)
+
+    await waitFor(() => expect(downloadProjectOffline).toHaveBeenCalledWith(fakeOfflineStore, "p1", "jwt"))
+  })
+
+  it("shows the offline badge and Remove offline copy once ready", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Available offline")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Remove offline copy" })
+    fireEvent.click(item)
+
+    expect(removeOfflineProject).toHaveBeenCalledWith(fakeOfflineStore, "p1")
+  })
+
+  it("shows a downloading badge with file progress while a download is in flight", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "downloading" }
+    downloadProgressValue = { filesDone: 1, filesTotal: 4 }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Downloading… (1/4 files)")).toBeInTheDocument()
+  })
+
+  it("blocks Remove offline copy and surfaces an error when writes are still queued", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    getOfflineQueueDepth.mockReturnValue(2)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove offline copy" }))
+
+    expect(removeOfflineProject).not.toHaveBeenCalled()
+    expect(await screen.findByText(/haven't synced to the server/)).toBeInTheDocument()
+  })
+
+  it("does not show offline actions outside Tauri", async () => {
+    tauriRuntime = false
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
   })
 })
 
@@ -1430,6 +1553,8 @@ describe("plan board on the overview", () => {
     expect(inspector).toBeInTheDocument()
     // Not inside a dialog: the page stays interactive behind it.
     expect(inspector.closest('[role="dialog"]')).toBeNull()
+    expect(within(inspector).getByRole("link", { name: /in editor$/ }))
+      .toHaveAttribute("href", "/project/p1/editor/file/f1")
   })
 
   it("withholds the planning controls from someone below maintainer", async () => {

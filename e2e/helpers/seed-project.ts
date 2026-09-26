@@ -30,6 +30,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
+import { extractUsfmStrings } from "../../src/lib/parsers/usfm"
+import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
 import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
@@ -90,7 +92,7 @@ export async function readSeededFileEvents(
   return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
-/** Create a project and import a markdown fixture entirely server-side.
+/** Create a project and import a markdown or USFM fixture entirely server-side.
  * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
@@ -115,25 +117,36 @@ export async function seedProjectWithFile(
   const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE
   const fileName = path.basename(fixturePath)
-  const strings = extractMarkdownStrings(await fs.readFile(fixturePath, "utf8"))
+  const fileType = path.extname(fixturePath).toLowerCase() === ".usfm" ? "usfm" : "md"
+  const contents = await fs.readFile(fixturePath, "utf8")
+  const strings = fileType === "usfm"
+    ? extractUsfmStrings(contents).flatMap((book) => book.strings)
+    : extractMarkdownStrings(contents)
+  const normalized = normalizeTranslatableStrings(strings, { fileName, fileType })
 
   // Mirror src/lib/import.ts buildBulkCells: chain via anchorCellId, thread
   // sequenceIndex + paragraphStart, keep the parser-minted cell ids.
   let prevCellId: string | null = null
   const cells = strings.map((str, seq) => {
+    const unit = normalized.units[seq]
     const cell = {
       id: randomUUID(),
       cellId: str.id,
       anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      value: unit.sourceText,
+      ...(unit.sourceHtml ? { valueHtml: unit.sourceHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
+      ...(unit.canonicalRef ? { canonicalRef: unit.canonicalRef } : {}),
       sequenceIndex: seq,
       // useCells reads paragraphStart from `source.metadata.paragraphStart`
       // (src/hooks/useCells.ts), not the top-level field — mirror
       // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
-      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+      ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      metadata: {
+        ...str.metadata,
+        aquillaImport: aquillaImportMetadata(normalized, unit),
+        ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      },
     }
     prevCellId = str.id
     return cell
@@ -147,18 +160,27 @@ export async function seedProjectWithFile(
   const file = {
     id: randomUUID(),
     name: fileName,
-    fileType: "md",
+    fileType,
     role: "source",
-    kind: "md",
-    importFormat: "md",
+    kind: fileType,
+    importFormat: fileType,
     parserVersion: "workspace-import-v1",
   }
-  await postIdempotentJson({
-    url: `${SYNC_BASE}/import`,
-    headers: importHeaders,
-    body: { projectId, fileId, file, cells, clientTs: Date.now() },
-    operation: "bulk import",
-  })
+  // Match the route's 5,000-cell request limit. Keep the global anchor chain
+  // and sequence indexes, and create file metadata only with the first batch.
+  for (let offset = 0; offset < Math.max(1, cells.length); offset += 5_000) {
+    await postIdempotentJson({
+      url: `${SYNC_BASE}/import`,
+      headers: importHeaders,
+      body: {
+        projectId, fileId,
+        ...(offset === 0 ? { file } : {}),
+        cells: cells.slice(offset, offset + 5_000),
+        clientTs: Date.now(),
+      },
+      operation: `bulk import batch ${offset / 5_000 + 1}`,
+    })
+  }
   await postIdempotentJson({
     url: `${SYNC_BASE}/import`,
     headers: importHeaders,
@@ -199,6 +221,32 @@ export async function readProjectedCells(
   return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
 }
 
+/** The projected-concept fields specs assert on; the route returns more. */
+export interface ProjectedConceptRow {
+  conceptId: string
+  sourceTerm: string
+  renderings: Array<{ rendering: string; status: string }>
+  notes: string | null
+  status: "active" | "draft" | "deprecated"
+}
+
+/** Read a project's LIVE (non-tombstoned) termbase straight from the
+ * sync-worker projection, as the JWT's user — the same read every other member's
+ * glossary hydrates from, so it proves a term.* write landed for them too and
+ * is not just the writer's optimistic state. */
+export async function readProjectedConcepts(
+  jwt: string,
+  projectId: string,
+): Promise<ProjectedConceptRow[]> {
+  // Any file scope works — the route verifies the project only (see useConcepts).
+  const token = await mintSyncToken(jwt, projectId, "any")
+  const r = await fetch(`${SYNC_BASE}/api/v1/projects/${encodeURIComponent(projectId)}/concepts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!r.ok) throw new Error(`concepts read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { concepts: ProjectedConceptRow[] }).concepts
+}
+
 /** One event on a cell's chain as returned by the per-cell history route
  * (sync-worker `cell-history-read-route.ts`), newest-first. */
 export interface CellHistoryEventRow {
@@ -233,27 +281,27 @@ export async function readCellHistory(
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */
 export async function openSeededProject(page: Page, seeded: SeededProject): Promise<Workspace> {
-  const sourceCellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
-  const sourceCellsLoaded = page.waitForResponse((response) => {
+  const cellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  const cellsLoaded = page.waitForResponse((response) => {
     if (response.request().method() !== "GET") return false
     const url = new URL(response.url())
-    return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
+    return url.pathname === cellsPath && url.searchParams.get("paired") === "1"
   }, { timeout: 60_000 })
 
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  const sourceResponse = await sourceCellsLoaded
-  if (!sourceResponse.ok()) {
+  const cellsResponse = await cellsLoaded
+  if (!cellsResponse.ok()) {
     throw new Error(
-      `Seeded source cells failed to load: HTTP ${sourceResponse.status()} — ${await sourceResponse.text()}`,
+      `Seeded complete rows failed to load: HTTP ${cellsResponse.status()} — ${await cellsResponse.text()}`,
     )
   }
-  const payload = await sourceResponse.json() as {
+  const payload = await cellsResponse.json() as {
     cells?: Array<{ cellId?: string }>
   }
   const firstCellId = seeded.cellIds[0]
   if (!firstCellId || !payload.cells?.some((cell) => cell.cellId === firstCellId)) {
     throw new Error(
-      `Seeded source response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
+      `Seeded complete-row response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
     )
   }
 

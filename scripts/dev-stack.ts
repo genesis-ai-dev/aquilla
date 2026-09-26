@@ -70,6 +70,7 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -349,7 +350,7 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
@@ -499,6 +500,8 @@ async function reconcilePgSchema(
     )
     patched.push("rebuilt file_section_progress PK with target_lang")
   }
+
+  await finalizeProgressSchema(run)
 
   // AQU-AGENT: the Agent API changeset lifecycle added the transitional
   // 'committing' status (schema.sql line ~782, used by commit.ts). The generic

@@ -56,6 +56,7 @@ describe("contextual.activity WS frames → run-store", () => {
       pause: async () => {},
       resume: async () => {},
       terminate: async () => {},
+      continueRun: async () => {},
     })
     await attachContextualRun(PROJECT, "file-1")
   })

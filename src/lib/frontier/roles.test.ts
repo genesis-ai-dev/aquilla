@@ -5,6 +5,8 @@ import {
   LINK_ROLE_ALLOWED,
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
+  ORG_WIDE_ACCESS_FLOOR,
+  orgRoleGrantsProjectAccess,
   roleName,
   roleLevelFromName,
   roleNameKey,
@@ -68,10 +70,19 @@ describe("ROLE constants", () => {
   })
 
   it("keeps the AD-6 viewer help text", () => {
-    expect(roleDescription(100)).toMatch(/read all org projects/i)
+    expect(roleDescription(100)).toMatch(/read-only access/i)
     expect(roleHelpText(100)).toBe(
-      "Viewer (100) — can read all org projects. No edit or management actions.",
+      "Viewer (100) — read-only access. No edit or management actions.",
     )
+  })
+
+  it("org-wide project access starts at Maintainer (AQU-435 / AQU-1107)", () => {
+    expect(ORG_WIDE_ACCESS_FLOOR).toBe(ROLE.MAINTAINER)
+    expect(orgRoleGrantsProjectAccess(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(orgRoleGrantsProjectAccess(ROLE.PROJECT_LEAD)).toBe(false)
+    expect(orgRoleGrantsProjectAccess(ROLE.MAINTAINER)).toBe(true)
+    expect(orgRoleGrantsProjectAccess(ROLE.OWNER)).toBe(true)
+    expect(orgRoleGrantsProjectAccess(null)).toBe(false)
   })
 })
 

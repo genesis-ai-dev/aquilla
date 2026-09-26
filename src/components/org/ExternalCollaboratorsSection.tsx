@@ -50,6 +50,10 @@ export function ExternalCollaboratorsSection({
   const loadScopeRef = useRef(loadScopeKey)
   loadScopeRef.current = loadScopeKey
 
+  // A dependency list entry has to be a simple expression (react-hooks/use-memo),
+  // so the content key is computed here rather than inline in the deps array.
+  const orgMemberIdsKey = orgMemberIds.join(",")
+
   const load = useCallback(async () => {
     const request = ++loadRequestRef.current
     if (!jwt) return
@@ -76,7 +80,7 @@ export function ExternalCollaboratorsSection({
     }
     // orgMemberIds is a fresh array each render; key on its contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, orgId, loadScopeKey, orgMemberIds.join(",")])
+  }, [jwt, orgId, loadScopeKey, orgMemberIdsKey])
 
   useEffect(() => { void load() }, [load])
 

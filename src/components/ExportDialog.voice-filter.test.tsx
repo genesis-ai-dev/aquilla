@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ExportDialog } from "./ExportDialog"
+import { pickSelectOption } from "@/test-utils/select"
 import type { CellData } from "@/hooks/useCells"
 
 vi.mock("@/lib/export/export-service", () => ({
@@ -44,15 +45,11 @@ const BASE_PROPS = {
   getToken: async () => null,
 }
 
-// Base UI's Select commits on the keyboard path under happy-dom; a plain click
-// on an option inside a modal Dialog does not (see AssignModal.test.tsx).
 async function pickVoice(label: string) {
-  const trigger = screen.getByRole("combobox", { name: /filter export by voice/i })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: new RegExp(`^${label}$`) })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  const trigger = await pickSelectOption(
+    /filter export by voice/i,
+    new RegExp(`^${label}$`),
+  )
   await waitFor(() => expect(trigger.textContent).toContain(label))
 }
 

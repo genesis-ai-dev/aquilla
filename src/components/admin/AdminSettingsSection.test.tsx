@@ -159,3 +159,49 @@ describe("AdminSettingsSection", () => {
     expect(await screen.findByText(/model_not_allowed/i)).toBeInTheDocument()
   })
 })
+
+describe("AdminSettingsSection — AQU-942: the form survives the post-save refetch", () => {
+  it("keeps the form mounted while the post-save refetch is in flight", async () => {
+    // WHY: `save` re-fetches to pick up the new version, flipping `loading`
+    // back on — which replaced the entire settings form with skeletons on
+    // every save.
+    mockGet.mockResolvedValue(RESPONSE)
+    mockUpdate.mockResolvedValue({ settings: {}, version: 4 })
+    render(<AdminSettingsSection jwt="jwt" />)
+    const save = await screen.findByRole("button", { name: /save settings/i })
+
+    let release: (settings: PlatformSettingsResponse) => void = () => {}
+    mockGet.mockImplementationOnce(
+      () => new Promise<PlatformSettingsResponse>((resolve) => { release = resolve }),
+    )
+    fireEvent.click(save)
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
+
+    // The button reads "Saving…" while busy, so anchor on the form itself.
+    expect(screen.getByText(/Global AI configuration for the whole platform/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("status", { name: "Loading platform settings" }),
+    ).not.toBeInTheDocument()
+
+    release({ ...RESPONSE, version: 4 })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /save settings/i })).toBeInTheDocument(),
+    )
+  })
+
+  it("shows a first-load placeholder before the first resolve", async () => {
+    let release: (settings: PlatformSettingsResponse) => void = () => {}
+    mockGet.mockImplementationOnce(
+      () => new Promise<PlatformSettingsResponse>((resolve) => { release = resolve }),
+    )
+    render(<AdminSettingsSection jwt="jwt" />)
+
+    expect(screen.getByRole("status", { name: "Loading platform settings" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+
+    release(RESPONSE)
+    expect(await screen.findByRole("button", { name: /save settings/i })).toBeInTheDocument()
+  })
+})

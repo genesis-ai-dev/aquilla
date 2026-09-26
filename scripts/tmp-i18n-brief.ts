@@ -3,7 +3,7 @@
  * locale — the English source, its resolved context, and prior art from keys
  * that already share distinctive vocabulary in that same locale.
  *
- * Usage: npx tsx scripts/tmp-i18n-brief.ts [locale…]   (default: th my mfa ar)
+ * Usage: npx tsx scripts/tmp-i18n-brief.ts [locale…]   (default: th my ms ar)
  */
 import { writeFileSync } from "node:fs"
 import { en, type MessageKey } from "../src/lib/i18n/messages/en"
@@ -11,7 +11,7 @@ import { CATALOGS } from "../src/lib/i18n/messages/index"
 import { isPluralMessage, type MessageValue } from "../src/lib/i18n/plurals"
 import { resolveKeyContext } from "../src/lib/i18n/context"
 
-const locales = process.argv.slice(2).length > 0 ? process.argv.slice(2) : ["th", "my", "mfa", "ar"]
+const locales = process.argv.slice(2).length > 0 ? process.argv.slice(2) : ["th", "my", "ms", "ar"]
 
 const flat = (v: MessageValue | undefined): string =>
   v === undefined ? "" : isPluralMessage(v) ? Object.values(v.forms).join(" | ") : v

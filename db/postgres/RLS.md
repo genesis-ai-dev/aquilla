@@ -20,7 +20,7 @@ Eight project-scoped tables have RLS enabled:
 | `project_settings` | `rls_project_settings_project_access` |
 | `snapshots` | `rls_snapshots_project_access` |
 
-Every policy calls `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org / creator) using `current_setting('app.user_id', true)`.
+Every policy calls `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant.
 
 Tables NOT covered by RLS (intentional):
 - Identity/org tables (`users`, `organizations`, `org_members`, `groups`, …) — they are not project-scoped; callers already gate on user identity at the route level.

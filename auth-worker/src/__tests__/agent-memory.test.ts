@@ -40,6 +40,20 @@ function agentHeader(jwt: string, runId = "run-1"): Record<string, string> {
   return { ...authHeader(jwt), "x-aquilla-agent-run": runId }
 }
 
+// [Pen test] Authorization & access control (2026-09-08): the memory-review
+// route now only honors the agent channel for a runId that names a real
+// `agent_runs` row scoped to the project (see agent-memory.ts's
+// isKnownAgentRun) — a bare header is no longer enough to reach the
+// CONTRIBUTOR-floor carve-out. Tests that exercise that carve-out seed one.
+async function seedAgentRun(projectId: string, runId: string, userId: number, username: string): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO agent_runs (run_id, project_id, user_id, username, prompt, model, started_at)
+     VALUES (?, ?, ?, ?, 'test', 'test-model', 0)`,
+  )
+    .bind(runId, projectId, userId, username)
+    .run()
+}
+
 async function req(
   method: string,
   path: string,
@@ -224,6 +238,7 @@ describe("agent-channel memory review autonomy", () => {
       content: "seen",
     })
     const { memoryId } = (await p.json()) as { memoryId: string }
+    await seedAgentRun(PROJECT, "run-1", 1, "lead")
     // No project_settings row → autonomy defaults to 'human'.
     const r = await req(
       "POST",
@@ -249,6 +264,7 @@ describe("agent-channel memory review autonomy", () => {
       content: "seen",
     })
     const { memoryId } = (await p.json()) as { memoryId: string }
+    await seedAgentRun(PROJECT, "run-1", 1, "lead")
     const r = await req(
       "POST",
       `${PROJECT}/agent-memory/${memoryId}/review`,
@@ -273,6 +289,7 @@ describe("agent-channel memory review autonomy", () => {
       content: "term",
     })
     const { memoryId } = (await p.json()) as { memoryId: string }
+    await seedAgentRun(PROJECT, "run-1", 1, "lead")
     const r = await req(
       "POST",
       `${PROJECT}/agent-memory/${memoryId}/review`,
@@ -281,6 +298,47 @@ describe("agent-channel memory review autonomy", () => {
       agentHeader(leadJwt),
     )
     expect(r.status).toBe(403)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// [Pen test] Authorization & access control (2026-09-08): the agent-channel
+// carve-out lowers the review floor from PROJECT_LEAD to CONTRIBUTOR. The
+// `x-aquilla-agent-run` header is ordinary, unauthenticated client input — a
+// Contributor who could never reach PROJECT_LEAD must not be able to grant
+// themselves that carve-out just by sending the header with a made-up runId.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("agent-channel review header cannot be spoofed", () => {
+  it("a contributor with a bogus runId cannot self-approve under agent-low-risk", async () => {
+    await seedUser(1, "lead")
+    await seedUser(2, "contrib")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    await grant(PROJECT, 2, 400) // contributor — below PROJECT_LEAD
+    await setAutonomy(PROJECT, "agent-low-risk")
+    const contribJwt = await jwtFor("contrib")
+
+    const p = await req("POST", `${PROJECT}/agent-memory`, contribJwt, {
+      path: "observations/spoof.md",
+      content: "seen",
+    })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+
+    // No agent_runs row exists for "run-1" — the header alone must not widen
+    // access. Without the fix this would 200 (CONTRIBUTOR clears the agent
+    // floor); with it, the caller falls back to the human PROJECT_LEAD floor
+    // and a contributor is rejected.
+    const r = await req(
+      "POST",
+      `${PROJECT}/agent-memory/${memoryId}/review`,
+      contribJwt,
+      { action: "approve" },
+      agentHeader(contribJwt),
+    )
+    expect(r.status).toBe(403)
+    const err = (await r.json()) as { error: { code: string } }
+    expect(err.error.code).toBe("permission_denied")
   })
 })
 
@@ -355,6 +413,7 @@ describe("supersede human-edited memory guard", () => {
       content: "agent v2",
     })
     const { memoryId: id2 } = (await p2.json()) as { memoryId: string }
+    await seedAgentRun(PROJECT, "run-1", 1, "lead")
     const a2 = await req(
       "POST",
       `${PROJECT}/agent-memory/${id2}/review`,

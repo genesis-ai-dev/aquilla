@@ -254,3 +254,17 @@ describe("the drawer's own state", () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 })
+
+it("resolves only displayed text rows through an indexed reader", () => {
+  const get = vi.fn((id: string) => textById.get(id))
+  renderDrawer(review({ confident: [confidentRow], actionable: 1 }), { textById: { get } })
+  expect(within(screen.getByTestId("cue-link-candidate-c1")).getAllByText(/No\./)).toHaveLength(2)
+  expect(get).toHaveBeenCalled()
+  expect(get.mock.calls.every(([id]) => id === "s1")).toBe(true)
+})
+
+it("does not resolve text cells when no review rows are displayed", () => {
+  const get = vi.fn((id: string) => textById.get(id))
+  renderDrawer(review(), { textById: { get } })
+  expect(get).not.toHaveBeenCalled()
+})

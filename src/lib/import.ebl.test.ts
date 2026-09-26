@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { SAMPLE_EBL, makeEblIdml, styled } from "./biblica/ebl/__fixtures__/ebl-idml"
+import { SAMPLE_EBL, makeEblIdml, styled, tocEntriesWithPageRuns } from "./biblica/ebl/__fixtures__/ebl-idml"
 import type { EblIdmlStories } from "./biblica/ebl/__fixtures__/ebl-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
@@ -249,6 +249,35 @@ describe("EBL import", () => {
       { version: 1, index: 1, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
       { version: 1, index: 2, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
     ])
+  })
+
+  it("commits contents titles without the page numbers that sit in neighbouring runs", async () => {
+    const requests = captureRequests()
+    const entries = SAMPLE_EBL.contentsTitles.map((title, index) => ({
+      title,
+      page: SAMPLE_EBL.contentsPages[index]!,
+    }))
+
+    await importBiblicaStudyNotes(
+      await eblFile({
+        body: [
+          styled("h", "02_TOC:ms1", SAMPLE_EBL.contentsHead),
+          tocEntriesWithPageRuns("toc", "02_TOC:tc1", entries),
+          styled("nested", "02_TOC:tc3", SAMPLE_EBL.contentsNestedEntry),
+        ],
+        badge: [],
+        summary: [],
+      }),
+      ctx,
+      undefined,
+      { edition: "ebl" },
+    )
+
+    const values = importBodies(requests).flatMap((body) => body.cells ?? []).map((cell) => cell.value)
+    for (const title of SAMPLE_EBL.contentsTitles) expect(values).toContain(title)
+    expect(values).toContain(SAMPLE_EBL.contentsNestedTitle)
+    for (const page of SAMPLE_EBL.contentsPages) expect(values).not.toContain(page)
+    expect(values).not.toContain(SAMPLE_EBL.contentsNestedEntry)
   })
 
   it("files the guide under its own corpus, apart from the other Biblica titles", async () => {

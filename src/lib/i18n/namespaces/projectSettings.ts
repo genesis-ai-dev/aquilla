@@ -32,47 +32,75 @@ export const projectSettings = defineNamespace({
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
     "projectSettings.create.dialogTitle": "Create New Project",
-    // AQU-832: no separate create.nameLabel/sourceLanguageLabel/targetLanguageLabel —
-    // this dialog reuses projectSettings.info.{nameLabel,sourceLanguageLabel,
-    // targetLanguageLabel} (the settings-page Project Info card's field labels)
-    // rather than minting Title-Case-vs-sentence-case duplicates of the same word.
+    // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
+    // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
+    // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
-    "projectSettings.create.targetLanguagesLabel": "Target language(s)",
+    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.additionalTargetPlaceholder": "Add another…",
+    "projectSettings.create.addTargetLanguageAction": "Add another language",
+    "projectSettings.create.bulkTargetLanguagesHint":
+      "That's all {max} boxes. Add any remaining languages here, separated by commas.",
+    "projectSettings.create.bulkTargetLanguagesPlaceholder":
+      "Swahili, Yoruba, Hausa, zh-Hant…",
+    "projectSettings.create.bulkTargetLanguagesCount": plural({
+      one: "Adds {count} more lane.",
+      other: "Adds {count} more lanes.",
+    }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
       "Any label works — a BCP-47 tag, a language name, or a register description " +
       "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self-contained",
-    "projectSettings.create.shapeSelfContained": "{name} — owns its source and target.",
-    "projectSettings.create.shapeSourceOnlyName": "Source-only",
-    "projectSettings.create.shapeSourceOnly":
-      "{name} — a canonical source others link against. No target.",
-    "projectSettings.create.shapeLinkedTargetName": "Linked target",
-    "projectSettings.create.shapeLinkedTarget":
-      "{name} — reads source from another project; owns only its target.",
+    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContained": plural({
+      one: "{name} — this project owns both its source and its target.",
+      other: "{name} — this project owns both its source and its targets.",
+    }),
+    "projectSettings.create.shapeLinkedTargetName": plural({
+      one: "Linked Target",
+      other: "Linked Targets",
+    }),
+    "projectSettings.create.shapeLinkedTarget": plural({
+      one:
+        "{name} — this project reads its source from another project and owns only its target.",
+      other:
+        "{name} — this project reads its source from another project and owns only its targets.",
+    }),
+    // Mode is implied by shape (self-contained → optional clone; linked-target → live).
+    // These intros replace the old clone/live radio pair under Advanced.
+    "projectSettings.create.cloneModeName": "Cloned",
+    "projectSettings.create.cloneIntro":
+      "Do you want to import a {mode} copy of another project? This will create a " +
+      "one-time snapshot and then remain independent.",
+    "projectSettings.create.liveModeName": "live",
+    "projectSettings.create.liveIntro":
+      "You are creating a {mode} copy. Your new project will be connected to the " +
+      "upstream project, and fixes in the upstream project will automatically " +
+      "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
-    "projectSettings.create.linkModeLabel": "Clone or live?",
-    // AQU-832: no separate create.linkModeLiveName/linkModeCloneName — reuses
-    // projectSettings.sourceLink.modeLive/modeClone (the Source Link card's
-    // mode badges), the same "Live"/"Clone" vocabulary this dialog is choosing.
-    "projectSettings.create.linkModeLive":
-      "{name} — stays subscribed; upstream fixes propagate here automatically.",
-    "projectSettings.create.linkModeClone":
-      "{name} — one-time snapshot; this project becomes independent immediately.",
-    "projectSettings.create.linkConsumesLabel": "What should become this project's source?",
-    "projectSettings.create.linkConsumesSourceName": "Its source",
-    "projectSettings.create.linkConsumesSource":
-      "{name} — sibling-translation case (this project translates the same original " +
-      "text). For same-org sibling languages, a target lane on the upstream project " +
-      "is the recommended shape instead.",
-    "projectSettings.create.linkConsumesTargetName": "Its translations",
+    "projectSettings.create.linkConsumesLabel":
+      "Which corpus should become this project's source?",
+    "projectSettings.create.linkConsumesSourceName": "Its Source",
+    "projectSettings.create.linkConsumesSource": plural({
+      one:
+        "{name} — sibling-translation case (this project translates the same original " +
+        "text). For same-org sibling languages, a target lane on the upstream project " +
+        "is the recommended shape instead.",
+      other:
+        "{name} — sibling-translation case (this project translates the same original " +
+        "text). For same-org sibling languages, target lanes on the upstream project " +
+        "are the recommended shape instead.",
+    }),
+    "projectSettings.create.linkConsumesTargetName": "One of its Targets",
     "projectSettings.create.linkConsumesTarget":
-      "{name} — chain case (this project translates the upstream project's target, " +
-      "e.g. French → Chaluba).",
+      "{name} — chain case (this project translates one of the upstream project's " +
+      "targets, e.g. French → Chaluba).",
+    "projectSettings.create.validationLinkConsumesRequired":
+      "Choose which corpus should become this project's source",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
@@ -208,12 +236,28 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
-    "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
-    "projectSettings.timeline.addLinesHint":
-      "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    "projectSettings.cellEditing.sectionTitle": "Content structure",
+    "projectSettings.cellEditing.label": "Who can add and remove cells",
+    "projectSettings.cellEditing.description":
+      "Puts buttons on each row to insert or remove cells. Removing one also removes its " +
+      "translations, recordings and comments; removing an imported cell always needs a " +
+      "maintainer.",
+    // Open-dropdown option text for the cell-editing floor select. FLOOR_LABEL
+    // (src/pages/settings/constants.ts) supplies the shorter closed-trigger
+    // word for each rung; "No one" is not a role, so it has no FLOOR_LABEL
+    // entry and shows this string in both places. AQU-1068 (Matthew's review):
+    // these were bespoke phrases ("Maintainers and project leads", "Anyone who
+    // can edit") and are now the product's standard ladder, so a project admin
+    // reads the same names here as on the Members panel.
+    "projectSettings.cellEditing.optionNone": "No one — default",
+    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
+    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
+    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -456,10 +500,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
-    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations.",
-    "projectSettings.validation.requiredAudioDisabledNote": "Enabled once audio translations exist.",
+    "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
+    // ── StructuralCellsProjectSection ── AQU-1083
+    "projectSettings.structuralCells.label": "Count headings as translatable content",
+    "projectSettings.structuralCells.description":
+      "Whether chapter headings, section titles and book names count toward " +
+      "this project's translation and validation percentages. Leaving them " +
+      "out means a book reads 100% once every verse is done.",
+    "projectSettings.structuralCells.inherit": "Organization default",
+    "projectSettings.structuralCells.currentlyCounting":
+      "The organization currently counts them",
+    "projectSettings.structuralCells.currentlyExcluding":
+      "The organization currently leaves them out",
+    "projectSettings.structuralCells.count": "Count them",
+    "projectSettings.structuralCells.exclude": "Leave them out",
+    "projectSettings.structuralCells.saveFailed": "Could not save that change",
+
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
@@ -468,6 +526,25 @@ export const projectSettings = defineNamespace({
       "Comma-separated usernames. When set, only these users' votes count toward the " +
       "threshold (AND'd with the role floor). Leave empty to allow any " +
       "sufficiently-privileged user.",
+
+    // ── AQU-490: the audio policy, beside the text policy rather than folded
+    // into it. Sam's ruling is that these are SEPARATE settings, so every
+    // label has to say which of the two it governs — "Minimum role to
+    // validate" alone, twice, would read as one rule stated twice.
+    "projectSettings.validation.minRoleAudioLabel": "Minimum role to validate recordings",
+    "projectSettings.validation.minRoleAudioDescription":
+      "Who may sign off a recording. Set separately from the text rule above — a " +
+      "project can want a higher bar for audio than for translations, or the other " +
+      "way round.",
+    "projectSettings.validation.allowSelfAudioLabel": "Allow validating your own recordings",
+    "projectSettings.validation.allowSelfAudioDescription":
+      "When off, whoever recorded a take cannot validate it — someone else has to " +
+      "listen. Takes whose recorder is not known are unaffected, so older " +
+      "recordings never become impossible to sign off.",
+    "projectSettings.validation.namedValidatorsAudioLabel": "Named recording validators",
+    "projectSettings.validation.namedValidatorsAudioDescription":
+      "When anyone is listed, only these people may validate recordings. Leave " +
+      "empty to allow anyone who meets the minimum role above.",
 
     // ── DecaySettingsSection.tsx ──
     "projectSettings.decay.summary": "Retrieval support",
@@ -667,6 +744,22 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+
+    // ── Terminology source-term matching (AQU-1271) ──
+    "projectSettings.termMatching.title": "Prefixes and suffixes",
+    "projectSettings.termMatching.description":
+      "Letters or syllables that attach to source words. Terminology matching will allow them around a term when the term's \"Allow prefixes and suffixes\" option is on.",
+    "projectSettings.termMatching.prefixes": "Prefixes",
+    "projectSettings.termMatching.suffixes": "Suffixes",
+    "projectSettings.termMatching.maxAffixes": "Max chained per side",
+    "projectSettings.termMatching.foldMarksDefault": "Ignore vowel marks and accents by default",
+    "projectSettings.termMatching.loadPreset": "Load preset",
+    "projectSettings.termMatching.addAffixPlaceholder": "Type and press Enter",
+    "projectSettings.termMatching.remove": "Remove {affix}",
+    "projectSettings.termMatching.preset.hebrew": "Hebrew",
+    "projectSettings.termMatching.preset.arabic": "Arabic",
+    "projectSettings.termMatching.preset.swahili": "Swahili",
+    "projectSettings.termMatching.preset.turkish": "Turkish",
   },
   context: {
     _context: {
@@ -768,51 +861,107 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.create.targetLanguagesLabel": {
         description:
-          "Field label above the target-language input when the chosen project shape " +
-          "is self-contained (multiple target lanes allowed).",
+          "Field label above the target-language boxes in the create dialog. " +
+          "Always 'Target Language(s)' — the parenthetical covers one or many " +
+          "lanes without swapping the label as boxes fill.",
+      },
+      "projectSettings.create.shapeLinkedTargetName": {
+        description:
+          "Bold name of the linked-target project-shape radio. Inflects with how " +
+          "many target-language lanes the user has filled in on this create pass " +
+          "('Linked Target' vs 'Linked Targets'). Count is not shown as a numeral.",
+      },
+      "projectSettings.create.additionalTargetPlaceholder": {
+        description:
+          "Placeholder in the second and subsequent target-language boxes of the " +
+          "create dialog, where the first box carries the full example placeholder.",
+      },
+      "projectSettings.create.addTargetLanguageAction": {
+        description:
+          "Label of the button under the target-language boxes in the create dialog " +
+          "that appends one more empty box (one per additional target lane).",
+      },
+      "projectSettings.create.bulkTargetLanguagesHint": {
+        description:
+          "Field description above the comma-separated overflow field in the create " +
+          "dialog, shown once the per-lane boxes have hit their limit and the plus " +
+          "button has been replaced.",
+        placeholders: {
+          max: "The number of individual target-language boxes the dialog allows before switching to the overflow field.",
+        },
+      },
+      "projectSettings.create.bulkTargetLanguagesPlaceholder": {
+        description:
+          "Placeholder in the comma-separated target-language overflow field, showing " +
+          "the expected comma-delimited shape.",
+      },
+      "projectSettings.create.bulkTargetLanguagesCount": {
+        description:
+          "Count of extra target lanes recognised in the comma-separated overflow " +
+          "field, shown beneath it as live feedback. Reflects lanes that would " +
+          "actually be created, after duplicates and the overall cap are applied.",
+        placeholders: {
+          count: "How many extra target lanes the overflow field currently contributes; governs the plural form.",
+        },
       },
       "projectSettings.create.languageHintAriaLabel": {
         description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
-          "One of three radio-option descriptions under 'Advanced: project shape'. " +
+          "One of two radio-option descriptions under 'Advanced: project shape'. " +
           "The bold name is a separate translated+styled placeholder so word order " +
-          "can move per locale.",
+          "can move per locale. Inflects 'target'/'targets' from the filled " +
+          "target-language count (not shown as a numeral).",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeSelfContainedName and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.shapeSourceOnly": {
-        description: "Second project-shape radio-option description; see shapeSelfContained.",
-        placeholders: {
-          name: "The bold shape name, already translated via projectSettings.create.shapeSourceOnlyName and wrapped in <strong> by the caller.",
-        },
-      },
       "projectSettings.create.shapeLinkedTarget": {
-        description: "Third project-shape radio-option description; see shapeSelfContained.",
+        description:
+          "Second project-shape radio-option description; see shapeSelfContained. " +
+          "Inflects 'target'/'targets' from the filled target-language count.",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeLinkedTargetName and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.linkModeLive": {
+      "projectSettings.create.cloneModeName": {
         description:
-          "Radio-option description for the 'live' link mode, shown only when shape " +
-          "is 'linked-target'.",
+          "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
+          "snapshot copy, not a live link.",
+      },
+      "projectSettings.create.cloneIntro": {
+        description:
+          "Explanatory line under the Self Contained shape radio: offers an optional " +
+          "one-time clone from an upstream project. The bold mode name is a separate " +
+          "translated+styled placeholder so word order can move per locale.",
         placeholders: {
-          name: "The bold mode name, already translated via projectSettings.sourceLink.modeLive and wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.cloneModeName " +
+            "and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.linkModeClone": {
-        description: "Radio-option description for the 'clone' link mode; see linkModeLive.",
+      "projectSettings.create.liveModeName": {
+        description:
+          "The emphasized mode word in projectSettings.create.liveIntro — a live-linked " +
+          "copy that stays connected to the upstream project.",
+      },
+      "projectSettings.create.liveIntro": {
+        description:
+          "Explanatory line under the Linked Target shape radio: states that this " +
+          "create is a live-linked copy. The bold mode name is a separate translated+styled " +
+          "placeholder so word order can move per locale.",
         placeholders: {
-          name: "The bold mode name, already translated via projectSettings.sourceLink.modeClone and wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.liveModeName " +
+            "and wrapped in <strong> by the caller.",
         },
       },
       "projectSettings.create.linkConsumesSource": {
         description:
           "Radio-option description for 'consumes source' (sibling-translation case) " +
-          "in the linked-target advanced flow.",
+          "in the advanced create flow. Inflects 'a target lane' vs 'target " +
+          "lanes' from how many target languages the user has entered.",
         placeholders: {
           name: "The bold option name, already translated via projectSettings.create.linkConsumesSourceName and wrapped in <strong> by the caller.",
         },
@@ -822,6 +971,12 @@ export const projectSettings = defineNamespace({
         placeholders: {
           name: "The bold option name, already translated via projectSettings.create.linkConsumesTargetName and wrapped in <strong> by the caller.",
         },
+      },
+      "projectSettings.create.validationLinkConsumesRequired": {
+        description:
+          "Inline validation error when Advanced linking is active (linked-target, or " +
+          "self-contained with an upstream picked) but the user has not chosen " +
+          "whether to consume the upstream source or one of its targets.",
       },
       "projectSettings.create.extraLanguagesRemoveAriaLabel": {
         description: "Accessible name of the small x button on a chip removing one extra target language from the create-dialog's list.",
@@ -1043,6 +1198,47 @@ export const projectSettings = defineNamespace({
           percent: "The current penalty as a whole-number percentage, e.g. '10'.",
         },
       },
+      "projectSettings.cellEditing.optionNone": {
+        description:
+          "First option in the 'Who can add and remove cells' dropdown, and the " +
+          "value every project starts on. It is not a role — it means nobody at " +
+          "all, including the project's owner. Keep the 'default' note: it is " +
+          "what tells an admin this list has never been touched. Translate the " +
+          "word 'default'; the dash is an em dash separating the two halves.",
+      },
+      "projectSettings.cellEditing.optionCommenter": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, naming the " +
+          "lowest rank that may be granted the affordance. Translate the role " +
+          "name exactly as common.role.commenter is translated — this list must " +
+          "read identically to the Members panel. The number in brackets is the " +
+          "role's level on the permission ladder: data, never translated.",
+      },
+      "projectSettings.cellEditing.optionReviewer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.reviewer is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionContributor": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.contributor is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionProjectLead": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.projectLead is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionMaintainer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, and the " +
+          "strictest rank the setting can name. Translate the role name exactly " +
+          "as common.role.maintainer is translated; the bracketed number is the " +
+          "role's ladder level, data, never translated.",
+      },
       "projectSettings.harmonization.defaultRoleSuffix": {
         description:
           "Marks a role option in the harmonization minimum-role select as the " +
@@ -1201,6 +1397,52 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.termMatching.title": {
+        description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",
+      },
+      "projectSettings.termMatching.description": {
+        description:
+          "Explains what the affix inventory is for — it only takes effect on terms with " +
+          "\"Allow prefixes and suffixes\" enabled.",
+      },
+      "projectSettings.termMatching.prefixes": {
+        description: "Label and accessible name of the prefix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.suffixes": {
+        description: "Label and accessible name of the suffix tag-input row in the affix inventory editor.",
+      },
+      "projectSettings.termMatching.maxAffixes": {
+        description: "Label of the numeric input capping how many chained affixes are allowed per side (1-4).",
+      },
+      "projectSettings.termMatching.foldMarksDefault": {
+        description:
+          "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
+          "when matching terms, absent a per-concept override.",
+      },
+      "projectSettings.termMatching.loadPreset": {
+        description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
+      },
+      "projectSettings.termMatching.addAffixPlaceholder": {
+        description: "Placeholder text in the prefix/suffix tag-input fields.",
+      },
+      "projectSettings.termMatching.remove": {
+        description: "Accessible name of the small remove button on one affix chip.",
+        placeholders: {
+          affix: "The affix text on the chip being removed (data, not translated).",
+        },
+      },
+      "projectSettings.termMatching.preset.hebrew": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.arabic": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.swahili": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.turkish": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
       },
     },
   },

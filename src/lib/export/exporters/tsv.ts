@@ -7,6 +7,7 @@
 // is stripped; only plain text values are emitted.
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { neutralizeFormulaLeader } from "./csv-safety"
 
 /**
  * Quote a TSV field per RFC-4180 if it contains any character that would
@@ -14,10 +15,11 @@ import { effectiveSourceText } from "@/lib/cell-text"
  * Plain fields are returned unchanged.
  */
 function tsvField(value: string): string {
-  if (value.includes('"') || value.includes("\t") || value.includes("\r") || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`
+  const safe = neutralizeFormulaLeader(value)
+  if (safe.includes('"') || safe.includes("\t") || safe.includes("\r") || safe.includes("\n")) {
+    return `"${safe.replace(/"/g, '""')}"`
   }
-  return value
+  return safe
 }
 
 export function exportTsv(cells: CellData[]): Blob {

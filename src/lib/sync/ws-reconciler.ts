@@ -41,6 +41,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import { recordSyncBytes } from "./connection-activity"
 import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
@@ -399,6 +400,7 @@ export function createWsReconciler(
       let parsed: ProjectWsServerMessage | null = null
       try {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data)
+        recordSyncBytes("download", raw)
         parsed = parseProjectWsMessage(raw)
       } catch (err) {
         const e = err instanceof Error ? err : new Error(String(err))
@@ -439,7 +441,9 @@ export function createWsReconciler(
     send(msg: ProjectWsClientMessage): boolean {
       if (!socket || socket.readyState !== host.Open) return false
       try {
-        socket.send(JSON.stringify(msg))
+        const payload = JSON.stringify(msg)
+        socket.send(payload)
+        recordSyncBytes("upload", payload)
         return true
       } catch {
         return false

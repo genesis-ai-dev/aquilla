@@ -45,7 +45,10 @@ Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/J
 
 - Snapshots (under redesign) — see Plan 2.
 - Cross-browser. Chromium only for v1.
-- Tauri shell — see Plan 3 for the separate `tauri-driver` suite.
+- Tauri shell — native-surface smoke suite at `e2e/tauri/smoke.spec.ts` (WebdriverIO +
+  `@wdio/tauri-service` embedded provider, not Playwright/tauri-driver — see
+  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Release-gate
+  only (`tauri-release.yml`), not a push gate.
 
 ## Project-level conventions
 
@@ -165,6 +168,14 @@ Whether an agent may pick an issue up is read straight off the **status** — th
 
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
+
+Placement is orthogonal too. Every issue carries exactly one label from the team's **`Area`**
+label group (`Editor`, `Importing`, `Dashboard`, … — `list_issue_labels` for the live list)
+and lives in one of two kinds of project. Work that V1 ships *with* goes in that area's
+**`<Area> V1`** project (all under the **Road to V1** initiative); maintenance and general
+fixes that V1 ships *without* go in **`Prototype Debugging`**. Agents default new issues to
+`Prototype Debugging`; promoting one into a V1 project is a human call. The `Todo` queue is
+read team-wide, across both kinds of project.
 
 **Every new issue is created from one of the Aquilla team's issue templates** — pass
 `template` to `save_issue`: **`Bug Report`** for bugs, **`Feature Request`** for new

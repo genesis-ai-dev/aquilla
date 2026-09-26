@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
+import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchOrgSettings,
   patchOrgSettings,
   postPromotionRequest,
+  resetCountStructuralOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -95,6 +97,8 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
+const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
 // AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
 // shape as the floors above, but it gates a WRITE (managing a project's
@@ -105,6 +109,15 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 // default) — all three must agree.
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+// AQU-1086: languageEditMinRole is the second write-gating permission-policy
+// key (who may change a project's source/target language and its extra target
+// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
+// behaviour — so an org opts IN to project-lead language editing. See
+// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// gate) and in auth-worker/src/services/org-permissions.ts (the server
+// default) — all three must agree.
+const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const EMPTY_RULES: TranslationRule[] = []
 
 // AQU-1002: the two comment floors are the same OWNER-only permission-policy
@@ -211,6 +224,30 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-1083: do chapter headings and section titles count as translatable
+   * content in this org's progress numbers? Explicit org setting, or TRUE when
+   * unset — which is what every project did before the setting existed, so
+   * nothing moves for an org that never opts out. A project may override it.
+   *
+   * Unlike the keys above this is NOT a permission policy — it decides how a
+   * number is calculated rather than who may see or do anything — so it rides
+   * the general maintainer write gate, not the owner-only one.
+   */
+  countStructuralCells: boolean
+  /**
+   * AQU-1083: how many projects in this org set their own value and therefore
+   * ignore the default above. Zero means changing the default reaches
+   * everything, which is why zero suppresses the prompt entirely.
+   */
+  countStructuralOverrides: number
+  /** Put those projects back on the org default. Clears their own key. */
+  resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
+   * AQU-1037: effective floor for assigning work to anyone, including
+   * file/chapter/target-lane assignments and AI changeset routing.
+   */
+  assignmentMinRole: number
+  /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
    * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
@@ -219,6 +256,13 @@ export interface UseOrgSettings {
    * Settings surface rather than for project-level gating.
    */
   termbaseEditMinRole: number
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change a project's languages. The per-project gate reads the
+   * same floor off the project record (`ProjectRecord.languageEditMinRole`),
+   * so this is here for the org Settings UI.
+   */
+  languageEditMinRole: number
   /**
    * AQU-907: True when the caller may use the org-wide Data egress surface.
    * Owners always may (700 meets every valid floor, so they never wait for
@@ -313,6 +357,21 @@ export function useOrgSettings(
     return got
   }, [orgId, jwt, writeServer])
 
+  /**
+   * AQU-1083: put every project back on the org's structural-cell default.
+   *
+   * Re-fetches afterwards rather than adjusting the count locally, because the
+   * server is the only thing that knows what it actually cleared — another
+   * maintainer may have opted a project out while this dialog was open.
+   */
+  const resetOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetCountStructuralOverrides(jwt, orgId)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -361,6 +420,14 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
+  // AQU-1086: effective language-edit floor — explicit org setting, or the
+  // MAINTAINER default when unset / out of the role ladder.
+  const languageEditMinRole = resolveLanguageEditFloor(
+    typeof server?.settings?.languageEditMinRole === "number"
+      ? (server.settings.languageEditMinRole as number)
+      : null,
+  )
+
   // AQU-907: effective egress floor — explicit org setting, or the OWNER
   // default when unset / out of the role ladder.
   const egressMinRole = (() => {
@@ -385,9 +452,19 @@ export function useOrgSettings(
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
+  // `!== false` rather than `=== true`: unset must read as ON here, because
+  // counting headings is what every org does today.
+  const countStructuralCells = server?.settings?.countStructuralCells !== false
+  const countStructuralOverrides = server?.countStructuralOverrides ?? 0
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
+  const assignmentMinRole = (() => {
+    const raw = server?.settings?.assignmentMinRole
+    if (typeof raw === "number" && VALID_ROLE_LEVELS.has(raw)) return raw
+    return DEFAULT_ASSIGNMENT_MIN_ROLE
+  })()
 
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
@@ -514,7 +591,12 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    countStructuralCells,
+    countStructuralOverrides,
+    resetCountStructuralOverrides: resetOverrides,
+    assignmentMinRole,
     termbaseEditMinRole,
+    languageEditMinRole,
     canEgress,
     egressMinRole,
     commentCreateMinRole,
@@ -552,6 +634,16 @@ export function canEditAssignmentAuthority(callerRoleLevel: number | null | unde
  */
 export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-1086: True when `callerRoleLevel` is allowed to CHANGE the
+ * languageEditMinRole floor (OWNER-only, same rationale as the helpers above —
+ * a maintainer must not be able to hand out project-language editing on their
+ * own authority).
+ */
+export function canEditLanguageFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= LANGUAGE_FLOOR_WRITE_MIN_ROLE
 }
 
 /**

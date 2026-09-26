@@ -39,6 +39,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     version: 1,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -51,7 +52,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
     projects: await fetchAccessibleProjects(...a),

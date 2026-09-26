@@ -297,8 +297,9 @@ export function OrgMembersTable({
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>{t("org.membersPage.orgTable.addMemberTitle")}</DialogTitle>
-              <DialogDescription>
-                {t("org.membersPage.orgTable.addMemberDescription")}
+              <DialogDescription className="space-y-2">
+                <span className="block">{t("org.membersPage.orgTable.addMemberDescription")}</span>
+                <span className="block">{t("org.membersPage.orgTable.projectAccessNote")}</span>
               </DialogDescription>
             </DialogHeader>
             <Tabs
@@ -313,7 +314,7 @@ export function OrgMembersTable({
               <TabsContent value="members">
                 <MemberMultiAddRow
                   roleOptions={ORG_ROLE_OPTIONS}
-                  defaultRole={ROLE.MAINTAINER}
+                  defaultRole={ROLE.CONTRIBUTOR}
                   scopedUserSearch={false}
                   excludedUserIds={members.map((m) => m.userId)}
                   onAdd={async (usernames, role) => {

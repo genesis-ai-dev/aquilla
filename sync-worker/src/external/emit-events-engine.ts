@@ -12,10 +12,13 @@
 
 import { errorResponse, toErrorResponse } from './errors'
 import {
+  TERM_EMIT_KINDS,
   TESTIMONY_EMIT_KINDS,
+  emitKindEffectLabel,
   type EmitEventInput,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import { isBindingTermWrite, resolveTermbaseFloor } from '../events/termbase-authority'
 import { laneCellKey } from './commands'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import {
@@ -77,6 +80,12 @@ interface FileRow {
   deleted_at: number | null
 }
 
+interface ConceptRow {
+  concept_id: string
+  status: string
+  deleted_at: number | null
+}
+
 /** Batch-load referenced comments, keyed by comment_id. */
 async function loadComments(
   db: AquillaDb,
@@ -114,6 +123,26 @@ async function loadFiles(
   return map
 }
 
+/** Batch-load referenced terminology concepts, keyed by concept_id. */
+async function loadConcepts(
+  db: AquillaDb,
+  projectId: string,
+  ids: readonly string[],
+): Promise<Map<string, ConceptRow>> {
+  const map = new Map<string, ConceptRow>()
+  if (ids.length === 0) return map
+  const placeholders = ids.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(
+      `SELECT concept_id, status, deleted_at
+         FROM concepts WHERE project_id = ? AND concept_id IN (${placeholders})`,
+    )
+    .bind(projectId, ...ids)
+    .all<ConceptRow>()
+  for (const row of results) map.set(row.concept_id, row)
+  return map
+}
+
 /** Batch-load referenced assignments (existence only), keyed by assignment_id. */
 async function loadAssignments(
   db: AquillaDb,
@@ -139,6 +168,7 @@ function collectRefs(events: readonly EmitEventInput[]) {
   const fileIds = new Set<string>()
   const commentIds = new Set<string>()
   const assignmentIds = new Set<string>()
+  const conceptIds = new Set<string>()
   for (const e of events) {
     if (PIN_KINDS.has(e.kind) || e.kind === 'cell.waive' || e.kind === 'cell.unwaive') {
       cellRefs.push({ fileId: e.fileId!, cellId: e.cellId!, ...(e.laneId ? { laneId: e.laneId } : {}) })
@@ -161,8 +191,19 @@ function collectRefs(events: readonly EmitEventInput[]) {
     if (e.kind === 'assignment.reassign' || e.kind === 'assignment.unassign') {
       assignmentIds.add(e.payload.assignmentId as string)
     }
+    // term.create names a concept that must NOT exist yet; the rest name one
+    // that must. Both need the row loaded.
+    if (TERM_EMIT_KINDS.has(e.kind) && typeof e.payload.conceptId === 'string') {
+      conceptIds.add(e.payload.conceptId)
+    }
   }
-  return { cellRefs, fileIds: [...fileIds], commentIds: [...commentIds], assignmentIds: [...assignmentIds] }
+  return {
+    cellRefs,
+    fileIds: [...fileIds],
+    commentIds: [...commentIds],
+    assignmentIds: [...assignmentIds],
+    conceptIds: [...conceptIds],
+  }
 }
 
 /**
@@ -188,11 +229,15 @@ export async function prepareEmitEvents(
   callerRoleLevel: number,
 ): Promise<Response> {
   const refs = collectRefs(cmd.events)
-  const [states, files, comments, assignments, commentFloors] = await Promise.all([
+  const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
+  const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
     resolveCellStates(db, projectId, refs.cellRefs),
     loadFiles(db, projectId, refs.fileIds),
     loadComments(db, projectId, refs.commentIds),
     loadAssignments(db, projectId, refs.assignmentIds),
+    loadConcepts(db, projectId, refs.conceptIds),
+    // Only pay for the org lookup when the batch actually touches terminology.
+    hasTerms ? resolveTermbaseFloor(db, projectId) : Promise.resolve(0),
     // AQU-1002: the org's configurable comment floors. Resolved once for the
     // whole plan alongside the other reference loads — the plan is
     // single-project, so there is nothing to key a cache on.
@@ -356,17 +401,62 @@ export async function prepareEmitEvents(
       }
     }
 
+    if (TERM_EMIT_KINDS.has(e.kind)) {
+      const conceptId = e.payload.conceptId as string | undefined
+      if (e.kind === 'term.create') {
+        // A create naming an existing concept would project as an idempotent
+        // upsert — silently OVERWRITING someone's term. Reject it: the caller
+        // meant term.update, or meant a new concept and reused an id.
+        if (conceptId && concepts.has(conceptId)) {
+          return failed(i, `concept ${conceptId} already exists — use term.update to change it`)
+        }
+        if (!conceptId) planned.conceptId = uuidv7()
+      } else {
+        const row = concepts.get(conceptId!)
+        if (!row || row.deleted_at != null) return failed(i, `concept ${conceptId} does not exist`)
+        // Only a draft is promotable — the projection guards on that, so an
+        // approve of an active or deprecated concept would apply as a silent
+        // no-op and report success. Say no here instead.
+        if (e.kind === 'term.approve' && row.status !== 'draft') {
+          return failed(i, `concept ${conceptId} is ${row.status}, not a draft awaiting approval`)
+        }
+      }
+      // The org's termbase floor gates BINDING writes (anything but suggesting
+      // a draft) — the same raise termbase-authority.ts applies at the /events
+      // perimeter. Mirrored here so a plan the caller could never commit is
+      // denied now rather than staged for a human to approve into a 403.
+      if (isBindingTermWrite(e.kind, e.payload) && callerRoleLevel < termbaseFloor) {
+        return errorResponse(
+          'permission_denied',
+          `events[${i}]: ${e.kind === 'term.create' ? 'creating an active term' : e.kind} requires role ${termbaseFloor} on this project's org (suggest instead with term.create status "draft")`,
+        )
+      }
+      // Terminology is project-level: route under the sentinel, like a
+      // project-scoped comment.
+      fileId = PROJECT_SENTINEL
+    }
+
     plannedEmit.push(planned)
     normalized.push({ ...e, ...(fileId !== undefined ? { fileId } : {}) })
   }
 
-  // Per-kind effect lines, first-seen order; testimony kinds flagged (†).
+  // Per-kind effect lines, first-seen order; testimony kinds flagged (†). The
+  // `label` is what the approval page shows a non-developer reviewer — see
+  // emitKindEffectLabel. It is computed here rather than in the client so every
+  // reviewing surface (page, chat card, receipt) says the same sentence.
   const byKind = new Map<string, EmitEventsSummaryEntry>()
   for (const e of normalized) {
     const entry = byKind.get(e.kind)
     if (entry) entry.count++
-    else byKind.set(e.kind, { kind: e.kind, count: 1, testimony: TESTIMONY_EMIT_KINDS.has(e.kind) })
+    else
+      byKind.set(e.kind, {
+        kind: e.kind,
+        count: 1,
+        testimony: TESTIMONY_EMIT_KINDS.has(e.kind),
+        label: '',
+      })
   }
+  for (const entry of byKind.values()) entry.label = emitKindEffectLabel(entry.kind, entry.count)
   // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
   // text as the server currently reads it, so the approver endorses specific
   // sentences rather than a count. Batches are capped at
@@ -409,7 +499,7 @@ export async function prepareEmitEvents(
 function compilePayload(
   e: EmitEventInput,
   pin: CellPrecondition | undefined,
-  planned: { commentId?: string; assignmentId?: string } | undefined,
+  planned: { commentId?: string; assignmentId?: string; conceptId?: string } | undefined,
 ): Record<string, unknown> | null {
   switch (e.kind) {
     case 'cell.validate':
@@ -443,6 +533,11 @@ function compilePayload(
         ...(e.payload.createdForTranslated !== undefined
           ? { createdForTranslated: e.payload.createdForTranslated }
           : {}),
+        // AQU-1233: every comment staged through the Agent API is agent-posted,
+        // so the marker is set here rather than taken from the caller — the
+        // payload validator already drops a supplied `viaAgent`, which means a
+        // credential can neither forge nor suppress it.
+        viaAgent: true,
       }
     }
     case 'assignment.create':
@@ -453,6 +548,11 @@ function compilePayload(
       }
     case 'assignment.reassign':
       return { ...e.payload, ...(e.laneId !== undefined ? { targetLang: e.laneId } : {}) }
+    case 'term.create':
+      return {
+        ...e.payload,
+        conceptId: (e.payload.conceptId as string | undefined) ?? planned?.conceptId ?? uuidv7(),
+      }
     default:
       // comment.edit/delete/resolve, cell.waive/unwaive, file.*,
       // assignment.unassign: the normalized payload IS the wire payload.
@@ -486,11 +586,12 @@ export async function commitEmitEvents(
 
   if (wasStaged) {
     const refs = collectRefs(cmd.events)
-    const [states, files, comments, assignments] = await Promise.all([
+    const [states, files, comments, assignments, concepts] = await Promise.all([
       resolveCellStates(db, projectId, refs.cellRefs),
       loadFiles(db, projectId, refs.fileIds),
       loadComments(db, projectId, refs.commentIds),
       loadAssignments(db, projectId, refs.assignmentIds),
+      loadConcepts(db, projectId, refs.conceptIds),
     ])
     const stale = async (message: string): Promise<Response> => {
       await markChangesetStale(db, cs.id)
@@ -530,6 +631,20 @@ export async function commitEmitEvents(
           return stale(`events[${i}]: assignment ${e.payload.assignmentId} no longer exists`)
         }
       }
+      if (TERM_EMIT_KINDS.has(e.kind)) {
+        const conceptId = e.payload.conceptId as string | undefined
+        const row = conceptId ? concepts.get(conceptId) : undefined
+        if (e.kind === 'term.create') {
+          // Someone created this concept between prepare and approval — landing
+          // the plan now would overwrite their entry, which is exactly the
+          // lost-update the term.* events exist to prevent.
+          if (row && row.deleted_at == null) {
+            return stale(`events[${i}]: concept ${conceptId} was created since prepare`)
+          }
+        } else if (!row || row.deleted_at != null) {
+          return stale(`events[${i}]: concept ${conceptId} no longer exists`)
+        }
+      }
     }
   }
 
@@ -546,7 +661,9 @@ export async function commitEmitEvents(
     if (payload === null) {
       return errorResponse('job_failed', `events[${i}]: stored plan is missing its precondition pin`)
     }
-    const fileId = e.fileId ?? (e.kind.startsWith('comment.') ? PROJECT_SENTINEL : undefined)
+    const fileId =
+      e.fileId ??
+      (e.kind.startsWith('comment.') || TERM_EMIT_KINDS.has(e.kind) ? PROJECT_SENTINEL : undefined)
     if (!fileId) return errorResponse('job_failed', `events[${i}]: stored plan is missing its fileId`)
     // Generic compile: the per-kind payload shape was enforced by the
     // validator + compilePayload, so one unknown-cast at the envelope seam

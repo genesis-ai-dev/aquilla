@@ -8,6 +8,7 @@
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
+  commandsContainAssignmentEvents,
   validateCommands,
   isStructureCommandKind,
   laneCellKey,
@@ -23,6 +24,7 @@ import {
   type PatchSettingsCommand,
   type PlanImportCommand,
   type ProjectLifecycleCommand,
+  type RegenerateBriefSummaryCommand,
   type RenameFileCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
@@ -41,6 +43,9 @@ import {
 import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
 import { renameFileToEmitEvents } from './commands-rename-file'
 import { prepareSetBrief } from './commands-set-brief'
+import { prepareProjectSetup } from './prepare-project-setup'
+import type { ProjectSetupCommand } from './commands-project-setup'
+import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
@@ -56,6 +61,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
+import { resolveAssignmentAuthority } from '../events/assignment-authority'
 
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
@@ -101,7 +107,7 @@ export async function handlePrepare(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "")
+  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   const identifier = `credential:${cred.credentialId}`
@@ -277,6 +283,32 @@ export async function prepareChangesetCore(
     return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
   }
 
+  // RegenerateBriefSummary (AQU-1282): sole command, same settings-blob
+  // version pin as SetBrief; the render itself happens at commit.
+  const regenBrief = validated.commands.find(
+    (c): c is RegenerateBriefSummaryCommand => c.kind === 'RegenerateBriefSummary',
+  )
+  if (regenBrief) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'RegenerateBriefSummary must be the only command in a changeset')
+    }
+    return prepareRegenerateBriefSummary(db, cred, projectId, id, autonomyMode, regenBrief, env)
+  }
+
+  // AQU-1294 ProjectSetup: the composite setup plan. Sole command and FORCED
+  // ask-mode; its module owns the effective floor (the max of the blocks it
+  // carries), every named-field rejection, and the step ledger — so like the
+  // settings commands it skips the generic role gate below.
+  const projectSetup = validated.commands.find(
+    (c): c is ProjectSetupCommand => c.kind === 'ProjectSetup',
+  )
+  if (projectSetup) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ProjectSetup must be the only command in a changeset')
+    }
+    return prepareProjectSetup(db, cred, projectId, id, projectSetup, env)
+  }
+
   // AQU-1228 Living Memory writes: sole command; receipt-only like
   // PatchSettings, with its own floors (propose vs. review tier) and the
   // human-edited guard, so it also skips the generic role gate below.
@@ -298,15 +330,20 @@ export async function prepareChangesetCore(
   // added/modified counts). Require the role FLOOR of the command kind being
   // staged — the same floor its commit hits at the /events perimeter, so a plan
   // the caller could never commit is denied here rather than leaked.
-  const requiredRole = Math.max(...validated.commands.map(requiredRoleForCommand))
+  const assignmentMinRole = commandsContainAssignmentEvents(validated.commands)
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : undefined
+  const requiredRole = Math.max(
+    ...validated.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+  )
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
 
   // EmitEvents (AQU-926 §2): sole command (one command already batches many
-  // events). The static max-floor gate just ran; its engine adds the dynamic
-  // maintainer bumps + live existence/pin resolution.
+  // events). The max-floor gate just ran, including the dynamic org assignment
+  // floor; its engine adds maintainer bumps + live existence/pin resolution.
   const emitEvents = validated.commands.find(
     (c): c is EmitEventsCommand => c.kind === 'EmitEvents',
   )

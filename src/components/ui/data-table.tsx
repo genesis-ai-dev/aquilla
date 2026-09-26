@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "react-router-dom"
 import {
   flexRender,
   getCoreRowModel,
@@ -221,19 +222,47 @@ function DataTableVirtualRowTable<TData>({
   )
 }
 
-function dataTableRowCells<TData>(row: Row<TData>, dense: boolean) {
-  return row.getVisibleCells().map((cell) => (
-    <TableCell
-      key={cell.id}
-      className={cn(
-        dense ? "py-1.5" : "py-2.5",
-        "overflow-hidden",
-        columnMetaClass(cell.column.columnDef.meta),
-      )}
-    >
-      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-    </TableCell>
-  ))
+function dataTableRowCells<TData>(
+  row: Row<TData>,
+  dense: boolean,
+  rowLink?: DataTableRowLink<TData>,
+) {
+  return row.getVisibleCells().map((cell) => {
+    const content = flexRender(cell.column.columnDef.cell, cell.getContext())
+    return (
+      <TableCell
+        key={cell.id}
+        className={cn(
+          dense ? "py-1.5" : "py-2.5",
+          "overflow-hidden",
+          columnMetaClass(cell.column.columnDef.meta),
+        )}
+      >
+        {rowLink && cell.column.id === rowLink.columnId ? (
+          // Real <a href> so keyboard, screen-reader, and automated users can
+          // reach what mouse users get from the row click. Under Tailwind
+          // preflight an anchor inherits color/decoration, so it looks like
+          // the plain cell. A plain activation (click, Enter) defers to the
+          // row's onClick — one navigation path, no double push — while
+          // modifier/middle clicks keep native open-in-new-tab behaviour.
+          <Link
+            to={rowLink.to(row.original)}
+            className="block min-w-0"
+            onClick={(e) => {
+              const plain =
+                e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey
+              if (plain) e.preventDefault()
+              else e.stopPropagation()
+            }}
+          >
+            {content}
+          </Link>
+        ) : (
+          content
+        )}
+      </TableCell>
+    )
+  })
 }
 
 function dataTableRowProps<TData>(
@@ -263,6 +292,12 @@ function dataTableRowProps<TData>(
     ),
     onClick: onRowClick ? () => onRowClick(row.original) : undefined,
   } as const
+}
+
+/** A row-level link for `DataTable.rowLink` (see that prop). */
+export interface DataTableRowLink<TData> {
+  columnId: string
+  to: (row: TData) => string
 }
 
 /**
@@ -302,6 +337,13 @@ interface DataTableProps<TData, TValue> {
   rowClassName?: string | ((row: TData) => string | undefined)
   /** When set, clicking a body row invokes this handler (e.g. navigate on row). */
   onRowClick?: (row: TData) => void
+  /**
+   * Pair with `onRowClick` when the click navigates: wraps the named column's
+   * cell content in a real link to the same destination, so the row is
+   * reachable without a mouse (AQU-1330). Choose a column whose cell holds no
+   * interactive controls.
+   */
+  rowLink?: DataTableRowLink<TData>
   /** Extra attributes on each body row (e.g. `data-project-id` for tests). */
   getRowAttributes?: (
     row: TData,
@@ -368,6 +410,7 @@ function DataTable<TData, TValue>({
   testId,
   rowClassName,
   onRowClick,
+  rowLink,
   getRowAttributes,
   renderRowMenuItems,
   renderSubRow,
@@ -447,7 +490,7 @@ function DataTable<TData, TValue>({
     (row: Row<TData>) => {
       const sub = renderSubRow?.(row.original)
       const menuItems = renderRowMenuItems?.(row.original) ?? null
-      const cells = dataTableRowCells(row, dense)
+      const cells = dataTableRowCells(row, dense, rowLink)
       const rowProps = dataTableRowProps(row, {
         rowClassName,
         onRowClick,
@@ -475,6 +518,7 @@ function DataTable<TData, TValue>({
       renderRowMenuItems,
       rowClassName,
       onRowClick,
+      rowLink,
       getRowAttributes,
     ],
   )
@@ -635,7 +679,7 @@ function DataTable<TData, TValue>({
                 tableRows.map((row) => {
                   const sub = renderSubRow?.(row.original)
                   const menuItems = renderRowMenuItems?.(row.original) ?? null
-                  const cells = dataTableRowCells(row, dense)
+                  const cells = dataTableRowCells(row, dense, rowLink)
                   const rowProps = dataTableRowProps(row, {
                     rowClassName,
                     onRowClick,

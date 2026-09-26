@@ -37,17 +37,32 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
   //
-  // Sam, 2026-08-21: create/delete/reorder dropped to CONTRIBUTOR so the
-  // `allowLineCreation` project setting can admit contributors — reorder
-  // included because it is the chain bookkeeping riding every add and remove
-  // batch. This is the LOWEST reachable floor; authorize.ts conditionally
-  // re-imposes PROJECT_LEAD — all three refused below lead unless the
-  // project opted in, deletes additionally only for a cell a person added by
-  // hand (line-creation-authority.ts).
-  'source.cell.create': ROLE.CONTRIBUTOR,
+  // AQU-1068: create/delete/reorder sit at COMMENTER — reorder included
+  // because it is the chain bookkeeping riding every add and remove batch.
+  //
+  // SINCE 2026-09-09 THIS IS THE ONLY SERVER FLOOR ON THESE THREE KINDS, and
+  // that is deliberate. The project's `cellEditingFloor` tier used to be
+  // checked in authorize.ts on top of it; it is now a PRODUCT rule enforced
+  // where the buttons are drawn, because enforcing it here silently refused
+  // audio-cue re-import, DCS upstream import and diarization — three flows
+  // that emit these kinds through the user's own outbox. See the long note in
+  // authorize.ts. What survives at the perimeter is the rule that protects the
+  // client's file: a delete needs MAINTAINER unless the cell is one a person
+  // added by hand here.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // when the tier list grew Commenter and Reviewer rungs; at CONTRIBUTOR those
+  // two rungs were unreachable by construction, which is a setting that lies.
+  //
+  // The external API surface does not consult this table for these three kinds
+  // at all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
+  // PROJECT_LEAD for create/delete/reorder, and since the tier check went away
+  // that hard-coded floor is now the ONLY thing holding integrations above
+  // this line. There is a test pinning it for exactly that reason.
+  'source.cell.create': ROLE.COMMENTER,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.CONTRIBUTOR,
-  'source.cell.reorder': ROLE.CONTRIBUTOR,
+  'source.cell.delete': ROLE.COMMENTER,
+  'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
 

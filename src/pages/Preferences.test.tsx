@@ -8,6 +8,14 @@ import { FontSizeProvider, FONT_SIZE_STORAGE_KEY } from "@/branding/FontSize"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences, PreferencesDialog } from "./Preferences"
 
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))

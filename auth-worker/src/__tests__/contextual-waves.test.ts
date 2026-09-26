@@ -127,12 +127,18 @@ async function seedFourSpans(): Promise<void> {
   await seedCell("w4", "MRK 4:1", "Again he began to teach")
 }
 
-async function startRun(anchorCellId?: string) {
+/** Unlimited by default (AQU-1300). Everything in this file is about WAVE
+ *  mechanics — concurrency, cursor advance, fault containment — which only
+ *  exist above one span. The trust gate's default allowance of 1 would cap
+ *  every wave here at a single span and quietly turn these into tests of the
+ *  budget instead. The budget has its own file: contextual-allowance.test.ts. */
+async function startRun(anchorCellId?: string, spanAllowance: number | null = null) {
   const created = await createRun(db, {
     projectId: PROJECT,
     fileId: FILE,
     initiatedBy: "tester",
     roleSnapshot: { userId: 1, username: "tester", level: 400 },
+    spanAllowance,
     ...(anchorCellId ? { anchorCellId } : {}),
   })
   if (created.status !== "ok") throw new Error("run not created")

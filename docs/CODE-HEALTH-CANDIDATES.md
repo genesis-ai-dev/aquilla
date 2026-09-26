@@ -135,9 +135,29 @@ routine never modifies test files.
   issue #410 family below — which did not reproduce this run, consistent with intermittent).
   It turned out **not** to have a colocated test (the original 2026-08-11 note guessed
   "671 lines total" including a test file that doesn't actually exist).
-- **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
-  by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
-  its size; confirm no e2e spec still depends on it.
+- **`src/components/TerminologyPage.tsx`** — done 2026-09-21 (`chore/aqu-1335-remove-dead-terminology-page`, AQU-1335).
+  Zero importers since the 2026-07-08 glossary-editor swap: `/project/:id/terminology`
+  renders `GlossaryEditor`, lazily mounted by `ProjectWorkspace.tsx`. It had stopped being
+  harmless — PR #540 (AQU-208) applied its role-gating fix here, so the fix never reached
+  users and the QA walk failed twice. Deleted the 1,535-line page plus everything only it
+  reached: `TerminologyMergeDialog.tsx` (351), `TerminologyReviewQueue.tsx` (210),
+  `CandidateTermsPanel.tsx` (151), `src/lib/terminology/candidates-worker.ts` (66, its
+  `?worker` lazy import) and `src/lib/terminology/stats.ts` + `stats.test.ts` (206 + 230, the
+  `LibraryStatsHeader` model). Like `RulesPage.tsx` it had no colocated test, and no e2e spec
+  or page object referenced any of its test ids. On `CandidateTermsPanel`'s
+  `SWARM-TODO(glue): mount this in the terminology view`: satisfied by supersession, not
+  erased — the glossary-editor spec folds the review-queue and candidates panels into the
+  surface, and `GlossaryEditor`'s "Suggest terms" calls `extractCandidates` itself and lands
+  the results as draft rows. **Not** superseded: merge-duplicates. The spec keeps it ("mergeable
+  via multi-select into the existing `TerminologyMergeDialog`") and the plan lists
+  re-surfacing it as a follow-up, but nothing on the live surface has offered it since the
+  swap. `mergeConcepts()` in `store.ts` and its tests are deliberately kept so that
+  follow-up only needs UI; the dialog is recoverable from git (`git show
+  707287dfd:src/components/TerminologyMergeDialog.tsx`). **Re-surfaced 2026-09-21 (AQU-1337)**:
+  the dialog is back byte-for-byte and `GlossaryEditor` mounts it behind a "Merge duplicates"
+  toolbar button, writing through `persist(mergeConcepts(…))`. Kept because `GlossaryEditor` still
+  uses them: `TerminologyTermDetail`, `TerminologyViolationsInbox`, `candidates.ts`,
+  `csv.ts`, `tbx.ts`, `store.ts`.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
   live `fetchAccessibleProjects` exists in `cloud-projects.ts`. **Blocked** by this
@@ -171,6 +191,225 @@ routine never modifies test files.
   moves), then delete the `messages`/`context.keys` entries in `rules.ts` plus the matching
   key in every locale file under `src/lib/i18n/messages/`; `pnpm build` and `pnpm test`
   should stay green throughout since nothing reads these strings.
+- **Grown by the 2026-09-18 run**: deleting `RuleCreateDialog.tsx` and `RuleSuggestDialog.tsx`
+  (the two dialogs `RulesPage.tsx` was the only render site for — see the entry below)
+  orphaned 18 more keys in the same namespace file and the same way: 15 under
+  `rules.createDialog.*` (`namePlaceholder`, `descriptionLabel`, `ruleTypeLabel`,
+  `checkType.sourceTargetMatch`, `checkType.sourceRequiresTarget`, `checkType.targetForbids`,
+  `patternRegexLabel`, `patternFieldHint.match`, `forbiddenPatternRegexLabel`,
+  `patternFieldHint.forbidden`, `sourcePatternRegexLabel`, `requiredTargetPatternRegexLabel`,
+  `testYourRuleHeading`, `testSourcePlaceholder`, `testTargetPlaceholder`, `testButton`) and
+  3 under `rules.suggestDialog.*` (`description`, `analyzeButton`, `analyzedSummary`).
+  Confirmed orphaned by `grep -rn "rules\.createDialog\.\|rules\.suggestDialog\." src e2e
+  scripts | grep -v src/lib/i18n/` (empty). The live in-shell surface uses the separate
+  `rules.surface.*` namespace, so nothing shares these. Their two
+  `── RuleCreateDialog.tsx ──` / `── RuleSuggestDialog.tsx ──` section-header comments in
+  `namespaces/rules.ts` now point at deleted files; they were deliberately left in place so
+  the still-present keys keep their provenance — remove the headers together with the keys,
+  not before. Whoever picks this up should sweep all three prefixes (`rules.page.*`,
+  `rules.createDialog.*`, `rules.suggestDialog.*`) in one pass: same files, same proof.
+
+## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
+
+- **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
+  component-cleanup entry above) left 65 of the 239 keys in
+  `src/lib/i18n/namespaces/terminology.ts` with no reader — **51 since AQU-1337 re-surfaced
+  merge-duplicates** and put the 12 `terminology.mergeDialog.*` keys,
+  `terminology.page.mergeDuplicatesButton` and `terminology.common.noRenderings` back in use;
+  the lists below are the 51. Proof: for every key in the
+  namespace's `messages` block, search all tracked `src`/`e2e`/`scripts`/`worker`/`tools`
+  source outside `src/lib/i18n/` for the quoted key, then keep only the misses that the
+  deleted files *did* reference. No live code builds a `terminology.*` key dynamically
+  (no `` `terminology.…${ `` template anywhere), so a literal search is sufficient.
+  - `terminology.page.*` (16): `editConceptAria`, `deleteConceptAria`,
+    `reviewQueueCountLabel`, `candidateTermsCountLabel`, `addConceptButton`,
+    `editConceptTitle`, `deleteConcept`, `deleteNamedConcept`,
+    `reviewQueueHeading`, `candidateTermsHeading`, `conceptsHeading`, `noConceptsTitle`,
+    `noConceptsDescription`, `addFirstConceptButton`, `renderingsColumnHeader`,
+    `deleteConceptDialogTitle`
+  - `terminology.candidates.*` (11): `emptyTitle`, `emptyDescription`, `countRankedByNc`,
+    `ncTooltip`, `cTooltip`, `g2Tooltip`, `promoteButton`, `minedFromSummary`,
+    `corpusScopeFull`, `corpusScopeCapped`, `miningLabel`
+  - `terminology.libraryStats.*` (7): `heading`, `noActiveConcepts`, `activeConceptsLabel`,
+    `enforcedLabel`, `infringedLabel`, `cellsAnalyzedLabel`, `mostInfringedLabel`
+  - `terminology.reviewQueue.*` (6): `approveAria`, `rejectAria`, `readOnlyTooltip`,
+    `emptyTitle`, `emptyDescription`, `awaitingReviewCount`
+  - `terminology.importDialog.*` (6): `title`, `parsing`, `dropZoneText`,
+    `chooseFileButton`, `csvColumnsHint`, `tbxDialectsHint`
+  - `terminology.common.*` (3): `managed`, `notesLabel`, `statusLabel`
+  - `terminology.conceptDialog.*` (2): `renderingPlaceholder`, `targetRenderingsLabel`
+- **Already orphaned before that deletion** (same search, but the deleted files never
+  referenced them either — 6 keys): `terminology.editor.loadingTermDetails`,
+  `terminology.editor.errorConflict`, `terminology.editor.errorOffline`,
+  `terminology.lookup.applyAria`, `terminology.lookup.applyButton`,
+  `terminology.addConcept.description`.
+- **Friction** — same shape as the `rules.*` entry above, plus two things that entry did
+  not hit:
+  - `Catalog` is `Partial<Record<MessageKey, MessageValue>>`, so a key dropped from the
+    base namespace becomes an excess-property **tsc error** in every locale catalog that
+    still carries it. The removal is therefore all-or-nothing across
+    `namespaces/terminology.ts` (`messages` + `context.keys`, ~105 lines), the six
+    generated catalogs under `src/lib/i18n/messages/` (62-65 lines each, and their header
+    says "Do not hand-edit"), and `src/lib/i18n/source-hashes.json` (~378 lines).
+  - `no-duplicates.test.ts` rejects a documented exception whose key no longer collides.
+    Four of the orphans carry entries in `namespaces/duplicate-exceptions.ts`
+    (`terminology.libraryStats.enforcedLabel`, `…libraryStats.infringedLabel`,
+    `…conceptDialog.renderingPlaceholder`, `…common.statusLabel`); those must go in the
+    same commit, and the *other* half of each pair needs a re-check for an exception that
+    just became stale.
+- **Why deferred**: orphaned strings are inert (nothing fails on an unused key), while the
+  removal is ~900 lines across 10 high-churn files — three open PRs (#540, #547, #657)
+  were in flight against this namespace's surface when the page was deleted, and #657 adds
+  ~96 lines to `namespaces/terminology.ts` itself. Do it once those land, in the same
+  single pass as the three `rules.*` prefixes above: same files, same proof.
+- **Section headers**: the `── TerminologyPage.tsx: … ──`,
+  `── TerminologyReviewQueue.tsx ──` and `── CandidateTermsPanel.tsx ──` comments in
+  `namespaces/terminology.ts` now name deleted files (`── TerminologyMergeDialog.tsx ──`
+  names a live file again since AQU-1337). Left in place on purpose, following
+  the `rules.ts` precedent — they are the only provenance the still-present keys have.
+  Remove the headers together with the keys, not before.
+- **Also stale, not touched**: 28 of the 32 `T-*` rows in `docs/FEATURE-STORIES.csv` (all
+  but T-16, T-24, T-30, T-31) cite the deleted files as their code pointers, and the early
+  ones describe the retired tabbed page. Most have a live
+  equivalent in `GlossaryEditor`, but T-02 (library statistics header) describes a feature
+  nothing renders any more while still marked `Implemented`. (T-26/T-27, merge duplicate
+  concepts, were in the same state until AQU-1337 re-surfaced merge and re-pointed them.) Re-pointing them is a feature-by-feature check against the live surface,
+  not a mechanical path swap.
+
+## 2026-09-18 — `RulesPage.tsx` orphan follow-up shipped; rest of the zero-importer sweep deferred
+
+- **Done this run**: deleted `src/components/RuleCreateDialog.tsx` (459 lines) and
+  `src/components/RuleSuggestDialog.tsx` (281 lines), plus the now-unused
+  `eslint-suppressions.json` entry for the latter (4 `i18n/no-unkeyed-string` suppressions —
+  ESLint's `--report-unused-disable-directives` bookkeeping flags a stale entry, so it had to
+  go in the same commit). Both were imported by exactly one file ever,
+  `src/components/RulesPage.tsx` (lines 14-15 of the pre-deletion file, rendered at 203-204),
+  which the 2026-09-14 run deleted — so this is that run's leftover debris, not a new finding.
+  Both have shipped replacements rendered by the live `RulesSurface`: `RuleEditor` inside
+  `RulesSurface`'s own `createRuleDialog`/`createOrgRuleDialog` (workstream B of
+  `docs/plans/rules-revamp.md`, "Redesign `RuleCreateDialog` into an inline rule editor on the
+  surface") and `RuleSuggestFromEditsDialog` for the LLM-suggest path.
+- **On the `SWARM-TODO(memory-wiring)` in the deleted `RuleSuggestDialog`**: its props block
+  carried a SWARM-TODO asking `ProjectWorkspace.tsx` to thread a `cells` snapshot "wherever it
+  is rendered". Checked against the `useSubscribedConcepts.ts` precedent below (staged
+  scaffolding that must NOT be deleted) and judged different in kind: that TODO waits on a
+  server route that does not exist yet, whereas this one was satisfied by supersession —
+  `RulesSurface.tsx:256-261` already passes `cells` to the replacement
+  `RuleSuggestFromEditsDialog`, and `ProjectWorkspace.tsx` never rendered the old dialog at
+  all. Nothing forward-compat was erased.
+- **Deliberately left alone**: `src/lib/rules/rule-suggester.ts`. Deleting `RuleSuggestDialog`
+  leaves its `suggestRulesFromPairs` export with no production caller (only
+  `rule-suggester.test.ts` exercises it), but the module stays live for its other exports
+  (`RuleSuggestion`/`UsageCallback` types used by `RuleImportDialog`, `RuleImportReview`,
+  `rule-extractor.ts`, `brief-generator.ts`; `suggestRulesFromCandidates` used by
+  `RuleSuggestFromEditsDialog`). Removing just the one function would require editing its
+  test — a frozen path for this routine. Same shape as the `projects-read.ts` blocker below;
+  needs a human or a non-code-health change.
+
+## Zero-importer sweep leftovers — 2026-09-18
+
+A corrected repo-wide sweep this run (match `"…/<stem>"` in any import/export specifier
+across `src`, `e2e`, `scripts`, all four worker packages, `parity` and `index.html`) turned up
+these besides the two files deleted above. None were attempted — the run's budget was spent —
+and each needs its own zero-importer re-verification before deletion, since files move.
+
+- `src/components/CheckFileButton.tsx` (100 lines) — **done 2026-09-21.** Re-verified zero
+  importers; the only remaining mention is the i18n section-header comment at
+  `namespaces/rules.ts:111`. Supersession confirmed: `FileChapterToolbar.tsx:52` renders the
+  live "Check file" trigger off the same `rules.checkFileButton.label` key, and
+  `checkScopeSummary` (the one export it pulled from `CheckFindingsDrawer`) stays live via
+  `CheckFindingsDrawer.tsx:301,308`. `FileChapterToolbar.test.tsx:200` asserts the
+  `check-file-button` testid is *absent*, so it is unaffected.
+- `src/components/onboarding/checklist/AiProviderStep.tsx` (221 lines) — **done 2026-09-21.**
+  Both documented call sites are gone: `AiSetupDialog.tsx` no longer exists at all, and
+  `SetupChecklistDrawer.tsx` imports seven checklist siblings but reaches AI provider setup
+  through `AiModelsStep` instead. The migration the plan doc described had already completed;
+  only the orphan file was left.
+- `src/components/AudioRecorder/RecordingVideoStage.tsx` (135 lines) — **done 2026-09-23.**
+  Re-verified zero references in code. `git log -S RecordingVideoStage` on
+  `AudioRecordingModal.tsx` is empty, so the modal never imported it: AQU-906 (`8e7cd8b3`)
+  added the component and it was never wired. The film panel that actually shipped is
+  `RecordingVideoSurface` (AQU-646 stage 5), rendered at `AudioRecordingModal.tsx:1463` and
+  carrying the same `data-testid="rec-video"`. `RecordingVideoSurface.test.tsx` passed at
+  both baseline and final gate. Deleting it orphans five `audio.recordingModal.*` keys —
+  see the follow-up entry below.
+- `src/lib/audio/browser-process-stub.ts` (14 lines) — **done 2026-09-21.** The build-config
+  question this entry raised is answered: nothing aliases it. phonemizer's Node detection is
+  now patched at transform time by `phonemizerBrowserUnpackPlugin`
+  (`scripts/vite-phonemizer-browser.ts`) delegating to
+  `src/lib/audio/phonemizer-browser-env.ts`; `vite.config.ts` has no stub alias, and the
+  module was debris from the superseded alias-based approach. `pnpm build` stayed green.
+- `src/components/ui/{attachment,item,toggle-group,bar-spinner}.tsx` (537 lines total) —
+  unused shadcn/ui primitives. Deliberately NOT logged as dead code: `src/components/ui/` is
+  a vendored primitive library where "added ahead of first use" is normal, and `shadcn add`
+  would just re-create them. Only worth touching if a human says the repo prefers a
+  strictly-used-only `ui/` directory.
+- Known-and-blocked, unchanged this run: the 15-file `src/components/import/*` orphan cluster
+  (~3,900 lines, blocked on issue #410) and `src/hooks/useSubscribedConcepts.ts` (looks dead,
+  is not — see below). (`TerminologyPage.tsx` and its `candidates-worker.ts` were listed here
+  too; both went on 2026-09-21 — see the component-cleanup entry above.)
+
+## 2026-09-21 — `dev`'s own gates are red, which freezes the i18n catalog
+
+The 2026-09-21 run's baseline (clean tree at `origin/dev` `b001b2cb`) found **`pnpm lint` and
+`pnpm test` both failing on trunk**. All of it reproduces in isolation — none are full-suite
+flakes — so future runs should expect these and re-baseline rather than assume green:
+
+- `pnpm lint` — exit 2, 6 errors: `sync-worker/src/external/commands.ts:39-42` (four unused
+  type imports), `auth-worker/src/routes/changeset-approvals.ts:34` (unused `ROLE`),
+  `src/components/org/ProjectAutopilotPanel.test.tsx:439` (`prefer-const` on `gate`). ESLint
+  also reports stale `eslint-suppressions.json` entries ("suppressions left that do not occur
+  anymore"), which is a *separate* finding from the nested-`dist` entry above.
+- `pnpm test` — exit 1, 4 files / 6 tests: `src/lib/i18n/context.test.ts` (2),
+  `src/hooks/useProject.deviceLocalLive.test.tsx` (3),
+  `src/lib/export/exporters/idml.rejoin.test.ts` (1), and
+  `scripts/cloudflare-preview-comment.test.mjs` (a collection error, not a test failure — the
+  file imports `node:test` but the root vitest config now sweeps it in).
+- `pnpm build` is green.
+
+**Consequence for this ledger**: `src/lib/i18n/context.test.ts` is a whole-catalog invariant
+test, so by the routine's "a file whose tests are already red is frozen" rule it freezes
+*every* `src/lib/i18n/namespaces/*.ts` file. That blocks the `rules.page.*` /
+`rules.createDialog.*` / `rules.suggestDialog.*` orphan-key sweep logged above — which this
+run had otherwise fully scoped and verified, and which turns out to be **well inside budget**,
+correcting that entry's "easily 15-20 files" estimate:
+
+- The repo has only 6 locale files (`ar`, `ms`, `my`, `th`, `zh-Hans`, `zh-Hant`); `en.ts` is
+  a barrel that spreads the namespaces and carries no keys of its own. In every locale file
+  the 26 keys sit on 26 contiguous single lines.
+- Real scope: `namespaces/rules.ts` (26 keys + 26 `context.keys` entries + 3 section headers)
+  + 6 locale files + `namespaces/duplicate-exceptions.ts` + `source-hashes.json` = **9 files,
+  ~460 deleted lines**, of which 156 are the inert `source-hashes.json` sidecar.
+- Confirmed orphaned repo-wide (`src`, `e2e`, `scripts`, all four worker packages): the only
+  non-i18n mentions are this ledger and `docs/swarm/I18N-COVERAGE-ORCHESTRATION.md`'s
+  historical retrospective table.
+- **`rules.loadingLabel` must survive** — `ProjectSettings/RulesSection.tsx:129` still uses it.
+  It sits *inside* the `── RulesPage.tsx ──` section in both the keys block and the context
+  block, so it has to be lifted out rather than swept with its neighbours, and its context
+  description ("Rendered in two places … the standalone Rules page and the Rules section
+  inside Project Settings") is itself drift now that the standalone page is gone.
+- **`duplicate-exceptions.ts` must change in the same commit.**
+  `no-duplicates.test.ts > keeps every documented exception real and justified` hard-fails on
+  an exception for a key that no longer exists, and `rules.createDialog.descriptionLabel` has
+  one (it collides with `nav.report.descriptionFieldLabel`). Simulated against the live
+  catalog: that is the **only** exception affected — no other entry stops colliding once the
+  26 keys go.
+- `source-hashes.json`'s 156 orphan entries are provably inert: `i18n-todo.ts` iterates
+  `catalogLeafKeys(locale)` (derived from `en`) and only *looks up* hashes, and
+  `i18n-catalog.ts`'s `runCheck()` only validates context coverage. They are worth deleting
+  for tidiness, not correctness.
+- **Proof needed**: whoever picks this up needs `context.test.ts` green first (fix the
+  `onboarding.connect.{account,agent,confirm}` context entries), then `pnpm lint`,
+  `pnpm build`, `pnpm test` — in particular `no-duplicates.test.ts` and `context.test.ts`.
+
+**Grown by this run**: deleting `CheckFileButton.tsx` orphaned three more keys in the same
+namespace — `rules.checkFileButton.{issueCount,lastCheckTooltip,idleTooltip}`. `.label` is
+*not* orphaned (`FileChapterToolbar.tsx:52` uses it), so the `── "Check file" toolbar button ──`
+section header stays. Deleting `AiProviderStep.tsx` likewise orphans the keys under the
+`— AiProviderStep —` header in `namespaces/onboarding.ts:232`. Per the 2026-09-18 convention,
+both section-header comments were left in place so the still-live keys under them keep their
+provenance; remove each header together with its keys, not before. Sweep all of this in the
+one pass with the three `rules.*` prefixes above.
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 
@@ -265,7 +504,11 @@ Docker/Wrangler setup was not reliable enough to complete the smoke suite. This 
 environment note, not a product regression. The 2026-08-12 and 2026-08-14 runs hit the
 same limitation (`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket,
 all 3 shards refuse to run rather than reset against a stale schema) — still an
-environment gap, not something a code-health PR should try to patch around.
+environment gap, not something a code-health PR should try to patch around. The 2026-09-18
+run hit it again, unchanged and with the same message; worth noting for anyone reading a
+red smoke result in one of these PRs that it fails at `[boot 2/8] resetting … postgres
+schema`, i.e. before Playwright loads a single spec, so it cannot be sensitive to the diff
+under test — it is a hard no-result, not a failing assertion.
 
 ## 2026-08-17 run — dead-code deletion blocked by a reproducible test-isolation flake
 
@@ -370,3 +613,78 @@ unblocked, since files move.
   for a comment. Needs a human or a non-code-health change to fix.
 - **Proof needed**: comment-only edit inside a test file; would need explicit sign-off
   since it falls outside the routine's "no test files" rule.
+
+## 2026-09-23 — dead-code run: two zero-importer orphans deleted; `dev`'s gates still red
+
+**Done this run** (theme: dead-code deletion, 2 files, 150 lines):
+
+- `src/components/AudioRecorder/RecordingVideoStage.tsx` (135 lines) — see the updated
+  entry in the 2026-09-18 sweep-leftovers section above.
+- `src/lib/cell-context.ts` (15 lines) — a lone `CellContext` interface. Its own header
+  comment records that it was relocated out of `completion/chat-service.ts` when the
+  standalone chat service was removed, "so the agent surface owns the type" — but the
+  agent surface never picked it up. `grep -rn CellContext` across every `.ts`/`.tsx`/`.mjs`
+  in the repo matched only its own declaration line: zero importers, zero symbol
+  references, not even a test. Pure relocation debris.
+
+**Sweep method** (worth reusing; it corrects a false-negative in the 2026-09-18 method):
+stem-match every import/export/`new URL()` specifier, but build the corpus from **code and
+config only — never `.md`**. This ledger names its own candidates in backticks, so a
+markdown-inclusive corpus reports live-looking references for files that are in fact dead.
+`RecordingVideoStage.tsx` was masked exactly that way. Also allow a trailing query string
+in the specifier (`?worker`, `?worker&url`): without it, `parse.worker.ts`,
+`livestore.worker.ts`, `idml.worker.ts` and `pcm-capture.worklet.ts` all read as orphans
+when each is loaded by a live `import("./x?worker")` call.
+
+**Nothing else in `src/` is a safe deletion right now.** The corrected sweep's full output
+was 21 files, and every one of the other 19 is already accounted for: the 13-file
+`src/components/import/*` cluster (blocked on issue #410), the three unused `src/components/ui/*`
+shadcn primitives (deliberately left — vendored library), `src/hooks/useSubscribedConcepts.ts`
+(looks dead, is not), and the four `*.worker`/`*.worklet` false positives above. A matching
+sweep over `auth-worker/`, `sync-worker/`, `agent-worker/` and `worker/` found **zero**
+orphan modules — only the two `aquilla-db.d.ts` ambient declaration files, which are
+included by tsconfig rather than imported.
+
+### Grown by this run: five orphaned `audio.recordingModal.*` keys (frozen)
+
+Deleting `RecordingVideoStage.tsx` orphans `audio.recordingModal.{muteVideoTooltip,
+unmuteVideoTooltip, videoMutedBadge, videoMutedWhileRecording, videoScenePreview}` — five
+keys × (`namespaces/audio.ts` strings + `namespaces/audio.ts` context entries + 6 locale
+files) ≈ 9 files. **Not swept this run**: `src/lib/i18n/context.test.ts` is red on `dev`
+(see the 2026-09-21 entry below/above), which freezes every `src/lib/i18n/namespaces/*.ts`
+under the routine's "a file whose tests are already red is frozen" rule. Per the
+2026-09-18 convention the `RecordingVideoSurface` section header at `namespaces/audio.ts:323`
+stays — the surface's own keys under it are live. Sweep these together with the
+still-pending `rules.*` / `onboarding` orphan keys once `context.test.ts` is green.
+
+### Baseline recorded 2026-09-23 (`origin/dev` `6cf6da70`) — `dev` is redder than on 2026-09-21
+
+- **`pnpm build`** — green.
+- **`pnpm lint`** — exit 2, **130 errors** (up from 6 on 2026-09-21), 901 warnings. 122 of
+  the 130 are `i18n/no-unkeyed-string` in the new billing surfaces:
+  `src/pages/settings/OrgSettingsBilling.tsx` (25), `src/components/org/BillingOffers.tsx` (23),
+  `BillingPlanReview.tsx` (20), `BillingChangeReview.tsx` (19), `BillingWorkspaceSummary.tsx` (17),
+  `src/pages/BillingSelection.tsx` (16). The other 8: the four unused type imports at
+  `sync-worker/src/external/commands.ts:39-42` and the unused `ROLE` at
+  `auth-worker/src/routes/changeset-approvals.ts:34` (both carried over from 2026-09-21),
+  plus three new ones — `scripts/migrate-daemon/loop.ts:251`
+  (`@typescript-eslint/no-unused-expressions`), `src/components/org/ProjectAutopilotPanel.test.tsx:439`
+  (`prefer-const`, carried over), and `src/components/voice/InworldVoiceDesignField.tsx:239`
+  (`react-hooks/immutability`). ESLint also still reports stale `eslint-suppressions.json`
+  entries. A whole keyed-string pass over the billing surfaces is the obvious fix and is
+  well outside this routine's budget and remit (it changes user-visible strings).
+- **`pnpm test`** — exit 1, 6 files failing, all reproducible rather than flakes:
+  - `src/lib/i18n/context.test.ts` — 2 tests, the `onboarding.connect.{account,agent,confirm}`
+    missing-context/placeholder issue carried over from 2026-09-21, unchanged.
+  - Four `src/components/org/OrgProjectsPage.{guest,pm-filter,role-filter,updated-filter}.test.tsx`
+    — **new**, collection errors, not assertion failures: `No "resolveCloudProjectResult"
+    export is defined on the "@/lib/sync/cloud-projects" mock`, thrown from
+    `src/lib/offline/download.ts:90` via `src/components/org/OrgProjectsDataTable.tsx:8`. A
+    `vi.mock` of `cloud-projects` in those four specs went stale against `download.ts`'s
+    `defaultDeps`. This freezes `OrgProjectsDataTable.tsx` and `download.ts` for the routine.
+  - `scripts/cloudflare-preview-comment.test.mjs` — collection error, carried over from
+    2026-09-21 (`Cannot bundle Node.js built-in "node:test"`; the root vitest config sweeps
+    in a file written for the node test runner).
+
+  The 2026-09-21 run's `ArchivedProjects.test.tsx` / `RecordingVideoSurface.test.tsx` timing
+  flakes did **not** fire in either the baseline or the final run this time.

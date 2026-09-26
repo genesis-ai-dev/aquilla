@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { ApiTokensSection } from "./ApiTokensSection"
 import type { ApiCredential, MintCredentialResult } from "@/lib/sync/credentials"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -23,7 +24,9 @@ vi.mock("@/lib/sync/credentials", () => ({
   revokeCredential: vi.fn(),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn() }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(),
   projectsResultError: vi.fn((result: { reason: string }) =>
     result.reason === "unreachable"
@@ -72,6 +75,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: null,
+  pii: false,
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -85,22 +89,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
-}
-
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (see
-// ProjectCreateDialog.addAsLane.test.tsx for the original of this helper).
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
+  pii: false,
 }
 
 beforeEach(() => {
@@ -152,6 +141,56 @@ describe("ApiTokensSection", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1)
   })
 
+  it("shows each token's creation date and labels its reach by kind", async () => {
+    // A reader scanning this list needs to see blast radius without opening
+    // anything: whole-org tokens read differently from single-project ones,
+    // and "when did this appear" is how you spot one you didn't expect.
+    mockListCredentials.mockResolvedValue([
+      { ...ASK_CREDENTIAL, orgId: "1", projectId: null },
+      REVOKED_CREDENTIAL,
+    ])
+    render(<ApiTokensSection />)
+    expect(await screen.findByText(/Whole org: Acme Org/)).toBeInTheDocument()
+    expect(screen.getByText(/Project: Maintainer Project/)).toBeInTheDocument()
+    expect(screen.getAllByText(/^Created /)).toHaveLength(2)
+  })
+
+  it("picks up a token minted moments after browser approval, without a manual reload", async () => {
+    // Arriving from /connect-agent the credential does not exist yet — it is
+    // minted on the agent's next poll. One fetch on mount always misses it.
+    vi.useFakeTimers()
+    try {
+      window.history.replaceState(null, "", "/preferences/api-tokens?awaiting=1")
+      mockListCredentials.mockResolvedValue([])
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+
+      mockListCredentials.mockResolvedValue([ASK_CREDENTIAL])
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument())
+
+      // Having found it, the section stops polling rather than refreshing forever.
+      const calls = mockListCredentials.mock.calls.length
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials.mock.calls.length).toBe(calls)
+    } finally {
+      vi.useRealTimers()
+      window.history.replaceState(null, "", "/")
+    }
+  })
+
+  it("does not poll when the page was opened directly", async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("renders an empty state when the caller has no tokens", async () => {
     mockListCredentials.mockResolvedValue([])
     render(<ApiTokensSection />)
@@ -185,6 +224,7 @@ describe("ApiTokensSection", () => {
         expiresAt: null,
         lastUsedAt: null,
         revokedAt: null,
+        pii: false,
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -220,6 +260,10 @@ describe("ApiTokensSection", () => {
     // Show-once dialog: the plaintext token renders, with the "never again" notice.
     expect(await screen.findByText("aqk_freshplaintext")).toBeInTheDocument()
     expect(screen.getByText(/you will not see it again/i)).toBeInTheDocument()
+    // Pasting a live credential into a chat or a log is how these leak. The
+    // warning has to name that, at the one moment the plaintext is on screen.
+    expect(screen.getByText(/Don't paste it into a chat/i)).toBeInTheDocument()
+    expect(screen.getByText(/act-mode access/i)).toBeInTheDocument()
 
     // Closing it makes it disappear for good — it isn't reachable again without
     // a fresh mint (the client never stores the plaintext).
@@ -253,7 +297,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
       },
     })
     await screen.findByText("aqk_once")
@@ -298,7 +342,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false,
         },
       })
 

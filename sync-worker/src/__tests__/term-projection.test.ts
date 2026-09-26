@@ -170,6 +170,32 @@ describe('term.* projection', () => {
     expect(withoutR.recorded[0].args[1]).toBeNull()
   })
 
+  it('term.create stores match options as JSON; absent writes NULL', () => {
+    // WHY: the option object must survive the round trip verbatim; a concept
+    // without options must project NULL so the read route resolves defaults.
+    const withOpts = project('term.create', {
+      conceptId: 'c1', sourceTerm: 'הארץ', renderings: [], status: 'draft',
+      match: { foldMarks: true, excludedForms: ['בארץ'] },
+    })
+    expect(withOpts.recorded[0].sql).toContain('match_options')
+    expect(withOpts.recorded[0].args).toContain(JSON.stringify({ foldMarks: true, excludedForms: ['בארץ'] }))
+    const without = project('term.create', { conceptId: 'c2', sourceTerm: 'x', renderings: [], status: 'draft' })
+    expect(without.recorded[0].args).toContain(null)
+  })
+
+  it('term.update replaces match wholesale when present and leaves it alone when absent', () => {
+    // WHY: like renderings, an options object has no per-key identity worth
+    // merging; but an absent key must be COALESCEd so a notes-only edit from
+    // another user never wipes someone's exclusions.
+    const present = project('term.update', { conceptId: 'c1', match: { affixes: false } })
+    expect(present.recorded[0].sql).toMatch(/match_options\s*=\s*COALESCE\(/)
+    expect(present.recorded[0].args).toContain(JSON.stringify({ affixes: false }))
+    const absent = project('term.update', { conceptId: 'c1', notes: 'hi' })
+    const idx = absent.recorded[0].sql.split('COALESCE').findIndex((s) => s.includes('match_options'))
+    expect(idx).toBeGreaterThan(-1)
+    expect(absent.recorded[0].args.filter((a) => a === null).length).toBeGreaterThanOrEqual(1)
+  })
+
   it('approve promotes a draft or restores an archived term, but cannot resurrect a deleted one', () => {
     const { recorded } = project('term.approve', { conceptId: 'cpt-1' })
     expect(recorded[0].sql).toContain("status IN ('draft', 'deprecated')")

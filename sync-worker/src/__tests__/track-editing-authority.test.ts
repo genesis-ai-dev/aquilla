@@ -6,7 +6,7 @@
 // work" and "restructuring" is decided by reading the PAYLOAD. That makes it a
 // pure function, and a pure function is the only part of this gate that can be
 // pinned without minting a JWT or standing up a fake database. Its sibling
-// (line-creation-authority.ts) has no such seam, which is why its own test has
+// (cell-editing-authority.ts) has no such seam, which is why its own test has
 // to fake a whole DB to assert a policy decision.
 
 import { describe, it, expect } from 'vitest'

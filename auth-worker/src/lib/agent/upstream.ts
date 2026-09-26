@@ -29,9 +29,12 @@ export interface UpstreamUsage {
 export interface UpstreamTurn {
   message: UpstreamMessage
   usage?: UpstreamUsage
+  /** Provider generation id, when reported (billing reconciliation). */
+  id?: string
 }
 
 interface JsonBody {
+  id?: string
   choices?: { message?: UpstreamMessage }[]
   usage?: UpstreamUsage
   error?: { message?: string }
@@ -39,6 +42,7 @@ interface JsonBody {
 
 /** One streamed chunk: OpenAI chat.completion.chunk shape (the parts we use). */
 interface StreamChunk {
+  id?: string
   choices?: {
     delta?: {
       content?: string | null
@@ -71,7 +75,7 @@ export async function readModelTurn(
     const message = data.choices?.[0]?.message
     if (!message) throw new Error("openrouter returned no message")
     if (message.content) onContentDelta(message.content)
-    return { message, usage: data.usage }
+    return { message, usage: data.usage, ...(typeof data.id === "string" ? { id: data.id } : {}) }
   }
 
   if (!res.body) throw new Error("openrouter stream had no body")
@@ -85,8 +89,10 @@ export async function readModelTurn(
   // tool_call deltas arrive as fragments keyed by index; arguments concatenate.
   const toolCalls: ToolCall[] = []
 
+  let generationId: string | undefined
   const processChunk = (chunk: StreamChunk): void => {
     sawChunk = true
+    if (typeof chunk.id === "string" && !generationId) generationId = chunk.id
     if (chunk.error?.message) throw new Error(`openrouter_error: ${chunk.error.message}`)
     if (chunk.usage) usage = chunk.usage
     const delta = chunk.choices?.[0]?.delta
@@ -150,5 +156,5 @@ export async function readModelTurn(
     content: content || null,
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
   }
-  return { message, usage }
+  return { message, usage, ...(generationId ? { id: generationId } : {}) }
 }

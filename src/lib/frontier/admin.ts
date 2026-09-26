@@ -109,6 +109,45 @@ export interface AdminMe {
   elevatedUntil: string | null
 }
 
+export interface MigrationJobStatus {
+  id: number
+  project_id: number
+  project_name: string
+  namespace: string
+  kind: "content" | "audio"
+  sha: string
+  stage: string
+  attempts: number
+  next_run_at: number
+  updated_at: number
+  error: string | null
+}
+
+export interface MigrationStatus {
+  schemaVersion: number
+  runner: string
+  heartbeatAt: string
+  updatedAt: string
+  dryRun: boolean
+  queue: {
+    projects: Array<{ status: string; count: number }>
+    jobs: Array<{ kind: "content" | "audio"; stage: string; count: number }>
+    recentJobs: MigrationJobStatus[]
+  }
+  active: Array<{
+    jobId: number
+    kind: "content" | "audio"
+    stage: string
+    startedAt: number
+    progress?: { total: number; copied: number; missingOid: number; lfsMiss: number; failed: number; events: number }
+  }>
+  lastInboxPollAt: string | null
+  lastInboxEnqueued: number
+  lastReconcileAt: string | null
+  lastReconcileEnqueued: number
+  reconcileHighWaterMark: string | null
+}
+
 /** Champion/challenger experiment on the default chat model (mirrors auth-worker AbTestConfig). */
 export interface AbTestConfig {
   enabled: boolean
@@ -252,6 +291,14 @@ export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/admins`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { admins: AdminAdmin[] }).admins
+}
+
+export async function getAdminMigrationStatus(jwt: string): Promise<MigrationStatus | null> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/migration-status`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return ((await res.json()) as { status: MigrationStatus | null }).status
 }
 
 export async function getAdminOverview(jwt: string): Promise<AdminOverview> {

@@ -164,8 +164,14 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  countStructuralCells: true,
+  countStructuralOverrides: 0,
+  resetCountStructuralOverrides: vi.fn(),
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
@@ -598,6 +604,14 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getByText("New Testament")).toBeInTheDocument()
+  })
+
+  it("exposes project names as native links on the overview", async () => {
+    renderMemberOverview()
+    expect(await screen.findByRole("link", { name: "Legacy Translation" }))
+      .toHaveAttribute("href", "/projects/stalled-1")
+    expect(screen.getByRole("link", { name: "New Testament" }))
+      .toHaveAttribute("href", "/projects/fresh-1")
   })
 
   // AQU-326: an invite addressed to the user's email must be discoverable

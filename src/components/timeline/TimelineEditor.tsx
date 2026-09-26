@@ -47,7 +47,8 @@ import {
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
-import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -154,6 +155,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface TimelineEditorProps {
@@ -221,20 +223,25 @@ export interface TimelineEditorProps {
    * to the new cell's id, or null if it could not be made.
    */
   onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
-  /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
-  /** MAY they — the `source.cell.create` clearance. Deliberately separate from
-   *  `allowLineCreation` below: this one also governs taking a line back, and
-   *  policy must not be able to strand a line somebody already made. */
+  /**
+   * May this user add and remove cells here at all?
+   *
+   * AQU-1068 collapsed the old MAY/SHOULD pair into one answer. There used to
+   * be a second `allowLineCreation` prop carrying the project's policy, kept
+   * separate so that switching policy off could not strand a line somebody had
+   * already made. The tier that replaced it governs adds and removes together
+   * — "that setting is enabling lines being added or removed" — so a single
+   * authority is now the thing that keeps the surfaces agreeing.
+   */
   canAddLine?: boolean
   /**
-   * SHOULD they — the project's `allowLineCreation` setting, off by default.
+   * May they remove an IMPORTED cell, not just a line added here?
    *
-   * Adding lines was built speculatively and is underdeveloped, so it stays
-   * hidden until a project turns it on. Removal of an empty added line is NOT
-   * gated on this, which is what makes the off state recoverable rather than
-   * frozen.
+   * The second gate, maintainer-only, whatever tier the project runs. An
+   * imported line is the client's own work; the confirmation dialog upstream
+   * is what makes taking one back safe.
    */
-  allowLineCreation?: boolean
+  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs contributor access,
@@ -1002,7 +1009,7 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
-  allowLineCreation = false,
+  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -1754,9 +1761,15 @@ export function TimelineEditor({
   // ask "is there a stretch of film here with no line on it": the pencil in the
   // Subtitles row and the mic in the Target audio row. Both are questions about
   // the TEXT, which is why this still sweeps `cells` and not the audio cues.
+  //
+  // Gated on "no media cells", NOT on footage: a timed VTT with no video
+  // linked has the same silences, and the text table already offers inserts
+  // into them, so hiding the pencils here made the two surfaces disagree
+  // (AQU-1068 round 4). With no footage the duration is null and the regions
+  // span the cells' own extent — head and between-cue gaps, no invented tail.
   const sourceRegions = useMemo(
-    () => (subtitleFileWithFootage ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
-    [subtitleFileWithFootage, cells, videoDurationSec],
+    () => (dialogue.length === 0 ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
+    [dialogue, cells, videoDurationSec],
   )
   // The Source-audio row's own map, from the hidden sibling's cues. Same sweep,
   // a different set of boundaries: the audio VTT transcribes the film's
@@ -1818,12 +1831,21 @@ export function TimelineEditor({
   // no take yet is a different affordance, comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      !allowLineCreation || !canAddLine
+      // AQU-1068: no add affordance in FREE timing. Free lays takes end to end
+      // on their own clock (buildProgramme), so a "silence" here is not a place
+      // a cell can go — there are no gaps by construction. Gap inserts on a
+      // Free-mode cue sheet still exist; they live on the text table, against
+      // the SOURCE clock, which is the one that stays real in either mode.
+      //
+      // It also retires a latent mismatch: these slots are positioned in raw
+      // file-clock seconds (TimelineLane) while audioFirst cards are placed on
+      // the programme clock, so the two disagreed about where a second was.
+      !canAddLine || audioFirst
         ? []
         : sourceRegions.regions
             .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
             .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions, allowLineCreation, canAddLine],
+    [sourceRegions, canAddLine, audioFirst],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
@@ -3313,16 +3335,19 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here, and only while it is still
-            // empty — deleting a cell with takes or comments on it would
-            // leave every one of them behind.
-            // TAKING A LINE BACK IS NEVER GATED ON POLICY (Sam, 2026-08-14).
-            // Only on clearance and on the cell qualifying — still user-added,
-            // still empty. Turning `allowLineCreation` off, or importing an
-            // audio VTT, must not strand a line somebody already made with no
-            // way to clear it up; an off state you cannot recover from is worse
-            // than the feature it hides.
-            canRemove={canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            // Only a line someone added here.
+            // AQU-1068 widened this: a MAINTAINER may take back any cell,
+            // imported ones included, and the confirmation dialog upstream is
+            // what makes that safe. Below that rank only a line added here can
+            // go — but a line added here can ALWAYS go, however full it is.
+            // The same shared predicate the text table asks, so the two
+            // surfaces can never disagree about what is removable; see
+            // `isImportedRow` for the emptiness clause that used to live here.
+            canRemove={
+              canAddLine
+                ? (c) => canRemoveImportedCells || !isImportedRow(c)
+                : undefined
+            }
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would
@@ -3429,6 +3454,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
           />
         )
@@ -3482,6 +3512,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
           />

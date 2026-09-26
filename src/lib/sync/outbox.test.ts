@@ -1,5 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import "fake-indexeddb/auto"
+import { makeInMemoryAdapter } from "@livestore/adapter-web"
+import { createStorePromise, type Store } from "@livestore/livestore"
+import {
+  schema as offlineSchema,
+  tables as offlineTables,
+  events as offlineEvents,
+} from "@/lib/offline/schema"
 import {
   enqueueOutboxEvent,
   enqueueOutboxEvents,
@@ -25,6 +32,30 @@ import {
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 import { flushOutboxBatch } from "./outbox-flush"
+import { journalTargetCommit } from "./outbox-recovery"
+
+// ── Tauri offline routing (Phase 4) test harness ───────────────────────────
+// outbox.ts dynamically `import()`s "@/lib/offline/store" only when
+// isTauriRuntime() is true (kept out of its static imports so the plain
+// browser SPA bundle never pulls in LiveStore/OPFS/wa-sqlite — see
+// src/lib/offline/is-tauri.ts). We mock that module to hand back a real,
+// in-memory LiveStore store (same pattern as sync-adapter.test.ts /
+// store.test.ts) instead of booting the real worker-backed OPFS adapter,
+// which isn't available under Vitest.
+let currentOfflineStore: Store<typeof offlineSchema> | undefined
+const getOfflineStoreMock = vi.fn(async () => {
+  if (!currentOfflineStore) throw new Error("test: offline store not initialized")
+  return currentOfflineStore
+})
+vi.mock("@/lib/offline/store", () => ({
+  getOfflineStore: () => getOfflineStoreMock(),
+}))
+
+function setTauriRuntime(on: boolean): void {
+  const w = window as unknown as { __TAURI__?: object }
+  if (on) w.__TAURI__ = {}
+  else delete w.__TAURI__
+}
 
 describe("cqrs outbox", () => {
   const sample: CqrsRawEvent<"target.cell.commit"> = {
@@ -40,6 +71,7 @@ describe("cqrs outbox", () => {
   }
 
   beforeEach(async () => {
+    localStorage.clear()
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
       const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
@@ -61,6 +93,45 @@ describe("cqrs outbox", () => {
     expect(peek[0].lastError).toBe(null)
     await removeOutboxEvents(["e1"])
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("journals a target commit synchronously before IndexedDB can finish", async () => {
+    setActiveOutboxOwner("alice")
+    const pending = enqueueOutboxEvent(sample)
+    const key = "aquilla:outbox-recovery:v1:e1"
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({
+      ownerKey: "alice", event: { id: "e1", payload: sample.payload },
+    })
+    await pending
+    expect(localStorage.getItem(key)).toBeNull()
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
+  it("recovers a write interrupted before IDB without crossing account boundaries", async () => {
+    journalTargetCommit({
+      id: sample.id, event: sample, ownerKey: "alice", enqueuedAt: 1,
+      attempts: 0, lastAttemptAt: null, lastError: null, status: "pending",
+    })
+    setActiveOutboxOwner("bob")
+    expect(await peekOutboxBatch(10)).toEqual([])
+    setActiveOutboxOwner("alice")
+    const recovered = await peekOutboxBatch(10)
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0].event).toEqual(sample)
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:e1")).toBeNull()
+  })
+
+  it("does not replace a quarantined event when replaying a stale journal", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    await quarantineOutboxEvents([sample.id], { status: 403, reason: "forbidden" })
+    const [existing] = await peekOutboxBatch(10)
+    journalTargetCommit({ ...existing, status: "pending", attempts: 0, lastError: null })
+    await resetOutboxConnectionForTests()
+    setActiveOutboxOwner("alice")
+    const [recovered] = await peekOutboxBatch(10)
+    expect(recovered.status).toBe("failed")
+    expect(recovered.lastError).toEqual({ status: 403, reason: "forbidden" })
   })
 
   it("keeps each account's durable queue isolated across switches", async () => {
@@ -399,5 +470,198 @@ describe("cqrs outbox", () => {
     await acknowledgeOutboxEvents([])
     await acknowledgeOutboxEvents(["nope"])
     expect(await peekOutboxBatch(10)).toHaveLength(0)
+  })
+})
+
+// ── Tauri desktop offline routing (Phase 4) ────────────────────────────────
+// enqueueOutboxEvent(s) routes target.cell.commit / cell.validate /
+// cell.unvalidate into LiveStore's event_queue instead of IndexedDB, but only
+// inside the Tauri runtime AND only for a project with a ready local copy.
+describe("Tauri offline routing", () => {
+  const commitEvent: CqrsRawEvent<"target.cell.commit"> = {
+    id: "tc1",
+    schemaVersion: CQRS_SCHEMA_VERSION,
+    kind: "target.cell.commit",
+    projectId: "proj1",
+    fileId: "file1",
+    cellId: "cell1",
+    parentId: "parent1",
+    author: "dev@local.test",
+    payload: { value: "hola" },
+    clientTs: 12345,
+  }
+
+  function markProjectOfflineReady(projectId: string): void {
+    currentOfflineStore!.commit(
+      offlineEvents.offlineProjectStatusSet({
+        projectId,
+        status: "ready",
+        syncedAt: new Date(),
+        queueDepth: 0,
+      }),
+    )
+  }
+
+  beforeEach(async () => {
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve, reject) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onblocked = () => resolve()
+      d.onsuccess = () => resolve()
+      d.onerror = () => reject(d.error)
+    })
+    currentOfflineStore = await createStorePromise({
+      schema: offlineSchema,
+      storeId: `outbox-offline-test-${Math.random().toString(36).slice(2)}`,
+      adapter: makeInMemoryAdapter(),
+      disableDevtools: true,
+      batchUpdates: (run) => run(),
+    })
+    getOfflineStoreMock.mockClear()
+    setTauriRuntime(false)
+  })
+
+  afterEach(() => {
+    setTauriRuntime(false)
+    currentOfflineStore = undefined
+  })
+
+  it("web build (isTauriRuntime false) is byte-for-byte unaffected: routable kinds still go to IndexedDB, offline store is never touched", async () => {
+    await enqueueOutboxEvent(commitEvent)
+
+    expect(getOfflineStoreMock).not.toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(1)
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
+  })
+
+  it("routes target.cell.commit, cell.validate, and cell.unvalidate into event_queue when Tauri + offline-ready, and NOT into IndexedDB", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+
+    await enqueueOutboxEvent(commitEvent)
+    await enqueueOutboxEvent({
+      ...commitEvent,
+      id: "v1",
+      kind: "cell.validate",
+      payload: { editEventId: "tc1" },
+    } as CqrsRawEvent<"cell.validate">)
+    await enqueueOutboxEvent({
+      ...commitEvent,
+      id: "u1",
+      kind: "cell.unvalidate",
+      payload: { editEventId: "tc1" },
+    } as CqrsRawEvent<"cell.unvalidate">)
+
+    expect(await outboxPendingCount()).toBe(0)
+    const rows = currentOfflineStore!.query(offlineTables.eventQueue.select())
+    expect(rows.map((r) => r.id).sort()).toEqual(["tc1", "u1", "v1"])
+  })
+
+  it("falls through to IndexedDB when Tauri but the project is NOT offline-ready", async () => {
+    setTauriRuntime(true)
+    // No markProjectOfflineReady call — project has no "ready" row.
+
+    await enqueueOutboxEvent(commitEvent)
+
+    expect(await outboxPendingCount()).toBe(1)
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
+  })
+
+  it("a non-routable kind always goes to IndexedDB regardless of Tauri/offline-ready state", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+
+    const waiveEvent: CqrsRawEvent<"cell.waive"> = {
+      id: "w1",
+      schemaVersion: CQRS_SCHEMA_VERSION,
+      kind: "cell.waive",
+      projectId: "proj1",
+      fileId: "file1",
+      cellId: "cell1",
+      parentId: null,
+      author: "dev@local.test",
+      payload: { ruleId: "rule1" },
+      clientTs: 1,
+    }
+    await enqueueOutboxEvent(waiveEvent)
+
+    expect(await outboxPendingCount()).toBe(1)
+    // Non-routable kind never even triggers the offline-store import/check.
+    expect(getOfflineStoreMock).not.toHaveBeenCalled()
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
+  })
+
+  it("enqueueOutboxEvents partitions a mixed bulk batch between LiveStore and IndexedDB", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+
+    const sourceCreate: CqrsRawEvent<"source.cell.create"> = {
+      id: "sc1",
+      schemaVersion: CQRS_SCHEMA_VERSION,
+      kind: "source.cell.create",
+      projectId: "proj1",
+      fileId: "file1",
+      cellId: "cell2",
+      parentId: null,
+      author: "dev@local.test",
+      payload: { cellId: "cell2", value: "hi" },
+      clientTs: 1,
+    }
+    let notifications = 0
+    const unsub = subscribeToOutbox(() => { notifications++ })
+
+    await enqueueOutboxEvents([commitEvent, sourceCreate])
+    unsub()
+
+    // Exactly one kind routed to LiveStore, the other fell through to one IDB write.
+    expect(await outboxPendingCount()).toBe(1)
+    expect(notifications).toBe(1)
+    const idbRows = await peekOutboxBatch(10)
+    expect(idbRows.map((r) => r.id)).toEqual(["sc1"])
+
+    const queuedRows = currentOfflineStore!.query(offlineTables.eventQueue.select())
+    expect(queuedRows.map((r) => r.id)).toEqual(["tc1"])
+  })
+
+  it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+
+    await enqueueOutboxEvent(commitEvent)
+
+    // Same query pattern sync-adapter.ts's flushQueue() uses.
+    const row = currentOfflineStore!.query(
+      offlineTables.eventQueue.select().where({ id: "tc1" }).first(),
+    )
+    expect(row).toBeTruthy()
+    expect(row!.status).toBe("pending")
+
+    // Mirrors sync-adapter.ts's private toRawEvent() exactly (fileId/cellId
+    // null -> undefined, clientTs Date -> epoch ms) — proves the row this
+    // module writes round-trips into a wire-valid OutboxRawEvent.
+    const rebuilt = {
+      id: row!.id,
+      schemaVersion: row!.schemaVersion,
+      kind: row!.kind,
+      projectId: row!.projectId,
+      fileId: row!.fileId ?? undefined,
+      cellId: row!.cellId ?? undefined,
+      parentId: row!.parentId,
+      author: row!.author,
+      payload: row!.payload,
+      clientTs: row!.clientTs.getTime(),
+    }
+    expect(rebuilt).toEqual({
+      id: "tc1",
+      schemaVersion: CQRS_SCHEMA_VERSION,
+      kind: "target.cell.commit",
+      projectId: "proj1",
+      fileId: "file1",
+      cellId: "cell1",
+      parentId: "parent1",
+      author: "dev@local.test",
+      payload: { value: "hola" },
+      clientTs: 12345,
+    })
   })
 })

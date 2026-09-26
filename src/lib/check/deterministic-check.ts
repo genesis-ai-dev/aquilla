@@ -29,14 +29,21 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import { scanTermConsistency } from "@/lib/check/term-consistency-scan"
-import type { TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
-import type { Concept } from "@/lib/terminology/types"
+import { semanticSourceText } from "@/lib/semantic-source-text"
+import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
+import type { CheckableCell, TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
 
-// The term scan and its types live in the alias-free leaf module so
+// `TermConsistencyFinding` (and friends) live in the alias-free leaf module so
 // sync-worker can import them too (AQU-1231). Re-exported here because this
-// module has always been their public home for in-app callers.
-export { scanTermConsistency } from "@/lib/check/term-consistency-scan"
+// module has always been their public home for in-app callers. The scan
+// FUNCTION itself is NOT re-exported from there: AQU-1271's source-form
+// matcher (`buildConceptRegex`, below) reaches `@/lib/terminology/types` for
+// `Concept`/`TermMatchingSettings`, which is not alias-free-reachable, so the
+// in-app scan is defined locally here rather than in the sync-worker-shared
+// module. `term-consistency-scan.ts`'s own `scanTermConsistency` (plain
+// `buildTermRegex` source matching, no termMatching settings) remains the one
+// the external Agent API uses.
 export type {
   CheckableCell,
   CheckableConcept,
@@ -66,6 +73,91 @@ export interface CheckRunResult {
   termFindings: TermConsistencyFinding[]
   /** Total issue count: infraction rows + flagged term cells. */
   totalFindingCount: number
+}
+
+// ---------------------------------------------------------------------------
+// Term-consistency scan (pure, synchronous)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan scoped cells for term consistency against active concepts.
+ *
+ * Only translated cells participate (an empty target is "not translated yet",
+ * not a term inconsistency — mirrors the rule engine's empty short-circuit).
+ * Concepts with no approved renderings produce no finding: there is nothing
+ * the target could be checked against.
+ *
+ * Returns one finding per concept that has ≥1 occurrence, in concept order.
+ * Callers typically render only findings with flaggedCells.length > 0 but the
+ * fully-consistent ones are returned too so the UI can say "14 of 14".
+ */
+export function scanTermConsistency(
+  cells: readonly CheckableCell[],
+  concepts: readonly Concept[],
+  termMatching?: TermMatchingSettings,
+): TermConsistencyFinding[] {
+  const findings: TermConsistencyFinding[] = []
+
+  for (const concept of concepts) {
+    if (concept.status !== "active") continue
+    // AQU-1271: source side through the concept matcher so the check agrees
+    // with the rule engine, the chips and the glossary counts.
+    const sourceRe = buildConceptRegex(concept, termMatching)
+    if (!sourceRe) continue
+
+    const approved = concept.renderings.filter(
+      (r) => r.status === "preferred" || r.status === "admitted",
+    )
+    if (approved.length === 0) continue
+
+    const approvedRes = approved
+      .map((r) => ({ rendering: r.rendering, re: buildTermRegex(r.rendering) }))
+      .filter((x): x is { rendering: string; re: RegExp } => x.re !== null)
+    if (approvedRes.length === 0) continue
+
+    let totalOccurrences = 0
+    let consistentCount = 0
+    const usage = new Map<string, string[]>()
+    const flaggedCells: TermConsistencyFinding["flaggedCells"] = []
+
+    for (const cell of cells) {
+      if (cell.status === "empty" || !cell.translated.trim()) continue
+      // `semanticSourceText`, not `effectiveSourceText`: a `CheckableCell` types
+      // `medium` as a plain string (the sync-worker row shape), which the SPA's
+      // `SegmentMedium`-typed entry point rejects. Same rule either way — this
+      // is the call the shared scan in term-consistency-scan.ts makes.
+      if (!sourceRe.test(semanticSourceText(cell))) continue
+      totalOccurrences++
+
+      let matchedAny = false
+      for (const { rendering, re } of approvedRes) {
+        if (re.test(cell.translated)) {
+          matchedAny = true
+          const list = usage.get(rendering)
+          if (list) list.push(cell.id)
+          else usage.set(rendering, [cell.id])
+        }
+      }
+      if (matchedAny) consistentCount++
+      else flaggedCells.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+    }
+
+    if (totalOccurrences === 0) continue
+    findings.push({
+      conceptId: concept.id,
+      sourceTerm: concept.sourceTerm,
+      approvedRenderings: approvedRes.map((x) => x.rendering),
+      totalOccurrences,
+      consistentCount,
+      renderingUsage: [...usage.entries()].map(([rendering, cellIds]) => ({
+        rendering,
+        cellIds,
+      })),
+      flaggedCells,
+    })
+  }
+
+  return findings
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +199,8 @@ export interface CheckRunInput {
   rules: readonly TranslationRule[]
   /** Project term base; only `active` concepts are scanned. */
   concepts: readonly Concept[]
+  /** Project-level source matching defaults (AQU-1271). */
+  termMatching?: TermMatchingSettings
 }
 
 const CHUNK_SIZE = 100
@@ -139,7 +233,7 @@ export async function runDeterministicCheck(
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).
   await nextTick()
-  const termFindings = scanTermConsistency(input.cells, activeConcepts)
+  const termFindings = scanTermConsistency(input.cells, activeConcepts, input.termMatching)
 
   const flaggedTermCells = termFindings.reduce(
     (n, f) => n + f.flaggedCells.length,

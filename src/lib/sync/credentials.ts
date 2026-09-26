@@ -24,6 +24,9 @@ export interface ApiCredential {
   expiresAt: string | null
   lastUsedAt: string | null
   revokedAt: string | null
+  /** AQU-1180: does this token see real human identities in agent-facing
+   *  responses? Off unless an owner deliberately turned it on. */
+  pii: boolean
 }
 
 export interface MintCredentialInput {
@@ -33,6 +36,10 @@ export interface MintCredentialInput {
   projectId?: string
   /** ISO-8601 timestamp; omit for "never expires". */
   expiresAt?: string
+  /** AQU-1180: expose translator names/user ids to the agent. Omit for the
+   *  safe default (pseudonymous ids). Server-side this requires OWNER of the
+   *  scoped org/project and 403s otherwise. */
+  pii?: boolean
 }
 
 export interface MintCredentialResult {

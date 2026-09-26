@@ -551,7 +551,10 @@ describe("InworldVoiceDesignField", () => {
     const group = screen.getByRole("group", { name: "Voice design presets" })
     expect(input.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: "Narrator" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Instructor" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Pirate" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Reset" })).toBeNull()
   })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { createRibbonInputCache, ribbonInputCacheFor, ribbonInputFor, stabilizeRibbonPoints, type RibbonInputCell } from "./ribbon-inputs"
-import type { HealthRibbonPoint } from "./health-ribbon"
+import { buildHealthRibbon, type HealthRibbonPoint } from "./health-ribbon"
 
 interface TestCell extends RibbonInputCell {
   original: string
@@ -86,6 +86,49 @@ describe("createRibbonInputCache", () => {
     second.forEach((input, index) => expect(input).toBe(first[index]))
   })
 
+  it("retains the whole ribbon when newer cell data has identical health inputs", () => {
+    const h = harness()
+    const ids = ["a", "b", "c"]
+    const first = h.cache.ribbon(ids, h.readers)
+    h.cells.set("b", { ...h.cells.get("b")!, translated: "edited draft" })
+    h.versions.set("b", 2)
+    h.examples.set("c", [{ matchedTokens: ["source", "c"] }])
+    // A validated cell remains 100 regardless of an automatic score update.
+    h.health.set("a", 20)
+    expect(h.cache.ribbon(ids, h.readers)).toBe(first)
+    expect(h.cache.ribbon([...ids], h.readers)).toBe(first)
+  })
+
+  it("matches a fresh full build through score, scope, stage, evidence, order and removal changes", () => {
+    const h = harness()
+    let ids = ["a", "b", "c"]
+    const transitions = [
+      () => { h.health.set("b", 25) },
+      () => { h.health.delete("b") },
+      () => { h.cells.set("b", { ...h.cells.get("b")!, group: "GEN 2" }); h.versions.set("b", 2) },
+      () => { h.cells.set("b", { ...h.cells.get("b")!, status: "validated" }); h.versions.set("b", 3) },
+      () => { h.examples.set("c", [{ matchedTokens: ["source"] }]) },
+      () => { h.examples.set("c", [{ matchedTokens: ["source", "c"] }, { matchedTokens: ["source", "c"] }]) },
+      () => { ids = ["c", "b", "a"] },
+      () => { h.cells.delete("a"); h.versions.set("a", 2) },
+      () => { ids = ["c", "b"] },
+      () => { h.cache.clear() },
+      () => { ids = [] },
+    ]
+    let previous = h.cache.ribbon(ids, h.readers)
+    for (const transition of transitions) {
+      const before = structuredClone(previous)
+      transition()
+      // Interleaved public reads must not make the ribbon think it already
+      // processed the changed data.
+      h.cache.read(ids, h.readers)
+      const next = h.cache.ribbon(ids, h.readers)
+      expect(next).toEqual(buildHealthRibbon(ids.map(id => ribbonInputFor(id, h.readers.getCell(id), h.readers))))
+      expect(previous).toEqual(before)
+      previous = next
+    }
+  })
+
   it("re-derives only the cell whose store version moved", () => {
     const h = harness()
     const first = h.cache.read(["a", "b", "c"], h.readers)
@@ -129,6 +172,29 @@ describe("createRibbonInputCache", () => {
     expect(h.cache.lastRebuilt).toBe(0)
 
     h.cache.read(["a", "b", "c"], h.readers)
+    expect(h.cache.lastRebuilt).toBe(1)
+  })
+
+  it("handles in-place reorder/removal and reintroduced IDs without stale cached inputs", () => {
+    const h = harness()
+    const ids = ["a", "b", "c"]
+    const first = h.cache.ribbon(ids, h.readers)
+    const original = structuredClone(first)
+    ids.reverse()
+    expect(h.cache.ribbon(ids, h.readers)).toEqual(buildHealthRibbon(ids.map(id => ribbonInputFor(id, h.cells.get(id)!, h.readers))))
+    ids.splice(1, 1)
+    h.cache.ribbon(ids, h.readers)
+    // Reintroduced IDs may have the same version after a reset. Removal must
+    // discard their cached view even if all cache keys otherwise match.
+    h.cells.set("b", cell("b", "validated", "New text"))
+    ids.push("b")
+    expect(h.cache.ribbon(ids, h.readers)).toEqual(buildHealthRibbon(ids.map(id => ribbonInputFor(id, h.cells.get(id)!, h.readers))))
+    expect(h.cache.lastRebuilt).toBe(1)
+    expect(first).toEqual(original)
+    ids.length = 0
+    expect(h.cache.ribbon(ids, h.readers).size).toBe(0)
+    ids.push("a")
+    h.cache.ribbon(ids, h.readers)
     expect(h.cache.lastRebuilt).toBe(1)
   })
 

@@ -23,6 +23,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import type { AquillaDb } from "../../../db/shim/postgres"
 import {
   createProposal,
   listMemories,
@@ -64,6 +65,25 @@ function errorJson(
     body: { error: { code, message, ...(details !== undefined ? { details } : {}) } },
     status,
   } as const
+}
+
+// [Pen test] Authorization & access control (2026-09-08): `x-aquilla-agent-run`
+// is an ordinary client-supplied header — nothing verifies it, so any caller
+// can send it on a raw HTTP request. Everywhere else in this file the header
+// only RESTRICTS (PATCH/PUT/brief-review all 403 when it's present), so a
+// spoofed value can only deny, never grant. The review route below is the one
+// place it WIDENS access — from PROJECT_LEAD down to CONTRIBUTOR for
+// low-risk observations — so before honoring it there, confirm the runId
+// names a real `agent_runs` row scoped to this project. Nothing in the
+// codebase sends this header today (the in-app agent harness hasn't been
+// wired to call this route yet), so this closes the gap without touching any
+// live caller.
+async function isKnownAgentRun(db: AquillaDb, projectId: string, runId: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 FROM agent_runs WHERE run_id = ? AND project_id = ?")
+    .bind(runId, projectId)
+    .first()
+  return !!row
 }
 
 /** Resolve the caller's live role floor on a project; null → no access. */
@@ -180,7 +200,8 @@ agentMemory.post(
       return c.json(body, status)
     }
 
-    const isAgent = !!c.req.header(AGENT_RUN_HEADER)
+    const runIdHeader = c.req.header(AGENT_RUN_HEADER)
+    const isAgent = runIdHeader ? await isKnownAgentRun(db, projectId, runIdHeader) : false
     if (isAgent) {
       // authz-M1: the agent still acts as a project member — require CONTRIBUTOR+
       // membership BEFORE the autonomy gate, so a non-member with the agent

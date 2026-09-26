@@ -4,6 +4,10 @@
 
 import { ROLE } from "@/lib/frontier/roles"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
+import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
+import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -160,4 +164,123 @@ export function trackDeleteGate(
     refused: refused != null,
     reason: refused?.lastError?.reason ?? null,
   }
+}
+
+/**
+ * AQU-207: assemble every glosser seed the workspace contributes, in one pure
+ * place so the composition is testable without rendering ProjectWorkspace.
+ *
+ * Four sources feed the statistical BT, in ascending order of how explicitly
+ * the user asked for them:
+ *   - corrected BTs from the cache (2, or 5 when unpolished — a raw human edit)
+ *   - termbase renderings (preferred 3 / admitted 1 / forbidden -3)
+ *   - confirmed / invalidated interlinear alignments (±2 via
+ *     `btSeedsFromAlignmentSeeds`)
+ *
+ * The alignment source was the one missing until AQU-207: those seeds were
+ * persisted and fed back into `interlinear.ts`'s own model, so the panel's
+ * suggestions sharpened, but the BT the user actually reads never moved.
+ */
+export function buildGlosserSeeds(args: {
+  corpusCells: readonly CellSummary[]
+  backtranslationCache: ReadonlyMap<string, BacktranslationRecord>
+  terminology: ProjectRecord["terminology"] | undefined
+  alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
+}): BtSeed[] {
+  const { corpusCells, backtranslationCache, terminology, alignmentSeeds } = args
+  const seeds: BtSeed[] = []
+
+  // High-weight seeds from previous user-corrected BTs stored in the cache.
+  // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
+  // future glosses reflect the reviewer's intent.
+  const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
+  for (const record of backtranslationCache.values()) {
+    const cell = corpusByCellId.get(record.cellId)
+    if (!cell?.translated) continue
+    // A BT pinned to a superseded target event describes text that no longer
+    // exists — seeding from it would teach the glosser a stale rendering.
+    if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
+      continue
+    }
+    seeds.push({
+      source: record.btText,
+      target: record.forText || cell.translated,
+      weight: record.polished === false ? 5 : 2,
+    })
+  }
+
+  // Seed from project termbase: active concepts feed preferred/admitted/forbidden
+  // renderings into the glosser so terminology constraints propagate to BTs.
+  for (const concept of terminology ?? []) {
+    if (concept.status !== "active") continue
+    for (const rendering of concept.renderings) {
+      const weight =
+        rendering.status === "preferred" ? 3 :
+        rendering.status === "admitted" ? 1 :
+        -3 // forbidden
+      seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
+    }
+  }
+
+  // AQU-207: alignments the user confirmed / invalidated in the interlinear
+  // panel are seeds too — this is what makes a confirmation move the BT.
+  seeds.push(...btSeedsFromAlignmentSeeds(alignmentSeeds ?? []))
+
+  return seeds
+}
+
+/** AQU-1326: the deferral gate's state. `open` is what the secondary per-file
+ *  hooks read; `file` and `sawLoad` exist only so the reducer can tell the
+ *  three "not loading" situations apart. */
+export interface PaintGate {
+  /** The file this gate describes, so a switch re-closes it. */
+  file: string | null
+  /** True once a load for `file` has actually been observed in flight. */
+  sawLoad: boolean
+  /** True once the secondary per-file reads may start. */
+  open: boolean
+}
+
+/**
+ * AQU-1326: decides when the workspace's secondary per-file reads (validation
+ * stats, comments, audio attachments, the sidebar progress rollup) may start.
+ * They must wait for the editor's own first cell page, so the cell stream gets
+ * the connection to itself on open.
+ *
+ * The subtlety this exists for: the cell store's `isLoading` starts FALSE and
+ * only flips true once its fetch gets past an async cache read. So "not
+ * loading" at mount is indistinguishable from "finished loading", and gating
+ * on it directly opens the gate on the first commit — before the cell stream
+ * has even been requested, which is the exact fan-out being prevented. A
+ * finished load therefore only counts once a load was actually seen.
+ *
+ * The three releases that are NOT a first paint are all real and all needed:
+ * no file open (nothing to wait behind), a failed load (no rows are coming),
+ * and a load that finished with zero rows (an empty file must not strand these
+ * hooks forever).
+ */
+export function nextPaintGate(
+  prev: PaintGate,
+  input: {
+    fileId: string | null
+    cellCount: number
+    cellsError: boolean
+    cellsLoading: boolean
+  },
+): PaintGate {
+  const file = input.fileId
+  const freshFile = prev.file !== file
+  const sawLoad = (freshFile ? false : prev.sawLoad) || input.cellsLoading
+  // On a file switch the cell count can still describe the PREVIOUS file for a
+  // render, so it is not trusted until the gate has settled on this file. The
+  // other two releases are trusted immediately: suppressing them on a fresh
+  // file risks latching the gate shut, because nothing would necessarily
+  // change again to re-run this.
+  const open = !file
+    ? true
+    : input.cellsError
+      || (sawLoad && !input.cellsLoading)
+      || (!freshFile && input.cellCount > 0)
+  if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
+  return { file, sawLoad, open }
 }

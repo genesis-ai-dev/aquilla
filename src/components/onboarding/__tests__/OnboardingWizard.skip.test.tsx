@@ -112,9 +112,9 @@ vi.mock("react-router-dom", async (importOriginal) => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderWizard() {
+function renderWizard(path = "/onboarding") {
   return render(
-    <MemoryRouter initialEntries={["/onboarding"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/onboarding" element={<OnboardingWizard />} />
       </Routes>
@@ -240,4 +240,12 @@ describe("OnboardingWizard — fresh-signup path unchanged", () => {
     expect(mockRefreshOrgs).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()
   })
+})
+
+it("preserves a paid marketing selection when a returning account signs in", async () => {
+  mockListMyOrgs.mockResolvedValue([{ id: 7, name: "Existing" }])
+  renderWizard("/onboarding?offer=max-20x&interval=annual&quantity=1&audience=individual")
+  advanceToSignIn()
+  fireEvent.click(screen.getByRole("button", { name: "Login complete" }))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("/billing/select?offer=max_20x&interval=year&quantity=1"))
 })

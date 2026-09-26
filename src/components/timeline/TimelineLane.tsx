@@ -130,18 +130,28 @@ export function TimelineLane({
   // with about 240px of overscan, so a neighbour scrolled off-screen would
   // silently stop constraining the drag and the card would sail through it.
   //
-  // The floor is a running maximum of every END so far, not the previous card's
-  // end: `cells` arrives sorted by START, and a real VTT may contain overlapping
-  // cues, so a long cue can reach past several shorter ones after it.
-  const boundsById = new Map<string, { minStartSec: number; maxEndSec: number }>()
+  // AQU-1068 item 5 (Sam, 2026-09-09): the walls are the neighbours' STARTS,
+  // and nothing else.
+  //
+  // They used to be the neighbours' near edges — the running maximum of every
+  // END before this card, and the next card's start — so a cue could neither
+  // cross nor overlap. Overlap is now allowed in full: it is a real thing a
+  // subtitle says, and the timed exporters already sort by start time. What a
+  // card may still not do is BEGIN outside its neighbours' starts, because the
+  // media lens and every timed export order by start while the text table
+  // reads the anchor chain, and consecutive starts staying in sequence is
+  // exactly what keeps those two agreeing.
+  //
+  // `cells` arrives sorted by START, so the neighbours are simply the cards
+  // either side. The END is unbounded — it never decides order.
+  const boundsById = new Map<string, { minStartSec: number; maxEndSec: number; maxStartSec?: number }>()
   if (boundNeighbours) {
-    let maxEndBefore = 0
     for (let i = 0; i < cells.length; i++) {
       boundsById.set(cells[i].id, {
-        minStartSec: maxEndBefore,
-        maxEndSec: i + 1 < cells.length ? spanOf(cells[i + 1]).start : Number.POSITIVE_INFINITY,
+        minStartSec: i > 0 ? spanOf(cells[i - 1]).start : 0,
+        maxStartSec: i + 1 < cells.length ? spanOf(cells[i + 1]).start : Number.POSITIVE_INFINITY,
+        maxEndSec: Number.POSITIVE_INFINITY,
       })
-      maxEndBefore = Math.max(maxEndBefore, spanOf(cells[i]).end)
     }
   }
 

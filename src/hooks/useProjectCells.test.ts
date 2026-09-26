@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { buildProjectCellSnapshot, loadProjectCellFiles } from "./useProjectCells"
+import {
+  buildProjectCellSnapshot,
+  loadProjectCellFiles,
+  overlayKey,
+  reconcileOptimisticEdits,
+} from "./useProjectCells"
 
 function row(
   cellId: string,
@@ -78,5 +83,47 @@ describe("loadProjectCellFiles", () => {
       ],
       getToken: async (fileId) => fileId === "f2" ? null : "token",
     }, async () => [])).rejects.toThrow("Two")
+  })
+})
+
+describe("reconcileOptimisticEdits", () => {
+  const shadow = (value: string) => ({ value, valueHtml: undefined, aiDrafted: false })
+
+  function snapshot(translated: string) {
+    return [{
+      fileId: "f1",
+      fileName: "One",
+      cells: buildProjectCellSnapshot(
+        [row("c1", "source", "by grace alone"), row("c1", "target", translated)],
+        "f1",
+      ),
+    }]
+  }
+
+  // AQU-206: the outbox row that backs the pending overlay is deleted the
+  // instant the flusher accepts the write. If the optimistic shadow were
+  // retired at the same moment, the drill-down row would snap back to the
+  // pre-edit text and its verdict would flip back to "infringed".
+  it("keeps a shadow the server snapshot has not caught up with", () => {
+    const optimistic = new Map([[overlayKey("f1", "c1"), shadow("por gracia sola")]])
+    const next = reconcileOptimisticEdits(optimistic, snapshot("por favor solo"))
+    expect(next.get(overlayKey("f1", "c1"))?.value).toBe("por gracia sola")
+  })
+
+  it("retires a shadow once the snapshot reports the same value", () => {
+    const optimistic = new Map([[overlayKey("f1", "c1"), shadow("por gracia sola")]])
+    const next = reconcileOptimisticEdits(optimistic, snapshot("por gracia sola"))
+    expect(next.has(overlayKey("f1", "c1"))).toBe(false)
+  })
+
+  it("keys shadows per file, so a same-named cell in another file is untouched", () => {
+    const optimistic = new Map([[overlayKey("f2", "c1"), shadow("por gracia sola")]])
+    const next = reconcileOptimisticEdits(optimistic, snapshot("por gracia sola"))
+    expect(next.get(overlayKey("f2", "c1"))?.value).toBe("por gracia sola")
+  })
+
+  it("returns the same map identity when nothing was retired", () => {
+    const optimistic = new Map([[overlayKey("f1", "c1"), shadow("por gracia sola")]])
+    expect(reconcileOptimisticEdits(optimistic, snapshot("por favor solo"))).toBe(optimistic)
   })
 })

@@ -43,11 +43,23 @@ describe("E2E determinism guardrails", () => {
       "test:e2e:shard",
       "test:e2e:ui",
       "test:e2e:debug",
+      "test:e2e:production:timing",
     ]) {
       expect(scripts[scriptName], `${scriptName} must run the policy guard`).toMatch(
         /^pnpm run test:e2e:guard && /,
       )
     }
+  })
+
+  it("keeps the production timing probe out of every local E2E run", () => {
+    // AQU-1024: e2e/specs/production drives a DEPLOYED environment with real
+    // credentials and commits a real event. Dropping this exclusion would make
+    // `pnpm test:e2e` fire it against production from a developer's laptop.
+    const source = readFileSync(
+      path.join(REPO_ROOT, "e2e/config/playwright.config.web.ts"),
+      "utf8",
+    )
+    expect(source).toMatch(/testIgnore:\s*\[\s*"\*\*\/production\/\*\*"/)
   })
 
   it("keeps UI waits tied to observable state", () => {

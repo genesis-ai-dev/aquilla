@@ -1,13 +1,14 @@
 // AQU-646 stage 2: the second gate on restructuring a timeline, at the
 // perimeter.
 //
-// Modelled on authorize-line-creation.test.ts, but the shape is deliberately
-// different and these tests are what stop someone "fixing" that. Line creation
-// is a conditional floor RAISE on a kind whose static floor was lowered.
-// `file.track.set` was never lowered — it is MAINTAINER in role-policy.ts — so
-// this setting answers *whether* a project restructures its timelines, not
-// *who* may do it. The consequence is the owner case below, which is the single
-// most important test in this file.
+// Modelled on authorize-cell-editing.test.ts, whose gate now has the SAME shape
+// — and these tests are what stop someone giving this one a clearance term.
+// AQU-1068 replaced the conditional floor RAISE that used to stand there
+// (`allowLineCreation`, on a kind whose static floor had been lowered) with a
+// bare whether-gate carrying no role term. `file.track.set` was never lowered —
+// it is MAINTAINER in role-policy.ts — so this setting likewise answers
+// *whether* a project restructures its timelines, not *who* may do it. The
+// consequence is the owner case below, the single most important test here.
 //
 // These are the tests that hold when the browser lies: the UI withholds the
 // controls when the setting is off, but a hand-rolled event, a stale tab or a
@@ -104,11 +105,12 @@ describe('track editing at the perimeter — what the setting gates', () => {
   })
 
   // THE ONE THAT PINS THE DECISION. An owner clears every role floor in the
-  // app, and both neighbouring carve-outs in authorize.ts carry a
-  // `role < PROJECT_LEAD` term that would let them straight past. Neither
-  // reason applies here — this kind's floor was never lowered — so the check
-  // has no role term at all, and an owner is refused like anyone else. If
-  // someone adds one back to make this resemble its neighbours, this fails.
+  // app. Of the neighbouring carve-outs in authorize.ts only the timing lock
+  // still carries a clearance term (`role < ROLE.MAINTAINER`) that would let an
+  // owner straight past; the cell-editing gate deliberately carries none, and
+  // neither does this one — this kind's floor was never lowered — so an owner
+  // is refused like anyone else. If someone adds a role term back to make this
+  // resemble the timing carve-out, this fails.
   it('refuses an OWNER too — two gates means two gates', async () => {
     const result = await authorize(await tokenFor(ROLE.OWNER), ev({ color: 'teal' }), SECRET, makeDb())
     expect(result.ok).toBe(false)

@@ -12,6 +12,7 @@ import {
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
 import type { CellData } from "@/hooks/useCells"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   idmlRejoinGroupKey,
   readIdmlRejoinMetadata,
@@ -120,6 +121,21 @@ function buildTranslations(
   const groups = new Map<string, CellContract[]>()
 
   for (const cell of cells) {
+    // AQU-1068: a cell somebody ADDED in the app has no IDML locator, and
+    // `cellContract` throws on that — so ONE such cell would block the entire
+    // download rather than being left out, which is a far worse failure than
+    // the content simply not appearing.
+    //
+    // It should be unreachable: `rowActionAvailability` refuses insert, insert-
+    // below AND remove on every IDML row (src/lib/cell-editing-gate.ts), so an
+    // InDesign file cannot hold added content in the first place. That is also
+    // why InDesign is the one native format this round did NOT teach to carry
+    // additions — the round-trip engine hashes the document structure and
+    // refuses to produce a file when it changed, `elementPath` is positional so
+    // an insert renumbers every later locator, and there is no element-level
+    // writer at all. Skipping here is the cheap guard for a rule enforced
+    // somewhere else entirely.
+    if (isUserAddedLine(cell)) continue
     const contract = cellContract(cell)
     if (contract.rejoin) {
       const key = idmlRejoinGroupKey(contract.locator)

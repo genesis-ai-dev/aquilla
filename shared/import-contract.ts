@@ -24,6 +24,19 @@ export const MAX_SOURCE_ARTIFACT_BYTES = 95 * 1024 * 1024
  */
 export const MAX_BUFFERED_SOURCE_ARTIFACT_BYTES = 50 * 1024 * 1024
 
+/**
+ * Largest UTF-8 payload accepted for a single cell's source or target text
+ * (`value` / `valueHtml`) by the bulk-import route. Declared here rather than
+ * in the worker so the client can partition or reject an oversized cell before
+ * an upload round-trip instead of surfacing the server's bare 413 (AQU-990).
+ */
+export const MAX_CELL_TEXT_BYTES = 256 * 1024
+
+/** UTF-8 byte length — the unit both import size ceilings are measured in. */
+export function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
 export const ROUND_TRIP_FIDELITIES = [
   "native",
   "verified-recipe",

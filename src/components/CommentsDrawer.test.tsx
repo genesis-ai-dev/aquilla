@@ -100,3 +100,25 @@ describe("CommentsDrawer — comment input gating (AQU-427)", () => {
     expect(screen.getByRole("textbox")).toBeInTheDocument()
   })
 })
+
+describe("CommentsDrawer — the new-thread field has a real accessible name", () => {
+  /**
+   * AQU-1338: the composer's only name used to be its placeholder, which
+   * disappears on the first keystroke and which screen readers and DOM-reading
+   * agents may never announce. A live Jev journey stalled on this field.
+   */
+  it("names the field from the visible heading, not the placeholder", () => {
+    renderDrawer(makeProject(ROLE.COMMENTER))
+    const field = screen.getByRole("textbox", { name: "New thread" })
+    expect(field).toBeInTheDocument()
+    expect(field.getAttribute("aria-labelledby")).toBe(
+      screen.getByText("New thread").getAttribute("id"),
+    )
+  })
+
+  it("keeps the placeholder as an additional hint", () => {
+    renderDrawer(makeProject(ROLE.COMMENTER))
+    expect(screen.getByRole("textbox", { name: "New thread" }))
+      .toHaveAttribute("placeholder", "Start a new comment thread...")
+  })
+})

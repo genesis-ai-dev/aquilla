@@ -21,6 +21,7 @@ import type { CellData } from "@/hooks/useCells"
 import { InterlinearAlignmentPanel } from "@/components/InterlinearAlignmentPanel"
 import { readingsDisagree, type BacktranslationActionSource } from "@/lib/completion/bt-record"
 import type { AlignmentModel, AlignmentSeed } from "@/lib/completion/interlinear"
+import type { MorphWord } from "@/lib/sync/morph-read"
 
 export interface BacktranslationPanelProps {
   cell: CellData
@@ -38,6 +39,9 @@ export interface BacktranslationPanelProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onAlignmentSeedChange?: (seed: AlignmentSeed) => void
   confirmedSeeds?: AlignmentSeed[]
+  /** AQU-462: original-language (Macula Hebrew/Greek) words for this cell, when
+   *  the source file carries morphology. Empty for every other source. */
+  originalWords?: readonly MorphWord[]
 }
 
 function readingCell(cell: CellData, visibleTranslated: string): CellData {
@@ -60,6 +64,7 @@ export function BacktranslationPanel({
   onSaveBacktranslation,
   onAlignmentSeedChange,
   confirmedSeeds,
+  originalWords,
 }: BacktranslationPanelProps) {
   const t = useT()
   const [editing, setEditing] = useState(false)
@@ -363,6 +368,7 @@ export function BacktranslationPanel({
                 alignmentModel={alignmentModel}
                 confirmedSeeds={confirmedSeeds ?? []}
                 onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
+                originalWords={originalWords}
               />
             </div>
           )}

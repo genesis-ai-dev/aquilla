@@ -67,6 +67,26 @@ const BANNED_FUNCTIONS = [
 // username/id/role_level from `users`, never this column.
 const BANNED_COLUMNS = ["password_hash"] as const
 
+// Tables banned outright regardless of project scoping (AQU pen-test
+// finding, 2026-09-23): `users` has no `project_id` column and no RLS
+// backstop (db/postgres/migrations/0034 covers cells/events/files/comments/
+// cell_validators/cell_audio/project_settings — not users), so the mandatory
+// ":project scoping" check below (which only requires the substring
+// `project_id = :project` to appear *somewhere* in the query, not that every
+// joined table is actually filtered by it) does nothing to scope a join
+// against `users`. A trivial, non-decoy query passes every existing check
+// and returns every account on the platform:
+//   SELECT c.cell_id, u.email, u.username FROM cells c
+//   CROSS JOIN users u WHERE c.project_id = :project
+// BANNED_COLUMNS closing password_hash alone was not enough — email,
+// username and display_name are exactly the D3 identity data
+// docs/OPSEC.md treats as sensitive. Banned outright rather than column-
+// filtered: this tool has no way to verify a join against `users` is
+// actually correlated to the caller's own project (see the residual-gap
+// note on PROJECT_EQ_RE below), so any access to the table is unsafe. The
+// assignments/project_members cookbook (docs.ts) no longer joins `users`.
+const BANNED_TABLES = ["users"] as const
+
 const KNOWN_VARS = ["project", "user", "file", "cell"] as const
 
 /**
@@ -191,6 +211,12 @@ export function guardSql(
       return { ok: false, error: `column "${col}" is not allowed through this tool` }
     }
   }
+  for (const table of BANNED_TABLES) {
+    const re = new RegExp(`\\b${table}\\b`, "i")
+    if (re.test(masked)) {
+      return { ok: false, error: `table "${table}" is not allowed through this tool` }
+    }
+  }
 
   // Project scoping is mandatory (v1 app-level RLS) — EXCEPT pure catalog
   // introspection: a query whose only table references are information_schema
@@ -270,6 +296,19 @@ export type SqlRunResult =
   | { ok: true; rows: Record<string, unknown>[] }
   | { ok: false; error: string }
 
+// `vars.projectId` is embedded directly into `SET LOCAL app.project_id =
+// '<id>'` below (SET LOCAL can't take a bind parameter) — the same
+// GUC-injection shape `PostgresDb.withUser()` already validates strictly for
+// `app.user_id` (db/shim/postgres.ts). In practice this value only ever
+// reaches here after `resolveProjectRole()` has looked it up via a
+// parameterized query, so an attacker-chosen string can't survive that far —
+// but that is a property of the caller, not of this function, so it is
+// re-validated here rather than trusted (AQU pen-test finding, 2026-09-23,
+// defense-in-depth alongside the BANNED_TABLES fix above). Every real
+// project id observed in this codebase is a `crypto.randomUUID()` value;
+// reject anything else before it reaches the query text.
+const PROJECT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function escapeLiteral(s: string): string {
   return s.replace(/'/g, "''")
 }
@@ -287,6 +326,9 @@ export async function runGuardedSql(
 ): Promise<SqlRunResult> {
   const guarded = guardSql(rawSql, vars, aliases)
   if (!guarded.ok) return { ok: false, error: guarded.error }
+  if (!PROJECT_ID_RE.test(vars.projectId)) {
+    return { ok: false, error: "internal: projectId is not a valid UUID" }
+  }
 
   // ORDER BY inside the subquery is preserved by Postgres in practice; the
   // wrapper exists so a missing LIMIT can never stream an entire projection.

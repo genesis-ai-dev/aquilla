@@ -5,6 +5,7 @@ import {
   dismissContextualRunSummary,
   getContextualRunProgress,
   getContextualRunState,
+  continueContextualRun,
   requestPauseContextualRun,
   resetContextualRunStore,
   resumeContextualRun,
@@ -31,6 +32,7 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     terminate: vi.fn(async () => {}),
+    continueRun: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -408,7 +410,10 @@ describe("start", () => {
     await attachContextualRun("p1", "file-1")
     const ok = await startContextualRun("p1", "file-1")
     expect(ok).toBe(true)
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
+    // Trailing `undefined` is `translateEverything` unset (AQU-1300): a plain
+    // Play asks for no budget lift, so the server applies its trust-gated
+    // default of one passage.
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "", undefined)
     expect(getContextualRunState()).toMatchObject({ runId: RUN_A, status: "running" })
   })
 
@@ -417,7 +422,7 @@ describe("start", () => {
     setContextualTransport(transport)
     await attachContextualRun("p1", "file-1", "fr")
     await startContextualRun("p1", "file-1")
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr", undefined)
   })
 
   it("forwards the anchor cell so the first wave starts where the user is looking", async () => {
@@ -425,6 +430,129 @@ describe("start", () => {
     setContextualTransport(transport)
     await attachContextualRun("p1", "file-1")
     await startContextualRun("p1", "file-1", "cell-42")
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "", undefined)
+  })
+})
+
+// ── Trust gate: parked awaiting input (AQU-1300) ───────────────────────────
+//
+// `parked` carries two opposite meanings, and the mirror is where they get
+// confused. A run that is HOLDING FOR A HUMAN and a run that has FINISHED both
+// arrive as `status: "parked"`; only `parkReason` tells them apart, and every
+// affordance the user gets hangs off that one field.
+
+describe("park reason", () => {
+  it("keeps the reason a parked frame carries", async () => {
+    setContextualTransport(makeTransport())
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({
+      ...runningFrame(RUN_A, { done: 1 }),
+      status: "parked",
+      parkReason: "awaiting_input",
+    })
+    expect(getContextualRunState()).toMatchObject({
+      status: "parked",
+      parkReason: "awaiting_input",
+    })
+  })
+
+  it("clears the reason when the run starts running again", async () => {
+    setContextualTransport(makeTransport())
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({
+      ...runningFrame(RUN_A, { done: 1 }),
+      status: "parked",
+      parkReason: "awaiting_input",
+    })
+    applyRemoteFrame(runningFrame(RUN_A, { done: 1 }))
+    // A live run still advertising "waiting for you" is how a working run gets
+    // reported as stuck — and how the Continue button appears on a run that
+    // does not need it.
+    expect(getContextualRunState()).toMatchObject({ status: "running", parkReason: null })
+  })
+
+  it("reads null from a backend that predates the trust gate", async () => {
+    setContextualTransport(makeTransport())
+    await attachContextualRun("p1", "file-1")
+    // No `parkReason` on the frame at all: an older server. Must not invent one.
+    applyRemoteFrame({ ...runningFrame(RUN_A, { done: 1 }), status: "parked" })
+    expect(getContextualRunState()).toMatchObject({ status: "parked", parkReason: null })
+  })
+
+  it("hydrates the reason from a snapshot", async () => {
+    const run: ContextualRunSnapshot = {
+      runId: RUN_A,
+      fileId: "file-1",
+      status: "parked",
+      parkReason: "awaiting_input",
+      phase: null,
+      spanLabel: null,
+      done: 1,
+      total: 6,
+      failed: 0,
+      activeDirections: [],
+    }
+    setContextualTransport(makeTransport({
+      fetchSnapshot: vi.fn(async () => ({ available: true, run })),
+    }))
+    await attachContextualRun("p1", "file-1")
+    expect(getContextualRunState()).toMatchObject({ parkReason: "awaiting_input" })
+  })
+})
+
+describe("continueContextualRun", () => {
+  async function parkAwaitingInput(transport: ContextualTransport) {
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({
+      ...runningFrame(RUN_A, { done: 1 }),
+      status: "parked",
+      parkReason: "awaiting_input",
+    })
+  }
+
+  it("asks for a batch and moves the mirror optimistically", async () => {
+    const transport = makeTransport()
+    await parkAwaitingInput(transport)
+    await continueContextualRun("batch")
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN_A, "batch")
+    expect(getContextualRunState()).toMatchObject({ status: "running", parkReason: null })
+  })
+
+  it("asks for the whole scope on 'translate everything'", async () => {
+    const transport = makeTransport()
+    await parkAwaitingInput(transport)
+    await continueContextualRun("all")
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN_A, "all")
+  })
+
+  it("does nothing for a run that simply finished its scope", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({
+      ...runningFrame(RUN_A, { done: 6 }),
+      status: "parked",
+      parkReason: "work_exhausted",
+    })
+    await continueContextualRun("batch")
+    // There is nothing to continue INTO. Sending it anyway would resume a run
+    // that immediately parks again — a button that visibly does nothing.
+    expect(transport.continueRun).not.toHaveBeenCalled()
+    expect(getContextualRunState()).toMatchObject({ status: "parked" })
+  })
+
+  it("rolls back to the parked state when the server refuses", async () => {
+    const transport = makeTransport({
+      continueRun: vi.fn(async () => { throw new Error("nope") }),
+    })
+    await parkAwaitingInput(transport)
+    await continueContextualRun("batch")
+    // Leaving the pill on "running" would strand the user with no way back to
+    // the Continue button on a run the server never restarted.
+    expect(getContextualRunState()).toMatchObject({
+      status: "parked",
+      parkReason: "awaiting_input",
+    })
   })
 })

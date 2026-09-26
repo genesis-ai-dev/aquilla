@@ -137,13 +137,19 @@ async function seedFile(): Promise<void> {
   await seedCell("c5", "MRK 2:2", "he returned home")
 }
 
-async function startRun(targetLang = "") {
+/** Unlimited by default (AQU-1300): these cases pin how a tick READS, drafts,
+ *  and advances — steering, lanes, pause edges, failure recording — none of
+ *  which is about the trust gate's work budget. The gate's own behaviour is
+ *  covered in contextual-allowance.test.ts; leaving the default of 1 here
+ *  would park every one of these after a single span for unrelated reasons. */
+async function startRun(targetLang = "", spanAllowance: number | null = null) {
   const created = await createRun(db, {
     projectId: PROJECT,
     fileId: FILE,
     targetLang,
     initiatedBy: "tester",
     roleSnapshot: { userId: 1, username: "tester", level: 400 },
+    spanAllowance,
   })
   if (created.status !== "ok") throw new Error("run not created")
   return created.run
@@ -197,6 +203,8 @@ async function startProseRun() {
     targetLang: "",
     initiatedBy: "tester",
     roleSnapshot: { userId: 1, username: "tester", level: 400 },
+    // Segmentation, not budget — see startRun above (AQU-1300).
+    spanAllowance: null,
   })
   if (created.status !== "ok") throw new Error("prose run not created")
   return created.run

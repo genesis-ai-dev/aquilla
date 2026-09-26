@@ -12,6 +12,12 @@
 //     org. An 'act' credential must therefore carry a scope.
 //   - The credential is a ceiling only: every API call re-resolves the user's
 //     live role, so a credential never exceeds the user.
+//   - `pii` (AQU-1180) opts the credential IN to seeing real human identities
+//     in agent-facing responses. Default off; requires OWNER of the scoped org
+//     or project, and an unscoped credential can never carry it. Everything
+//     the Agent API returns lands in whatever AI console holds the token, and
+//     for translation teams in restricted regions that makes translator
+//     identity a safety exposure — see sync-worker/src/external/pii.ts.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -37,6 +43,9 @@ const createSchema = z.object({
   projectId: z.string().min(1).optional(),
   // ISO-8601 timestamp; validated as a real date below.
   expiresAt: z.string().datetime().optional(),
+  // AQU-1180: opt IN to human identity in agent-facing responses. Omitted =
+  // false; the safe answer is the one you get by not thinking about it.
+  pii: z.boolean().optional(),
 })
 
 interface CredentialRow {
@@ -50,6 +59,7 @@ interface CredentialRow {
   expires_at: string | null
   last_used_at: string | null
   revoked_at: string | null
+  pii: boolean | null
 }
 
 /** Public JSON shape — never includes token_hash. */
@@ -65,12 +75,16 @@ function toDto(r: CredentialRow) {
     expiresAt: r.expires_at,
     lastUsedAt: r.last_used_at,
     revokedAt: r.revoked_at,
+    // AQU-1180: surfaced so the token list can mark which tokens see real
+    // names — a human auditing their tokens has to be able to tell.
+    pii: r.pii === true,
   }
 }
 
 credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c) => {
   const user = c.get("user")
-  const { name, mode, orgId, projectId, expiresAt } = c.req.valid("json")
+  const { name, mode, orgId, projectId, expiresAt, pii } = c.req.valid("json")
+  const wantsPii = pii === true
 
   // [Pen test] API security & data exposure (2026-08-13): throttle minting
   // before doing any scope resolution — see rate-limit.ts for rationale.
@@ -114,6 +128,35 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
     }
   }
 
+  // AQU-1180: a `pii` credential hands a third-party AI console the real names
+  // of everyone who has edited the project. That is a decision about other
+  // people's safety, so it needs the person who is accountable for the team:
+  // OWNER of the scope, not merely someone who can write to it. An unscoped
+  // (user-global) credential can never carry it — there is no owner of "every
+  // project this user can reach" to make that call.
+  if (wantsPii) {
+    if (scopeLevel === null) {
+      return c.json(
+        {
+          error: "permission_denied",
+          message:
+            "A credential that exposes translator identity must be scoped to a single org or project, and minted by an owner of it.",
+        },
+        403,
+      )
+    }
+    if (scopeLevel < ROLE.OWNER) {
+      return c.json(
+        {
+          error: "permission_denied",
+          message:
+            "Only an owner of this org or project can mint a credential that exposes translator identity (names and user ids) to an agent.",
+        },
+        403,
+      )
+    }
+  }
+
   let expiresAtValue: string | null = null
   if (expiresAt) {
     const ts = new Date(expiresAt).getTime()
@@ -131,10 +174,10 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 
   const row = await c.env.AQUILLA_PG.prepare(
     `INSERT INTO api_credentials
-        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, pii)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      RETURNING id, name, mode, org_id, project_id, token_prefix,
-               created_at, expires_at, last_used_at, revoked_at`,
+               created_at, expires_at, last_used_at, revoked_at, pii`,
   )
     .bind(
       id,
@@ -146,6 +189,7 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
       orgId ?? null,
       projectId ?? null,
       expiresAtValue,
+      wantsPii,
     )
     .first<CredentialRow>()
 
@@ -159,7 +203,7 @@ credentials.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
   const result = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, mode, org_id, project_id, token_prefix,
-            created_at, expires_at, last_used_at, revoked_at
+            created_at, expires_at, last_used_at, revoked_at, pii
        FROM api_credentials
       WHERE user_id = ?
       ORDER BY created_at DESC`,

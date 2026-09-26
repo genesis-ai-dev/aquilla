@@ -39,6 +39,19 @@ export const ROLE = {
 
 export type RoleLevel = (typeof ROLE)[keyof typeof ROLE]
 
+/**
+ * AQU-435 / AQU-1107: org membership is a project-access path only at
+ * Maintainer+. Mirrors auth-worker's ORG_WIDE_ACCESS_FLOOR. Contributors
+ * reach a project through a direct grant or a team, never through org
+ * membership alone.
+ */
+export const ORG_WIDE_ACCESS_FLOOR = ROLE.MAINTAINER
+
+/** True when this org-level role can see/open every project in the org. */
+export function orgRoleGrantsProjectAccess(level: number | null | undefined): boolean {
+  return level != null && level >= ORG_WIDE_ACCESS_FLOOR
+}
+
 export const ALL_ROLE_LEVELS: readonly RoleLevel[] = [
   ROLE.VIEWER,
   ROLE.COMMENTER,
@@ -78,9 +91,9 @@ export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
 
 /**
  * Roles offered in the org Members panel role picker. Commenter (200) and
- * reviewer (300) are absent because org-level grants apply to every project
- * in the org — granting "comment-only across all projects" is a niche we
- * don't surface yet. Set explicitly per-project via SharePanel instead.
+ * reviewer (300) are absent — those are per-project niches (SharePanel).
+ * Org membership below Maintainer does not grant project access (AQU-435 /
+ * AQU-1107); only Maintainer+ is org-wide oversight.
  */
 export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.VIEWER,

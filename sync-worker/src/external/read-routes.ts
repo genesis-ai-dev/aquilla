@@ -67,6 +67,7 @@ import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { paginate, parsePageParams } from "./pagination"
+import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
@@ -105,8 +106,12 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   if (limited) return limited
   const cred = authed.credential
   return Response.json({
-    userId: cred.userId,
-    username: cred.username,
+    // AQU-1180: identity is opt-in. By default /me answers "which token am I
+    // and what may I do", never "who is the human behind it" — an agent needs
+    // the former to work and the latter never leaves this worker unless an
+    // OWNER minted the credential with `pii` on. The scope ids (org/project)
+    // stay: they are the credential's own reach, not a person.
+    ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
     orgId: cred.orgId,
     projectId: cred.projectId,
@@ -260,8 +265,28 @@ async function handleExternalFileCells(
     changedCellIds?: string[]
     maxServerSeq?: number | null
   }
+
+  // AQU-1180: the internal cells route serves the SPA, where showing "last
+  // edited by Anna" is the whole point — so the scrub happens HERE, at the
+  // agent boundary, rather than in the shared serializer.
+  const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
+  const cells = await scrubAuthorField(
+    body.cells ?? [],
+    "lastEditor",
+    policy,
+    env.SYNC_SECRET_KEY,
+    projectId,
+  )
+  await recordAgentRead(env.AQUILLA_PG, {
+    credentialId: authed.ctx.credential.credentialId,
+    projectId,
+    resource: "cells",
+    resourceId: fileId,
+    rowCount: cells.length,
+  })
+
   return Response.json({
-    data: body.cells ?? [],
+    data: cells,
     nextCursor: body.nextCursor ?? null,
     ...(body.resync ? { resync: true } : {}),
     ...(body.delta ? { delta: true, changedCellIds: body.changedCellIds ?? [] } : {}),
@@ -350,8 +375,21 @@ async function handleExternalCellHistory(
     .bind(projectId, cellId, fetchLimit)
     .all<EventRowRaw>()
 
-  const events = result.results.map(mapHistoryRow)
-  return Response.json(paginate(events, offset, limit))
+  const page = paginate(result.results.map(mapHistoryRow), offset, limit)
+
+  // AQU-1180: history is the densest identity surface on the API — one author
+  // per event, ordered in time. Scrub the page the caller actually receives
+  // (the fetch over-reads by `offset` rows that are then sliced away).
+  const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
+  const data = await scrubAuthorField(page.data, "author", policy, env.SYNC_SECRET_KEY, projectId)
+  await recordAgentRead(env.AQUILLA_PG, {
+    credentialId: authed.ctx.credential.credentialId,
+    projectId,
+    resource: "history",
+    resourceId: cellId,
+    rowCount: data.length,
+  })
+  return Response.json({ ...page, data })
 }
 
 // ---------------------------------------------------------------------------

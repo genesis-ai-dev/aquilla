@@ -5,6 +5,15 @@ import { OrgProvider } from "@/context/OrgContext"
 import { openRowMenu } from "@/test-utils/row-menu"
 import { ArchivedProjects } from "./ArchivedProjects"
 
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))
@@ -15,7 +24,9 @@ vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 
 const fetchArchivedProjects = vi.fn()
 const fetchOrgDeletedFiles = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchArchivedProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
     projects: await fetchArchivedProjects(...a),

@@ -7,9 +7,43 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AddConceptPopover } from "./AddConceptDialog"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+
+function sourceRow(cellId: string, value: string): CellRow {
+  return {
+    cellId,
+    side: "source",
+    value,
+    valueHtml: null,
+    type: null,
+    canonicalRef: null,
+    anchorCellId: null,
+    eventId: `source-${cellId}`,
+    sourceEventId: null,
+    lastEditor: "alice",
+    lastEditAt: 1,
+    validated: false,
+    wordCount: 1,
+    endorsementCount: 0,
+  }
+}
+
+function seededStore(rows: CellRow[]): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: "p1",
+    fileId: "f1",
+    username: "alice",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(rows)
+  return store
+}
 
 function renderPopover(props: Partial<Parameters<typeof AddConceptPopover>[0]> = {}) {
   const defaults = {
@@ -102,7 +136,11 @@ describe("AddConceptPopover", () => {
     renderPopover({ sourceTerm: "grace", onConfirm })
     await openPopover()
     await user.type(screen.getByLabelText(/rendering for new concept/i), "favor")
-    await user.click(screen.getByRole("checkbox", { name: /case insensitive/i }))
+    // AQU-1271: case sensitivity now lives inside the collapsed "Matching
+    // options" disclosure with the other matcher toggles, stated positively
+    // ("Match case exactly") rather than as a standalone inverted checkbox.
+    await user.click(screen.getByRole("button", { name: /matching options/i }))
+    await user.click(screen.getByRole("checkbox", { name: /match case exactly/i }))
     await user.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({
@@ -173,6 +211,61 @@ describe("AddConceptPopover", () => {
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace", approve: false })
     })
+  })
+
+  // WHY: the preview count and chips are how a user learns what the matcher
+  // will do BEFORE saving; an option toggle must re-count live, and a chip
+  // click must land in the submitted draft as an exclusion.
+  it("previews matches, toggles options live, and submits exclusions", async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "אֵת הָאָֽרֶץ׃"),
+      sourceRow("c", "nothing here"),
+    ]
+    const cellStore = seededStore(rows)
+    renderPopover({
+      sourceTerm: "הָאָ֗רֶץ",
+      cellStore,
+      termMatching: { prefixes: ["ו"], suffixes: [] },
+      canApprove: true,
+      onConfirm,
+    })
+    await openPopover()
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Exclude וְהָאָ֗רֶץ/ }))
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceTerm: "הָאָ֗רֶץ",
+          match: expect.objectContaining({ excludedForms: ["וְהָאָ֗רֶץ"] }),
+        }),
+      )
+    })
+  })
+
+  // WHY: stale-snapshot regression (AQU-1271 review). The preview used to be
+  // handed a cells array through the memoized editor row, so a commit anywhere
+  // else in the file left an OPEN popover counting against a dead snapshot.
+  // The popover subscribes to the store itself; a new matching cell must show
+  // up in the count without the popover being reopened.
+  it("re-counts while open when the file's cells change underneath", async () => {
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "nothing here"),
+    ]
+    const cellStore = seededStore(rows)
+    renderPopover({ sourceTerm: "הָאָ֗רֶץ", cellStore, termMatching: { prefixes: ["ו"], suffixes: [] } })
+    await openPopover()
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+
+    act(() => {
+      cellStore.replaceRows([...rows, sourceRow("c", "אֵת הָאָֽרֶץ׃")], { full: true })
+    })
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
   })
 
   it("closes on Cancel without calling onConfirm", async () => {

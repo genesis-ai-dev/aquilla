@@ -65,6 +65,64 @@ function runtime(store: CellStore, auditStats: ReadonlyMap<string, CellAuditStat
 }
 
 describe("CellStore per-cell versions", () => {
+  it("does not publish identical complete rows, but publishes changes in every lane", () => {
+    const store = new CellStore()
+    runtime(store, new Map())
+    const source = row("a", "source", "Hello", { metadata: { nested: [1, { label: "section" }] } })
+    let target = row("a", "target", "Default")
+    let spanish = row("a", "target", "Hola", { targetLang: "es" })
+    store.replaceRows([source, target, spanish])
+    const summary = store.getCellSummary("a")
+    const allVersion = store.getAllVersion()
+    const cellVersion = store.getCellVersion("a")
+    let notifications = 0
+    store.subscribeAll(() => { notifications++ })
+    store.replaceRowsForCell("a", structuredClone([source, target, spanish]))
+    expect(notifications).toBe(0)
+    expect(store.getAllVersion()).toBe(allVersion)
+    expect(store.getCellVersion("a")).toBe(cellVersion)
+    expect(store.getCellSummary("a")).toBe(summary)
+    for (const patch of [
+      { eventId: "new-head" }, { validated: true }, { endorsementCount: 2 },
+      { valueHtml: "<b>Default</b>" }, { metadata: { nested: [2] } },
+      { lastEditor: "bob" }, { sourceEventId: "new-source" },
+    ]) {
+      target = { ...target, ...patch }
+      const before = notifications
+      store.replaceRowsForCell("a", [source, target, spanish])
+      expect(notifications).toBe(before + 1)
+    }
+    spanish = { ...spanish, value: "Buenos días" }
+    const before = notifications
+    store.replaceRowsForCell("a", [source, target, spanish])
+    expect(notifications).toBe(before + 1)
+    expect(store.toRows()).toContainEqual(spanish)
+    store.replaceRowsForCell("a", [source, target])
+    expect(store.toRows().some(row => row.targetLang === "es")).toBe(false)
+    store.replaceRowsForCell("a", [])
+    expect(store.getCellView("a")).toBeNull()
+  })
+
+  it("publishes shadow removal even when the subsequent row response is identical", () => {
+    const store = new CellStore()
+    runtime(store, new Map())
+    store.replaceRows([row("a", "source", "Hello"), row("a", "target", "Draft")])
+    store.applyOptimisticTargetEdit("a", { value: "Saved" })
+    store.setPendingOverlay(new Map([["a", { value: "", targetLang: "" }]]))
+    const version = store.getAllVersion()
+    const rows = store.toRows()
+    let notifications = 0
+    store.subscribeAll(() => { notifications++ })
+    store.clearConfirmedShadows(rows, store.getWriteSeq())
+    const confirmedVersion = store.getAllVersion()
+    expect(confirmedVersion).toBeGreaterThan(version)
+    expect(store.getCellSummary("a")?.translated).toBe("")
+    expect(notifications).toBe(1)
+    store.replaceRowsForCell("a", structuredClone(rows))
+    expect(store.getAllVersion()).toBe(confirmedVersion)
+    expect(notifications).toBe(1)
+  })
+
   it("never re-issues a version a cell has already reported, even across reset()", () => {
     const store = new CellStore()
     runtime(store, new Map())

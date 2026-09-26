@@ -17,8 +17,11 @@ import {
 import {
   appendSteering,
   getRun,
+  grantSpanAllowance,
   setSpanCursor,
   unblockRun,
+  INPUT_GRANT_CAP,
+  INPUT_GRANT_SPANS,
   type ContextualRun,
   type SpanCursor,
 } from "./contextual-runs"
@@ -90,6 +93,17 @@ async function resolveInTransaction(
       await setSpanCursor(db, existing.runId, nextCursor)
     }
   }
+
+  // AQU-1300: answering is human input, so it buys a span — inside the same
+  // transaction, and BEFORE the unblock. A run unblocked onto a zero allowance
+  // would park again on its very next span edge, so the human would answer the
+  // question and watch nothing happen. Dismissing earns the same span: the
+  // human still engaged with the question, and the run still has to get past
+  // the passage that raised it.
+  await grantSpanAllowance(db, existing.runId, {
+    spans: INPUT_GRANT_SPANS,
+    cap: INPUT_GRANT_CAP,
+  })
 
   const unblocked = await unblockRun(db, existing.runId)
   if (unblocked.status !== "ok") {

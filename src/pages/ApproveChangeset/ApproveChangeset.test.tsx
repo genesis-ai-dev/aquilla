@@ -184,6 +184,51 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  // AQU-1179: an EmitEvents changeset's whole effect is the `events` array,
+  // which the scalar-fact filter drops — so this page used to offer a reviewer
+  // "No changes summarized." above an Approve button that applied real writes.
+  it("renders an EmitEvents changeset as plain-language effect lines", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        events: [
+          { kind: "term.create", count: 2, testimony: false, label: "Add 2 glossary terms" },
+          {
+            kind: "term.approve",
+            count: 1,
+            testimony: false,
+            label: "Approve a glossary term — enforced for everyone on the project",
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("Add 2 glossary terms")).toBeInTheDocument()
+    expect(screen.getByText(/enforced for everyone on the project/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+    // The raw event kind is never what the reviewer is asked to consent to.
+    expect(screen.queryByText("term.approve")).not.toBeInTheDocument()
+  })
+
+  it("falls back to kind × count for a changeset staged before effect labels existed", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: { events: [{ kind: "comment.create", count: 4 }], warnings: [] },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("comment.create × 4")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   // AQU-1185: a role grant must never be approved blind — the page lists one
   // plain-language line per membership change, straight from the server.
   it("renders one line per change for a membership changeset", async () => {

@@ -266,11 +266,14 @@ describe('PROJECTION_TABLES', () => {
       cell_validators: true,
       cell_waivers: true,
       cell_audio: true,
+      cell_audio_validators: true,
       comments: true,
       cell_backtranslations: true,
       assignments: true,
       assignment_cells: true,
       cell_links: true,
+      // AQU-1068: a source.cell.delete now clears the cell's morph rows.
+      cell_word_morph: true,
       concepts: true,
     }
     expect([...PROJECTION_TABLES].sort()).toEqual(Object.keys(ALL).sort())

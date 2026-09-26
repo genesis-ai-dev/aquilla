@@ -52,6 +52,7 @@ describe("Autopilot realtime reconnect reconciliation", () => {
       pause: vi.fn(async () => {}),
       resume: vi.fn(async () => {}),
       terminate: vi.fn(async () => {}),
+      continueRun: vi.fn(async () => {}),
     })
     await attachContextualRun(PROJECT, FILE)
 

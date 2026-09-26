@@ -6,6 +6,7 @@
 // one with execute({docs:"topic"}) only when a task needs it.
 
 import { PROJECT_BOOTSTRAP, QA_SWEEP, FIRST_CYCLE } from "./docs-playbooks"
+import { AGENT_SKILLS } from "../../../../db/shared/agent-skills"
 
 const DRAFTING = `# Drafting cookbook — the canonical draft loop
 
@@ -207,10 +208,15 @@ Live ai_drafted state (not yet human-touched): cells.ai_drafted = 1.`
 
 const ASSIGNMENTS = `# Assignments cookbook — who is working on what
 
+The \`users\` table is not readable through this tool (every account on the
+platform, not just this project's — see sql-guard.ts BANNED_TABLES). Use
+assignee_user_id / user_id as opaque numeric ids; resolve a name only if the
+conversation already gave you one, or ask the user.
+
 Active assignments:
-SELECT a.assignment_id, u.username, a.scope_label, a.cells_total,
+SELECT a.assignment_id, a.assignee_user_id, a.scope_label, a.cells_total,
        a.deadline, a.note, a.completed_at
-FROM assignments a JOIN users u ON u.id = a.assignee_user_id
+FROM assignments a
 WHERE a.project_id = :project AND a.unassigned_at IS NULL
 ORDER BY a.created_at DESC LIMIT 50
 
@@ -225,8 +231,8 @@ WHERE ac.assignment_id = '#e1'
 (assignment_id values come back from the first query; aliases work.)
 
 Members you can assign to:
-SELECT u.id, u.username, pm.role_level
-FROM project_members pm JOIN users u ON u.id = pm.user_id
+SELECT pm.user_id, pm.role_level
+FROM project_members pm
 WHERE pm.project_id = :project ORDER BY pm.role_level DESC
 
 Creating one (PROJECT_LEAD+). scopeKind 'books' = whole file(s);
@@ -333,6 +339,11 @@ const COOKBOOKS: Record<string, string> = {
   "playbooks/project-bootstrap": PROJECT_BOOTSTRAP,
   "playbooks/qa-sweep": QA_SWEEP,
   "playbooks/first-cycle": FIRST_CYCLE,
+  // AQU-1294 §2.3: agent skills. The SAME bodies the Agent API serves over
+  // REST /skills/:name and MCP get_skill (db/shared/agent-skills.ts), so an
+  // in-app agent and an external one follow one playbook. L2 like the
+  // playbooks above — not in the resident card.
+  ...Object.fromEntries(AGENT_SKILLS.map((s) => [`skills/${s.name}`, s.body])),
 }
 
 export const COOKBOOK_TOPICS = Object.keys(COOKBOOKS)

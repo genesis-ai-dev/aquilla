@@ -6,6 +6,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { getEffectiveOrgRole } from "../services/org-permissions"
 import { mintApiToken, sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, ipIdentifier, userIdentifier } from "../utils/rate-limit"
 
@@ -27,6 +28,7 @@ interface Grant {
   mode: "ask" | "act"
   requested_project_id: string | null
   project_id: string | null
+  org_id: string | null
   user_id: string | null
   status: string
   expires_at: string
@@ -34,6 +36,18 @@ interface Grant {
   poll_interval: number
 }
 const normalizeCode = (code: string) => code.replace(/-/g, "")
+/** The approver's live authority over the single scope a grant carries.
+ * `null` means "no authority" — an unscoped agent credential is not a thing
+ * the device flow can mint (see /decision: exactly one scope is required). */
+async function scopeLevel(
+  env: AuthHonoEnv["Bindings"], user: AuthUser,
+  projectId: string | null | undefined, orgId: string | null | undefined,
+): Promise<number | null> {
+  if (projectId) return (await resolveProjectRole(env, user, projectId))?.level ?? null
+  if (!orgId) return null
+  const numericOrgId = Number(orgId)
+  return Number.isInteger(numericOrgId) ? await getEffectiveOrgRole(env, numericOrgId, user) : null
+}
 async function body(req: Request): Promise<unknown> {
   if (req.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
     return Object.fromEntries(new URLSearchParams(await req.text()))
@@ -110,6 +124,10 @@ routes.post("/request", authMiddleware, async (c) => {
 routes.post("/decision", authMiddleware, async (c) => {
   const parsed = z.object({ user_code: codeSchema, approve: z.boolean(),
     project_id: z.string().min(1).max(200).optional(),
+    org_id: z.string().min(1).max(200).optional(),
+    // The human is the authority on autonomy: the agent's requested scope is a
+    // default, not a ceiling. Omitted means "as requested".
+    mode: z.enum(["ask", "act"]).optional(),
     code_confirmed: z.literal(true).optional(),
   }).safeParse(await body(c.req.raw))
   if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
@@ -125,22 +143,31 @@ routes.post("/decision", authMiddleware, async (c) => {
      AND status = 'pending' AND expires_at > now()`,
   ).bind(hash).first<Grant>()
   if (!grant) return c.json({ error: "expired_token" }, 400)
+  // The granted mode may differ from the requested one; every floor below and
+  // the mint in /token are checked against what was actually granted.
+  const mode = input.approve ? (input.mode ?? grant.mode) : grant.mode
   if (input.approve) {
-    if (!input.project_id || !input.code_confirmed) return c.json({ error: "invalid_request" }, 400)
+    // Exactly one scope, and the code must have been compared by a human.
+    if (!input.code_confirmed) return c.json({ error: "invalid_request" }, 400)
+    if (Boolean(input.project_id) === Boolean(input.org_id)) {
+      return c.json({ error: "invalid_request" }, 400)
+    }
+    // A requested project stays pinned: approve that project or deny. Widening
+    // it to the whole org would hand the agent more than the human reviewed.
     if (grant.requested_project_id && grant.requested_project_id !== input.project_id) {
       return c.json({ error: "scope_denied" }, 403)
     }
-    const role = await resolveProjectRole(c.env, c.get("user"), input.project_id)
-    if (!role || role.level < (grant.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) {
-      return c.json({ error: "scope_denied" }, 403)
-    }
+    const floor = mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR
+    const level = await scopeLevel(c.env, c.get("user"), input.project_id, input.org_id)
+    if (level == null || level < floor) return c.json({ error: "scope_denied" }, 403)
   }
   const changed = await c.env.AQUILLA_PG.prepare(
-    `UPDATE agent_authorizations SET status = ?, user_id = ?, project_id = ?
+    `UPDATE agent_authorizations SET status = ?, user_id = ?, project_id = ?, org_id = ?, mode = ?
      WHERE user_code_hash = ? AND status = 'pending' AND expires_at > now()
      RETURNING status`,
   ).bind(input.approve ? "approved" : "denied", String(c.get("user").id),
-    input.approve ? input.project_id : null, hash).first()
+    input.approve ? (input.project_id ?? null) : null,
+    input.approve ? (input.org_id ?? null) : null, mode, hash).first()
   if (!changed) return c.json({ error: "expired_token" }, 400)
   return c.json({ status: input.approve ? "approved" : "denied" })
 })
@@ -174,9 +201,11 @@ routes.post("/token", async (c) => {
   if (grant.status === "pending") return c.json({ error: "authorization_pending" }, 400)
   const user = await c.env.AQUILLA_PG.prepare("SELECT * FROM users WHERE id::text = ?")
     .bind(grant.user_id).first<AuthUser>()
-  const role = user && grant.project_id
-    ? await resolveProjectRole(c.env, user, grant.project_id) : null
-  if (!role || role.level < (grant.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) {
+  // Re-check at mint time, not just at approval: the approver's role may have
+  // been lowered in between.
+  const level = user
+    ? await scopeLevel(c.env, user, grant.project_id, grant.org_id) : null
+  if (level == null || level < (grant.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) {
     return c.json({ error: "access_denied" }, 400)
   }
   const minted = await mintApiToken()
@@ -186,15 +215,15 @@ routes.post("/token", async (c) => {
     `WITH claimed AS (
        UPDATE agent_authorizations SET status = 'consumed'
        WHERE device_hash = ? AND status = 'approved' AND expires_at > now()
-       RETURNING user_id, agent_name, mode, project_id
+       RETURNING user_id, agent_name, mode, org_id, project_id
      ) INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, project_id, expires_at)
-       SELECT ?, user_id, agent_name, ?, ?, mode, project_id,
+       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at)
+       SELECT ?, user_id, agent_name, ?, ?, mode, org_id, project_id,
          now() + interval '30 days' FROM claimed RETURNING id`,
   ).bind(hash, id, minted.tokenPrefix, minted.tokenHash).first()
   if (!credential) return c.json({ error: "expired_token" }, 400)
   return c.json({ access_token: minted.token, token_type: "Bearer",
     expires_in: TOKEN_SECONDS, scope: grant.mode, project_id: grant.project_id,
-    credential_id: id })
+    org_id: grant.org_id, credential_id: id })
 })
 export default routes

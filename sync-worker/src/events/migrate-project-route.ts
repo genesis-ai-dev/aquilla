@@ -11,6 +11,7 @@
 // deterministic id and (group_id, project_id).
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { ensureProjectLaneStmts } from '../../../db/shared/lanes'
 
 const PATH = '/migrate/project'
 
@@ -83,6 +84,8 @@ export async function handleMigrateProjectRequest(
         .bind(body.teamId, body.projectId, body.roleLevel ?? 400, body.ownerUserId),
     )
   }
+
+  stmts.push(...ensureProjectLaneStmts(db, body.projectId))
 
   try {
     await db.batch(stmts)

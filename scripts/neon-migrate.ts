@@ -34,6 +34,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Client } from "pg"
 import { neonClient } from "./pg"
+import { prepareCommentsKey } from "./neon-comments-key"
+import { applyMigrationFile } from "./neon-migration-file"
 import {
   diffSchemaContract,
   expectedSchemaContract,
@@ -146,11 +148,9 @@ async function apply(client: Client): Promise<number> {
   }
   for (const f of pending) {
     console.log(`applying ${f}…`)
-    // One multi-statement query = one implicit transaction: a failing
-    // statement rolls the whole file back and we abort loudly rather than
-    // recording a half-applied migration (same approach as dev-stack.ts).
-    await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"))
-    await client.query(`INSERT INTO ${LEDGER} (name) VALUES ($1)`, [f])
+    await applyMigrationFile(
+      client, f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"),
+    )
     console.log(`✓ applied ${f}`)
   }
   return status(client)
@@ -181,8 +181,8 @@ async function baseline(client: Client): Promise<number> {
 
 async function main() {
   const cmd = process.argv[2] ?? "status"
-  if (!["status", "apply", "baseline"].includes(cmd)) {
-    console.error("usage: neon-migrate.ts [status|apply|baseline]")
+  if (!["status", "apply", "baseline", "prepare-comments-key"].includes(cmd)) {
+    console.error("usage: neon-migrate.ts [status|apply|baseline|prepare-comments-key]")
     process.exit(1)
   }
   // pg.ts reads NEON_PG_* at neonClient() call time, so loading .env here
@@ -193,8 +193,8 @@ async function main() {
   try {
     const host = process.env.NEON_PG_HOST
     console.log(`neon-migrate ${cmd} → ${host}\n`)
-    const fns = { status, apply, baseline } as const
-    process.exit(await fns[cmd as keyof typeof fns](client))
+    const fns = { status, apply, baseline, "prepare-comments-key": prepareCommentsKey } as const
+    process.exitCode = await fns[cmd as keyof typeof fns](client)
   } finally {
     await client.end()
   }

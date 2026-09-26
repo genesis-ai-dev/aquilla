@@ -673,6 +673,18 @@ async function main(): Promise<void> {
   console.log(`${TAG}[boot ✓] all services up, handing off to Playwright`)
   console.log("")
 
+  // Disposable app container: the trusted harness runs in another container.
+  // Only synthetic stack configuration crosses this boundary, never secrets.
+  if (process.env.E2E_SERVE_ONLY === "1") {
+    writeFileSync("/tmp/aquilla-stack-ready.json", JSON.stringify({
+      ...browserEnv,
+      E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
+      E2E_DATABASE_URL: E2E_PG_URL,
+    }))
+    await new Promise(() => {})
+    return
+  }
+
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
   // The default config combines Playwright's line/GitHub reporter with the
   // heartbeat reporter. A caller may still override it explicitly.

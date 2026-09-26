@@ -40,11 +40,15 @@ export function escapeRegex(s: string): string {
  * is passed through verbatim; only the "couldn't even tell you why" fallback
  * is app copy. Standalone `t()`: called directly in RuleEditor.test.ts with no
  * provider/component in scope.
+ *
+ * `flags` is optional so the autofix editor can reject a bad flag string
+ * ("gg", "gx") the same way it rejects a bad pattern — `new RegExp()` throws on
+ * either, and an autofix is stored as pattern + flags together.
  */
-export function validateRegex(pattern: string): string | null {
+export function validateRegex(pattern: string, flags?: string): string | null {
   if (!pattern) return null
   try {
-    new RegExp(pattern)
+    new RegExp(pattern, flags)
     return null
   } catch (e) {
     return e instanceof Error ? e.message : standaloneT("rules.editor.invalidRegexFallback")
@@ -53,6 +57,23 @@ export function validateRegex(pattern: string): string | null {
 
 type Side = "source" | "target"
 type Mode = "required" | "forbidden" | "match"
+
+/**
+ * The `side` values a mode can actually express as a `RuleCheck`.
+ *
+ * There is no source-side prohibition in the union: `target-forbids` constrains
+ * the target, and `source-requires-target` also constrains the target (its
+ * source pattern only decides *when* the rule applies). `match` covers both
+ * sides at once, so it shows no side picker at all.
+ *
+ * Offering "source" for `forbidden`/`required` was a dead end — `buildCheck`
+ * returned `null`, so Save failed with "Pattern is required" even though the
+ * pattern was filled, while the plain-language sentence claimed the rule
+ * applied to the source.
+ */
+export function sidesForMode(mode: Mode): Side[] {
+  return mode === "match" ? ["source", "target"] : ["target"]
+}
 
 function buildCheck(
   side: Side,
@@ -196,6 +217,19 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
   // ── Validation ──
   const patternError = useMemo(() => isLiteral ? null : validateRegex(pattern), [pattern, isLiteral])
   const sourcePatternError = useMemo(() => isLiteral ? null : validateRegex(sourcePattern), [sourcePattern, isLiteral])
+  // The autofix is always a regex (there is no literal toggle for it), and it is
+  // persisted on the rule — an unvalidated one saves fine and only blows up
+  // later, wherever the fix is applied. Validate pattern + flags together.
+  const autofixError = useMemo(
+    () => (showAutofix && afPattern ? validateRegex(afPattern, afFlags) : null),
+    [showAutofix, afPattern, afFlags],
+  )
+
+  /** Switch mode, snapping `side` back to a value the new mode can express. */
+  function selectMode(next: Mode) {
+    setMode(next)
+    if (!sidesForMode(next).includes(side)) setSide("target")
+  }
 
   // ── Debounced draft check for live preview ──
   const [debouncedCheck, setDebouncedCheck] = useState<RuleCheck | null>(null)
@@ -234,7 +268,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
       ? t("rules.editor.sourceAndTargetPatternRequired")
       : t("rules.editor.patternRequired")
     : null
-  const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError
+  const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError && !autofixError
 
   function handleSave() {
     setAttempted(true)
@@ -326,7 +360,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
               <button
                 key={m}
                 type="button"
-                onClick={() => setMode(m)}
+                onClick={() => selectMode(m)}
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                   mode === m
                     ? "bg-primary text-primary-foreground"
@@ -343,26 +377,38 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
           </div>
         </div>
 
-        {/* Side only shows when not "match" (match implies both sides) */}
+        {/* Side only shows when not "match" (match implies both sides).
+            A side the mode can't express stays visible but disabled with the
+            reason spelled out (AQU-427 convention: explain, don't hide) — the
+            alternative was a Save that failed with a pattern error. */}
         {mode !== "match" && (
           <div>
             <FieldLabel className="text-xs">{t("rules.editor.sideLabel")}</FieldLabel>
             <div className="mt-1 flex gap-1">
-              {(["source", "target"] as Side[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSide(s)}
-                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                    side === s
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {s === "source" ? t("editor.column.source") : t("editor.column.target")}
-                </button>
-              ))}
+              {(["source", "target"] as Side[]).map((s) => {
+                const supported = sidesForMode(mode).includes(s)
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={!supported}
+                    onClick={() => setSide(s)}
+                    className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                      side === s
+                        ? "bg-primary text-primary-foreground"
+                        : supported
+                          ? "bg-muted text-muted-foreground hover:bg-muted/80"
+                          : "bg-muted/50 text-muted-foreground/50 cursor-not-allowed"
+                    }`}
+                  >
+                    {s === "source" ? t("editor.column.source") : t("editor.column.target")}
+                  </button>
+                )
+              })}
             </div>
+            <p className="mt-1 max-w-56 text-[10px] text-muted-foreground">
+              {t("rules.editor.sideTargetOnlyNote")}
+            </p>
           </div>
         )}
 
@@ -548,7 +594,8 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
                   value={afPattern}
                   onChange={(e) => setAfPattern(e.target.value)}
                   placeholder={t("rules.editor.patternLabel")}
-                  className="mt-1 font-mono text-xs"
+                  className={`mt-1 font-mono text-xs ${autofixError ? "border-destructive" : ""}`}
+                  aria-invalid={!!autofixError}
                 />
               </div>
               <div>
@@ -564,15 +611,26 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
                 />
               </div>
               <div>
-                <FieldLabel className="text-[10px]">{t("rules.editor.flagsLabel")}</FieldLabel>
+                <FieldLabel htmlFor="re-af-flags" className="text-[10px]">
+                  {t("rules.editor.flagsLabel")}
+                </FieldLabel>
                 <Input
+                  id="re-af-flags"
                   value={afFlags}
                   onChange={(e) => setAfFlags(e.target.value)}
                   placeholder="gi" // i18n-exempt regex flags syntax example, not natural-language text
-                  className="mt-1 font-mono text-xs"
+                  className={`mt-1 font-mono text-xs ${autofixError ? "border-destructive" : ""}`}
+                  aria-invalid={!!autofixError}
                 />
               </div>
             </div>
+            {/* Surfaced as soon as the pattern or flags are bad — not only once
+                a sample is typed — because it now blocks Save. */}
+            {autofixError && (
+              <p className="text-xs text-destructive">
+                {t("rules.editor.invalidAutofixPattern")}: {autofixError}
+              </p>
+            )}
             {/* Sample before/after */}
             <div>
               <FieldLabel htmlFor="re-af-sample" className="text-[10px]">
@@ -592,18 +650,15 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
                   <span className="text-green-700 dark:text-green-400">{afPreview}</span>
                 </div>
               )}
-              {afSample && afPreview === null && afPattern && (
-                <p className="mt-1 text-xs text-destructive">{t("rules.editor.invalidAutofixPattern")}</p>
-              )}
             </div>
           </div>
         )}
       </div>
 
       {/* Actions — match Terminology Add dialog DialogFooter */}
-      {attempted && (checkError || patternError || sourcePatternError) && (
+      {attempted && (checkError || patternError || sourcePatternError || autofixError) && (
         <FieldError>
-          {checkError ?? patternError ?? sourcePatternError}
+          {checkError ?? patternError ?? sourcePatternError ?? autofixError}
         </FieldError>
       )}
       <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">

@@ -38,6 +38,18 @@ async function seedOrgWithAssignments() {
       ('as-anna', 'f1', 'c1'), ('as-anna', 'f1', 'c2'), ('as-anna', 'f1', 'c3'),
       ('as-bob', 'f1', 'c4'), ('as-bob', 'f1', 'c5')`,
   ).run()
+  // SOURCE rows: one per assigned cell. assignment_cells is populated by an
+  // INSERT..SELECT over `cells WHERE side = 'source'`, so in production a
+  // source row is what put each id there — and AQU-1068 derives the assignment
+  // DENOMINATOR by counting the ones that still exist.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES
+      ('pa', 'f1', 'c1', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c2', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c3', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c4', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c5', 'source', 's', 'e-pa', 1)`,
+  ).run()
   // Target cells: a row exists iff that cell has a target translation; validated
   // marks reviewer sign-off. anna c1+c2 done; bob c4 done.
   await env.AQUILLA_PG.prepare(
@@ -290,5 +302,55 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
       env,
     )
     expect(outRes.status).toBe(403)
+  })
+})
+
+describe("assignment totals survive a removed cell (AQU-1068)", () => {
+  // `assignments.cells_total` is stamped once at assignment.create and never
+  // recomputed. Before cells could be removed that was harmless; once a
+  // maintainer can take one out of a file, a stored denominator counts a row
+  // that no longer exists and the assignment can never reach 100% again.
+  // Both halves are derived from the live projection now.
+
+  it("drops the denominator when an assigned cell is removed, so the count stays reachable", async () => {
+    await seedOrgWithAssignments()
+    // anna: 3 assigned, 2 validated. Remove c3 — the one still outstanding.
+    await env.AQUILLA_PG.prepare(
+      `DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'c3'`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    const body = (await res.json()) as {
+      assignments: Array<{ cellsTotal: number; cellsDone: number }>
+    }
+    // The stored column still says 3; nobody reads it.
+    expect(body.assignments[0]).toMatchObject({ cellsTotal: 2, cellsDone: 2 })
+  })
+
+  it("leaves the orphaned assignment_cells row harmless rather than counting it", async () => {
+    // There is no DELETE FROM assignment_cells anywhere in the codebase, so the
+    // row outlives the cell by design. Deriving from `cells` makes it invisible
+    // instead of making it wrong.
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      `DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id IN ('c1', 'c2', 'c3')`,
+    ).run()
+
+    const orphans = await env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*)::int AS n FROM assignment_cells WHERE assignment_id = 'as-anna'`,
+    ).first<{ n: number }>()
+    expect(orphans?.n).toBe(3)
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    const body = (await res.json()) as { assignments: Array<{ cellsTotal: number; cellsDone: number }> }
+    expect(body.assignments[0]).toMatchObject({ cellsTotal: 0, cellsDone: 0 })
   })
 })

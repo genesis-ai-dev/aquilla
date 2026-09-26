@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 27 tools each with an input schema', async () => {
+  it('returns all 29 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -205,16 +205,19 @@ describe('MCP tools/list', () => {
       [
         'confirm_changeset', 'describe_command', 'discard_changeset', 'export_file',
         'find_similar_cells', 'get_capabilities', 'get_changeset', 'get_identity_and_scope',
-        'get_project', 'get_project_settings', 'get_prompt_preview', 'list_changesets',
+        'get_project', 'get_project_settings', 'get_prompt_preview',
+        // AQU-1294 skills.
+        'get_skill',
+        'list_changesets',
         'list_memory', 'list_orgs', 'list_projects', 'patch_settings', 'prepare_import',
-        'prepare_translations', 'preview_import', 'read_cell_memory', 'read_content',
-        'read_history',
+        'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
+        'read_content', 'read_history',
         // AQU-1231 quality reads.
         'read_quality', 'read_term_consistency',
         'search_project', 'search_projects', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(27)
+    expect(body.result.tools).toHaveLength(29)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -235,9 +238,13 @@ describe('MCP tools/call — reads', () => {
     })
     const { payload, isError } = toolPayload(((await res.json()) as any).result)
     expect(isError).toBe(false)
+    // AQU-1180: the MCP adapter and REST /me must agree about what a token is
+    // allowed to learn — scope and autonomy yes, the human behind it no.
     expect(payload).toMatchObject({
-      userId: '1', username: 'alice', mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
+      mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
     })
+    expect(payload).not.toHaveProperty('userId')
+    expect(payload).not.toHaveProperty('username')
   })
 
   it('get_capabilities publishes real limits and error codes', async () => {
@@ -610,7 +617,7 @@ describe('MCP tools/call — settings + command discovery', () => {
     expect(JSON.parse(rows[0].settings).systemPrompt).toBe('old')
   })
 
-  it('patch_settings rejects a policy key at prepare (agent cannot loosen its own gates)', async () => {
+  it('patch_settings rejects a LOOSENING policy write at prepare (agent cannot loosen its own gates)', async () => {
     await promoteToMaintainer()
     await seedSettings({ systemPrompt: 'old', validationCount: 3 }, 1)
     const env = makeEnv(tdb.db)
@@ -629,6 +636,38 @@ describe('MCP tools/call — settings + command discovery', () => {
     const { payload, isError } = toolPayload(((await res.json()) as any).result)
     expect(isError).toBe(true)
     expect((payload as any).error.code).toBe('permission_denied')
+    expect((payload as any).error.details.loosening[0].key).toBe('validationCount')
+  })
+
+  it('patch_settings accepts a TIGHTENING policy write and confirm lands it (AQU-1282 §1)', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'old', validationCount: 3 }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 52, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: {
+          projectId: PROJECT,
+          ops: [{ key: 'validationCount', value: 5 }],
+          ifMatchVersion: 1,
+        },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 53, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    expect(toolPayload(((await commitRes.json()) as any).result).isError).toBe(false)
+
+    const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
+    expect(JSON.parse(rows[0].settings).validationCount).toBe(5)
+    expect(rows[0].version).toBe(2)
   })
 
   it('patch_settings requires ops and a numeric ifMatchVersion', async () => {

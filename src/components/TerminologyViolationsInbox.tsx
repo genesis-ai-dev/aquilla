@@ -16,7 +16,7 @@ import { ChevronDown, ChevronRight, ShieldAlert } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { checkRules } from "@/lib/rules/rule-engine"
@@ -33,15 +33,17 @@ interface Props {
   cells: CellData[]
   /** Jump back to the editor focused on the offending cell, when supported. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
+  termMatching?: TermMatchingSettings
 }
 
-export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Props) {
+export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell, termMatching }: Props) {
   const t = useT()
   // Compile active concepts → rules and evaluate over the loaded cells. This is
   // the same derive-on-read path the editor uses; it only runs while mounted
   // (the caller mounts this only on the active Violations tab).
   const groups = useMemo<ConceptViolationGroup[]>(() => {
-    const termRules = compileConceptsToRules(concepts)
+    const termRules = compileConceptsToRules(concepts, termMatching)
     if (termRules.length === 0) return []
     const byFile = new Map<string, CellData[]>()
     for (const c of cells) {
@@ -52,7 +54,7 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Pr
     const infractionMap = checkRules(byFile, termRules)
     const flat = [...infractionMap.values()].flat()
     return groupTerminologyInfractions(flat, concepts)
-  }, [concepts, cells])
+  }, [concepts, cells, termMatching])
 
   const cellById = useMemo(() => {
     const m = new Map<string, CellData>()

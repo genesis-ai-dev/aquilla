@@ -138,14 +138,20 @@ function summarize(
   push(num(summary, "targetVariantsAdded"), "target variant(s)")
   push(num(summary, "mediaLinked"), "cell(s) media-linked")
   if (num(summary, "filesCreated") > 0) parts.push(`${num(summary, "filesCreated")} file(s) created`)
-  // EmitEvents summaries carry events: { kind, count, testimony }[].
+  // EmitEvents summaries carry events: { kind, count, testimony, label }[].
+  // AQU-1179: prefer the server's plain-language `label` — this line is read by
+  // the person deciding whether to apply the plan, and "3 cell.backtranslation.set"
+  // is not something anyone can consent to. Older summaries have no label; they
+  // keep the raw-kind rendering.
   const events = Array.isArray(summary.events) ? summary.events : []
   for (const ev of events) {
     const e = asRecord(ev)
     const kind = typeof e.kind === "string" ? e.kind : "event"
+    const label = typeof e.label === "string" && e.label.length > 0 ? e.label : null
     const count = num(e, "count")
     if (count > 0) {
-      parts.push(`${count} ${kind}${e.testimony === true ? " (testimony)" : ""}`)
+      const text = label ?? `${count} ${kind}`
+      parts.push(`${text}${e.testimony === true ? " (testimony)" : ""}`)
       cellCount += count
     }
   }

@@ -13,8 +13,8 @@ import { Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
-import type { Concept } from "@/lib/terminology/types"
-import { buildTermRegex } from "@/lib/terminology/match"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
+import { buildTermRegex, findConceptMatches } from "@/lib/terminology/match"
 import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
 export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminologyChipDecorations")
@@ -45,11 +45,26 @@ export function findTermMatches(text: string, term: string): Array<{ start: numb
 }
 
 /**
+ * Find every plain-text [start, end) range a CONCEPT matches: its sourceTerm
+ * plus any extra `match.forms`, with mark-folding, project affixes and
+ * excluded forms applied (AQU-1271). Chips therefore highlight exactly the
+ * surface forms the rule engine enforces.
+ */
+export function findConceptMatchRanges(
+  text: string,
+  concept: Concept,
+  termMatching?: TermMatchingSettings,
+): Array<{ start: number; end: number }> {
+  return findConceptMatches(text, concept, termMatching).map(({ start, end }) => ({ start, end }))
+}
+
+/**
  * Build a DecorationSet with one inline decoration wrapping each match.
  */
 export function buildTerminologyChipDecorationSet(
   doc: PMNode,
   concepts: Concept[],
+  termMatching?: TermMatchingSettings,
 ): DecorationSet {
   // Only active concepts participate
   const activeConcepts = concepts.filter(c => c.status === "active")
@@ -62,7 +77,7 @@ export function buildTerminologyChipDecorationSet(
   const decorations: Decoration[] = []
 
   for (const concept of activeConcepts) {
-    const matches = findTermMatches(plainText, concept.sourceTerm)
+    const matches = findConceptMatchRanges(plainText, concept, termMatching)
     for (const match of matches) {
       const from = plainToPm[match.start]
       const to = plainToPm[match.end]
@@ -83,7 +98,10 @@ export function buildTerminologyChipDecorationSet(
   return DecorationSet.create(doc, decorations)
 }
 
-export function createTerminologyChipExtension(getConcepts: () => Concept[]) {
+export function createTerminologyChipExtension(
+  getConcepts: () => Concept[],
+  getTermMatching?: () => TermMatchingSettings | undefined,
+) {
   return Extension.create({
     name: "terminologyChipDecorations",
     addProseMirrorPlugins() {
@@ -92,16 +110,16 @@ export function createTerminologyChipExtension(getConcepts: () => Concept[]) {
           key: terminologyChipPluginKey,
           state: {
             init: (_, state) =>
-              buildTerminologyChipDecorationSet(state.doc, getConcepts()),
+              buildTerminologyChipDecorationSet(state.doc, getConcepts(), getTermMatching?.()),
             apply: (tr, old, _oldState, newState) => {
               if (tr.getMeta(terminologyChipPluginKey) === "rebuild") {
-                return buildTerminologyChipDecorationSet(newState.doc, getConcepts())
+                return buildTerminologyChipDecorationSet(newState.doc, getConcepts(), getTermMatching?.())
               }
               // Chip matches are derived from the doc text itself (unlike the
               // violation/karaoke decorations, whose inputs are external props
               // rebuilt via meta). Mapping the old set through a doc change can
               // never ADD a chip for newly typed term matches, so rebuild.
-              if (tr.docChanged) return buildTerminologyChipDecorationSet(tr.doc, getConcepts())
+              if (tr.docChanged) return buildTerminologyChipDecorationSet(tr.doc, getConcepts(), getTermMatching?.())
               return old
             },
           },

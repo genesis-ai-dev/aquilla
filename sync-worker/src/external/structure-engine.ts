@@ -185,9 +185,22 @@ async function loadTargets(
 }
 
 /** True when ANY source cell in the file carries a preserved export slot —
- *  see the ROUND-TRIP note at the top of this module. `jsonb_exists` is the
- *  function form of the `?` operator: the Postgres shim rewrites `?` as a bind
- *  placeholder, so the operator form cannot be used here. */
+ *  see the ROUND-TRIP note at the top of this module.
+ *
+ *  Only the SLOT-ADDRESSED locator kinds count: `package-block` (the OOXML
+ *  docx/pptx path, the one `translationsByPackageBlock` reads) and IDML's own
+ *  metadata keys. Every import stamps SOME `sourceLocator` — `PlanImport`
+ *  gives plain content a synthetic `{ kind: 'sequence' }` — so testing for the
+ *  field's mere existence refused these commands on every file an agent can
+ *  create, which is the whole surface AQU-1234 exists to serve. The other
+ *  kinds (`sequence`, `cue`, `usfm`, `recipe`, `translation-unit`) are
+ *  positional or ref-keyed, not slot-addressed: nothing throws on a cell that
+ *  lacks one. USFM's lossless overlay keeps its own narrower guard
+ *  (`fileHasLosslessSource`) at each call site.
+ *
+ *  `jsonb_exists` is the function form of the `?` operator: the Postgres shim
+ *  rewrites `?` as a bind placeholder, so the operator form cannot be used
+ *  here. */
 async function fileHasPreservedSlots(
   db: AquillaDb,
   projectId: string,
@@ -198,7 +211,7 @@ async function fileHasPreservedSlots(
       `SELECT 1 AS hit FROM cells
         WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
           AND (
-            jsonb_exists(metadata -> 'aquillaImport', 'sourceLocator')
+            metadata -> 'aquillaImport' -> 'sourceLocator' ->> 'kind' = 'package-block'
             OR jsonb_exists(metadata, 'idml')
             OR jsonb_exists(metadata, 'idmlLocator')
           )

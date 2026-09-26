@@ -47,7 +47,11 @@ export async function authenticateCredential(
     }
   }
 
-  const credential = await validateApiCredential(env.AQUILLA_PG as AquillaDb, token)
+  const credential = await validateApiCredential(
+    env.AQUILLA_PG as AquillaDb,
+    token,
+    request.headers.get("CF-Connecting-IP"),
+  )
   if (!credential) {
     // Collapses invalid/revoked/expired into one generic message — the code
     // (permission_denied) is what callers branch on, not the message text.

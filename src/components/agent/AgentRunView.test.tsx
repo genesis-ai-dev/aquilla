@@ -53,6 +53,35 @@ describe("AgentRunView", () => {
     expect(screen.getByText(/#c1\|MRK 4:1/)).toBeInTheDocument()
   })
 
+  // AQU-842: tool-result tables (PassageCard & friends, rendered through the
+  // renderToolCard seam) used to sit expanded under every chip and bury the
+  // agent's prose. They collapse with the chip now.
+  it("keeps the tool card collapsed until its own chip is clicked", () => {
+    render(
+      <AgentRunView
+        run={makeRun({
+          items: [
+            { id: "i0", kind: "tool", step: 1, tool: "read", summary: "MRK 4 · 32 cells", ok: true },
+            { id: "i1", kind: "tool", step: 2, tool: "read", summary: "MRK 5 · 43 cells", ok: true },
+          ],
+        })}
+        renderToolCard={(item) => <div data-testid={`card-${item.id}`}>{item.summary} table</div>}
+      />,
+    )
+
+    expect(screen.getByTestId("card-i0")).not.toBeVisible()
+    expect(screen.getByTestId("card-i1")).not.toBeVisible()
+
+    // One click expands that block ALONE — not every card in the run.
+    fireEvent.click(screen.getByText("MRK 4 · 32 cells"))
+    expect(screen.getByTestId("card-i0")).toBeVisible()
+    expect(screen.getByTestId("card-i1")).not.toBeVisible()
+
+    // …and clicking again collapses it back.
+    fireEvent.click(screen.getByText("MRK 4 · 32 cells"))
+    expect(screen.getByTestId("card-i0")).not.toBeVisible()
+  })
+
   it("interleaves prose and tool chips in timeline order", () => {
     const { container } = render(
       <AgentRunView

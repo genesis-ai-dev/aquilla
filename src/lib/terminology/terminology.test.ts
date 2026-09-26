@@ -217,6 +217,27 @@ describe("compileConceptsToRules", () => {
     const rules = compileConceptsToRules([makeConcept()])
     expect(rules.every((r) => r.enabled)).toBe(true)
   })
+
+  // WHY: enforcement must see the same forms the term page and chips see. If
+  // compile bypassed the concept matcher, a term would count as "enforced" on
+  // the glossary page while the rule engine silently skipped prefixed cells.
+  it("source pattern honours foldMarks, affixes, forms and exclusions", () => {
+    const concept: Concept = {
+      id: "c-erets",
+      sourceTerm: "הָאָ֗רֶץ",
+      renderings: [{ rendering: "earth", status: "preferred" }],
+      status: "active",
+      createdAt: new Date().toISOString(),
+      match: { excludedForms: ["בארץ"] },
+    }
+    const [rule] = compileConceptsToRules([concept], { prefixes: ["ו", "ה", "ב"], suffixes: [] })
+    const re = new RegExp((rule.check as { sourcePattern: string }).sourcePattern, "giu")
+    expect(re.test("וְהָאָ֗רֶץ")).toBe(true)
+    re.lastIndex = 0
+    expect(re.test("הָאָֽרֶץ׃")).toBe(true)
+    re.lastIndex = 0
+    expect(re.test("בָּאָ֓רֶץ")).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------

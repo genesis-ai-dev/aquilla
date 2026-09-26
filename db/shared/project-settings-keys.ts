@@ -11,8 +11,9 @@
 // It mirrors `ProjectWideSettings` in src/lib/sync/project-settings.ts — the
 // SPA's view of the same blob — plus two keys that live only server-side:
 // the `healthSettings`/`decaySettings` alias pair normalizeSettings() keeps in
-// step (db/shared/projects.ts) and the policy keys that are never agent-
-// writable but must still be RECOGNISED here, so naming one earns the
+// step (db/shared/projects.ts) and the policy keys that are agent-writable
+// only in their restrictive direction (AQU-1282, db/shared/policy-direction.ts)
+// but must still be RECOGNISED here, so a loosening write earns the
 // `permission_denied` it deserves rather than being mistaken for a typo.
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
@@ -86,16 +87,43 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   algorithmicChecks: { kind: 'object' },
   terminology: { kind: 'object[]' },
 
-  // Validation policy (all POLICY keys — listed so they resolve to
+  // Validation policy (all POLICY keys — writable in the restrictive direction
+  // only, see db/shared/policy-direction.ts; a loosening write resolves to
   // permission_denied rather than "unknown key")
   validationCount: { kind: 'number' },
   validationCountAudio: { kind: 'number' },
   validationRoleFloor: { kind: 'enum', values: ['reviewer', 'project_lead', 'maintainer'] },
   validationNamedUsers: { kind: 'string[]' },
   allowSelfValidation: { kind: 'boolean' },
+  // AQU-490: the audio twins. Separate keys rather than shared ones, by Sam's
+  // ruling — a project can reasonably want two ears on a recording and one on
+  // a translation, or trust a different set of people with each. A project
+  // that sets none of them gets the text defaults' behaviour, not the text
+  // project's settings: absent means unrestricted here exactly as it does
+  // above, and the two are never read as fallbacks for each other.
+  validationRoleFloorAudio: { kind: 'enum', values: ['reviewer', 'project_lead', 'maintainer'] },
+  validationNamedUsersAudio: { kind: 'string[]' },
+  allowSelfValidationAudio: { kind: 'boolean' },
+  // AQU-490: ACCEPTED AND IGNORED. This was briefly a real switch — whether
+  // the audio validation control appeared in the TEXT view's gutter — and Sam
+  // dropped it a day later: the control simply appears wherever a line has a
+  // recording, on every project. Nothing reads the key any more. It stays
+  // listed for the reason `agentAuthorship` below does: a client or an agent
+  // that still names it should get a clean answer rather than "unknown key",
+  // and any project stamped by an early 0096 still carries it in its blob.
+  showAudioValidationInTextView: { kind: 'boolean' },
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },
   contributeToGlobalTm: { kind: 'boolean' },
+  // AQU-1180: drops author fields from agent-facing reads. Recognised so an
+  // agent naming it gets permission_denied rather than "unknown key".
+  agentAuthorship: { kind: 'enum', values: ['none'] },
+  // AQU-1068: who may add/remove cells; "none" = nobody (the default). Ordered
+  // loosest → tightest in db/shared/policy-direction.ts.
+  cellEditingFloor: {
+    kind: 'enum',
+    values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },

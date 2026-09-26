@@ -154,6 +154,8 @@ export function deriveNavIcon(pathname: string): LucideIcon {
         }
         if (parts[1] === "providers") return KeyRound
         if (parts[1] === "monday") return Workflow
+        // AQU-1131 — same icon as the project-level rules pane.
+        if (parts[1] === "rules") return SpellCheck
         return NAV_PAGE_ICONS.settings
       case "members":
         return NAV_PAGE_ICONS.members

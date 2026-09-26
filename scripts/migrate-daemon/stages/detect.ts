@@ -105,10 +105,16 @@ export async function registerProject(
   if (resolvedSha === null) throw new Error(`no head sha for project ${p.id} (${p.namespace}/${p.name})`)
 
   const existing = deps.db.getProject(p.id)
-  if (existing && existing.applied_sha === resolvedSha && existing.content_logic === CONTENT_LOGIC_VERSION) return "unchanged"
-
-  deps.db.enqueue(p.id, "content", resolvedSha)
-  return "enqueued"
+  let enqueued = false
+  if (!existing || existing.applied_sha !== resolvedSha || existing.content_logic !== CONTENT_LOGIC_VERSION) {
+    deps.db.enqueue(p.id, "content", resolvedSha)
+    enqueued = true
+  }
+  if (!existing || existing.audio_applied_sha !== resolvedSha) {
+    deps.db.enqueue(p.id, "audio", resolvedSha)
+    enqueued = true
+  }
+  return enqueued ? "enqueued" : "unchanged"
 }
 
 /**
@@ -141,6 +147,8 @@ export async function pollInbox(deps: DetectDeps): Promise<number> {
     }
   }
   if (last !== undefined) deps.db.kvSet("inbox_cursor", last)
+  deps.db.kvSet("last_inbox_poll_at", new Date().toISOString())
+  deps.db.kvSet("last_inbox_enqueued", String(enqueued))
   return enqueued
 }
 
@@ -164,5 +172,7 @@ export async function reconcile(deps: DetectDeps): Promise<number> {
     }
   }
   if (max !== undefined) deps.db.kvSet("reconcile_hwm", max)
+  deps.db.kvSet("last_reconcile_at", new Date().toISOString())
+  deps.db.kvSet("last_reconcile_enqueued", String(enqueued))
   return enqueued
 }

@@ -1252,7 +1252,8 @@ CREATE INDEX IF NOT EXISTS idx_changeset_confirmations_changeset
 
 -- External API credentials (0054_api_credentials.sql): personal access tokens
 -- for the Agent API (AQU-533 §2). Per-user, optionally scoped to an org and/or
--- project, with an autonomy ceiling ('ask' | 'act'). Only a SHA-256 hash is
+-- project, with an autonomy ceiling ('ask' | 'act') and an access ceiling
+-- ('read' | 'write', AQU-1242/0112). Only a SHA-256 hash is
 -- stored; token_prefix (first 12 chars, incl. the 'aqk_' tag) is display-only.
 -- User-scoped like agent_sessions; live role is re-resolved per call.
 CREATE TABLE IF NOT EXISTS api_credentials (
@@ -1271,7 +1272,12 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     -- AQU-1180 (0091): opt-IN human identity. Default false — an agent token
     -- sees stable per-project pseudonyms instead of usernames. Only an OWNER
     -- of the credential's scope may mint one with it on.
-    pii          BOOLEAN NOT NULL DEFAULT false
+    pii          BOOLEAN NOT NULL DEFAULT false,
+    -- AQU-1242 (0112): may this token change anything at all? Orthogonal to
+    -- `mode`, which is the autonomy dial for writes that ARE permitted. 'read'
+    -- makes every write surface answer scope_denied; 'write' (the default, so
+    -- every pre-0112 token keeps working) is the original all-or-nothing grant.
+    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write'))
 );
 CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);

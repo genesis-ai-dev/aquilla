@@ -56,6 +56,7 @@ import {
   mintCredential,
   revokeCredential,
   type ApiCredential,
+  type CredentialAccess,
   type CredentialMode,
   type MintCredentialResult,
 } from "@/lib/sync/credentials"
@@ -296,6 +297,7 @@ export function ApiTokensSection() {
       {instructionsFor && (
         <AgentInstructionsDialog
           mode={instructionsFor.mode}
+          access={instructionsFor.access}
           scopeLabel={scopeLabel(t, instructionsFor, orgs, projects)}
           onClose={() => setInstructionsFor(null)}
         />
@@ -401,6 +403,7 @@ function ShowOnceTokenDialog({
         syncOrigin: syncWorkerHttpOrigin(),
         token: result.token,
         mode: result.credential.mode,
+        access: result.credential.access,
         scopeLabel,
       }),
     )
@@ -463,19 +466,21 @@ function ShowOnceTokenDialog({
 function AgentInstructionsDialog({
   token,
   mode,
+  access,
   scopeLabel,
   onClose,
 }: {
   token?: string
   mode: CredentialMode
+  access: CredentialAccess
   scopeLabel: string
   onClose: () => void
 }) {
   const t = useT()
   const [copied, setCopied] = useState(false)
   const text = useMemo(
-    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, scopeLabel }),
-    [token, mode, scopeLabel],
+    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, access, scopeLabel }),
+    [token, mode, access, scopeLabel],
   )
 
   function copy() {
@@ -535,6 +540,15 @@ function MintTokenDialog({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [mode, setMode] = useState<CredentialMode>("ask")
+  // AQU-1242: defaults to read-write, matching the server default and what every
+  // token minted before this field existed does. Tempting as a safe-by-default
+  // read-only is, flipping it would silently change what a returning user gets
+  // from this dialog: someone who mints "Import agent" the way they always have
+  // and skips past a new radio would walk away with a token their agent 403s on,
+  // and discover it as a broken import rather than as a choice they made.
+  // Narrowing a token is therefore explicit, and the option is placed first and
+  // spelled out so it is not easy to miss.
+  const [access, setAccess] = useState<CredentialAccess>("write")
   const [orgId, setOrgId] = useState("")
   const [projectId, setProjectId] = useState("")
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
@@ -562,7 +576,9 @@ function MintTokenDialog({
   const selectedProject = projectOptions.find((p) => p.id === projectId) ?? null
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
-  const canAct = selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
+  const readOnly = access === "read"
+  const canAct =
+    !readOnly && selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
   // AQU-1180: exposing translator names to an agent is a decision about other
   // people's safety, so it takes an OWNER of the scope — mirrors the server's
   // permission_denied rule rather than letting the user discover it on submit.
@@ -575,6 +591,7 @@ function MintTokenDialog({
     if (open) return
     setName("")
     setMode("ask")
+    setAccess("write")
     setOrgId("")
     setProjectId("")
     setExpiry("90d")
@@ -615,6 +632,7 @@ function MintTokenDialog({
       const result = await mintCredential(jwt, {
         name: name.trim(),
         mode,
+        access,
         orgId: orgId || undefined,
         projectId: projectId || undefined,
         expiresAt: expiryToIso(expiry),
@@ -651,15 +669,39 @@ function MintTokenDialog({
               />
             </Field>
 
+            {/* AQU-1242: asked BEFORE mode, because it decides whether mode is a
+                question at all — a read-only token never reaches an approval. */}
+            <Field>
+              <FieldLabel>{t("onboarding.apiTokens.accessLabel")}</FieldLabel>
+              <RadioGroup
+                value={access}
+                onValueChange={(value) => setAccess(value as CredentialAccess)}
+                className="gap-2"
+              >
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="read" className="mt-0.5" data-testid="token-access-read" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessReadLabel")}</strong> — {t("onboarding.apiTokens.accessReadDescription")}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="write" className="mt-0.5" data-testid="token-access-write" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessWriteLabel")}</strong> — {t("onboarding.apiTokens.accessWriteDescription")}
+                  </span>
+                </label>
+              </RadioGroup>
+            </Field>
+
             <Field>
               <FieldLabel>{t("common.modeLabel")}</FieldLabel>
               <RadioGroup
                 value={mode}
                 onValueChange={(value) => setMode(value as CredentialMode)}
-                className="gap-2"
+                className={`gap-2 ${readOnly ? "opacity-50" : ""}`}
               >
                 <label className="flex items-start gap-2.5 text-sm">
-                  <RadioGroupItem value="ask" className="mt-0.5" />
+                  <RadioGroupItem value="ask" className="mt-0.5" disabled={readOnly} />
                   <span>
                     <strong>{t("onboarding.apiTokens.modeAskLabel")}</strong> — {t("onboarding.apiTokens.modeAskDescription")}
                   </span>
@@ -673,6 +715,9 @@ function MintTokenDialog({
                   </span>
                 </label>
               </RadioGroup>
+              {readOnly && (
+                <FieldDescription>{t("onboarding.apiTokens.modeNotApplicable")}</FieldDescription>
+              )}
             </Field>
 
             <Field>

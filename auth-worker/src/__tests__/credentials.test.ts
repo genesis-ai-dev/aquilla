@@ -11,6 +11,7 @@ type CreateResponse = {
     id: string
     name: string
     mode: "ask" | "act"
+    access: "read" | "write"
     orgId: string | null
     projectId: string | null
     tokenPrefix: string
@@ -338,6 +339,94 @@ describe("DELETE /api/v2/credentials/:id", () => {
       expect(res.status).toBe(201)
       const body = (await res.json()) as CreateResponse
       expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.pii).toBe(false)
+    })
+  })
+
+  /**
+   * AQU-1242 — the access ceiling.
+   *
+   * The regression these guard is not "a field round-trips": it is that the
+   * whole read-only feature is only as good as what `validateApiCredential`
+   * reports, because every enforcement point in sync-worker branches on that one
+   * value. A token minted `read` that validates back as `write` is not a cosmetic
+   * bug — it is a token the partner believes cannot touch their translations,
+   * silently able to.
+   */
+  describe("access ceiling (AQU-1242)", () => {
+    it("mints a read-only credential that validates back as read-only", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "reporting agent", mode: "ask", access: "read" })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect(body.credential.access).toBe("read")
+
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.access).toBe("read")
+    })
+
+    it("omitting access mints a read-write credential — every existing caller is unchanged", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "legacy caller", mode: "ask" })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect(body.credential.access).toBe("write")
+      expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.access).toBe("write")
+    })
+
+    it("rejects read-only + act mode rather than silently picking one", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2)
+      const res = await mint("alice", {
+        name: "contradiction",
+        mode: "act",
+        access: "read",
+        projectId: "proj-1",
+      })
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "validation_failed" })
+
+      // Nothing was minted — a rejected request must not leave a token behind.
+      const rows = await env.AQUILLA_PG.prepare("SELECT id FROM api_credentials").all()
+      expect(rows.results ?? []).toHaveLength(0)
+    })
+
+    it("reports access in the list so a human auditing their tokens can see which can write", async () => {
+      await seedUser(1, "alice")
+      await mint("alice", { name: "ro", mode: "ask", access: "read" })
+      await mint("alice", { name: "rw", mode: "ask", access: "write" })
+
+      const res = await app.request(
+        "/api/v2/credentials",
+        { headers: authHeader(await jwtFor("alice")) },
+        env,
+      )
+      expect(res.status).toBe(200)
+      const { credentials } = (await res.json()) as { credentials: CreateResponse["credential"][] }
+      expect(
+        Object.fromEntries(credentials.map((c) => [c.name, c.access])),
+      ).toEqual({ ro: "read", rw: "write" })
+    })
+
+    it("a read-only credential still carries its scope and pii decisions", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2, null)
+      await grantProjectRole("proj-1", 1, 800, 2) // owner-level on the project
+      const res = await mint("alice", {
+        name: "read-only auditor",
+        mode: "ask",
+        access: "read",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      // Access is orthogonal to both: reading real names and reading only are
+      // different questions, and narrowing one must not quietly reset the other.
+      expect(ctx).toMatchObject({ access: "read", projectId: "proj-1", pii: true })
     })
   })
 })

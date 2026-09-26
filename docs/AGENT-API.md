@@ -121,6 +121,8 @@ economics) lives in the AQU-533 comment thread, not here.
   real use case requires it.
 - Carry an **autonomy ceiling** (`ask` or `act`, below), expiry, last-used metadata,
   rotation, and emergency revocation.
+- Carry an **access ceiling** (`read` or `write`, AQU-1242) — orthogonal to autonomy.
+  See "Access ceiling" below.
 - **Live role/membership resolution on every call** — a credential never outlives or
   exceeds the user's current role. Every command passes the same per-action permission
   checks as the in-app path.
@@ -141,7 +143,7 @@ fact about a person, not a preference. An agent needs none of it to translate. S
 | Layer | Default | Who can change it |
 | --- | --- | --- |
 | Author fields (`lastEditor` on cells, `author` on history) | stable per-project pseudonym `u_xxxxxxxx` | credential `pii` flag |
-| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + scope; no `userId`/`username` | credential `pii` flag |
+| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + access + scope; no `userId`/`username` | credential `pii` flag |
 | Project-wide | authorship exposed pseudonymously | project setting `agentAuthorship` |
 
 - **Pseudonyms are HMAC(SYNC_SECRET_KEY, projectId ‖ author)**, truncated to 8 hex. Stable
@@ -165,6 +167,38 @@ the external boundary — the internal SPA read path legitimately shows real nam
 
 Auth transport: personal access tokens for the initial developer preview; OAuth 2.1
 for broadly compatible remote MCP (connector directories) as a fast follow.
+
+### Access ceiling (AQU-1242)
+
+`access` answers a different question from `mode`: **may this token change anything at
+all?** `mode` is the autonomy dial for writes that are already permitted — an ask-mode
+token still writes, with a human at the approval page.
+
+- **`write`** (the default, and what every token minted before migration 0112 carries)
+  — the original grant: stage, commit, upload artifacts.
+- **`read`** — the whole API is read-only. Changeset prepare, changeset commit and
+  artifact upload answer `403 scope_denied`; reads, search, history and export are
+  unaffected. `GET /me` reports `access: "read"` with a hint saying so, so an agent
+  learns the ceiling from discovery rather than from a refusal on work it already did.
+
+A read-only refusal is **not** retryable and is not about the caller's project role:
+only a human minting a new token can lift it. That is why it is `scope_denied` rather
+than `permission_denied` — the token's scope is what falls short, exactly as it does
+for an out-of-scope org or project.
+
+Enforced at three depths, the deepest being load-bearing: prepare and commit refuse
+early so an agent does not build a plan it can never apply, and `mintInternalSyncToken`
+(the one door every external event write passes — the engine never constructs an
+`AuthorizedEvent` itself) refuses unconditionally, so a write path added later is
+refused even if it forgets the route-level check.
+
+Access is fixed at mint time and cannot be raised by any API call. It is a ceiling like
+every other: the caller's live project role is still resolved per call, so a read-only
+token can only ever narrow what its owner could already do.
+
+Not yet scoped finer than read/write — per-book, per-file and per-interaction-type
+scoping is tracked separately (see AQU-1242's follow-up); a book-scoped token would have
+to filter every read surface, and a half-filtered one would restrict in appearance only.
 
 ### Autonomy modes
 

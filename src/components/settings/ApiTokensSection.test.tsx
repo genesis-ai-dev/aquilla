@@ -76,6 +76,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: null,
   pii: false,
+  access: "write",
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -90,6 +91,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
   pii: false,
+  access: "write",
 }
 
 beforeEach(() => {
@@ -225,6 +227,7 @@ describe("ApiTokensSection", () => {
         lastUsedAt: null,
         revokedAt: null,
         pii: false,
+        access: "write",
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -297,7 +300,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false, access: "write",
       },
     })
     await screen.findByText("aqk_once")
@@ -342,7 +345,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null, pii: false,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
         },
       })
 
@@ -390,6 +393,136 @@ describe("ApiTokensSection", () => {
       // ASK_CREDENTIAL is ask-mode and unscoped: the safety instruction is present.
       expect(prompt).toMatch(/ask-mode/)
       expect(prompt).toContain("Unscoped (personal)")
+    })
+
+    // AQU-1242: a read-only token's prompt must not read like an ask-mode one.
+    // "Stage writes and wait for my approval" sends the agent down a path that
+    // ends in a 403 it will probably retry; the ceiling has to be stated instead.
+    it("read-only token: the prompt states the ceiling instead of the approval dance", async () => {
+      mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, access: "read" }])
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      await screen.findByText(/aqk_abc123/)
+
+      fireEvent.click(screen.getByRole("button", { name: "Agent setup" }))
+      await screen.findByText("Instructions for your agent")
+      fireEvent.click(screen.getByRole("button", { name: /Copy instructions/i }))
+
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+      const prompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+      expect(prompt).toContain("read-only")
+      expect(prompt).toContain("scope_denied")
+      expect(prompt).not.toMatch(/ask-mode/)
+      expect(prompt).not.toMatch(/you can stage writes/)
+    })
+  })
+
+  // AQU-1242 — the token's write ceiling.
+  describe("access ceiling", () => {
+    it("mints a read-only token, and act mode is not offered for one", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_readonlyplaintext",
+        credential: {
+          id: "cred-ro", name: "Reporting agent", mode: "ask", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_ro",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reporting agent" } })
+
+      // A maintainer project would normally unlock act mode...
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      expect(screen.getByRole("radio", { name: /Act/i })).not.toHaveAttribute("aria-disabled", "true")
+
+      // ...but a read-only token has nothing to apply, so act is withdrawn and
+      // the reason is stated rather than left as a mysteriously dead control.
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+      expect(screen.getByRole("radio", { name: /Act/i })).toHaveAttribute("aria-disabled", "true")
+      expect(screen.getByText(/Mode only applies to a token that can write/i)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("picking act mode and then read-only never mints the contradiction the server rejects", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_x",
+        credential: {
+          id: "cred-y", name: "Flip flop", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_x", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Flip flop" } })
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      fireEvent.click(screen.getByRole("radio", { name: /Act/i }))
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      // read + act is a 400 server-side; the dialog must not be able to send it.
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("defaults to read-write, so a user who ignores the new field mints what they always did", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_default",
+        credential: {
+          id: "cred-d", name: "Same as before", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_def", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Same as before" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "write" }),
+      )
+    })
+
+    it("the list marks a read-only token as read-only instead of showing its unused mode", async () => {
+      mockListCredentials.mockResolvedValue([
+        { ...ASK_CREDENTIAL, id: "cred-ro", tokenPrefix: "aqk_ro1234", access: "read" },
+        { ...ASK_CREDENTIAL, id: "cred-rw", tokenPrefix: "aqk_rw1234", access: "write" },
+      ])
+      render(<ApiTokensSection />)
+      await screen.findByText(/aqk_ro1234/)
+
+      const readOnlyRow = screen.getByText(/aqk_ro1234/).closest("li")!
+      const writeRow = screen.getByText(/aqk_rw1234/).closest("li")!
+      expect(readOnlyRow).toHaveTextContent("read-only")
+      // "ask" would suggest writes are merely gated on approval, not impossible.
+      expect(readOnlyRow).not.toHaveTextContent(/\bask\b/)
+      expect(writeRow).toHaveTextContent("ask")
+      expect(writeRow).not.toHaveTextContent("read-only")
     })
   })
 })

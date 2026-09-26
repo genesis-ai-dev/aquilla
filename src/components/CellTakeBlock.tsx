@@ -18,17 +18,18 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { Mic } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { CellAudioButton } from "./CellAudioButton"
-import { CellWaveform } from "./CellWaveform"
+import { TakeWaveform } from "./audio/TakeWaveform"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { takeBadgeState } from "./cell/audio-validation-state"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
@@ -144,17 +145,29 @@ function CellTakeBlockView({
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 
-  // AQU-1217: play only the part of the clip that plays for this line — the
-  // take's stored trim, or, for an imported source-audio section, the section
-  // itself. This block used to play the whole file: an untrimmed take, and on
-  // a source section the entire source reading from its first second.
+  // AQU-1217: the part of the clip that plays for this line — the take's
+  // stored trim, or, for an imported source-audio section, the section itself.
+  // TakeWaveform applies it to the player; this block used to play the whole
+  // file (an untrimmed take, and on a source section the entire reading).
   const kept = keptWindowSec(owner, selectedAudioId, attachment)
-  const { setTrim } = controller
-  useEffect(() => {
-    setTrim(kept.start, kept.end)
-    // selectedAudioId is a dep on purpose: the controller drops its window when
-    // the take changes, so an identical window on the new take must re-apply.
-  }, [setTrim, kept.start, kept.end, selectedAudioId])
+  const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
+  const badge = attachment ? takeBadgeState(attachment, username, audioValidation.validationRequirement) : null
+  // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
+  // that HOLDS the take — a linked heard-line take writes to its cue.
+  const commitTrim = useCallback((start: number | null, end: number | null) => {
+    if (!selectedAudioId || !attachment) return
+    void persistTakeTrim({
+      projectId: project.id,
+      fileId: owner.fileId,
+      cellId: owner.id,
+      audioId: selectedAudioId,
+      att: attachment,
+      selectedAudioId: owner.selectedAudioId,
+      trimStartMs: trimMs(start),
+      trimEndMs: trimMs(end),
+      author: username,
+    })
+  }, [selectedAudioId, attachment, project.id, owner.fileId, owner.id, owner.selectedAudioId, username])
 
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
@@ -217,16 +230,25 @@ function CellTakeBlockView({
   return (
     <div className="flex flex-col gap-3">
       {header}
-      <div className="flex items-center gap-2">
-        <CellAudioButton controller={controller} />
-        <div className="flex-1">
-          <CellWaveform
-            controller={controller}
-            height={36}
-            strategy={project.audioMediaStrategy ?? "lazy"}
-          />
-        </div>
-      </div>
+      {/* The take, drawn as its timeline chip (AQU-1217). Play from its corner;
+          its mic opens the recorder, as a chip's does; trim right here. */}
+      <TakeWaveform
+        controller={controller}
+        audioId={selectedAudioId}
+        kept={kept}
+        height={56}
+        kind={isGenerated ? "generated" : "take"}
+        strategy={project.audioMediaStrategy ?? "lazy"}
+        trimEditable={editable}
+        onCommitTrim={commitTrim}
+        onRecord={editable && onOpenRecording ? () => onOpenRecording(owner.id) : undefined}
+        // The chip's own label, not the row button's: the two do the same
+        // thing, but a screen reader should not hear two "Re-record"s.
+        recordLabel={t("workspace.targetAudioLane.recordAudio")}
+        recordGlyph={<Mic className="h-2.5 w-2.5" />}
+        validation={badge === "self" || badge === "full" ? badge : null}
+        testId="cell-take-waveform"
+      />
       {timings && timings.length > 0 && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

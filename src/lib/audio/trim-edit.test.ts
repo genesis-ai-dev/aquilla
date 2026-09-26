@@ -18,6 +18,12 @@ describe("moveTrimStart", () => {
     expect(moveTrimStart({ start: 0.4, end: null }, -1, 3)).toEqual({ start: null, end: null })
   })
 
+  it("lets a single arrow nudge step in from the edge without snapping back", () => {
+    expect(moveTrimStart(open, 0.01, 3, { snap: false })).toEqual({ start: 0.01, end: null })
+    expect(moveTrimEnd(open, 2.99, 3, { snap: false })).toEqual({ start: null, end: 2.99 })
+    expect(moveTrimStart({ start: 0.01, end: null }, 0, 3, { snap: false })).toEqual({ start: null, end: null })
+  })
+
   it("does nothing without a known length", () => {
     expect(moveTrimStart(open, 0.4, 0)).toBe(open)
   })

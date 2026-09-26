@@ -44,8 +44,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 
 // A corrected transcript rides a cell.audio.attach into the outbox — not what
 // these tests are about.
+const trimEmits: Array<Record<string, unknown>> = []
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async () => "evt-1"),
+  emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
 }))
 
 import { CellTakeBlock } from "./CellTakeBlock"
@@ -98,6 +100,7 @@ beforeEach(() => {
   audioCalls.length = 0
   transcribeCalls.length = 0
   trimCalls.length = 0
+  trimEmits.length = 0
   localStorage.clear()
 })
 
@@ -162,6 +165,52 @@ describe("which part of the recording it plays", () => {
     } as unknown as CellData
     draw({ owner })
     expect(trimCalls.at(-1)).toEqual([17.6, 23.1])
+  })
+})
+
+// Sam, 2026-09-25: trim right where you see it. The Crop popover is retired.
+describe("trimming in place", () => {
+  function sized() {
+    const root = screen.getByTestId("cell-take-waveform")
+    root.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 56, width: 400, height: 56, x: 0, y: 0, toJSON: () => ({}) })
+  }
+
+  it("drags the start line and saves the trim on the cell that holds the take", () => {
+    draw()
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(line, { clientX: 40, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 40 })
+    expect(trimEmits).toHaveLength(1)
+    expect(trimEmits[0]).toMatchObject({
+      fileId: "cue-sibling", cellId: "cue-1", audioId: "audio-cue-1-1700000000-take.webm",
+      trimStartMs: 300, trimEndMs: null,
+    })
+  })
+
+  it("nudges a focused line with the arrow keys", () => {
+    draw()
+    const line = screen.getByRole("slider", { name: /end of the kept audio/i })
+    fireEvent.keyDown(line, { key: "ArrowLeft", shiftKey: true })
+    expect(trimEmits.at(-1)).toMatchObject({ trimStartMs: null, trimEndMs: 2900 })
+  })
+
+  it("shows the trim but offers no dragging to someone who cannot edit", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    owner.attachments![id] = { ...owner.attachments![id], trimStartMs: 300 } as never
+    draw({ owner, editable: false })
+    expect(screen.getByRole("slider", { name: /start of the kept audio/i })).toHaveAttribute("aria-readonly", "true")
+  })
+
+  it("never offers trim lines on a source-audio section — its window is the section", () => {
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(), startTime: 1, endTime: 2, selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src" } },
+    } as unknown as CellData
+    draw({ owner })
+    expect(screen.queryByRole("slider", { name: /kept audio/i })).toBeNull()
   })
 })
 

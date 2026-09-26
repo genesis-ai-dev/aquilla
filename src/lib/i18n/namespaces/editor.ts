@@ -143,6 +143,8 @@ export const editor = defineNamespace({
     "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click retry",
     "editor.waveform.retryTooltip": "Couldn't load this clip's waveform; click to retry",
     "editor.waveform.retry": "Retry waveform",
+    "editor.waveform.trimStart": "Start of the kept audio",
+    "editor.waveform.trimEnd": "End of the kept audio",
 
     // — Per-cell audio upload ————————————————————————————————————
     "editor.audio.upload": "Upload audio file",
@@ -2313,6 +2315,19 @@ export const editor = defineNamespace({
           "beside a circular-arrow icon. Imperative; retries drawing the waveform, " +
           "not the recording.",
         maxLength: 18,
+      },
+      "editor.waveform.trimStart": {
+        description:
+          "Screen-reader name of the vertical line marking where the part of a " +
+          "recording that plays begins. Dragging it (or focusing it and pressing " +
+          "the arrow keys) trims silence off the start; nothing is deleted. A " +
+          "noun phrase naming the line, not a command.",
+      },
+      "editor.waveform.trimEnd": {
+        description:
+          "Screen-reader name of the vertical line marking where the part of a " +
+          "recording that plays ends. Dragging it trims silence off the end; " +
+          "nothing is deleted. A noun phrase naming the line, not a command.",
       },
       "editor.audio.upload": {
         description:

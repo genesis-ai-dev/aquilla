@@ -29,20 +29,30 @@ function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n
 }
 
+/** How far from the clip's edge counts as "at the edge". A pointer drag gets
+ *  the snap zone; an arrow-key nudge is exact — its steps are smaller than the
+ *  zone, and a first nudge in from the edge must not snap straight back. */
+export interface MoveOpts {
+  minLenSec?: number
+  snap?: boolean
+}
+
 /** Move the start edge to `toSec`. */
-export function moveTrimStart(v: TrimValue, toSec: number, durationSec: number, minLenSec = MIN_TARGET_LEN_SEC): TrimValue {
+export function moveTrimStart(v: TrimValue, toSec: number, durationSec: number, opts: MoveOpts = {}): TrimValue {
   if (!(durationSec > 0) || !Number.isFinite(toSec)) return v
+  const { minLenSec = MIN_TARGET_LEN_SEC, snap = true } = opts
   const end = v.end ?? durationSec
   const t = clamp(toSec, 0, Math.max(0, end - minLenSec))
-  return { start: t <= TRIM_EDGE_CLEAR_SEC ? null : t, end: v.end }
+  return { start: t <= (snap ? TRIM_EDGE_CLEAR_SEC : 0) ? null : t, end: v.end }
 }
 
 /** Move the end edge to `toSec`. */
-export function moveTrimEnd(v: TrimValue, toSec: number, durationSec: number, minLenSec = MIN_TARGET_LEN_SEC): TrimValue {
+export function moveTrimEnd(v: TrimValue, toSec: number, durationSec: number, opts: MoveOpts = {}): TrimValue {
   if (!(durationSec > 0) || !Number.isFinite(toSec)) return v
+  const { minLenSec = MIN_TARGET_LEN_SEC, snap = true } = opts
   const start = v.start ?? 0
   const t = clamp(toSec, Math.min(durationSec, start + minLenSec), durationSec)
-  return { start: v.start, end: t >= durationSec - TRIM_EDGE_CLEAR_SEC ? null : t }
+  return { start: v.start, end: t >= durationSec - (snap ? TRIM_EDGE_CLEAR_SEC : 0) ? null : t }
 }
 
 /** The kept part's length in seconds. */

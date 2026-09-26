@@ -45,7 +45,7 @@ export interface EnvelopePoint {
  * — it is the gap between words — and drawing nothing there reads as the take
  * having stopped rather than as quiet.
  */
-export function envelopePoints(peaks: Float32Array, height: number): EnvelopePoint[] {
+export function envelopePoints(peaks: ArrayLike<number>, height: number): EnvelopePoint[] {
   const usable = Math.max(1, height - VERTICAL_INSET_PX)
   const out: EnvelopePoint[] = []
   for (let i = 0; i < peaks.length; i++) {
@@ -94,4 +94,14 @@ export function envelopePath(points: readonly EnvelopePoint[], mid: number): str
  *  third of the size they would otherwise be. */
 function r(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/**
+ * The whole envelope as one path `d`, for a box `height` px tall: bin
+ * coordinates across, pixels down. The timeline chip and the shared waveform
+ * rectangle both draw this, which is what makes them the same figure.
+ */
+export function envelopePathD(peaks: ArrayLike<number>, height: number): string {
+  if (!Number.isFinite(height) || height <= 0) return ""
+  return envelopePath(envelopePoints(peaks, height), height / 2)
 }

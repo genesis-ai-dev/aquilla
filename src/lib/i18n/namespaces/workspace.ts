@@ -692,20 +692,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },

@@ -1500,6 +1500,8 @@ export const editor = defineNamespace({
 
     // — Table header, lane switcher and whole-file empty states ——————
     "editor.column.controls": "Controls",
+    "editor.audioLens.trackColorAria": "Audio colour for this file: {color}",
+    "editor.audioLens.trackColorLabel": "Audio colour for this file",
     "editor.lane.activeAria": "Active translation lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
@@ -5605,6 +5607,20 @@ export const editor = defineNamespace({
           "per-line voice and playback controls sit instead of source text. Replaces " +
           "editor.column.source in that mode, so it must read as a column heading.",
         maxLength: 14,
+      },
+      "editor.audioLens.trackColorAria": {
+        description:
+          "Screen-reader name of a small coloured dot beside the 'Controls' heading " +
+          "in the audio lens. Pressing it opens six colours to choose from; the one " +
+          "chosen colours every recording in this file, for everyone on the project " +
+          "(the same colour the timeline shows for the file's dub track).",
+        placeholders: { color: "The name of the colour currently chosen, e.g. 'Green'." },
+      },
+      "editor.audioLens.trackColorLabel": {
+        description:
+          "Small heading at the top of that colour menu, above the six colour names. " +
+          "Says the choice applies to the whole file's audio, not to one line.",
+        maxLength: 32,
       },
       "editor.lane.activeAria": {
         description:

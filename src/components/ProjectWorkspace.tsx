@@ -244,7 +244,8 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
@@ -13263,6 +13264,16 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             audioLens={audioLens}
+            // Sam, 2026-09-26: the Audio view's colour IS the file's dub-track
+            // colour, the timeline's own value — one colour per file, the same
+            // for everyone. A maintainer may change it whatever the track-
+            // editing setting says (track-editing-authority.ts).
+            audioTrackColor={audioLens ? fileTrackColor(project?.files, activeFileId, DEFAULT_TARGET_TRACK_ID) : undefined}
+            onSetAudioTrackColor={
+              audioLens && canReorderTracks
+                ? (hueId) => handleSetTrackColor([{ trackId: DEFAULT_TARGET_TRACK_ID, color: hueId }])
+                : undefined
+            }
             castGutter={timelineStacked}
             ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}

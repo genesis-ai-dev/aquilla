@@ -116,6 +116,24 @@ describe("Traditional Chinese (AQU-976)", () => {
   })
 })
 
+describe("French (AQU-1432)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const fr = LOCALES.find((l) => l.code === "fr")
+    expect(fr?.dir).toBe("ltr")
+    expect(fr?.nativeName).toBe("Français")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.fr ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves French to regional browser codes", () => {
+    // Browsers rarely send bare `fr`; without the primary-subtag fallback a
+    // Canadian or Senegalese French speaker would land on English.
+    expect(normalizeLocale("fr-CA")).toBe("fr")
+    expect(normalizeLocale("fr-FR")).toBe("fr")
+    expect(normalizeLocale("fr-SN")).toBe("fr")
+  })
+})
+
 describe("normalizeLocale", () => {
   it("keeps an exact supported code", () => {
     expect(normalizeLocale("ar")).toBe("ar")

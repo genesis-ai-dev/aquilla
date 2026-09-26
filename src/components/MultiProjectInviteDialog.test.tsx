@@ -287,3 +287,65 @@ describe("MultiProjectInviteDialog confirmation toast (AQU-1149)", () => {
     )
   })
 })
+
+// AQU-1152: a 60+ character project name used to paint over the role picker
+// once its row was checked. The row is a three-column grid whose name track is
+// `minmax(0,1fr)`, and the name button already carried `truncate` — but the
+// button is inline-block, and shrink-to-fit resolves a `white-space: nowrap`
+// box to its full text width no matter how narrow the track is. The box
+// overflowed the track and the picker sat underneath it.
+//
+// happy-dom does no layout, so the guard is the class pair that encodes the
+// constraint: `truncate` supplies the ellipsis, `max-w-full` is what makes it
+// reachable. Either one alone is the bug.
+describe("MultiProjectInviteDialog long project names (AQU-1152)", () => {
+  const LONG_NAME =
+    "Genesis through Deuteronomy — Burmese Back Translation Review Pass 2026"
+  const longProjects = [
+    { id: "pa", name: LONG_NAME },
+    { id: "pb", name: "Mark" },
+  ] as CloudProjectSummary[]
+
+  function renderLong() {
+    return render(
+      <MultiProjectInviteDialog open={true} onOpenChange={() => {}} projects={longProjects} />,
+    )
+  }
+
+  const nameButton = (name: string) => screen.getByRole("button", { name })
+
+  it("clamps the name to its grid track so it can ellipsise", () => {
+    expect(LONG_NAME.length).toBeGreaterThanOrEqual(60)
+    renderLong()
+    const btn = nameButton(LONG_NAME)
+    expect(btn).toHaveClass("truncate")
+    expect(btn).toHaveClass("max-w-full")
+    // The wrapper has to be a block box for `max-w-full` to resolve against
+    // the track rather than an inline shrink-wrap.
+    expect(btn.parentElement).toHaveClass("block", "min-w-0")
+  })
+
+  it("keeps the full name readable through the tooltip", () => {
+    renderLong()
+    // The tooltip wraps the name button, so the untruncated string is still
+    // in the accessibility tree even once CSS clips the visible text.
+    expect(nameButton(LONG_NAME)).toHaveTextContent(LONG_NAME)
+  })
+
+  it("leaves the checkbox and the role picker their own space once checked", () => {
+    renderLong()
+    fireEvent.click(screen.getByRole("checkbox", { name: `Select ${LONG_NAME}` }))
+    // All three grid columns are present and distinct — the name never
+    // replaces or swallows the controls on either side of it.
+    expect(screen.getByRole("checkbox", { name: `Select ${LONG_NAME}` })).toBeInTheDocument()
+    expect(nameButton(LONG_NAME)).toBeInTheDocument()
+    expect(screen.getByLabelText(`Role for ${LONG_NAME}`)).toBeInTheDocument()
+  })
+
+  it("does not stretch short names to the full track", () => {
+    renderLong()
+    // `w-full` would fix the overlap too, but it would also hand a two-letter
+    // project the entire row as a click target — "short names are unaffected".
+    expect(nameButton("Mark")).not.toHaveClass("w-full")
+  })
+})

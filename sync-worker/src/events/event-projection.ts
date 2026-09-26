@@ -27,7 +27,7 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
-import { visibleSourceSql } from './hidden-cells-scope'
+import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
@@ -250,20 +250,16 @@ function fileCountersSql(scope: FileCountersScope): string {
                    SELECT 1 FROM cells
                     WHERE project_id = f.project_id AND file_id = f.id
                       -- AQU-1424: a cell parked with Hide cell is not work, so it
-                      -- leaves the file's denominator. The correlated lookup reads the
-                      -- SHARED SOURCE ROW rather than each row's own hidden_at: the flag
-                      -- lives only there (hiding is per cell, not per lane), and a target
-                      -- row created after the hide carries none of its own. One indexed
-                      -- probe per group, covered by 0112's partial index.
-                      AND NOT EXISTS (
-                        SELECT 1 FROM cells hidden_src
-                         WHERE hidden_src.project_id = cells.project_id
-                           AND hidden_src.file_id = cells.file_id
-                           AND hidden_src.cell_id = cells.cell_id
-                           AND hidden_src.side = 'source'
-                           AND COALESCE(hidden_src.target_lang, '') = ''
-                           AND hidden_src.hidden_at IS NOT NULL
-                      )
+                      -- leaves the file's denominator. It reads the SHARED SOURCE ROW's
+                      -- flag rather than each row's own: the flag lives only there
+                      -- (hiding is per cell, not per lane), and a target row created
+                      -- after the hide carries none of its own.
+                      --
+                      -- The SET form, not a correlated NOT EXISTS, and the difference is
+                      -- load-bearing: this GROUP BY is under the plan-shape guardrail in
+                      -- hot-query-plans.test.ts and must stay Sort-free. NOT EXISTS makes
+                      -- the planner sort the inner side. See visibleCellIdSql.
+                      AND ${visibleCellIdSql('cells.cell_id', 'f.project_id', 'f.id')}
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,

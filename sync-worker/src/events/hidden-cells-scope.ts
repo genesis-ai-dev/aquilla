@@ -73,3 +73,46 @@ export function notHiddenSql(alias: string): string {
        AND hidden_src.hidden_at IS NOT NULL
   )`
 }
+
+/**
+ * The set form: `<cellIdExpr> NOT IN (<this file's hidden cell ids>)`, for a
+ * grouped scan that must stay Sort-free.
+ *
+ * WHY A THIRD FORM RATHER THAN {@link notHiddenSql}. The `files` counter
+ * recompute is under a plan-shape guardrail
+ * (`sync-worker/src/__tests__/hot-query-plans.test.ts`, migration 0085): its
+ * `GROUP BY cell_id` must ride an ordered Index Only Scan on `cells_pkey` with
+ * NO Sort node. In prod that query runs over 37K-cell files under
+ * `work_mem = 4MB`, and the shape this guards against wrote 4.6 GB of temp
+ * across 5K calls.
+ *
+ * A correlated `NOT EXISTS` breaks that: the planner turns it into a Merge Anti
+ * Join and sorts the inner side on `cell_id` — measured, not assumed, and it
+ * does so with or without a COALESCE and whatever order the correlation clauses
+ * are written in. Collecting the ids ONCE into a hashed subplan keeps the outer
+ * scan exactly as it was.
+ *
+ * Cheap for the same reason the partial index is: hidden cells are a handful per
+ * file, so the subplan reads a handful of rows through `idx_cells_hidden` once,
+ * not once per group.
+ *
+ * `NOT IN` IS SAFE HERE, and it is worth saying why, because `NOT IN` against a
+ * set containing NULL returns NO ROWS AT ALL — a file would report zero cells.
+ * `cell_id` is part of `cells`' primary key, so it can never be NULL, and the
+ * subquery selects nothing else. Do not widen this subquery to a nullable
+ * column.
+ */
+export function visibleCellIdSql(
+  cellIdExpr: string,
+  projectExpr: string,
+  fileExpr: string,
+): string {
+  return `${cellIdExpr} NOT IN (
+    SELECT hidden_src.cell_id FROM cells hidden_src
+     WHERE hidden_src.project_id = ${projectExpr}
+       AND hidden_src.file_id = ${fileExpr}
+       AND hidden_src.side = 'source'
+       AND COALESCE(hidden_src.target_lang, '') = ''
+       AND hidden_src.hidden_at IS NOT NULL
+  )`
+}

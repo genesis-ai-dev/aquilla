@@ -284,3 +284,43 @@ export function nextPaintGate(
   if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
   return { file, sawLoad, open }
 }
+
+/**
+ * Everything a WebSocket reconnect must pull back (AQU-845, AQU-817).
+ *
+ * The per-project DO holds no durable state and never replays (AD-1), so every
+ * `event.applied` frame that lands while a client's socket is down is lost to
+ * that client permanently. A reopen is the only signal that such a gap may
+ * exist, so each broadcast-fed projection has to be re-read there or it stays
+ * stale until a full page reload.
+ *
+ * Comments were the projection this list forgot: AQU-845 wired cells, audit
+ * stats and file progress, but a comment frame missed during a redeploy, a DO
+ * eviction, a blip or a sleeping laptop left the reader's thread list frozen —
+ * the AQU-817 report of a contributor's comment never reaching another member
+ * in the same cell. Extracted so the fan-out is pinned by a test rather than
+ * living only inside the 11.5k-line shell's async connect effect.
+ */
+export interface ReconnectResyncTargets {
+  revalidateCells(): void
+  revalidateAuditStats(): void
+  invalidateProjectFileProgress(): void
+  /** AQU-817 — comments are broadcast-only too. */
+  refreshComments(): void | Promise<void>
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runReconnectResync(targets: ReconnectResyncTargets): void {
+  targets.revalidateCells()
+  targets.revalidateAuditStats()
+  targets.invalidateProjectFileProgress()
+  // useComments.refresh() resolves even on failure (it sets its own isError),
+  // but each leg is isolated anyway: one projection's transient read failure
+  // must not skip the others, and must not surface as an unhandled rejection.
+  void Promise.resolve(targets.refreshComments()).catch(() => {
+    // The next focus return or reconnect retries.
+  })
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}

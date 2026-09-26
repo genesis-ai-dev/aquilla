@@ -332,13 +332,23 @@ export function MultiProjectInviteDialog({
                             >
                               {isSelected && <Check className="h-3.5 w-3.5" />}
                             </button>
+                            {/* AQU-1152: `truncate` alone never clipped this.
+                              * The button is inline-block, and shrink-to-fit
+                              * resolves a `white-space: nowrap` box to its full
+                              * text width whatever the 1fr track allows — so a
+                              * long name overflowed the track and painted over
+                              * the role picker to its right. `max-w-full`
+                              * clamps the box to the track, which is what makes
+                              * the ellipsis appear. Not `w-full`: short names
+                              * must keep hugging their text, hit area included.
+                              */}
                             <AppTooltip content={p.name}>
-                              <span className="min-w-0">
+                              <span className="block min-w-0">
                                 <button
                                   type="button"
                                   onClick={() => toggleProject(p.id)}
                                   disabled={busy}
-                                  className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
+                                  className="min-w-0 max-w-full truncate text-start hover:text-foreground disabled:opacity-50"
                                 >
                                   {p.name}
                                 </button>

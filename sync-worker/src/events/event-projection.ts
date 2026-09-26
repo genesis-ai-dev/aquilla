@@ -259,7 +259,14 @@ function fileCountersSql(scope: FileCountersScope): string {
                       -- load-bearing: this GROUP BY is under the plan-shape guardrail in
                       -- hot-query-plans.test.ts and must stay Sort-free. NOT EXISTS makes
                       -- the planner sort the inner side. See visibleCellIdSql.
-                      AND ${visibleCellIdSql('cells.cell_id', 'f.project_id', 'f.id')}
+                      -- Unqualified cell_id, like the two predicates above it: this
+                      -- subquery's only FROM relation is cells, so it resolves there
+                      -- unambiguously. A cells-qualified column would be equally valid
+                      -- SQL, but it trips the guard in event-projection.test.ts that
+                      -- catches a cells column pasted into a statement whose own FROM has
+                      -- no cells — a real bug (AQU-1068, it broke removal outright) worth
+                      -- keeping a blunt check for.
+                      AND ${visibleCellIdSql('cell_id', 'f.project_id', 'f.id')}
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,

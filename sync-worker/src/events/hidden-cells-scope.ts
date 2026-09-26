@@ -101,6 +101,13 @@ export function notHiddenSql(alias: string): string {
  * `cell_id` is part of `cells`' primary key, so it can never be NULL, and the
  * subquery selects nothing else. Do not widen this subquery to a nullable
  * column.
+ *
+ * `cellIdExpr` is whatever resolves in the CALLER's scope, so an unqualified
+ * `cell_id` is the right argument when the caller's only FROM relation is
+ * `cells`. Prefer that: a `cells.`-qualified column is equally valid SQL but
+ * trips the blunt guard in `event-projection.test.ts`, which catches a `cells`
+ * column pasted into a statement whose own FROM has no `cells` (AQU-1068 — it
+ * broke removal outright) and is worth keeping blunt.
  */
 export function visibleCellIdSql(
   cellIdExpr: string,

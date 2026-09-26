@@ -99,6 +99,7 @@ import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
@@ -305,6 +306,9 @@ app.route("/api/v2/invites", invitesRoutes)
 // request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
+// AQU-1028: in-app feedback (message + optional screenshot). Session JWT
+// required, per-user throttle inside (routes/feedback.ts).
+app.route("/api/v2/feedback", feedbackRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
 app.route("/api/v2", billingWorkspaceRoutes)

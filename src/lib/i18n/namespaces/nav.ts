@@ -51,6 +51,11 @@ export const nav = defineNamespace({
     "nav.help.contactSupport": "Contact support",
     "nav.help.report": "Report",
 
+    // -- FeedbackButton (AQU-1028): the always-visible shell affordance that
+    // opens the same dialog as nav.help.report. --
+    "nav.feedback.buttonLabel": "Feedback",
+    "nav.feedback.buttonTooltip": "Send feedback to the Aquilla team",
+
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
     "nav.dock.agentTab": "Agent",
@@ -254,7 +259,7 @@ export const nav = defineNamespace({
     "nav.report.descriptionEnabled":
       "Describe what went wrong. Your report will be sent along with session context.",
     "nav.report.descriptionDisabled":
-      "Analytics are off — your report won't be sent automatically. You can copy it to share manually.",
+      "Analytics are off, so no session replay is attached — your message still reaches the Aquilla team.",
     "nav.report.thanks": "Thanks — report received.",
     "nav.report.replayLinked": "Session replay linked to the report.",
     "nav.report.descriptionFieldLabel": "Description",
@@ -262,8 +267,21 @@ export const nav = defineNamespace({
     "nav.report.descriptionRequired": "Description is required",
     "nav.report.capturedContext": "Captured context:",
     "nav.report.analyticsOffNotice":
-      "Usage data collection is off. Enable it in Preferences if you'd like reports to be sent automatically — or use \"Copy report\" to share it manually.",
+      "Usage data collection is off, so this report carries no session replay. Enable it in Preferences if you'd like future reports to include one.",
     "nav.report.sendReport": "Send report",
+    "nav.report.sending": "Sending…",
+    "nav.report.sendFailed":
+      "Couldn't send your report. Check your connection and try again, or copy it to share another way.",
+    "nav.report.notDelivered":
+      "Report received, but this environment has no mail delivery configured — the team won't be emailed.",
+    "nav.report.attachScreenshot": "Attach a screenshot",
+    "nav.report.capturingScreenshot": "Choose what to share…",
+    "nav.report.retakeScreenshot": "Retake",
+    "nav.report.removeScreenshot": "Remove screenshot",
+    "nav.report.screenshotAttached": "Screenshot attached",
+    "nav.report.screenshotAlt": "Screenshot attached to this report",
+    "nav.report.screenshotFailed":
+      "Couldn't capture a screenshot. You can still send the report without one.",
     "nav.report.copyReport": "Copy report",
     "nav.report.copied": "Copied!",
 
@@ -576,6 +594,20 @@ export const nav = defineNamespace({
       "nav.help.report": {
         description:
           "Dropdown item that opens the 'Report a problem' dialog (nav.report.*).",
+      },
+
+      // -- FeedbackButton (AQU-1028) --
+      "nav.feedback.buttonLabel": {
+        description:
+          "Visible label of the always-present feedback button in the app shell's " +
+          "sidebar footer. It opens the same dialog as nav.help.report; this one is the " +
+          "discoverable entry point, so the word should read as an invitation rather " +
+          "than a fault report.",
+        maxLength: 12,
+      },
+      "nav.feedback.buttonTooltip": {
+        description:
+          "Tooltip and accessible name for that button, naming who receives the message.",
       },
 
       // -- LeftDock --
@@ -1125,10 +1157,9 @@ export const nav = defineNamespace({
       },
       "nav.report.analyticsOffNotice": {
         description:
-          "Amber notice shown only when analytics consent is off, pointing the user at " +
-          "Preferences and at the 'Copy report' fallback. Contains a literal quoted " +
-          "phrase matching nav.report.copyReport's wording — keep them consistent if " +
-          "either is retranslated.",
+          "Amber notice shown only when analytics consent is off. Since AQU-1028 the " +
+          "report itself always reaches the team over the network, so this explains the " +
+          "one thing consent still governs: whether a session replay is attached.",
         screenshot: "confirm-dialog",
       },
       "nav.report.sendReport": {
@@ -1145,6 +1176,71 @@ export const nav = defineNamespace({
         description:
           "Replaces nav.report.copyReport's label for a moment right after a " +
           "successful copy.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sending": {
+        description:
+          "Disabled state of the submit button while the report (and any attached " +
+          "screenshot) is uploading.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sendFailed": {
+        description:
+          "Error shown in the dialog when the upload failed — offline, or the server " +
+          "refused it. Points at retrying or at the Copy report fallback.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.notDelivered": {
+        description:
+          "Shown after a successful submit in an environment whose worker has no mail " +
+          "binding (local dev, E2E): the report was stored but no email was sent.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.attachScreenshot": {
+        description:
+          "Button that starts a screen capture to attach to the report. Opens the " +
+          "browser's own share-picker, so the label promises an attachment, not an " +
+          "instant grab.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.capturingScreenshot": {
+        description:
+          "Disabled label on the attach button while the browser's screen-share picker " +
+          "is open and the user has not chosen a surface yet.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.retakeScreenshot": {
+        description:
+          "Button next to the attached screenshot thumbnail that discards it and starts " +
+          "a fresh capture.",
+        screenshot: "confirm-dialog",
+        maxLength: 12,
+      },
+      "nav.report.removeScreenshot": {
+        description:
+          "Accessible label for the button that detaches the captured screenshot from " +
+          "the report.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotAttached": {
+        description:
+          "Caption beside the thumbnail confirming an image will be sent with the report.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.screenshotAlt": {
+        description:
+          "Alt text for the thumbnail preview of the captured screenshot inside the " +
+          "dialog.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotFailed": {
+        description:
+          "Error shown when the screen capture itself failed (not when the user simply " +
+          "dismissed the picker, which is silent). Reassures that the report can still " +
+          "be sent without an image.",
         screenshot: "confirm-dialog",
       },
 

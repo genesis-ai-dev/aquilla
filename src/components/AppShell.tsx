@@ -7,6 +7,7 @@ import { BrandContext } from "@/branding/use-brand"
 import { useI18nOptional } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
+import { FeedbackButton } from "./ReportProblemButton/FeedbackButton"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
@@ -350,6 +351,9 @@ export function AppShell({
           {!chromeCollapsed && <ConnectivityStatusChip />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {/* AQU-1028: feedback is a first-class control here, not a row inside
+              the Help dropdown — the stuck user has to be able to see it. */}
+          <FeedbackButton compact={chromeCollapsed} />
           <HelpMenu compact showTour={!useDockResize} />
           {i18n && (
             <LanguageSwitcher

@@ -31,6 +31,13 @@ export const RESET_REQUEST_MAX_PER_IDENTIFIER = 3
 // primitive (see routes/contact.ts).
 export const CONTACT_MAX_PER_IP = 5
 
+// In-app feedback sends per authenticated user inside the window
+// (routes/feedback.ts). The endpoint requires a session, so this is inbox
+// protection rather than an anti-bot control: high enough that a user filing
+// several reports during a bad session is never blocked, low enough that a
+// stuck retry loop or a compromised account can't bomb CONTACT_EMAIL.
+export const FEEDBACK_MAX_PER_USER = 10
+
 // [Pen test] Auth & session mgmt (2026-07-27): POST /api/v2/admin/elevation/verify
 // had no attempt limiting at all — a caller already holding a valid (e.g.
 // stolen) platform-admin JWT could brute-force the 6-digit step-up code with
@@ -97,6 +104,7 @@ export type RateLimitKind =
   | "agent_code"
   | "agent_decision"
   | "access_link_redeem"
+  | "feedback"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup

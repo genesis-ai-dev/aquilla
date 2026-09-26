@@ -272,6 +272,11 @@ import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
 import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import {
+  computeRightRailSurfaces,
+  hasRightRailEdge,
+  hasRightRailPanel,
+} from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -11495,6 +11500,26 @@ export function ProjectWorkspace() {
     />
   ) : null
 
+  // AQU-1316: one decision for both right-rail slots. `aside` renders the
+  // panels, `asideEdge` the collapsed tabs, and each feature's two surfaces are
+  // derived from the same open flag — so a panel and its edge tab can never be
+  // on screen together (the duplicate Parallel Bibles panels in the report) and
+  // closing a panel always gives its edge tab back.
+  const rightRail = computeRightRailSurfaces({
+    inScriptureEditor: parallelBiblesPanelActive,
+    // AQU-461: verse resources ride the same scripture-editor condition, plus
+    // the project's Bible-resources gate (the aquifer routes 404 when it's off,
+    // so an ungated tab would only ever show an error).
+    verseResourcesAvailable:
+      !!project &&
+      resolveBibleResourcesEnabled(
+        project.bibleResourcesEnabled,
+        projectHasScriptureFiles(project.files),
+      ),
+    parallelBiblesOpen,
+    verseResourcesOpen,
+  })
+
   return (
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
@@ -12630,21 +12655,8 @@ export function ProjectWorkspace() {
           />
         )}
         aside={(() => {
-          const showParallelBibles =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          // AQU-461: verse resources ride the same scripture-editor condition,
-          // plus the project's Bible-resources gate (the aquifer routes 404
-          // when it's off, so an ungated tab would only ever show an error).
-          const showVerseResources =
-            showParallelBibles &&
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
           const hasRightAside =
-            (showParallelBibles && parallelBiblesOpen) ||
-            (showVerseResources && verseResourcesOpen) ||
+            hasRightRailPanel(rightRail) ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -12658,7 +12670,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {showParallelBibles && parallelBiblesOpen && (
+              {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
                   key={activeFile!.id}
                   trackedRef={trackedCellRef}
@@ -12672,7 +12684,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {showVerseResources && verseResourcesOpen && (
+              {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
                   key={activeFile!.id}
                   projectId={project!.id}
@@ -12813,21 +12825,14 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          const inScriptureEditor =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          if (!inScriptureEditor) return null
           // AQU-461: two collapsed tabs can stack here — bibles and verse
           // resources — each shown only while its own panel is closed.
-          const verseResourcesAvailable =
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
-          if (parallelBiblesOpen && !(verseResourcesAvailable && !verseResourcesOpen)) return null
+          // AQU-1316: both flags come from `rightRail`, the same value `aside`
+          // reads, so a tab can never sit beside its own open panel.
+          if (!hasRightRailEdge(rightRail)) return null
           return (
             <>
-              {!parallelBiblesOpen && (
+              {rightRail.biblesEdge && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-edge`}
                   trackedRef={trackedCellRef}
@@ -12839,7 +12844,7 @@ export function ProjectWorkspace() {
                   }}
                 />
               )}
-              {verseResourcesAvailable && !verseResourcesOpen && (
+              {rightRail.resourcesEdge && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources-edge`}
                   projectId={project!.id}

@@ -8,14 +8,14 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
@@ -27,7 +27,9 @@ import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID, slotForTrack } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { takeTrims } from "@/lib/audio/take-margins"
+import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
+import { keptLengthSec } from "@/lib/audio/trim-edit"
+import { usePreviewTake } from "./usePreviewTake"
 import { cameraLabel } from "@/lib/timeline/cue-character"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
@@ -39,7 +41,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
 import { getActiveAudio, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { keptWindowSec } from "@/lib/audio/kept-window"
+import { keptWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
@@ -180,6 +182,16 @@ interface Props {
 // Generate and Upload, ignored Space, and had no transition out of itself: with
 // auto-advance switched off it was a genuine dead end, escapable only by
 // navigating to another line or closing the dialog.
+/** A stable identity per recorded blob, so the preview's trim state (and a
+ *  drag in progress) can never carry over from one take to the next. */
+const previewTakeIds = new WeakMap<Blob, string>()
+let previewTakeSeq = 0
+function previewTakeId(blob: Blob): string {
+  let id = previewTakeIds.get(blob)
+  if (!id) { id = `preview-take-${++previewTakeSeq}`; previewTakeIds.set(blob, id) }
+  return id
+}
+
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "error"
 
 /** A way out of the recorder that a take sitting unsaved has to be asked about
@@ -315,8 +327,11 @@ export function AudioRecordingModal({
   const dialogSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [phase, setPhase] = useState<Phase>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+  // AQU-1210: the operator's trim of the take in preview, keyed by the take's
+  // blob so a Retake or a new line can never inherit it. Seconds on the take's
+  // own clock; null on a side = the clip's edge. Absent = never touched, and
+  // Save then sends exactly what it always has.
+  const [previewTrim, setPreviewTrim] = useState<{ blob: Blob; start: number | null; end: number | null } | null>(null)
   const consumedBlobRef = useRef<Blob | null>(null)
   // The acknowledgement that replaced the "saved" screen: the take's own name,
   // shown under the duration bar for a couple of seconds and then gone. The
@@ -645,6 +660,40 @@ export function AudioRecordingModal({
     },
   }
 
+  // ── AQU-1210: the take in preview, and its trim ──────────────────────────
+  // After Stop the take is drawn with two trim lines, opening where it would
+  // be born-trimmed anyway (the cue's start to just after Stop). Moving them
+  // changes what plays, what the target bar judges, and what Save keeps.
+  const stoppedTake = recorder.state.kind === "stopped" ? recorder.state : null
+  const previewBlob = stoppedTake?.blob ?? null
+  const preview = usePreviewTake(previewBlob)
+  const previewDurationMs = stoppedTake ? Math.round(stoppedTake.durationSec * 1000) : 0
+  const previewDefaults = useMemo(
+    () => stoppedTake
+      ? defaultTakeWindow({
+          cue: { startTime: activeCell?.startTime },
+          preRollMs: stoppedTake.preRollMs,
+          tailGraceMs: stoppedTake.tailGraceMs,
+          durationMs: Math.round(stoppedTake.durationSec * 1000),
+        })
+      : null,
+    [stoppedTake, activeCell?.startTime],
+  )
+  const operatorTrim = previewTrim && previewTrim.blob === previewBlob ? previewTrim : null
+  const previewKept: KeptWindow = operatorTrim
+    ? { start: operatorTrim.start, end: operatorTrim.end, kind: "trim" }
+    : {
+        start: previewDefaults?.trimStartMs != null ? previewDefaults.trimStartMs / 1000 : null,
+        end: previewDefaults?.trimEndMs != null ? previewDefaults.trimEndMs / 1000 : null,
+        kind: "trim",
+      }
+  const previewLenSec = preview.duration > 0
+    ? keptLengthSec({ start: previewKept.start, end: previewKept.end }, preview.duration)
+    : previewDurationMs / 1000
+  const commitPreviewTrim = useCallback((start: number | null, end: number | null) => {
+    if (previewBlob) setPreviewTrim({ blob: previewBlob, start, end })
+  }, [previewBlob])
+
   // Round 8c: takes recorded before the webm-duration fix attached without a
   // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
   // their chips still fall back to section width. Heal the SELECTED take once
@@ -709,7 +758,6 @@ export function AudioRecordingModal({
     setLeadIn(null)
     setPhase("idle")
     setErrorMessage(null)
-    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
     // The note names a take on the line you just left; carrying it over would
     // credit this line with a take it does not have.
@@ -777,7 +825,6 @@ export function AudioRecordingModal({
     recorder.releaseMic?.()
     countdown.cancel()
     setLeadIn(null)
-    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
     setPhase("idle")
     setErrorMessage(null)
@@ -795,8 +842,6 @@ export function AudioRecordingModal({
       const blob = recorder.state.blob
       if (consumedBlobRef.current === blob) return
       consumedBlobRef.current = blob
-      const url = URL.createObjectURL(blob)
-      setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return url })
       setPhase("preview")
     }
     if (recorder.state.kind === "error") {
@@ -894,12 +939,11 @@ export function AudioRecordingModal({
 
   const retake = useCallback(() => {
     recorder.reset()
-    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
     setPhase("idle")
     // Immediately start the next take — user already signalled intent.
     setTimeout(startFlow, 0)
-  }, [recorder, previewUrl, startFlow])
+  }, [recorder, startFlow])
 
   // Hand the line back exactly as it was before the take that just landed:
   // Record armed, Generate and Upload beside it, the window bar showing the
@@ -908,7 +952,6 @@ export function AudioRecordingModal({
   // into a review of a take they have already kept.
   const returnToReady = useCallback((note: string) => {
     recorder.reset()
-    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
     setErrorMessage(null)
     setPhase("idle")
@@ -918,7 +961,7 @@ export function AudioRecordingModal({
       savedNoteTimerRef.current = null
       setSavedNote(null)
     }, 2500)
-  }, [recorder, previewUrl])
+  }, [recorder])
 
   // Round 8: durable TTS from the recording surface — the clear "regenerate"
   // counterpart to re-recording. Uses the project engine + this cell's
@@ -1123,13 +1166,28 @@ export function AudioRecordingModal({
       // file-zero clamp. Deriving it from `preRollMs` instead would drift,
       // because the pre-roll ring keeps whole buffers and so hands back rather
       // more than the 200ms it was asked for. See take-margins.ts.
-      const laneOffsetMs =
-        preRollMs > 0 && activeCell.startTime != null
-          ? targetOffsetMsFor(activeCell, activeCell.startTime - preRollMs / 1000)
-          : null
-      const takeTrimWindow = takeTrims({
-        targetOffsetMs: laneOffsetMs ?? undefined,
+      //
+      // AQU-1210: if the operator moved the preview's trim lines, their window
+      // is kept instead, and a moved head re-places the take so its first kept
+      // sample still lands on the cue (take-margins.composeTakeWindow). With
+      // the lines untouched this is exactly the born-trim window, as before.
+      const cue = { startTime: activeCell.startTime }
+      const defaults = defaultTakeWindow({
+        cue,
+        preRollMs,
         tailGraceMs: recorder.state.tailGraceMs,
+        durationMs: takeDurationMs,
+      })
+      const operator = previewTrim && previewTrim.blob === blob
+        ? {
+            startMs: previewTrim.start == null ? null : Math.round(previewTrim.start * 1000),
+            endMs: previewTrim.end == null ? null : Math.round(previewTrim.end * 1000),
+          }
+        : null
+      const { laneOffsetMs, ...takeTrimWindow } = composeTakeWindow({
+        cue,
+        defaults,
+        operator,
         durationMs: takeDurationMs,
       })
       const audioId = buildAudioId(activeCell.id)
@@ -1296,7 +1354,9 @@ export function AudioRecordingModal({
             // wiped the take's length a minute after saving. Mirrors the seed
             // built by auto-transcribe.ts. (The mime type isn't carried on
             // this shape; the projection's COALESCE protects it instead.)
-            [fullAudioId]: { url: result.url, type: "audio", durationMs: takeDurationMs },
+            // AQU-1210: and the kept window, so the transcript is of the part
+            // that plays. (The re-attach never forwards a trim — see there.)
+            [fullAudioId]: { url: result.url, type: "audio", durationMs: takeDurationMs, ...takeTrimWindow },
           },
         },
         session,
@@ -1324,7 +1384,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag])
+  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1465,8 +1525,12 @@ export function AudioRecordingModal({
     return release
   }, [open])
 
-  // Keyboard shortcuts.
-  useEffect(() => {
+  // Keyboard shortcuts. A LAYOUT effect, so the listener always matches the
+  // phase on screen: registered in a passive effect it could lag a commit, and
+  // a key pressed in that gap acted on the phase before — a retry pressed the
+  // instant a failed save's message appeared still read "uploading" and did
+  // nothing (AQU-1210 added a render to that path and made the gap visible).
+  useLayoutEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       // Typing into an input? let it through.
@@ -1998,13 +2062,53 @@ export function AudioRecordingModal({
             )}
 
             {/* i18n-exempt "preview" is a RecorderPhase union tag, not copy */}
-            {displayPhase === "preview" && previewUrl && (
+            {displayPhase === "preview" && previewBlob && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> {t("audio.recordingModal.capturedNotice")}
                 </div>
-                <audio ref={previewAudioRef} src={previewUrl} controls className="h-9 w-full" preload="auto" />
-                {targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
+                {/* AQU-1210: the take just recorded, drawn as its timeline chip
+                    will be, with the lines it will be born with. Drag a line
+                    (or click it and use the arrow keys) past the silence; play
+                    sounds only the part between them. */}
+                <div className="space-y-1">
+                  <TakeWaveform
+                    controller={preview}
+                    audioId={previewTakeId(previewBlob)}
+                    kept={previewKept}
+                    height={showFilm ? 40 : 56}
+                    trimEditable
+                    onCommitTrim={commitPreviewTrim}
+                    testId="rec-preview-waveform"
+                  />
+                  <div className="flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
+                    <span data-testid="rec-trim-readout">
+                      {t("audio.recordingModal.trimReadout", {
+                        start: formatClock((previewKept.start ?? 0) * 1000),
+                        end: formatClock((previewKept.end ?? preview.duration) * 1000),
+                        length: formatClock(previewLenSec * 1000),
+                      })}
+                    </span>
+                    {operatorTrim && (
+                      <AppTooltip content={t("audio.recordingModal.trimReset")}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          data-testid="rec-trim-reset"
+                          aria-label={t("audio.recordingModal.trimReset")}
+                          onClick={() => setPreviewTrim(null)}
+                          className="text-muted-foreground"
+                        >
+                          <RotateCcw />
+                        </Button>
+                      </AppTooltip>
+                    )}
+                    <span className="ms-auto">{t("audio.recordingModal.trimHint")}</span>
+                  </div>
+                </div>
+                {/* The bar judges the part that will play, not the stopwatch. */}
+                {targetSec != null && <DurationBar elapsedMs={Math.round(previewLenSec * 1000)} targetSec={targetSec} />}
                 {!online && (
                   <p data-testid="rec-offline-notice" className="text-xs font-medium text-amber-500">
                     {OFFLINE_MESSAGE}

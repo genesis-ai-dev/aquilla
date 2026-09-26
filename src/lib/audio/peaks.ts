@@ -81,14 +81,23 @@ export async function decodeBuffer(data: ArrayBuffer): Promise<AudioBuffer> {
 }
 
 function reduceToPeaks(buffer: AudioBuffer, targetBins: number): Float32Array {
-  const channelCount = buffer.numberOfChannels
-  const samples = buffer.length
-  const out = new Float32Array(targetBins)
-  const bucketSize = samples / targetBins
-
-  // Pre-fetch channel data arrays once.
   const channels: Float32Array[] = []
-  for (let c = 0; c < channelCount; c++) channels.push(buffer.getChannelData(c))
+  for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c))
+  return reduceChannelsToPeaks(channels, targetBins)
+}
+
+/**
+ * The reduction itself, over raw channel data: channels averaged to mono,
+ * max-abs per bin, then scaled up so the loudest bin reaches 1. Exported so a
+ * take that is not yet an attachment (the recorder's preview) draws exactly
+ * the figure it will draw once saved.
+ */
+export function reduceChannelsToPeaks(channels: readonly Float32Array[], targetBins: number): Float32Array {
+  const channelCount = channels.length
+  const samples = channels[0]?.length ?? 0
+  const out = new Float32Array(targetBins)
+  if (channelCount === 0 || samples === 0) return out
+  const bucketSize = samples / targetBins
 
   for (let i = 0; i < targetBins; i++) {
     const start = Math.floor(i * bucketSize)

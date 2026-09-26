@@ -290,6 +290,9 @@ export const audio = defineNamespace({
     "audio.recordingModal.capturedNotice": "Captured — review, then keep or retake.",
     "audio.recordingModal.noTimedWindow": "This line has no timed window.",
     "audio.recordingModal.readyTakeCaption": "{label} · {seconds}s",
+    "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
+    "audio.recordingModal.trimReset": "Reset trim",
+    "audio.recordingModal.trimHint": "Drag a line to trim",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -1291,6 +1294,31 @@ export const audio = defineNamespace({
             "the start of its translated text, e.g. '1. In the beginning God…'. " +
             "User content — do not translate the substituted value.",
         },
+      },
+      "audio.recordingModal.trimReadout": {
+        description:
+          "Small readout under the waveform of a just-recorded take, while the " +
+          "operator trims silence off its start and end before saving (AQU-1210): " +
+          "where the kept part starts, where it ends, and how long it is.",
+        placeholders: {
+          start: "Where the kept part starts, as minutes:seconds.tenths, e.g. 0:00.3.",
+          end: "Where the kept part ends, same format, e.g. 0:02.7.",
+          length: "Length of the kept part, same format, e.g. 0:02.4.",
+        },
+      },
+      "audio.recordingModal.trimReset": {
+        description:
+          "Tooltip and screen-reader name of the small button that puts a just-" +
+          "recorded take's trim lines back where they started (the line's own " +
+          "start and just after Stop). Nothing is deleted either way.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.trimHint": {
+        description:
+          "Tiny hint beside the trim readout: the two vertical lines on the " +
+          "waveform can be dragged to cut silence off the start and end of the " +
+          "take before saving. Imperative, very short.",
+        maxLength: 28,
       },
       "audio.recordingModal.readyTakeCaption": {
         description:

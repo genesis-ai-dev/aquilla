@@ -43,12 +43,29 @@ export const TOKEN_PREFIX_LEN = 12
 /** Random secret bytes (before the tag/base64url encoding). */
 const TOKEN_RANDOM_BYTES = 32
 
+/**
+ * AQU-1242: the credential's ACCESS ceiling — may this token change anything?
+ *
+ * Orthogonal to `mode`, which is the autonomy dial for writes that are already
+ * permitted ('ask' parks them at the approval page, 'act' applies them). A
+ * read-only token is refused at every write surface regardless of mode.
+ */
+export type ApiCredentialAccess = "read" | "write"
+
 /** The resolved credential context handed to the command/permission layer. */
 export interface ApiCredentialContext {
   credentialId: string
   userId: string
   username: string
   mode: "ask" | "act"
+  /**
+   * AQU-1242: 'read' refuses every write surface; 'write' is the original
+   * all-or-nothing grant. REQUIRED rather than optional on purpose — the
+   * permissive value is the back-compatible one, so an optional field would let
+   * a new principal fail OPEN by simply forgetting it. Every construction site
+   * (including session-routes' browser principal) must say which it is.
+   */
+  access: ApiCredentialAccess
   orgId: string | null
   projectId: string | null
   /**
@@ -106,6 +123,7 @@ interface CredentialRow {
   id: string
   user_id: string
   mode: "ask" | "act"
+  access: string | null
   org_id: string | null
   project_id: string | null
   expires_at: string | null
@@ -151,6 +169,7 @@ export async function validateApiCredential(
   const row = await db
     .prepare(
       `SELECT ac.id AS id, ac.user_id AS user_id, ac.mode AS mode,
+              ac.access AS access,
               ac.org_id AS org_id, ac.project_id AS project_id,
               ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
               ac.last_used_at AS last_used_at, u.username AS username,
@@ -189,6 +208,10 @@ export async function validateApiCredential(
     userId: row.user_id,
     username: row.username,
     mode: row.mode,
+    // AQU-1242: only an explicit 'read' narrows the token. Any other stored
+    // value — including a NULL from a row written before 0112 landed — is the
+    // original read-write grant, so existing tokens keep working unchanged.
+    access: row.access === "read" ? "read" : "write",
     orgId: row.org_id,
     projectId: row.project_id,
     // Only an explicit true opts in — a NULL (pre-0091 row) stays scrubbed.

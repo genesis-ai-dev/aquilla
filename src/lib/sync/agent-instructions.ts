@@ -20,7 +20,7 @@
 // Adding a "here are the endpoints / command kinds" section to this string
 // would defeat the point. Let the API answer that question.
 
-import type { CredentialMode } from "./credentials"
+import type { CredentialAccess, CredentialMode } from "./credentials"
 
 /** Placeholder used when the plaintext token isn't available (the show-once
  * dialog is the only moment it is). */
@@ -32,6 +32,10 @@ export interface AgentInstructionsInput {
   /** Plaintext token, or omit for the placeholder. */
   token?: string
   mode: CredentialMode
+  /** AQU-1242: omit for `"write"`. On a read-only token the mode lines below are
+   *  replaced — telling an agent to stage writes it will only be refused for is
+   *  worse than telling it nothing. */
+  access?: CredentialAccess
   /** Human-readable scope, e.g. `project "Blackfoot NT"`. */
   scopeLabel: string
 }
@@ -40,20 +44,24 @@ export function buildAgentInstructions({
   syncOrigin,
   token,
   mode,
+  access,
   scopeLabel,
 }: AgentInstructionsInput): string {
   const base = `${syncOrigin.replace(/\/+$/, "")}/api/v1/external`
   const tok = token ?? TOKEN_PLACEHOLDER
+  const readOnly = access === "read"
 
-  const modeLine =
-    mode === "ask"
+  const modeLine = readOnly
+    ? "read-only — you can read, search and export, but you cannot change anything. Writes are refused by the server, not just discouraged."
+    : mode === "ask"
       ? "ask — you can stage writes, but nothing is applied until I approve it in my browser."
       : "act — writes you commit are applied immediately. Be careful, and tell me what you changed."
 
   // Prose lines are deliberately unwrapped: the dialog and most agent chats
   // soft-wrap them, and hard newlines mid-sentence would wrap twice and read ragged.
-  const modeRule =
-    mode === "ask"
+  const modeRule = readOnly
+    ? `Because this token is read-only, don't plan around writing. Staging a changeset or uploading a file comes back 403 scope_denied, and no retry, different endpoint or MCP tool changes that — the ceiling is on the token, and only I can lift it by minting a new one. If the task turns out to need a write, say so and stop rather than working around it.`
+    : mode === "ask"
       ? `Because this token is ask-mode, a commit will come back asking for human approval, with a URL. That URL is for me, not you: paste it to me, stop, and wait. Don't retry the commit in a loop while you wait — retry it once, after I tell you I've approved. You cannot skip or automate this step, and you shouldn't try to.`
       : `Because this token is act-mode, a commit really does apply. Always stage first and read back the effect summary the server computes; only commit once it matches what I actually asked for. Tell me what you changed afterwards.`
 
@@ -62,7 +70,7 @@ export function buildAgentInstructions({
 API base: ${base}
 Token:    ${tok}
 Header:   Authorization: Bearer ${tok}
-Mode:     ${modeLine}
+${readOnly ? "Access:   " : "Mode:     "}${modeLine}
 Scope:    ${scopeLabel}
 
 Don't take my word for what this API can do — ask it. Before anything else, fetch ${base} itself. It needs no auth and returns a machine-readable map of the live API: every endpoint, the read/write model, the full error-code list, and how to connect over MCP. The server generates that map from what it is actually running, so it is always current. This message isn't — it's a snapshot from whenever I pasted it. Where the two disagree, the API is right.

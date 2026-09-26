@@ -113,12 +113,23 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
     // stay: they are the credential's own reach, not a person.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: a read-only token has to learn that from /me. Otherwise its
+    // first discovery of the ceiling is a 403 on a plan it already built, and
+    // an agent cannot tell that refusal apart from a role problem it might
+    // usefully retry.
+    access: cred.access,
     orgId: cred.orgId,
     projectId: cred.projectId,
     credentialId: cred.credentialId,
     hints: {
+      access:
+        cred.access === "read"
+          ? "read-only token: every write surface (changeset prepare/commit, artifact upload) answers 403 scope_denied. Reads, search and export work normally. Nothing you do can change this project."
+          : "read-write token: you may stage and commit changesets, subject to the mode below and your live project role.",
       mode:
-        cred.mode === "ask"
+        cred.access === "read"
+          ? "not applicable on a read-only token: there is nothing to approve because nothing can be staged."
+          : cred.mode === "ask"
           ? "ask mode: you can prepare changesets but a commit needs a human approval at the approvalUrl first (commit returns 428 confirmation_required until then)."
           : "act mode: commit applies a prepared changeset immediately.",
       next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. Managing a whole workspace? GET /api/v1/external/orgs, then /api/v1/external/orgs/:orgId/projects, and search several at once with GET /api/v1/external/search?q=&projectIds=a,b. GET /api/v1/external for the full API map.",

@@ -1227,10 +1227,7 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
   // the original gates: manager, not archived, and the roster-visibility floor.
 
   function teamCard(): HTMLElement {
-    const heading = screen.getByRole("heading", { name: "Team" })
-    const card = heading.closest(".rounded-lg")
-    if (!card) throw new Error("Team heading is not inside a card")
-    return card as HTMLElement
+    return screen.getByTestId("overview-team-card")
   }
 
   it("starts collapsed under the Team card and reveals the settings roster when opened", async () => {
@@ -1428,6 +1425,159 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    // AQU-1172: the collapse affordance must not leak a header-only Team card
+    // to a below-floor viewer.
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
+
+describe("ProjectOverview Team card collapse (AQU-1172)", () => {
+  // WHY: managers can tuck the assignments surface away without leaving the
+  // overview. Unlike Members (AQU-1171), Team starts expanded so first load
+  // is the working surface plus a chevron — collapse is per-page-load only.
+
+  async function withWorkload() {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([
+      { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
+    ])
+  }
+
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("starts expanded and hides the body when the header is clicked", async () => {
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "true")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+  })
+
+  it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    const view = renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-team-toggle"))
+    expect(screen.getByTestId("overview-team-card")).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    view.unmount()
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("overview-members-card")).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("keeps Team and Members collapse independent", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const team = await screen.findByTestId("overview-team-card")
+    const members = await screen.findByTestId("overview-members-card")
+    expect(team.nextElementSibling).toBe(members)
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "false")
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "false")
+    expect(team.nextElementSibling).toBe(members)
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+  })
+
+  it("restores teammate activity after a collapse/expand cycle", async () => {
+    await withWorkload()
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    fetchMemberActivity.mockResolvedValue({
+      recentEvents: [
+        { id: "e1", kind: "target.cell.commit", fileId: "f1", cellId: "c1", clientTs: 1, serverTs: 1700000000000, serverSeq: 2 },
+      ],
+      fileRollup: [
+        { fileId: "f1", fileName: "Genesis", cellsTouched: 12, wordCount: 340, lastActivityAt: 1700000000000 },
+      ],
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    const panel = await screen.findByTestId("member-activity-panel")
+    expect(within(panel).getByText("Genesis")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
   })
 })
 

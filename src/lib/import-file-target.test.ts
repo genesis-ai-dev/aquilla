@@ -314,6 +314,62 @@ describe("usfmToTargetRows", () => {
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
   })
+
+  // AQU-1363. A Paratext export reaches the TARGET column, which the editor
+  // hydrates TipTap from directly instead of running the display-time strip
+  // the source column relies on. Raw markers committed here read cleanly until
+  // the translator clicks the cell and then appear as literal backslash codes,
+  // so they are resolved on the way in. These assert the stored string, which
+  // is the only thing standing between the import and that editor.
+  describe("AQU-1363: markers never reach the target column", () => {
+    const jonah = [
+      "\\id JON",
+      "\\c 1",
+      "\\s1 The \\nd Lord\\nd* Calls Jonah",
+      "\\p",
+      "\\v 1 And the word of the \\nd Lord\\nd* came to \\w Jonah|strong=\"H3124\"\\w*.",
+      "\\v 2 Arise, go to Nineveh.\\f + \\fr 1.2 \\ft A great city. \\f*",
+      "\\v 3 But Jonah rose to flee,\\q1 away from the presence.",
+    ].join("\n")
+
+    const textByRef = (usfm: string) =>
+      new Map(usfmToTargetRows(usfm).map((r) => [r.ref, r.text]))
+
+    it("unwraps inline character markers, keeping the words they wrapped", () => {
+      expect(textByRef(jonah).get("JON 1:1")).toBe(
+        "And the word of the Lord came to Jonah.",
+      )
+    })
+
+    it("drops footnotes rather than leaving the caller and body inline", () => {
+      expect(textByRef(jonah).get("JON 1:2")).toBe("Arise, go to Nineveh.")
+    })
+
+    it("renders a structural break inside a verse as a newline", () => {
+      expect(textByRef(jonah).get("JON 1:3")).toBe(
+        "But Jonah rose to flee,\naway from the presence.",
+      )
+    })
+
+    it("cleans heading rows too, not just verse bodies", () => {
+      const heading = usfmToTargetRows(jonah).find((r) => r.ref?.includes(":s"))
+      expect(heading?.text).toBe("The Lord Calls Jonah")
+    })
+
+    // The regression guard proper: one assertion that no row, of any kind,
+    // carries a backslash. A marker this projection did not know about would
+    // slip past the per-verse expectations above.
+    it("leaves no backslash in any row of a real Paratext-shaped file", () => {
+      for (const row of usfmToTargetRows(jonah)) {
+        expect(row.text).not.toContain("\\")
+      }
+    })
+
+    it("leaves a marker-free verse exactly as before, edge whitespace included", () => {
+      const plain = ["\\id JON", "\\c 1", "\\p", "\\v 1   Simple text.  "].join("\n")
+      expect(textByRef(plain).get("JON 1:1")).toBe("Simple text.")
+    })
+  })
 })
 
 describe("subtitleToTargetRows (AQU-1144)", () => {

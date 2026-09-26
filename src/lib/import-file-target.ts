@@ -19,6 +19,7 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import { usfmContentOnly } from "./parsers/usfm-content-only"
 import {
   parseCueRange,
   extractVttStrings,
@@ -392,18 +393,42 @@ export function vttToTargetRows(raw: string): TargetRow[] {
 /** Extract target rows from a USFM file: verse bodies + heading/title/intro
  *  paratext in document order, refs and text conventions identical to the
  *  source-import path (usfmSectionToStrings in lib/import.ts) so refs match
- *  cells that were originally imported from USFM. */
+ *  cells that were originally imported from USFM.
+ *
+ *  Text is projected content-only (AQU-1363). `parseUsfmLossless` keeps
+ *  intra-verse markers verbatim, which is right for the SOURCE column: the
+ *  source is a faithful copy of someone else's file, and the read-only render
+ *  strips the markup at display time (usfm-display.ts / EditorCellContent).
+ *  The TARGET column is not a copy — it is the text a translator owns and
+ *  edits, and the editor hydrates TipTap from the stored string rather than
+ *  running the display transform. Committing raw USFM there made a cell read
+ *  cleanly until it was clicked and then spill `\nd`/`\w`/`\f` codes into the
+ *  editor, and re-save whatever the translator did to those codes.
+ *
+ *  So markers are resolved on the way in, the same projection the Agent API's
+ *  `content-only` USFM import uses (AQU-1283) and off the same segmenter the
+ *  editor renders with — character markers unwrapped, structural breaks to
+ *  newlines, `~` to a space. Notes (footnotes, endnotes, crossrefs) leave the
+ *  target text with the rest of the markup: `EBibleMatchedCell` carries text
+ *  and nothing else, so there is no side field to park them in, and a note
+ *  left inline is precisely the literal-backslash leak this fixes. Marker-free
+ *  input is returned unchanged, so spreadsheet and subtitle target imports —
+ *  which never reach this function — and plain USFM are both untouched. */
 export function usfmToTargetRows(
   raw: string,
   opts?: { excludeFrontMatter?: boolean },
 ): TargetRow[] {
   const doc = parseUsfmLossless(raw, { excludeFrontMatter: opts?.excludeFrontMatter })
   return [
-    ...doc.verses.map((v) => ({ order: v.textStart, ref: v.ref, text: v.text.trim() })),
-    ...doc.headings.map((h) => ({ order: h.textStart, ref: h.ref, text: h.text.trim() })),
+    ...doc.verses.map((v) => ({ order: v.textStart, ref: v.ref, text: v.text })),
+    ...doc.headings.map((h) => ({ order: h.textStart, ref: h.ref, text: h.text })),
   ]
     .sort((a, b) => a.order - b.order)
-    .map(({ ref, text }) => ({ ref, text }))
+    // Trimmed after the projection, not before: usfmContentOnly returns
+    // marker-free input unchanged apart from `~`, so it is this trim — not the
+    // projection's own — that keeps a plain verse's edge whitespace handled the
+    // way it was before AQU-1363.
+    .map(({ ref, text }) => ({ ref, text: usfmContentOnly(text).text.trim() }))
 }
 
 /** Subtitle formats whose cues this module can turn into target rows. */

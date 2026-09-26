@@ -12,6 +12,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
 const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; askAgain?: boolean }> = []
+const trimCalls: Array<[number | null, number | null]> = []
+const setTrimSpy = (start: number | null, end: number | null) => { trimCalls.push([start, end]) }
 
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: (_project: unknown, cell: { metadata?: Record<string, unknown> }, fileId: string) => {
@@ -24,7 +26,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
       state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 3,
       peaks: null, peaksState: "idle",
       play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
-      setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+      setTrim: setTrimSpy, requestPeaks: vi.fn(), ensureBytes: vi.fn(),
     }
   },
 }))
@@ -95,6 +97,7 @@ function draw(over: Partial<React.ComponentProps<typeof CellTakeBlock>> = {}) {
 beforeEach(() => {
   audioCalls.length = 0
   transcribeCalls.length = 0
+  trimCalls.length = 0
   localStorage.clear()
 })
 
@@ -127,6 +130,38 @@ describe("whose recording it plays", () => {
     owner.attachments!["gen-1"] = { type: "audio", url: "frontier-audio://gen" } as never
     draw({ owner, audioId: "gen-1" })
     expect(audioCalls[0].selectedAudioId).toBe("gen-1")
+  })
+})
+
+// AQU-1217: the tab used to play the WHOLE file — an untrimmed take, and on an
+// imported source-audio section the entire source reading.
+describe("which part of the recording it plays", () => {
+  it("plays a take through its stored trim", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    owner.attachments![id] = { ...owner.attachments![id], trimStartMs: 300, trimEndMs: 2700 } as never
+    draw({ owner })
+    expect(trimCalls.at(-1)).toEqual([0.3, 2.7])
+  })
+
+  it("plays an untrimmed take whole", () => {
+    draw()
+    expect(trimCalls.at(-1)).toEqual([null, null])
+  })
+
+  it("plays only its section of a shared source-audio clip, not the whole reading", () => {
+    // The imported clip is seeded with the FILE id, so it is not this cell's
+    // take; its window is the section's own timing, not its transcription trim.
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(),
+      startTime: 17.6,
+      endTime: 23.1,
+      selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src", trimStartMs: 17_900, trimEndMs: 22_800 } },
+    } as unknown as CellData
+    draw({ owner })
+    expect(trimCalls.at(-1)).toEqual([17.6, 23.1])
   })
 })
 

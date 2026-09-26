@@ -19,9 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { setCellPref } from "@/lib/store/audio-cell-prefs"
-import { emitCellAudioTrim } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { persistTakeTrim } from "@/lib/audio/persist-trim"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
@@ -148,8 +146,6 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         const start = i === 0 ? 0 : cuts[i - 1]
         const end = i === n - 1 ? duration : cuts[i]
         const cell = cells[i]
-        // Live cache the player reads.
-        setCellPref(project.id, cell.id, { trimStart: start, trimEnd: end })
         // Durable, cross-device: this cell's slice of the shared clip. The
         // generator already attached that clip to every one of these cells,
         // untrimmed, so the row exists and only its window is in question.
@@ -158,17 +154,22 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         // An attach can now only ever SET a window, never move one, so
         // re-adjusting boundaries a second time would have gone silently
         // nowhere — the first slice would have stuck forever.
-        void emitCellAudioTrim({
+        //
+        // 2026-09-25: through the shared persist, which also paints each
+        // slice at once. The per-line preference copy it used to write is
+        // gone — every player reads the trim from the attachment now.
+        void persistTakeTrim({
           projectId: project.id,
           fileId,
           cellId: cell.id,
           audioId,
+          att: cell.attachments?.[audioId] ?? { url, voiceId, referenceAudioId },
+          selectedAudioId: cell.selectedAudioId,
           trimStartMs: Math.round(start * 1000),
           trimEndMs: Math.round(end * 1000),
           author: username,
         })
       }
-      notifyAudioAttachmentsChanged(fileId)
       onSaved?.()
       onClose()
     } finally {

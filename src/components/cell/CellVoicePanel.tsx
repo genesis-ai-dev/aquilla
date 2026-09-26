@@ -17,7 +17,7 @@
 // keeps its own element. The app-wide audio-coordinator still guarantees
 // only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CopyPlus, Pause, Play, Volume2, VolumeX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -35,8 +35,8 @@ import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
-import { emitCellAudioTrim } from "@/lib/sync/events-emit"
-import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { keptWindowSec } from "@/lib/audio/kept-window"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -299,78 +299,65 @@ export function CellVoicePanel({
       ? { start: cell.startTime, end: cell.endTime }
       : null
 
-  // Per-cell volume + non-destructive crop, client-owned (localStorage) and
-  // reactive — a write from here OR from "voice together" (which writes slices
-  // across many cells at once) updates this player live. Pushed into the
-  // controller; null trim bounds = no constraint. Source clips ignore the
-  // crop pref: their window IS the section.
+  // Volume is a per-device preference (localStorage), pushed into the player.
   const pref = useCellPref(projectId, cell.id)
   const volume = pref.volume ?? 1
-  const trimStart = sectionWindow ? sectionWindow.start : (pref.trimStart ?? null)
-  const trimEnd = sectionWindow ? sectionWindow.end : (pref.trimEnd ?? null)
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
-  useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {
     setCellPref(projectId, cell.id, { volume: clamp01(v) })
   }, [projectId, cell.id])
-  // Persist a manual crop server-side by re-attaching the selected clip with
-  // the new trim (ms). Debounced so dragging the handles doesn't spam events;
-  // localStorage (above) updates live for instant feedback.
-  const trimEmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const persistTrimToServer = useCallback((start: number | null, end: number | null) => {
-    if (!playableId) return
-    // Round 5 guard: never rewrite the SOURCE clip's per-section trims — the
-    // crop UI is hidden for source clips, this is the belt-and-braces.
-    if (isSourceClip) return
+
+  // The TRIM is not a preference (AQU-1217, 2026-09-25). It lives on the take
+  // itself — the attachment's trimStartMs/trimEndMs, which the timeline chip
+  // and the Recording tab read too. It used to be copied into a per-device,
+  // per-LINE preference, so switching the line to another take carried the old
+  // take's trim across. Source clips keep their section as the window: that is
+  // the section's timing, not a trim, and is never edited here.
+  const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
+  const kept = keptWindowSec(cell, playableId, playableAtt)
+  const storedStart = sectionWindow ? sectionWindow.start : kept.start
+  const storedEnd = sectionWindow ? sectionWindow.end : kept.end
+  // While a line is being dragged, the drag's value leads; the stored window
+  // catches up once the trim event lands (the optimistic overlay makes that
+  // near-instant). Reset whenever the take changes.
+  const [draftTrim, setDraftTrim] = useState<{ audioId: string | null; start: number | null; end: number | null } | null>(null)
+  const draftLive = draftTrim && draftTrim.audioId === playableId ? draftTrim : null
+  const trimStart = draftLive ? draftLive.start : storedStart
+  const trimEnd = draftLive ? draftLive.end : storedEnd
+  useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim, playableId])
+
+  const changeTrim = useCallback((start: number | null, end: number | null) => {
+    if (!playableId || isSourceClip) return
+    setDraftTrim({ audioId: playableId, start, end })
+  }, [playableId, isSourceClip])
+
+  // Persist on release (or after an arrow-key nudge): one event per gesture,
+  // not one per pointer move.
+  const commitTrim = useCallback((start: number | null, end: number | null) => {
+    if (!playableId || isSourceClip) return
     const att = cell.attachments?.[playableId]
     if (!att) return
-    // AQU-646: the clip's own slot; the comparison is only a fallback for a
-    // clip that reached us without one.
-    const slot = att.slot ?? (playableId === cell.selectedAudioId ? "recording" : "generatedVoice")
-    // Round 7: overlay the new trims onto the merged cells instantly so the
-    // timeline chip resizes without waiting on flush + refetch. SUB-48: the
-    // overlay rides the emit promise so it lives exactly as long as the event.
-    //
-    // 2026-08-14: a trim is its own event now. This call site is the reason the
-    // distinction had to be made explicit rather than inferred — dragging a
-    // handle back to the clip's edge CLEARS a bound, and it used to say so by
-    // omitting the field, which is indistinguishable from a re-attach that
-    // simply has no opinion about trims. Now `null` says it out loud.
-    const trimP = emitCellAudioTrim({
+    void persistTakeTrim({
       projectId,
       fileId: cell.fileId,
       cellId: cell.id,
       audioId: playableId,
-      trimStartMs: start != null ? Math.round(start * 1000) : null,
-      trimEndMs: end != null ? Math.round(end * 1000) : null,
+      att,
+      selectedAudioId: cell.selectedAudioId,
+      trimStartMs: trimMs(start),
+      trimEndMs: trimMs(end),
       ...(targetLang ? { targetLang } : {}),
       author: username,
     })
-    injectOptimisticAudioTrim(cell.fileId, cell.id, {
-      audioId: playableId,
-      url: att.url,
-      slot,
-      mimeType: null,
-      voiceId: att.voiceId ?? null,
-      referenceAudioId: att.referenceAudioId ?? null,
-      durationMs: att.durationMs ?? null,
-      // AQU-490: carried, because this overlay REPLACES the attachment and a
-      // missing optional field silently reads as "nobody validated this". The
-      // second of the two trim call sites; both have to say it.
-      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
-      ...(att.validators ? { validators: att.validators } : {}),
-      trimStartMs: start != null ? Math.round(start * 1000) : null,
-      trimEndMs: end != null ? Math.round(end * 1000) : null,
-    }, trimP)
-    void trimP
-    notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username, targetLang])
-
-  const changeTrim = useCallback((start: number | null, end: number | null) => {
-    setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
-    if (trimEmitTimer.current) clearTimeout(trimEmitTimer.current)
-    trimEmitTimer.current = setTimeout(() => persistTrimToServer(start, end), 500)
-  }, [projectId, cell.id, persistTrimToServer])
+  }, [playableId, isSourceClip, cell.attachments, cell.fileId, cell.id, cell.selectedAudioId, projectId, username, targetLang])
+  // The crop popover reports every pointer move; debounce its persist so a drag
+  // is one event.
+  const cropCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cropChange = useCallback((start: number | null, end: number | null) => {
+    changeTrim(start, end)
+    if (cropCommitTimer.current) clearTimeout(cropCommitTimer.current)
+    cropCommitTimer.current = setTimeout(() => commitTrim(start, end), 500)
+  }, [changeTrim, commitTrim])
 
   // Generate → autoplay: when the magic button generates a fresh take, start
   // playback as soon as the attachment lands (a re-render flips `hasTake`).
@@ -471,7 +458,7 @@ export function CellVoicePanel({
       {/* Round 5: no crop on the shared source clip — its window is the
           section's timing; retime the section in the timeline. */}
       {!isSourceClip && (
-        <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+        <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={cropChange} />
       )}
       <VolumeButton volume={volume} onChange={changeVolume} />
       <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>

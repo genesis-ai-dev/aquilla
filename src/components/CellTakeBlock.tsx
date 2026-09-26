@@ -18,7 +18,7 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { Mic } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
+import { keptWindowSec } from "@/lib/audio/kept-window"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
@@ -142,6 +143,18 @@ function CellTakeBlockView({
     ...(targetLang ? { targetLang } : {}),
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
+
+  // AQU-1217: play only the part of the clip that plays for this line — the
+  // take's stored trim, or, for an imported source-audio section, the section
+  // itself. This block used to play the whole file: an untrimmed take, and on
+  // a source section the entire source reading from its first second.
+  const kept = keptWindowSec(owner, selectedAudioId, attachment)
+  const { setTrim } = controller
+  useEffect(() => {
+    setTrim(kept.start, kept.end)
+    // selectedAudioId is a dep on purpose: the controller drops its window when
+    // the take changes, so an identical window on the new take must re-apply.
+  }, [setTrim, kept.start, kept.end, selectedAudioId])
 
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"

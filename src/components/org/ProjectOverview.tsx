@@ -1040,7 +1040,6 @@ export function ProjectOverview() {
     )
   }, [planCsv, project?.name])
 
-  const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
   const canAssign = canOpenAssignUi(
     project?.syncRole?.level ?? null,
@@ -1482,13 +1481,13 @@ export function ProjectOverview() {
                         <Settings className="h-4 w-4" />
                       </Link>
                     )}
-                    {isOwner && isArchived && (
+                    {canManage && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
                         {t("common.restore")}
                       </Button>
                     )}
                     {/* Archive + Download + Lifecycle + Offline moved into overflow menu */}
-                    {(canManage || isOwner || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
+                    {(canManage || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -1544,7 +1543,7 @@ export function ProjectOverview() {
                               {t("org.projectOverview.removeOfflineCopy")}
                             </DropdownMenuItem>
                           )}
-                          {isOwner && (
+                          {canManage && (
                             <DropdownMenuItem
                               onClick={() => setArchiveConfirmOpen(true)}
                               disabled={busy}
@@ -1759,8 +1758,8 @@ export function ProjectOverview() {
                   title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
-                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
-                      : "Archive this project? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects."
+                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects.`
+                      : "Archive this project? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects."
                   }
                   confirmLabel="Archive"
                   checkboxLabel="I understand this project will be hidden from the active list."

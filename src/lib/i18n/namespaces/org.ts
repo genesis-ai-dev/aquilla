@@ -1182,6 +1182,9 @@ export const org = defineNamespace({
     "org.orgProjectsPage.roleFilter.all": "All roles",
     // AQU-1043: last-edit recency options. Fixed windows, not free-form
     // dates; "any time" is the default.
+    // AQU-1070: toolbar toggle that folds soft-archived projects into the list,
+    // greyed out, instead of sending the PM to the separate Archived page.
+    "org.orgProjectsPage.showArchived": "Show archived",
     "org.orgProjectsPage.updatedFilter.any": "Updated any time",
     "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)

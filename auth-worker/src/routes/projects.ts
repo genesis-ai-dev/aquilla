@@ -812,7 +812,10 @@ projects.patch(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
-// POST /api/v2/projects/:projectId/archive — owner-only
+// POST /api/v2/projects/:projectId/archive — maintainer+ (AQU-1070)
+//   Archiving is reversible (DELETE below restores) and is the billing lever
+//   partners use to drop a finished language out of their active-lane band, so
+//   it sits with the maintainers who run the portfolio rather than org owners.
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.post("/:projectId/archive", authMiddleware, async (c) => {
@@ -821,8 +824,8 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can archive a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json({ error: "maintainer+ required to archive a project" }, 403)
   }
 
   try {
@@ -857,7 +860,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
-// DELETE /api/v2/projects/:projectId/archive — restore (owner-only)
+// DELETE /api/v2/projects/:projectId/archive — restore (maintainer+, AQU-1070)
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.delete("/:projectId/archive", authMiddleware, async (c) => {
@@ -866,8 +869,8 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can restore a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json({ error: "maintainer+ required to restore a project" }, 403)
   }
 
   try {

@@ -287,6 +287,15 @@ export async function writeOrgBillingOverrides(
   }
 }
 
+/**
+ * Active target-lane count for an org — the number the enterprise SOW bills by.
+ *
+ * "Active" excludes both ways a partner can stand a language down (AQU-1070):
+ * archived projects (`archived_at`) and paused ones (`is_active = false`, the
+ * lifecycle toggle). A paused lane is one nobody is working, so billing it
+ * would leave partners with no way to drop out of a band short of archiving.
+ * Lane-level archival is applied per project by `countDistinctTargetLanes`.
+ */
 export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
   try {
     const { results } = await db
@@ -296,7 +305,9 @@ export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise
                 (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
            FROM project_settings ps
            JOIN projects p ON p.id = ps.project_id
-          WHERE p.org_id = ? AND p.archived_at IS NULL`,
+          WHERE p.org_id = ?
+            AND p.archived_at IS NULL
+            AND COALESCE(p.is_active, TRUE)`,
       )
       .bind(orgId)
       .all<{ target_language: string | null; target_lanes: unknown; archived_lanes: unknown }>()

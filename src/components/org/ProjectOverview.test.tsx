@@ -1491,6 +1491,108 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(screen.getByText("alice")).toBeInTheDocument()
   })
 
+  it("hides the Team card from a maintainer when the roster floor is owner-only", async () => {
+    // The progress floor can still say maintainer. Leaving the card open
+    // under "Only maintainers & owners can see this" is the roster choice
+    // appearing not to stick.
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: false,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+  })
+
+  it("keeps the Team badge on owners after the roster floor is raised", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: true,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/only owners can see this/i)
+    expect(within(card).getByTestId("section-visibility-badge")).not.toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("lets an org owner change the Team floor and withholds the picker from a project owner who is not an org owner", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
+      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+    })
+    const ownerView = renderOverview()
+
+    const ownerCard = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
+    const ownerBadge = within(ownerCard).getByTestId("section-visibility-badge")
+    expect(ownerBadge.tagName).toBe("BUTTON")
+    expect(ownerBadge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
+    ownerView.unmount()
+
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+
+  it("persists an owner-only Team floor from the header", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      rosterViewMinRole: ROLE.MAINTAINER,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /owners only/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+  })
+
   it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
     await withWorkload()
     useProject.mockReturnValue({

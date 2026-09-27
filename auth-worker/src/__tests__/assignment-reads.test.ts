@@ -287,6 +287,31 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
     expect(body.roster).toHaveLength(2)
   })
 
+  it("403s a maintainer when the roster floor is owner-only", async () => {
+    await seedOrgWithAssignments()
+    // wendi created the project, so she resolves as owner (700). mia is a
+    // maintainer on both the org and the project, and not the creator.
+    await seedUser(4, "mia")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, '{\"rosterViewMinRole\":700}', 1, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("mia")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { rosterHidden?: boolean; roster?: unknown }
+    expect(body.rosterHidden).toBe(true)
+    expect(body.roster).toBeUndefined()
+  })
+
   it("403s a contributor (anna) and a non-member (outsider)", async () => {
     await seedOrgWithAssignments()
     const annaRes = await app.request(

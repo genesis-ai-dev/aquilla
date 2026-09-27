@@ -2101,6 +2101,12 @@ export async function getAssignmentMinRoleForProject(
  * subject to `rosterViewMinRole` exactly as before, so AQU-485's
  * safe-by-default promise for contributors/reviewers/viewers is untouched.
  *
+ * The carve-out stops at the default roster floor (MAINTAINER). Raising the
+ * roster above that — "only owners can see this" — is an explicit choice that
+ * the assignment floor must not punch through. Otherwise the badge saves
+ * owner-only, then a maintainer still reads the project roster because the
+ * assignment default (PROJECT_LEAD) pulls the effective floor back down.
+ *
  * Scoped to the per-project roster (the picker's source). The org-wide
  * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
  * project-scoped authority and confers no org-wide roster visibility.
@@ -2110,6 +2116,7 @@ export async function getProjectRosterViewMinRole(env: Env, orgId: number): Prom
     getRosterViewMinRole(env, orgId),
     getAssignmentMinRole(env, orgId),
   ])
+  if (rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE) return rosterFloor
   return Math.min(rosterFloor, assignmentFloor)
 }
 

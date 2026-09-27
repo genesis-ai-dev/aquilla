@@ -1010,6 +1010,23 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
   if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+
+  // Names on this roster are the member list. An owner-only roster floor must
+  // hide them here too — the Team card is how a maintainer still "sees" the
+  // roster after the Members card has closed, under a badge that still reads
+  // "only maintainers & owners".
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (project?.org_id != null) {
+    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    if (!canViewRoster(role.level, rosterMinRole)) {
+      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+    }
+  }
+
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })

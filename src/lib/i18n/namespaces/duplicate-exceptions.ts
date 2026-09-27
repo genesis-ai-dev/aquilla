@@ -370,11 +370,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "vs a report-style detail-row label for the same underlying value read very " +
     "differently in languages that distinguish an editable field from a fact.",
   "projectSettings.decay.summary":
-    "Collapsed-details summary for this project's AD-14 confidence-propagation " +
+    "Collapsed-details summary for this project's AD-14 health-propagation " +
     "tuning (max hops / attention threshold). editor.expansion.retrievalSupport " +
-    "is the cell-level badge shown on an individual cell's expansion panel. A " +
-    "settings-panel heading and a per-cell status badge naming the same feature " +
-    "at two different granularities read as different parts of speech.",
+    "is the cell-level health badge shown on an individual cell's expansion " +
+    "panel. A settings-panel heading and a per-cell status badge naming the same " +
+    "feature at two different granularities read as different parts of speech.",
   "projectSettings.share.tabMembers":
     "Tab label in the Share dialog switching to the per-project member list. " +
     "editor.navTitle.members is the breadcrumb/nav title for the standalone " +

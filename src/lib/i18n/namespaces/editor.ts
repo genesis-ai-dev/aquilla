@@ -1424,16 +1424,16 @@ export const editor = defineNamespace({
     "editor.audio.play": "Play audio",
     "editor.cue.playFrom": "Play from this cue",
 
-    // — Expansion tab: retrieval support ——————————————————————————
-    "editor.expansion.retrievalSupport": "Retrieval support",
+    // — Expansion tab: health ————————————————————————————————————
+    "editor.expansion.retrievalSupport": "Health",
     "editor.expansion.endorsements": plural({
-      one: "{count} endorsement · support {percent}%",
-      other: "{count} endorsements · support {percent}%",
+      one: "{count} endorsement · health {percent}%",
+      other: "{count} endorsements · health {percent}%",
     }),
     "editor.expansion.lowerSupport":
-      "Lower retrieval support — review terminology and context closely.",
+      "Lower health — review terminology and context closely.",
     "editor.expansion.betterSupport":
-      "Better retrieval support — human review is still required.",
+      "Better health — human review is still required.",
 
     // — Expansion tab: back-translation ————————————————————————————
     "editor.bt.label": "Back-translation",
@@ -5313,30 +5313,31 @@ export const editor = defineNamespace({
       },
       "editor.expansion.retrievalSupport": {
         description:
-          "Name of the expansion tab showing how much evidence from the project's " +
-          "own existing translations backs this cell's draft. 'Retrieval' is the " +
-          "search step that finds that evidence. Tab labels sit beside an icon and " +
-          "hide on narrow screens.",
+          "Name of the expansion tab showing this cell's health: how much evidence " +
+          "from the project's own validated translations backs the draft. 'Health' " +
+          "is the app-wide name for this signal — use the same word the project " +
+          "settings panel uses. Tab labels sit beside an icon and hide on narrow " +
+          "screens.",
         maxLength: 22,
       },
       "editor.expansion.endorsements": {
         description:
-          "Summary line in the retrieval-support tab: how many times reviewers have " +
-          "endorsed this rendering, and the resulting support score as a percentage. The " +
+          "Summary line in the health tab: how many times reviewers have " +
+          "endorsed this rendering, and the resulting health score as a percentage. The " +
           "middle dot separates the two figures.",
         placeholders: {
           count:
             "Number of endorsements. Selects the plural form, and the app renders it " +
             "emphasised inside the sentence.",
           percent:
-            "Support score 0-100, already rounded, without the % sign — the sign " +
+            "Health score 0-100, already rounded, without the % sign — the sign " +
             "belongs to this string, so its glyph and position are yours to choose. " +
             "The number itself is rendered emphasised.",
         },
       },
       "editor.expansion.lowerSupport": {
         description:
-          "Advice shown when the retrieval-support score is below the threshold: " +
+          "Advice shown when the health score is below the threshold: " +
           "little comparable material was found, so check the wording carefully. Not " +
           "a claim that the translation is wrong.",
       },

@@ -1933,6 +1933,7 @@ export async function handleEventsWriteRequest(
                 author: entry.author,
                 body,
                 parentCommentId,
+                commentId: p.commentId,
               }),
             )
           }

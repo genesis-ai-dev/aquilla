@@ -24,6 +24,21 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── CommentNotificationsSection (preferences → notifications) ── AQU-1193
+    "settings.notifications.groupLabel": "Comment email",
+    "settings.notifications.commentEmailLabel": "Email me about comments",
+    "settings.notifications.commentEmailDescription":
+      "How much comment email Aquilla sends you. Replies on one thread always " +
+      "arrive as a single email conversation, however you set this.",
+    "settings.notifications.option.all": "Every mention and reply",
+    "settings.notifications.option.mentions": "Only when someone @-mentions me",
+    "settings.notifications.option.off": "Never",
+    "settings.notifications.loadFailed": "Could not load your notification setting",
+    "settings.notifications.saveFailed": "Could not save that setting",
+    "settings.notifications.section.title": "Notifications",
+    "settings.notifications.section.description":
+      "Choose when Aquilla emails you about comments.",
+
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
     "settings.structuralCells.description":
@@ -372,6 +387,64 @@ export const settings = defineNamespace({
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
         },
+      },
+      "settings.notifications.groupLabel": {
+        description:
+          "Card heading over the single comment-email control on the "
+          + "Preferences → Notifications page.",
+        maxLength: 28,
+      },
+      "settings.notifications.commentEmailLabel": {
+        description:
+          "Label of the dropdown that chooses how much comment email the "
+          + "signed-in user receives.",
+        maxLength: 40,
+      },
+      "settings.notifications.commentEmailDescription": {
+        description:
+          "Help text under the comment-email dropdown. Explains what the "
+          + "setting covers and reassures the reader that thread grouping is "
+          + "not something they have to turn on.",
+      },
+      "settings.notifications.option.all": {
+        description:
+          "Dropdown option: send email for every @-mention AND every reply on "
+          + "a thread the user is part of. The noisiest of the three.",
+        maxLength: 36,
+      },
+      "settings.notifications.option.mentions": {
+        description:
+          "Dropdown option, and the default: send email only when someone "
+          + "@-mentions this user in a comment. '@-mentions' refers to typing "
+          + "@username in a comment — keep the @ symbol.",
+        maxLength: 36,
+      },
+      "settings.notifications.option.off": {
+        description:
+          "Dropdown option: send no comment email at all. One word if the "
+          + "language allows it.",
+        maxLength: 20,
+      },
+      "settings.notifications.loadFailed": {
+        description:
+          "Inline error shown in place of the dropdown when the current "
+          + "setting could not be read from the server.",
+      },
+      "settings.notifications.saveFailed": {
+        description:
+          "Inline error shown under the dropdown when saving the chosen "
+          + "setting failed; the dropdown reverts to its previous value.",
+      },
+      "settings.notifications.section.title": {
+        description:
+          "Nav row title and page heading for the Notifications section of "
+          + "personal Preferences.",
+        maxLength: 24,
+      },
+      "settings.notifications.section.description": {
+        description:
+          "One-line summary under the Notifications nav row on the "
+          + "Preferences index, telling the reader what the section holds.",
       },
       "settings.monday.dismissNoticeAriaLabel": {
         description:

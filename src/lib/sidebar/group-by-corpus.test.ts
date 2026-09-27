@@ -192,4 +192,23 @@ describe("groupByCorpus — file-name fallback for migrated projects (AQU-1084)"
     expect(groups.map((g) => g.label)).toEqual(["Season 1"])
     expect(groups[0].derived).toBeUndefined()
   })
+
+  // AQU-1187: the eBible/Hello AO importers now emit one file per book, named by
+  // book and carrying bookCode but no corpusMarker. That has to land in OT/NT in
+  // canonical order — it is the whole reason the split exists.
+  it("groups per-book scripture-catalog files into OT and NT in canonical order", () => {
+    const perBook = (name: string, bookCode: string) => ({ name, bookCode, type: "ebible" })
+    const groups = groupByCorpus([
+      perBook("Matthew", "MAT"),
+      perBook("Exodus", "EXO"),
+      perBook("Genesis", "GEN"),
+      perBook("Revelation", "REV"),
+    ])
+
+    expect(groups.map((g) => g.label)).toEqual(["OT", "NT"])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Genesis", "Exodus"])
+    expect(groups[1].files.map((x) => x.name)).toEqual(["Matthew", "Revelation"])
+    // Derived from bookCode, not from a marker the user can rename.
+    expect(groups[0].derived).toBe(true)
+  })
 })

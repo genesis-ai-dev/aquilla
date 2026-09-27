@@ -590,8 +590,8 @@ export function ImportDialog({
             targetLang={targetLang}
             getToken={getToken}
             sourceCells={sourceCells}
-            onImported={async (ref, inferredLanguages) => {
-              await handleChildImported([ref], inferredLanguages)
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
             onTargetImported={() => {
               onOpenChange(false)
@@ -606,8 +606,8 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             getToken={getToken}
-            onImported={async (ref, inferredLanguages) => {
-              await handleChildImported([ref], inferredLanguages)
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
           />
         )}
@@ -1955,7 +1955,9 @@ interface EBiblePanelProps {
   targetLanguage: string
   targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: a whole-Bible eBible import lands as one file per book, so this
+   *  takes the full list rather than a single reference. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   /** When provided, enables the "into target" mode toggle (AQU-191). */
   sourceCells?: SourceCellRef[]
   /** Called after a successful target-column import (no new FileReference). */
@@ -2020,7 +2022,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
     abortRef.current = new AbortController()
 
     try {
-      const ref = await importEBible(
+      const refs = await importEBible(
         selected,
         {
           projectId,
@@ -2034,7 +2036,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       )
       // Propagate the eBible translation's language code as the inferred
       // sourceLanguage so the project can seed it when unset (AQU-249).
-      await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
+      await onImported(refs, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
@@ -2321,7 +2323,8 @@ interface HelloaoPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: a Hello AO import lands as one file per selected book. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
 }
 
 function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
@@ -2424,7 +2427,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     try {
       // Whole-bible selection passes null so the parser skips no books.
       const selection = checkedBooks.size === books.length ? null : checkedBooks
-      const ref = await importHelloao(
+      const refs = await importHelloao(
         selected,
         selection,
         {
@@ -2437,7 +2440,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         setProgress,
         abortRef.current.signal
       )
-      await onImported(ref, { sourceLanguage: selected.language || undefined })
+      await onImported(refs, { sourceLanguage: selected.language || undefined })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {

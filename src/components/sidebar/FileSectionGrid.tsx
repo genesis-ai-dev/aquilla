@@ -67,5 +67,13 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
     percentagesOnly: true,
   }))
 
-  return <BookHealthSpine chapters={spineChapters} onChapterClick={onSectionClick} />
+  return (
+    <BookHealthSpine
+      chapters={spineChapters}
+      onChapterClick={onSectionClick}
+      // AQU-1187: per (project, file), so folding Genesis shut in one file
+      // doesn't fold it in another.
+      bookCollapseStorageKey={`aquilla:sidebar:book-collapsed:${projectId}:${fileId}`}
+    />
+  )
 }

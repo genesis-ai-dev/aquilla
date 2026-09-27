@@ -13,6 +13,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import {
   Combobox,
   ComboboxContent,
@@ -57,12 +58,19 @@ interface NavigationRow {
   key: string
   milestone: MilestoneNavigationItem
   subsection?: MilestoneNavigationSubsection
+  /**
+   * AQU-1187: a book name heading above the chapters of one book, for a file
+   * that spans several books. Present only on heading rows, which label the
+   * list rather than navigating anywhere.
+   */
+  bookHeader?: string
 }
 
 // Fixed row heights so open doesn't wait on measureElement. Nested cell-range
 // rows are one line of label plus the same two-line progress column.
 const MILESTONE_ROW_HEIGHT_PX = 48
 const SUBSECTION_ROW_HEIGHT_PX = 40
+const BOOK_HEADER_ROW_HEIGHT_PX = 28
 
 /** Matches EditorTable: picker is absolutely centered from lg up. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
@@ -273,7 +281,9 @@ function VirtualizedMilestoneList({
     getScrollElement: () => scrollElementRef.current,
     getItemKey: (index) => filteredItems[index]?.key ?? index,
     estimateSize: (index) => (
-      filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
+      filteredItems[index]?.bookHeader
+        ? BOOK_HEADER_ROW_HEIGHT_PX
+        : filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
     ),
     overscan: 12,
     initialRect: { width: 320, height: 360 },
@@ -335,6 +345,37 @@ function VirtualizedMilestoneList({
             const isActive = row.key === activeRowKey
             const subsection = row.subsection
             const expandable = !subsection && Boolean(row.milestone.subsections?.length)
+
+            if (row.bookHeader) {
+              // Still a Combobox.Item so Base UI's index bookkeeping (and the
+              // virtualizer's) stays 1:1 with filteredItems; `disabled` is what
+              // keeps keyboard navigation from ever landing on a heading.
+              return (
+                <ComboboxPrimitive.Item
+                  key={row.key}
+                  index={virtualItem.index}
+                  data-index={virtualItem.index}
+                  value={row}
+                  disabled
+                  data-testid="milestone-book-header"
+                  data-book={row.bookHeader}
+                  className="flex w-full items-center px-2 text-xs font-semibold text-muted-foreground select-none data-disabled:opacity-100"
+                  aria-setsize={filteredItems.length}
+                  aria-posinset={virtualItem.index + 1}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    width: "auto",
+                    height: virtualItem.size,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <span className="truncate">{row.bookHeader}</span>
+                </ComboboxPrimitive.Item>
+              )
+            }
 
             return (
               <ComboboxPrimitive.Item
@@ -475,18 +516,31 @@ export function MilestoneNavigator({
   const canGoNext = activeDestinationIndex >= 0 && activeDestinationIndex < destinations.length - 1
 
   const rows = useMemo<NavigationRow[]>(
-    () => items.flatMap((milestone) => {
-      const milestoneRow: NavigationRow = { key: milestone.key, milestone }
-      if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
-      return [
-        milestoneRow,
-        ...milestone.subsections.map((subsection): NavigationRow => ({
-          key: subsection.key,
-          milestone,
-          subsection,
-        })),
-      ]
-    }),
+    () => {
+      const rowsFor = (milestone: MilestoneNavigationItem): NavigationRow[] => {
+        const milestoneRow: NavigationRow = { key: milestone.key, milestone }
+        if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
+        return [
+          milestoneRow,
+          ...milestone.subsections.map((subsection): NavigationRow => ({
+            key: subsection.key,
+            milestone,
+            subsection,
+          })),
+        ]
+      }
+
+      // AQU-1187: a file spanning several books (a whole-Bible import) gets its
+      // chapters filed under book headings, in canonical order, instead of one
+      // flat list of 1,189. Every other file — per-book scripture, media,
+      // prose — groups to null and keeps the flat list it always had.
+      const books = groupChaptersByBook(items)
+      if (!books) return items.flatMap(rowsFor)
+      return books.flatMap((book) => [
+        { key: `book:${book.id}`, milestone: book.chapters[0], bookHeader: book.id },
+        ...book.chapters.flatMap(rowsFor),
+      ])
+    },
     [expandedKey, items],
   )
 
@@ -568,6 +622,11 @@ export function MilestoneNavigator({
           autoHighlight
           onValueChange={(row, eventDetails) => {
             if (!row) return
+            if (row.bookHeader) {
+              // A heading names the group; it is not a destination.
+              eventDetails.cancel()
+              return
+            }
             if (row.subsection) {
               choose(row.milestone.key, row.subsection.key)
               return
@@ -582,13 +641,22 @@ export function MilestoneNavigator({
             choose(row.milestone.key)
           }}
           itemToStringLabel={(row) => (
-            row.subsection
-              ? t("editor.milestone.cellRange", { range: row.subsection.label })
-              : row.milestone.label
+            row.bookHeader
+              ? row.bookHeader
+              : row.subsection
+                ? t("editor.milestone.cellRange", { range: row.subsection.label })
+                : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}
           isItemEqualToValue={(a, b) => a.key === b.key}
-          filter={(row, query) => milestoneMatchesSearch(row.milestone, query)}
+          filter={(row, query) => (
+            // Headings organize the browse list; once the user types, the
+            // matches stand on their own and an unmatched heading above them
+            // would only mislead ("Matthew 5" must not sit under "Genesis").
+            row.bookHeader
+              ? query.trim().length === 0
+              : milestoneMatchesSearch(row.milestone, query)
+          )}
           onItemHighlighted={(row, { reason, index }) => {
             const virtualizer = virtualizerRef.current
             if (!row || !virtualizer || index < 0) return

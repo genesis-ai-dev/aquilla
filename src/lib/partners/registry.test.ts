@@ -63,16 +63,18 @@ describe("partner registry — discovery", () => {
   })
 })
 
-describe("partner registry — this tree", () => {
+describe("partner registry — shape invariants that hold in any tree", () => {
   /**
-   * Guards the wiring, not the partner: if `register.ts` stops being discovered
-   * (a renamed folder, a moved glob pattern), the Biblica importer silently
-   * vanishes from the dialog with nothing else failing.
+   * True with partners and without them, so it is the generic tree's own guard.
+   * Whether a PARTICULAR integration is wired is that partner's test to keep —
+   * see `src/partner-integrations/<partner>/__tests__/register.test.ts`.
    */
-  it("discovers the Biblica integration with an import tile and an IDML normalizer", () => {
-    const biblica = partnerIntegrations().find((integration) => integration.id === "biblica")
-    expect(biblica).toBeDefined()
-    expect(biblica?.importScreen?.titleKey).toBe("importExport.landing.biblica.title")
-    expect(biblica?.idmlTargetHtmlNormalizers).toHaveLength(1)
+  it("gives every discovered integration an id and a loadable panel", () => {
+    for (const integration of partnerIntegrations()) {
+      expect(integration.id).toMatch(/\S/)
+      if (integration.importScreen) {
+        expect(typeof integration.importScreen.panel).toBe("function")
+      }
+    }
   })
 })

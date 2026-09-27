@@ -60,6 +60,7 @@ import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { createScopedRibbonCache } from "@/lib/health/scoped-ribbon"
 import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
+import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -255,6 +256,10 @@ type EditorGridCols =
   | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
   | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+/** AQU-1191: low-memory mode renders the viewport and nothing beyond it, so a
+ *  constrained device holds one screen of rows instead of one screen plus two
+ *  overscan bands. Costs some blank-on-fast-scroll; buys the tab. */
+const LOW_MEMORY_DRAW_DISTANCE_PX = 0
 
 /**
  * 2026-08-07 (wire c): vertical follow for the stacked media lens — the table
@@ -1355,6 +1360,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const ribbonInputCache = useMemo(() => createScopedRibbonCache(), [cellStore])
   const ribbonIndexById = useMemo(() => new Map(displayCellIds.map((id, index) => [id, index])), [displayCellIds])
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
+  // AQU-1191: the list's off-screen overscan is one of the two render costs
+  // this mode dials back (the rows' presence overlay is the other — see
+  // EditorRow, which reads the same store rather than taking a prop, so the
+  // flag stays off MemoizedRow's compare surface).
+  const lowMemoryActive = useLowMemoryActive()
   const healthRibbonByCellId = useMemo(() =>
     !healthCalculationsEnabled ? EMPTY_RIBBON :
     readAtVersion(cellStoreVersion, () => ribbonInputCache.read<CellData>(displayCellIds, ribbonIndexById, {
@@ -2786,7 +2796,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             extraData={listExtraData}
             keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
-            drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
+            drawDistance={lowMemoryActive ? LOW_MEMORY_DRAW_DISTANCE_PX : LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
             maintainVisibleContentPosition
             onScroll={handleListScroll}
@@ -4786,7 +4796,13 @@ function EditorRow({
   const videoSoundingCellId = useVideoSoundingCellId()
   const rowMediaSyncActive = useMediaSyncActive()
   const isQueueRow = (isQueueCurrentCell || videoSoundingCellId === cell.id) && rowMediaSyncActive
-  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
+  // AQU-1191: in low-memory mode a row stops subscribing to per-cell presence,
+  // so the peer badges and the mirrored remote draft go with it. Display only —
+  // the advisory focus lock still supplies "X is editing" (`lockHolderLabel`),
+  // and AQU-1154 already took presence out of the write path, so nothing about
+  // who may commit changes with the mode.
+  const lowMemoryActive = useLowMemoryActive()
+  const remoteCellPresence = useCellPresence(lowMemoryActive ? null : presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
   const remoteDraftText = useMemo(() => {

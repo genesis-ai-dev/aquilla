@@ -7,6 +7,12 @@ import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
 } from "@/lib/store/milestone-split-pref"
+import {
+  __resetLowMemoryForTests,
+  getLowMemoryMode,
+  isLowMemoryActive,
+  setLowMemoryMode,
+} from "@/lib/perf/low-memory"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -53,6 +59,8 @@ beforeEach(() => {
   localStorage.clear()
   resetMilestoneSplitCacheForTests()
   setMilestoneSplit(false)
+  setLowMemoryMode("auto")
+  __resetLowMemoryForTests()
 })
 
 afterEach(() => {
@@ -101,6 +109,34 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(within(targetTermOptions).getByRole("radio", { name: "Focused cell only" }))
 
     expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
+  })
+
+  it("switches low-memory mode from the device setting and keeps the popover open (AQU-1191)", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    expect(within(modeTabs).getByRole("tab", { name: "Auto" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    fireEvent.click(within(modeTabs).getByRole("tab", { name: "On" }))
+
+    expect(getLowMemoryMode()).toBe("on")
+    expect(isLowMemoryActive()).toBe(true)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("offers low-memory mode with no file open — it is a device setting, not a file one", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    fireEvent.click(within(modeTabs).getByRole("tab", { name: "Off" }))
+
+    expect(getLowMemoryMode()).toBe("off")
+    expect(isLowMemoryActive()).toBe(false)
   })
 
   it("changes source direction via the tabs", () => {

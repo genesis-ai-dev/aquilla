@@ -367,6 +367,10 @@ export const editor = defineNamespace({
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.lowMemory": "Low-memory mode",
+    "editor.view.lowMemoryAuto": "Auto",
+    "editor.view.lowMemoryOn": "On",
+    "editor.view.lowMemoryOff": "Off",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -3004,6 +3008,30 @@ export const editor = defineNamespace({
           "infractions, and the confidence overlay on or off. Turning it off " +
           "lightens the editor on very large files. Applies to this browser only.",
         maxLength: 32,
+      },
+      "editor.view.lowMemory": {
+        description:
+          "Section heading for the setting that strips the editor back on a " +
+          "device short of memory — health indicators, peer-presence overlays, " +
+          "and off-screen rows. Three options follow it. Applies to this " +
+          "browser only.",
+        maxLength: 28,
+      },
+      "editor.view.lowMemoryAuto": {
+        description:
+          "Option that lets the device's own reported memory decide whether the " +
+          "editor runs stripped back. The default.",
+        maxLength: 16,
+      },
+      "editor.view.lowMemoryOn": {
+        description:
+          "Option that always runs the editor stripped back, whatever the device reports.",
+        maxLength: 16,
+      },
+      "editor.view.lowMemoryOff": {
+        description:
+          "Option that always runs the full editor, whatever the device reports.",
+        maxLength: 16,
       },
       "editor.view.targetKeyTerms": {
         description:

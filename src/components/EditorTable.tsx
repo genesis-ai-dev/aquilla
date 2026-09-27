@@ -42,6 +42,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { isBiblicaScriptureCell } from "@/lib/biblica/cell-kind"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
@@ -2228,6 +2229,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const isFirstOfFile = index === 0
             || cellStore.getCellView(displayCellIds[index - 1])?.fileId !== cell.fileId
           const showParagraphBoundary = cell.paragraphStart === true && !isFirstOfFile
+          // AQU-1285: a Biblica study-Bible file holds both the Bible text and
+          // the notes about it. Editing a verse and editing a note on it are
+          // different jobs, so a verse row says so — the accent and badge are
+          // the same shape the untimed rows use, and the reference pill already
+          // carries the verse ("GEN 1:1") from the cell's globalReferences.
+          const isScriptureRow = isBiblicaScriptureCell(cell.metadata)
           // p1-paragraph-ui-wiring (Task 3): only paragraph-start cells carry
           // group info; every other row gets undefined so its rail button
           // gate (paragraphGroupSize !== undefined) resolves false.
@@ -2294,6 +2301,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         data-cell-id={cell.id}
         data-index={index}
         data-untimed={untimedInTimeLens ? "true" : undefined}
+        data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
         className={cn(
@@ -2302,9 +2310,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // be caught by the row's other `group` users.
           sourceLineEditing && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
+          isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
+        {isScriptureRow && (
+          <span className="pointer-events-none absolute end-1 top-1 z-10 rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
+            {t("editor.row.scriptureBadge")}
+          </span>
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}

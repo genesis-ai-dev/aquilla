@@ -1317,6 +1317,7 @@ export const editor = defineNamespace({
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
     "editor.row.noTimingBadge": "no timing",
+    "editor.row.scriptureBadge": "verse",
     "editor.row.newParagraph": "New paragraph",
     "editor.row.lineAria": "Line {number}",
     "editor.row.cellAria": "{ref} cell",
@@ -4838,6 +4839,14 @@ export const editor = defineNamespace({
         description:
           "Tiny (9px) amber badge in the corner of such a row. Lower-case because it " +
           "is a badge. Two words at most.",
+        maxLength: 14,
+      },
+      "editor.row.scriptureBadge": {
+        description:
+          "Tiny (9px) badge in the corner of a row holding one verse of the Bible " +
+          "text of a study-Bible import, telling a translator the row is scripture " +
+          "rather than a study note about it. Lower-case because it is a badge. " +
+          "One word.",
         maxLength: 14,
       },
       "editor.row.newParagraph": {

@@ -748,3 +748,75 @@ describe("plan unit rollup", () => {
     expect(await portfolio()).toMatchObject({ unitsTotal: 0, unitsDone: 0, unitsOverdue: 0 })
   })
 })
+
+/**
+ * AQU-1071 — the org's active-language count, served beside the rollup.
+ *
+ * This is the number the enterprise billing band is read off, so it is counted by
+ * the same helper billing counts with (`countTargetLanesByOrg` → the plans.ts
+ * rule): distinct language tags, archived lanes and archived projects excluded.
+ * The org dashboard tile reads it straight from here rather than tallying the
+ * lane chips on screen, which would double-count a language two projects share
+ * and would count an archived lane that still has progress rows.
+ */
+describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)", () => {
+  async function seedOrgWithLanes() {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES
+        ('pa', 'John', 1, 1, NULL),
+        ('pb', 'Mark', 1, 1, NULL),
+        ('pc', 'Luke', 1, 1, NULL),
+        ('pz', 'Retired', 1, 1, '2026-01-01')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES
+        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Bambara","Dioula"]}', 1),
+        ('pb', '{"targetLanguage":"Dioula"}', 1),
+        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+  }
+
+  async function languageCount(): Promise<number> {
+    const res = await app.request(
+      "/api/v2/orgs/1/portfolio",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { activeLanguageCount: number }).activeLanguageCount
+  }
+
+  it("counts each active target language once across the org", async () => {
+    await seedOrgWithLanes()
+    // Bambara (pa, listed twice — primary and lane), Dioula (pa and pb), and
+    // Fulfulde (pc). Songhai is archived and Zarma's project is archived, so
+    // neither is a language this org is still translating into.
+    expect(await languageCount()).toBe(3)
+  })
+
+  it("is zero for an org with no projects, rather than absent", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    expect(await languageCount()).toBe(0)
+  })
+
+  it("is org-wide, so a filtered page of projects does not shrink it", async () => {
+    // The tile must agree with the invoice whatever the table is showing, so the
+    // count is deliberately not scoped to the requested page or search.
+    await seedOrgWithLanes()
+    const res = await app.request(
+      "/api/v2/orgs/1/portfolio?q=john&limit=1",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: unknown[]; activeLanguageCount: number }
+    expect(body.projects).toHaveLength(1)
+    expect(body.activeLanguageCount).toBe(3)
+  })
+})

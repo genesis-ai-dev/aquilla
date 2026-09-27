@@ -112,6 +112,10 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
+    // AQU-1071: the enterprise billing band is read off this number — distinct
+    // active target languages across the org, archived lanes excluded.
+    "org.orgHome.activeLanguages": "Active languages",
+    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",

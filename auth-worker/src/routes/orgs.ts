@@ -51,6 +51,7 @@ import {
   isCanonicalRoleLevel,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
@@ -367,14 +368,21 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  const { projects, nextCursor } = await listOrgPortfolioPage(
-    c.env,
-    [orgId],
-    { userId: user.id, isAdmin },
-    page,
-  )
+  // AQU-1071: the active-language count rides along with the rollup the org
+  // dashboard is already asking for, so its tile costs no extra round trip. It
+  // is the same rule billing bills on (distinct active target-language tags,
+  // archived lanes and archived projects excluded), and deliberately org-wide
+  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
+  // a partner reading a smaller figure than their invoice is the confusion this
+  // ticket exists to remove, and a bare count names no project, so it discloses
+  // nothing the visibility rule guards.
+  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+    listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
+    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+  ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
+    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
     nextCursor,
   })
 })

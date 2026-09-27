@@ -97,12 +97,44 @@ export interface OrgPortfolio {
   projects: PortfolioProject[]
 }
 
-export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+/**
+ * AQU-1071: an org's rollup plus the number the enterprise billing band is read
+ * off — distinct ACTIVE target languages across the org (archived lanes and
+ * archived projects excluded), counted server-side by the same helper billing
+ * uses, so the dashboard tile and the invoice cannot disagree.
+ *
+ * A project with three target lanes contributes three languages; two projects
+ * translating into the same language contribute one, which is why this is not
+ * derived client-side from the per-project lane chips.
+ */
+export interface OrgPortfolioSummary {
+  projects: PortfolioProject[]
+  /** 0 from a server that predates the field, so a tile reads 0 rather than NaN. */
+  activeLanguageCount: number
+}
+
+export async function getOrgPortfolioSummary(
+  jwt: string,
+  orgId: number,
+): Promise<OrgPortfolioSummary> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio`, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
-  return ((await res.json()) as { projects: PortfolioProject[] }).projects
+  const body = (await res.json()) as {
+    projects?: PortfolioProject[]
+    activeLanguageCount?: number
+  }
+  return {
+    projects: body.projects ?? [],
+    activeLanguageCount: Number.isFinite(body.activeLanguageCount)
+      ? Number(body.activeLanguageCount)
+      : 0,
+  }
+}
+
+export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+  return (await getOrgPortfolioSummary(jwt, orgId)).projects
 }
 
 export const PORTFOLIO_PAGE_SIZE = 40

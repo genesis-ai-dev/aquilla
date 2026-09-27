@@ -130,10 +130,10 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Journey | Spec |
 | --- | --- |
 | IDML roundtrip / IME / protected slots | `e2e/specs/editor/idml-roundtrip.spec.ts` |
-| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
-| Treasure Hunt Bible import | `e2e/specs/editor/import-treasure-hunt-bible.spec.ts` |
-| Reach 4 Life import | `e2e/specs/editor/import-reach4life.spec.ts` |
-| EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/editor/import-ebl.spec.ts` |
+| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/partner-integrations/biblica/import-biblica-study-notes.spec.ts` |
+| Treasure Hunt Bible import | `e2e/specs/partner-integrations/biblica/import-treasure-hunt-bible.spec.ts` |
+| Reach 4 Life import | `e2e/specs/partner-integrations/biblica/import-reach4life.spec.ts` |
+| EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/partner-integrations/biblica/import-ebl.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
 | Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |

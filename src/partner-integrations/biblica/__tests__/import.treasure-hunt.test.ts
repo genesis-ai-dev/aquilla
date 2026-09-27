@@ -7,7 +7,7 @@ import {
   paragraph,
   run,
   scripture,
-} from "./biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+} from "@/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
 // in this runtime. Run the identical shared engine inline so the commit path is
@@ -25,7 +25,7 @@ vi.mock("@/lib/idml/idml-worker-client", async (importOriginal) => {
   }
 })
 
-const { importBiblicaStudyNotes, TREASURE_HUNT_PROFILE_ID } = await import("./import")
+const { importBiblicaStudyNotes, TREASURE_HUNT_PROFILE_ID } = await import("@/partner-integrations/biblica/import")
 
 afterEach(() => vi.unstubAllGlobals())
 

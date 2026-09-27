@@ -16,8 +16,8 @@ import {
   makeBiblicaIdml,
   paragraph,
   run,
-} from "@/lib/biblica/__fixtures__/biblica-idml"
-import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
+} from "@/partner-integrations/biblica/__fixtures__/biblica-idml"
+import { extractBiblicaStudyNoteStrings } from "@/partner-integrations/biblica/parsers/biblica"
 import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import type { TranslatableString } from "@/lib/parsers/types"
 import {

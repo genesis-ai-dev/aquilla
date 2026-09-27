@@ -21,10 +21,11 @@ import {
   makeEblIdml,
   styled,
   tocEntriesWithPageRuns,
-} from "@/lib/biblica/ebl/__fixtures__/ebl-idml"
-import { buildBulkCellsWithSpeakers, EBL_PROFILE_ID } from "@/lib/import"
-import { extractEblStrings } from "@/lib/parsers/biblica-ebl"
-import { exportIdml, type IdmlExportExecutor } from "./idml"
+} from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
+import { buildBulkCellsWithSpeakers } from "@/lib/import"
+import { EBL_PROFILE_ID } from "@/partner-integrations/biblica/editions"
+import { extractEblStrings } from "@/partner-integrations/biblica/parsers/biblica-ebl"
+import { exportIdml, type IdmlExportExecutor } from "@/lib/export/exporters/idml"
 
 const directExecutor: IdmlExportExecutor = {
   parse: async (bytes) => parseIdml(bytes),

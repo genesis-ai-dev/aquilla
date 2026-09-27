@@ -27,11 +27,11 @@ import {
   paragraph,
   run,
   verseMarkerOnlyNote,
-} from "@/lib/biblica/__fixtures__/biblica-idml"
+} from "@/partner-integrations/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { normalizeProtectedCompletion } from "@/lib/idml/completion"
-import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
-import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
+import { extractBiblicaStudyNoteStrings } from "@/partner-integrations/biblica/parsers/biblica"
+import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "@/lib/export/exporters/idml"
 
 const directExecutor: IdmlExportExecutor = {
   parse: async (bytes) => parseIdml(bytes),

@@ -51,10 +51,10 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
-import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
-import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
-import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
-import { extractEblStrings } from "./parsers/biblica-ebl"
+// Partner readers are NOT imported here — they arrive on the `edition` descriptor
+// passed to `importPartnerNotes`, so this module still compiles with the
+// partner-integrations folders deleted. See docs/PARTNER-INTEGRATIONS.md.
+import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -431,7 +431,7 @@ export interface ImportResult {
    *  sidebar can group + order by canonical book. */
   bookCode?: string
   /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a
-   *  named collection such as "Treasure Hunt Bible" for a Biblica edition. */
+   *  named collection such as one publisher title from a partner integration. */
   corpusMarker?: string | undefined
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
@@ -1239,132 +1239,69 @@ export async function importTranslationNotes(
   }
 }
 
-/** Distinguishes a notes-only Biblica import from a whole-package IDML import. */
-export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
-
 /**
- * The Treasure Hunt Bible is a different InDesign template with the opposite
- * marking convention, so it gets its own profile — the cells are not
- * interchangeable with study-Bible notes even though both are Biblica IDML.
- */
-export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
-
-/**
- * Reach4Life is a third template again — a teenagers' workbook wrapped around
- * the NIrV, organized by lesson rather than by chapter.
- */
-export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
-
-/**
- * Equipping Biblical Leaders is a fourth template — a training programme's
- * facilitator and participant guides, divided by topic and lesson rather than
- * by book, and holding no published scripture to set anything around.
- */
-export const EBL_PROFILE_ID = "builtin:biblica-ebl"
-
-/**
- * Which Biblica title an IDML package is. Nothing in the package identifies the
- * edition, and the four templates disagree about what a paragraph style means,
- * so the person importing it says which one this is.
- */
-export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life" | "ebl"
-
-/**
- * Sidebar folder per edition, so a project holding more than one Biblica title
- * keeps them apart. The label is the file's corpus marker, which the sidebar
- * groups by and the user can rename or move a file out of later.
- */
-const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": "Biblica Study Notes",
-  "treasure-hunt": "Treasure Hunt Bible",
-  reach4life: "Reach 4 Life",
-  ebl: "Equipping Biblical Leaders",
-}
-
-export type BiblicaImportPhase = "parse" | "save"
-export interface BiblicaProgress {
-  phase: BiblicaImportPhase
-  /** Engine parse progress, while the package is being read. */
-  idml?: IdmlProgress
-  cellsEnqueued?: number
-  cellsTotal?: number
-  /** Paragraphs left out because they are scripture rather than notes. */
-  verseUnitCount?: number
-}
-
-/**
- * Import the notes from a Biblica IDML package.
+ * Import the note/prose cells from a partner's IDML package (AQU-1286).
+ *
+ * This is the generic half of the old publisher-specific notes importer. Which
+ * template the package is, what counts as a note in it, and what to say when it
+ * yields nothing are all the partner's business and travel in the `edition`
+ * descriptor — see `src/lib/partners/types.ts` and
+ * `docs/PARTNER-INTEGRATIONS.md`. Nothing here names a publisher, so deleting the
+ * partner folders leaves this function compiling with no caller, which is
+ * exactly the intended stripped state.
  *
  * The package parses through the same shared v2 engine as a plain IDML import,
  * so cells keep their protected anchors, exact locators, and preserved source
- * bytes — strict IDML export still works. Only the note paragraphs become cells:
- * the Bible text is set from the publisher's scripture files, so importing it
- * here would ask translators to retype scripture they must not edit.
- *
- * Which paragraphs count as notes depends on the edition. A study Bible marks
- * its notes positively (`intro:*`); the Treasure Hunt Bible and Reach4Life mark
- * scripture instead, so everything set around the Bible text is imported —
- * facts and hunts, lessons and journeys, book introductions and front matter.
- * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
- *
- * The study Bible's own front and back matter — contents, "how to use", the
- * Bible Dictionary, the timelines, the maps, the cover — ships as separate
- * volumes holding no scripture at all, which is how the reader recognizes them
- * without another toggle. There every text-bearing paragraph is a cell.
+ * bytes — strict IDML export still works.
  */
-export interface BiblicaImportOptions {
+export interface PartnerNotesImportOptions {
+  /** Which of the partner's templates to read the package with. */
+  edition: PartnerImportEdition
   /**
    * When true, cut long note lines into one cell per sentence.
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean
-  /** Which template's rules to read the package with. Defaults to a study Bible. */
-  edition?: BiblicaEdition
 }
 
-export async function importBiblicaStudyNotes(
+export async function importPartnerNotes(
   file: File,
   ctx: ImportContext,
-  onProgress?: (p: BiblicaProgress) => void,
-  options?: BiblicaImportOptions,
+  onProgress: ((p: PartnerImportProgress) => void) | undefined,
+  options: PartnerNotesImportOptions,
 ): Promise<FileReference> {
-  if (!/\.idml$/i.test(file.name)) {
-    throw new Error(t("importExport.errors.biblicaExpectsIdml"))
-  }
+  const { edition } = options
   assertSourceUploadByteLength(file.size)
   onProgress?.({ phase: "parse" })
 
-  const edition: BiblicaEdition = options?.edition ?? "study-notes"
   // The worker transfers (detaches) its input, so the preserved source artifact
   // is read from the File a second time rather than shared with the parse buffer.
   const parseBuffer = await file.arrayBuffer()
   assertIdmlPackageBytes(parseBuffer, file.name)
-  const parseOptions = {
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
-    onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
-    ...(options?.splitSentences !== undefined
-      ? { splitSentences: options.splitSentences }
-      : {}),
-  }
-  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await parseBiblicaEdition(
-    edition,
+  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await edition.parse(
     parseBuffer,
-    parseOptions,
+    {
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
+      ...(options.splitSentences !== undefined
+        ? { splitSentences: options.splitSentences }
+        : {}),
+    },
   )
 
-  // A study-Bible volume that yields nothing was almost certainly read with the
-  // wrong edition. A front/back matter volume that yields nothing is simply
-  // artwork — the maps and plates hold no text — and still imports, so the file
-  // stays part of the project and exports back unchanged.
+  // A volume that yields nothing was almost certainly read with the wrong
+  // edition. A front/back matter volume that yields nothing is simply artwork —
+  // the maps and plates hold no text — and still imports, so the file stays part
+  // of the project and exports back unchanged.
   if (strings.length === 0 && !frontBackMatter) {
-    throw new Error(emptyBiblicaImportMessage(edition, file.name))
+    throw new Error(edition.emptyImportMessage(file.name))
   }
 
   const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
   const normalized = normalizeTranslatableStrings(strings, {
     fileName: name,
     fileType: "idml",
-    profileId: BIBLICA_PROFILE_IDS[edition],
+    profileId: edition.profileId,
     profileVersion: "1",
     fidelity: "content-only",
   })
@@ -1384,7 +1321,7 @@ export async function importBiblicaStudyNotes(
       rawBytes: await file.arrayBuffer(),
       rawSourceFormat: "idml",
       roundTripFidelity: "content-only",
-      corpusMarker: BIBLICA_CORPUS_MARKERS[edition],
+      corpusMarker: edition.corpusMarker,
       ...(bookCodes.length === 1 ? { bookCode: bookCodes[0] } : {}),
     },
     "idml",
@@ -1405,104 +1342,6 @@ export async function importBiblicaStudyNotes(
   return ref
 }
 
-const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": BIBLICA_NOTES_PROFILE_ID,
-  "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
-  reach4life: REACH4LIFE_PROFILE_ID,
-  ebl: EBL_PROFILE_ID,
-}
-
-interface BiblicaParseOutcome {
-  strings: TranslatableString[]
-  bookCodes: string[]
-  /** Paragraphs left out because they are the published Bible text. */
-  skippedScriptureCount: number
-  /**
-   * The package is one of the study Bible's front/back matter volumes — no
-   * scripture anywhere, so an empty result is a legitimate artwork-only volume
-   * rather than a package read with the wrong edition.
-   */
-  frontBackMatter: boolean
-}
-
-/**
- * Run the reader for one edition. Each returns the same three things under its
- * own names, because each counts a different thing as scripture.
- */
-async function parseBiblicaEdition(
-  edition: BiblicaEdition,
-  buffer: ArrayBuffer,
-  parseOptions: {
-    signal?: AbortSignal
-    onProgress: (progress: IdmlProgress) => void
-    splitSentences?: boolean
-  },
-): Promise<BiblicaParseOutcome> {
-  if (edition === "treasure-hunt") {
-    const { strings, bookCodes, skipped } =
-      await extractTreasureHuntStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "reach4life") {
-    const { strings, bookCodes, skipped } =
-      await extractReach4LifeStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "ebl") {
-    // A guide is written material throughout, so nothing is skipped for being
-    // scripture and no one book owns the file.
-    const { strings } = await extractEblStrings(buffer, undefined, parseOptions)
-    return { strings, bookCodes: [], skippedScriptureCount: 0, frontBackMatter: false }
-  }
-  const { strings, bookCodes, skipped, frontBackMatter } =
-    await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
-  return {
-    strings,
-    bookCodes,
-    skippedScriptureCount: skipped.verseUnitCount,
-    frontBackMatter,
-  }
-}
-
-/**
- * What to say when a package parsed but yielded nothing. The overwhelmingly
- * likely cause is the wrong edition, so each message names the styles it looked
- * for and — for the default reading — the toggles that change it.
- */
-function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): string {
-  if (edition === "treasure-hunt") {
-    return `${fileName} parsed successfully but contained no Treasure Hunt notes. `
-      + "Treasure Hunt content lives in `!meta_*`, `_intro_*` and front-matter paragraph "
-      + "styles — check that this is a Treasure Hunt volume."
-  }
-  if (edition === "reach4life") {
-    return `${fileName} parsed successfully but contained no Reach 4 Life content. `
-      + "Reach 4 Life content lives in the `R4Lv4 Paragraph Styles:*` lesson groups and in "
-      + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
-      + "that this is a Reach 4 Life package."
-  }
-  if (edition === "ebl") {
-    // Nothing is filtered out by edition here, so an empty result means the
-    // package carried no text at all rather than the wrong template.
-    return `${fileName} parsed successfully but contained no text. An EBL guide imports `
-      + "every text-bearing paragraph, so this package holds only artwork — check that "
-      + "this is the guide rather than a cover or plate volume."
-  }
-  return `${fileName} parsed successfully but contained no study notes. `
-    + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
-    + "document. If this is a Treasure Hunt Bible, a Reach 4 Life or an EBL file, tick the "
-    + "matching box and import it again."
-}
 
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
 function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {

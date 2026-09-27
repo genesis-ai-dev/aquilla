@@ -4,11 +4,11 @@ import {
   selectEblNotes,
   type EblDivisionKind,
   type EblSelection,
-} from "@/lib/biblica/ebl/notes"
+} from "@/partner-integrations/biblica/ebl/notes"
 import { IDML_REJOIN_METADATA_KEY, idmlRejoinMetadata } from "@/lib/idml/rejoin"
-import type { ImportMilestone } from "../../../shared/import-contract"
-import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "./idml"
-import type { TranslatableString } from "./types"
+import type { ImportMilestone } from "../../../../shared/import-contract"
+import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "@/lib/parsers/idml"
+import type { TranslatableString } from "@/lib/parsers/types"
 
 export interface EblParseOptions {
   signal?: AbortSignal
@@ -50,7 +50,7 @@ const CONTENT_TYPES: Readonly<Record<EblDivisionKind, string>> = {
  * as an explicit navigation milestone, read out of the outline the template
  * numbers itself with — the front-matter sections, then a milestone per topic
  * opener and per lesson ("Topic 1.2: How the Bible was inspired", "Lesson 3:
- * An act of faith"). See `@/lib/biblica/ebl/notes`.
+ * An act of faith"). See `@/partner-integrations/biblica/ebl/notes`.
  */
 export async function extractEblStrings(
   buffer: ArrayBuffer,

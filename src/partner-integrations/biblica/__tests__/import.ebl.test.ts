@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { SAMPLE_EBL, makeEblIdml, styled, tocEntriesWithPageRuns } from "./biblica/ebl/__fixtures__/ebl-idml"
-import type { EblIdmlStories } from "./biblica/ebl/__fixtures__/ebl-idml"
+import { SAMPLE_EBL, makeEblIdml, styled, tocEntriesWithPageRuns } from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
+import type { EblIdmlStories } from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
 // in this runtime. Run the identical shared engine inline so the commit path is
@@ -18,7 +18,7 @@ vi.mock("@/lib/idml/idml-worker-client", async (importOriginal) => {
   }
 })
 
-const { importBiblicaStudyNotes, EBL_PROFILE_ID } = await import("./import")
+const { importBiblicaStudyNotes, EBL_PROFILE_ID } = await import("@/partner-integrations/biblica/import")
 
 afterEach(() => vi.unstubAllGlobals())
 

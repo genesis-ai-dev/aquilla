@@ -85,10 +85,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
-    // `parsers`/`biblica` are the importer's own reading layer — a change there
-    // only reaches a user through an import, so it selects the import sentinel
-    // rather than falling through to the generic shared-runtime one.
-    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
+    // `parsers` and the partner integrations are the importer's own reading layer
+    // — a change there only reaches a user through an import, so it selects the
+    // import sentinel rather than falling through to the generic shared-runtime
+    // one. Partner readers moved under `src/partner-integrations/` in AQU-1286.
+    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|audio|voice|video|search|sidebar|timeline|storage)|src\/partner-integrations\/|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {

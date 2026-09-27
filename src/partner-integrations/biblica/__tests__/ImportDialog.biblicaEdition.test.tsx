@@ -9,15 +9,17 @@
  * cut the text is a separate question that every title answers the same way, so
  * it must stay independent of that choice rather than being cleared by it.
  *
- * The parsers themselves are covered in `src/lib/biblica/**` and the whole
- * import journey in `e2e/specs/editor/import-ebl.spec.ts`; this suite guards
- * only the panel → `importBiblicaStudyNotes` options wiring.
+ * The parsers themselves are covered alongside them under
+ * `src/partner-integrations/biblica/**`, and the whole import journey in
+ * `e2e/specs/partner-integrations/biblica/import-ebl.spec.ts`; this suite guards
+ * only the panel → `importBiblicaStudyNotes` options wiring, and that the dialog
+ * still reaches the panel now that it arrives through the partner registry.
  */
 
 import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import type { BiblicaImportOptions } from "@/lib/import"
+import type { BiblicaImportOptions } from "@/partner-integrations/biblica/import"
 
 const { importBiblicaStudyNotes } = vi.hoisted(() => ({
   importBiblicaStudyNotes: vi.fn(async (
@@ -39,8 +41,9 @@ vi.mock("@/lib/import", () => ({
   prepareEBibleTargetImport: vi.fn(),
   applyEBibleTargetImport: vi.fn(),
   prepareImportFile: vi.fn(async () => ({ fileType: "txt", results: [] })),
-  importBiblicaStudyNotes,
+  importPartnerNotes: vi.fn(),
 }))
+vi.mock("@/partner-integrations/biblica/import", () => ({ importBiblicaStudyNotes }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({ filesToProjectEntries: vi.fn(async () => []) }))
 // ScrollArea uses @base-ui/react which calls getAnimations() — not in happy-dom.
@@ -57,7 +60,7 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => <span />,
 }))
 
-import { ImportDialog } from "./ImportDialog"
+import { ImportDialog } from "@/components/ImportDialog"
 
 const baseProps = {
   open: true,
@@ -79,9 +82,15 @@ const TITLES = {
 
 const SPLIT = /Split long notes into one cell per sentence/i
 
-function openBiblicaPanel(): void {
+/**
+ * The Biblica panel reaches the dialog through the partner registry as a lazy
+ * import (AQU-1286), so it is not in the DOM in the same tick as the click —
+ * wait for one of its controls before asserting on any of them.
+ */
+async function openBiblicaPanel(): Promise<void> {
   render(<ImportDialog {...baseProps} />)
   fireEvent.click(screen.getByText("Biblica Study Bible Notes"))
+  await waitFor(() => expect(checkbox(SPLIT)).toBeInTheDocument())
 }
 
 function checkbox(name: RegExp): HTMLElement {
@@ -116,8 +125,8 @@ beforeEach(() => {
 })
 
 describe("AQU-1008 — Biblica edition choice", () => {
-  it("starts on study notes with every title clear", () => {
-    openBiblicaPanel()
+  it("starts on study notes with every title clear", async () => {
+    await openBiblicaPanel()
 
     for (const name of Object.values(TITLES)) {
       expect(checkbox(name)).not.toBeChecked()
@@ -125,8 +134,8 @@ describe("AQU-1008 — Biblica edition choice", () => {
     expect(checkbox(SPLIT)).not.toBeChecked()
   })
 
-  it("keeps the titles mutually exclusive, whichever order they are ticked in", () => {
-    openBiblicaPanel()
+  it("keeps the titles mutually exclusive, whichever order they are ticked in", async () => {
+    await openBiblicaPanel()
 
     toggle(TITLES.treasureHunt)
     expect(checkbox(TITLES.treasureHunt)).toBeChecked()
@@ -142,7 +151,7 @@ describe("AQU-1008 — Biblica edition choice", () => {
   })
 
   it("sends the ticked title to the importer", async () => {
-    openBiblicaPanel()
+    await openBiblicaPanel()
     toggle(TITLES.ebl)
     chooseFile()
 
@@ -153,7 +162,7 @@ describe("AQU-1008 — Biblica edition choice", () => {
   })
 
   it("falls back to study notes when the ticked title is cleared again", async () => {
-    openBiblicaPanel()
+    await openBiblicaPanel()
     toggle(TITLES.ebl)
     toggle(TITLES.ebl)
     expect(checkbox(TITLES.ebl)).not.toBeChecked()
@@ -166,7 +175,7 @@ describe("AQU-1008 — Biblica edition choice", () => {
   })
 
   it("keeps sentence splitting independent of the title, in both directions", async () => {
-    openBiblicaPanel()
+    await openBiblicaPanel()
 
     // Splitting is not one of the alternatives, so ticking it leaves the
     // titles alone...
@@ -190,8 +199,8 @@ describe("AQU-1008 — Biblica edition choice", () => {
     })
   })
 
-  it("describes the guide, and names its file picker, once EBL is ticked", () => {
-    openBiblicaPanel()
+  it("describes the guide, and names its file picker, once EBL is ticked", async () => {
+    await openBiblicaPanel()
     expect(screen.getByText(/Choose study Bible IDML file/i)).toBeInTheDocument()
 
     toggle(TITLES.ebl)

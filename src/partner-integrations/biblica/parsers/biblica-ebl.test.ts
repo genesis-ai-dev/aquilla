@@ -11,8 +11,8 @@ import {
   styled,
   tocEntriesWithPageRuns,
   type EblIdmlStories,
-} from "@/lib/biblica/ebl/__fixtures__/ebl-idml"
-import { selectEblNotes } from "@/lib/biblica/ebl/notes"
+} from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
+import { selectEblNotes } from "@/partner-integrations/biblica/ebl/notes"
 import { extractEblStrings } from "./biblica-ebl"
 
 async function extractFrom(stories: EblIdmlStories = {}) {

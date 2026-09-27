@@ -15,10 +15,10 @@
 import { useState } from "react"
 import { describe, it, expect, beforeAll, afterEach } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { MilestoneNavigator, type MilestoneNavigationItem } from "@/components/ChapterNavigator"
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
-import { extractEblStrings } from "@/lib/parsers/biblica-ebl"
-import { makeEblIdml, SAMPLE_EBL } from "@/lib/biblica/ebl/__fixtures__/ebl-idml"
+import { extractEblStrings } from "@/partner-integrations/biblica/parsers/biblica-ebl"
+import { makeEblIdml, SAMPLE_EBL } from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
 import { MILESTONE_SUBSECTION_SIZE } from "@/hooks/useActiveCellStore"
 import { parseIdml } from "@aquilla/idml-roundtrip"
 

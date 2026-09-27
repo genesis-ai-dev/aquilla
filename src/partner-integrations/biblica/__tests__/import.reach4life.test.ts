@@ -5,9 +5,9 @@ import {
   reach4LifeWorkbookSampleStory,
   scripture,
   styled,
-} from "./biblica/reach4life/__fixtures__/reach4life-idml"
-import { makeTreasureHuntIdml } from "./biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
-import { makeBiblicaIdml } from "./biblica/__fixtures__/biblica-idml"
+} from "@/partner-integrations/biblica/reach4life/__fixtures__/reach4life-idml"
+import { makeTreasureHuntIdml } from "@/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+import { makeBiblicaIdml } from "@/partner-integrations/biblica/__fixtures__/biblica-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
 // in this runtime. Run the identical shared engine inline so the commit path is
@@ -25,7 +25,7 @@ vi.mock("@/lib/idml/idml-worker-client", async (importOriginal) => {
   }
 })
 
-const { importBiblicaStudyNotes, REACH4LIFE_PROFILE_ID } = await import("./import")
+const { importBiblicaStudyNotes, REACH4LIFE_PROFILE_ID } = await import("@/partner-integrations/biblica/import")
 
 afterEach(() => vi.unstubAllGlobals())
 

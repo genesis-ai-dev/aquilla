@@ -11,7 +11,7 @@ function entry(name: string, content: string): ProjectEntry {
 
 const SETTINGS_AR = `<ScriptureText>
   <Name>arONAV12</Name>
-  <FullName>Biblica Open New Arabic Version 2012</FullName>
+  <FullName>Example Open New Arabic Version 2012</FullName>
   <Language>Standard Arabic</Language>
   <LanguageIsoCode>arb:::</LanguageIsoCode>
   <Versification>4</Versification>

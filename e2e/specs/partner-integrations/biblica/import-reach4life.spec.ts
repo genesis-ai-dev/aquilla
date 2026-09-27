@@ -1,6 +1,6 @@
-import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
+import { test, expect } from "../../../helpers/multi-user"
+import { Dashboard } from "../../../helpers/page-objects/Dashboard"
+import { Workspace } from "../../../helpers/page-objects/Workspace"
 import { writeFile } from "node:fs/promises"
 import JSZip from "jszip"
 

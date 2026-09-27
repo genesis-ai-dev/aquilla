@@ -20,10 +20,11 @@ import {
   SAMPLE_TREASURE_HUNT,
   TREASURE_HUNT_STORY_PATH,
   makeTreasureHuntIdml,
-} from "@/lib/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
-import { buildBulkCellsWithSpeakers, TREASURE_HUNT_PROFILE_ID } from "@/lib/import"
-import { extractTreasureHuntStrings } from "@/lib/parsers/biblica-treasure-hunt"
-import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
+} from "@/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+import { buildBulkCellsWithSpeakers } from "@/lib/import"
+import { TREASURE_HUNT_PROFILE_ID } from "@/partner-integrations/biblica/editions"
+import { extractTreasureHuntStrings } from "@/partner-integrations/biblica/parsers/biblica-treasure-hunt"
+import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "@/lib/export/exporters/idml"
 
 const directExecutor: IdmlExportExecutor = {
   parse: async (bytes) => parseIdml(bytes),

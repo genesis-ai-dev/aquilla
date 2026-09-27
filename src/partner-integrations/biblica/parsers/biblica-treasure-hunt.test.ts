@@ -12,8 +12,8 @@ import {
   paragraph,
   run,
   scripture,
-} from "@/lib/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
-import { selectTreasureHuntNotes } from "@/lib/biblica/treasure-hunt/notes"
+} from "@/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+import { selectTreasureHuntNotes } from "@/partner-integrations/biblica/treasure-hunt/notes"
 import { prepareIdmlDisplayHtml } from "@/lib/richtext/idml-style-display"
 import { extractTreasureHuntStrings } from "./biblica-treasure-hunt"
 

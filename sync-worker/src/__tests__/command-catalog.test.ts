@@ -25,7 +25,7 @@ import {
 import { requiredRoleForCommand, validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
 import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
-import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { ALLOWED_EMIT_KINDS, MATCH_OPTION_KEYS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
 import { BRIEF_FIELD_IDS } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
@@ -163,6 +163,22 @@ describe('command catalog — invariants', () => {
     const setBriefDoc = describeCommand('SetBrief')!.paramsDoc
     expect(setBriefDoc).toContain('RegenerateBriefSummary')
     expect(setBriefDoc).not.toContain('carried over, not cleared')
+  })
+
+  it("documents every term match option the validator accepts (AQU-1175)", () => {
+    // Same contract as the CreateProject case below, and the same bug: `match`
+    // was accepted by the event kinds and dropped by the validator, so a
+    // caller had no way to learn the field existed. An option the validator
+    // takes but describe_command never names is that gap reopening.
+    const emitDoc = describeCommand('EmitEvents')!.paramsDoc
+    for (const key of MATCH_OPTION_KEYS) {
+      expect(emitDoc).toContain(key)
+    }
+    // And the two rules that decide whether a staged term does anything: the
+    // option set replaces wholesale, and matching is exact without it.
+    expect(emitDoc).toContain('match')
+    expect(emitDoc).toMatch(/exact/i)
+    expect(emitDoc).toMatch(/wholesale/i)
   })
 
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {

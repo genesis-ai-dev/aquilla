@@ -528,6 +528,54 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'list_terms',
+    description:
+      'Read the project TERMBASE — the glossary concepts the copilot is told to honour and ' +
+      'the QA pass checks against. One entry per concept: conceptId, sourceTerm, renderings ' +
+      '(each preferred|admitted|forbidden), status (active = enforced now, draft = suggested ' +
+      'and awaiting review, deprecated = retired), notes, caseSensitive, matchOptions, and ' +
+      'created/updated timestamps. Same rows, same order (oldest first) as the in-app ' +
+      'Terminology page. Args: projectId; optional status to filter, includeDeleted to see ' +
+      'tombstoned entries (audit only), limit/cursor to page.\n\n' +
+      'READ THIS BEFORE STAGING A TERM. Two things it tells you that you cannot guess:\n' +
+      '1. Whether the concept already exists — staging a second concept for the same ' +
+      'sourceTerm does not merge, it gives the project two competing entries. To change an ' +
+      'existing one, send term.update with its conceptId.\n' +
+      '2. `matchOptions` — how the term MATCHES, which decides whether it fires at all. ' +
+      '`forms` are extra literal source forms treated as alternates of sourceTerm; ' +
+      '`excludedForms` are surfaces a human rejected; `affixes` allows the project\'s ' +
+      'configured prefixes/suffixes; `foldMarks` ignores combining marks. Matching is ' +
+      'otherwise EXACT, so in an inflected language a concept with no forms matches only the ' +
+      'lemma: "Боже Слово" with empty matchOptions flags none of its inflected forms. An ' +
+      'entry reporting `matchOptions: {}` is configured for exactly one surface form — if ' +
+      'read_term_consistency shows drift on it, missing `forms` is the first thing to check, ' +
+      'and the fix is a term.update carrying match.forms, not a new concept.\n\n' +
+      'Write terms with an EmitEvents changeset (REST POST .../projects/:projectId/changesets) ' +
+      'carrying term.create / term.update / term.approve / term.reject / term.delete — ' +
+      'describe_command({ kind: "EmitEvents" }) has the payloads. Every write goes through ' +
+      'the normal approval gate. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['active', 'draft', 'deprecated'],
+          description: 'Only entries with this status; omit for all live entries.',
+        },
+        includeDeleted: {
+          type: 'boolean',
+          description: 'Include tombstoned entries (they carry deletedAt). Audit views only.',
+        },
+        limit: { type: 'number', description: 'Page size (default 50).' },
+        cursor: { type: 'string', description: "Opaque cursor from a previous page's nextCursor." },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +

@@ -337,6 +337,102 @@ interface TermRendering {
 
 const RENDERING_STATUSES: ReadonlySet<string> = new Set(['preferred', 'admitted', 'forbidden'])
 
+/** Mirrors TermMatchOptionsPayload in events/types.ts (redeclared locally for
+ *  the same reason TermRendering is). */
+interface TermMatchOptions {
+  foldMarks?: boolean
+  affixes?: boolean
+  forms?: string[]
+  excludedForms?: string[]
+}
+
+/** Cap on `forms` / `excludedForms` per concept. Each entry becomes an
+ *  alternate in the compiled terminology regex, so an unbounded list is a
+ *  pathological pattern on every keystroke in the editor — the cap is a
+ *  performance floor, not a modelling opinion. */
+const MAX_TERM_FORMS = 100
+
+/**
+ * A concept's matching options — the inflection-variant surface (AQU-1175).
+ *
+ * WHY THIS VALIDATOR EXISTS AT ALL: the event kinds, the projection column
+ * (`concepts.match_options`) and the in-app Terminology UI have carried
+ * `match` since AQU-1006, but the EmitEvents validators never named the key,
+ * so it was silently DROPPED off every term written through the Agent API. A
+ * caller could send `match: { forms: [...] }`, get a 200 and an applied
+ * changeset, and end up with a concept matching exactly one surface form.
+ *
+ * That is not a cosmetic gap. Exact-match on "Боже Слово" flags every
+ * inflected form of it, so for Ukrainian — and most inflected languages —
+ * terminology through this API was unusable without variants. Dropping an
+ * unknown key is the right default in general; dropping THIS one produced a
+ * term that looked configured and was not.
+ *
+ * Replaced wholesale when present (like `renderings`, and for the same reason:
+ * no per-item identity to merge on), left untouched when absent. `match: {}` is
+ * therefore a meaningful request on term.update — it CLEARS every option back
+ * to defaults — and is accepted as one.
+ *
+ * Unknown keys are REJECTED here, unlike the payload validators around it,
+ * which whitelist and let extras fall away. Being lax is what caused this bug:
+ * a caller who writes `{ form: ["..."] }` for `forms` would otherwise filter
+ * down to `{}`, i.e. silently clear the options they were trying to set, and
+ * get a 200 for it. Inside the one field whose whole history is "silently
+ * dropped", a typo has to be an error.
+ */
+export const MATCH_OPTION_KEYS = ['foldMarks', 'affixes', 'forms', 'excludedForms'] as const
+
+function validateMatchOptions(
+  value: unknown,
+  bad: (message: string) => null,
+): TermMatchOptions | null {
+  if (!isPlainObject(value)) {
+    bad('match must be an object when present')
+    return null
+  }
+  for (const key of Object.keys(value)) {
+    if (!(MATCH_OPTION_KEYS as readonly string[]).includes(key)) {
+      bad(
+        `match.${key} is not a match option — expected one of ` +
+          `${MATCH_OPTION_KEYS.join(', ')}`,
+      )
+      return null
+    }
+  }
+  const out: TermMatchOptions = {}
+  for (const key of ['foldMarks', 'affixes'] as const) {
+    if (value[key] === undefined) continue
+    if (typeof value[key] !== 'boolean') {
+      bad(`match.${key} must be a boolean when present`)
+      return null
+    }
+    out[key] = value[key] as boolean
+  }
+  for (const key of ['forms', 'excludedForms'] as const) {
+    if (value[key] === undefined) continue
+    const raw = value[key]
+    if (!Array.isArray(raw)) {
+      bad(`match.${key} must be an array of strings when present`)
+      return null
+    }
+    if (raw.length > MAX_TERM_FORMS) {
+      bad(`match.${key} must hold at most ${MAX_TERM_FORMS} entries`)
+      return null
+    }
+    const forms: string[] = []
+    for (const [i, form] of raw.entries()) {
+      if (!isNonEmptyString(form)) {
+        bad(`match.${key}[${i}] must be a non-empty string`)
+        return null
+      }
+      forms.push(form)
+    }
+    out[key] = forms
+  }
+  // `{}` falls through deliberately: on term.update it is "clear every option".
+  return out
+}
+
 /** A concept's rendering list — replaced wholesale by create/update, so it must
  *  be fully valid or the whole event is rejected. */
 function validateRenderings(
@@ -509,6 +605,12 @@ function validatePayload(
       if (p.caseSensitive !== undefined && typeof p.caseSensitive !== 'boolean') {
         return bad('caseSensitive must be a boolean when present')
       }
+      let match: TermMatchOptions | undefined
+      if (p.match !== undefined) {
+        const parsed = validateMatchOptions(p.match, bad)
+        if (parsed === null) return null
+        match = parsed
+      }
       return {
         ...(p.conceptId !== undefined ? { conceptId: p.conceptId } : {}),
         sourceTerm: p.sourceTerm,
@@ -516,6 +618,7 @@ function validatePayload(
         status: p.status,
         ...(p.notes !== undefined ? { notes: p.notes } : {}),
         ...(p.caseSensitive !== undefined ? { caseSensitive: p.caseSensitive } : {}),
+        ...(match !== undefined ? { match } : {}),
       }
     }
     case 'term.update': {
@@ -539,11 +642,18 @@ function validatePayload(
       if (p.status !== undefined) {
         return bad('status is not patchable — use term.approve or term.reject')
       }
+      let match: TermMatchOptions | undefined
+      if (p.match !== undefined) {
+        const parsed = validateMatchOptions(p.match, bad)
+        if (parsed === null) return null
+        match = parsed
+      }
       const patch: Record<string, unknown> = { conceptId: p.conceptId }
       if (p.sourceTerm !== undefined) patch.sourceTerm = p.sourceTerm
       if (renderings !== undefined) patch.renderings = renderings
       if (p.notes !== undefined) patch.notes = p.notes
       if (p.caseSensitive !== undefined) patch.caseSensitive = p.caseSensitive
+      if (match !== undefined) patch.match = match
       if (Object.keys(patch).length === 1) return bad('must patch at least one field')
       return patch
     }

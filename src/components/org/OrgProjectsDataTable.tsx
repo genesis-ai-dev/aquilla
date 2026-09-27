@@ -624,6 +624,10 @@ export function OrgProjectsDataTable({
           meta: { align: "right" as const, className: "w-10" },
           cell: ({ row }) => {
             const p = row.original
+            // AQU-1070: an archived row has no menu (see renderRowMenuItems), so
+            // it gets no ⋯ trigger either — the button reads its items from
+            // context and would otherwise open an empty popup.
+            if (p.archivedAt) return null
             return (
               <DataTableRowActionsButton
                 label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
@@ -724,7 +728,13 @@ export function OrgProjectsDataTable({
         renderRowMenuItems={
           embedded
             ? undefined
-            : (p) => (
+            : (p) =>
+                // AQU-1070: every entry here puts work or people INTO a project
+                // — Assign work, Add member, and (on desktop) taking a copy
+                // offline to edit. None of that belongs on an archive, and the
+                // workspace can't be opened while archived anyway, so the row
+                // carries no menu at all rather than a menu of dead ends.
+                p.archivedAt ? null : (
                 <>
                   {canAssignProject(p.id) && (
                     <MenuItem

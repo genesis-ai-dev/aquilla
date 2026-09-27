@@ -174,6 +174,25 @@ describe("org Projects archived toggle (AQU-1070)", () => {
     expect(rowNames()).toEqual(["Gospels"])
   })
 
+  // Caught by the QA bot's claim walk on c946567d: gating only `canAssignProject`
+  // hid "Assign work" but left "Add member" on the archived row, so the row still
+  // offered a way to put people into an archive. The whole menu is gone now.
+  it("offers no row menu on an archived row, while a live row keeps its actions", async () => {
+    renderProjectsPage()
+    await screen.findByText("Gospels")
+
+    fireEvent.click(screen.getByTestId("show-archived-toggle"))
+    await screen.findByText("Swahili pilot")
+
+    expect(screen.queryByTestId("project-row-actions-swahili")).not.toBeInTheDocument()
+
+    // The live row is untouched: its menu still opens and still offers both.
+    const liveActions = screen.getByTestId("project-row-actions-gospels")
+    fireEvent.click(liveActions)
+    const items = (await screen.findAllByRole("menuitem")).map((el) => el.textContent)
+    expect(items).toContain("Add member")
+  })
+
   it("never renders a project twice when the archived list is stale about a restored project", async () => {
     // Restored in another tab: the live read already has it, the archived read
     // has not caught up. The live row wins — it is the one with real rollups.

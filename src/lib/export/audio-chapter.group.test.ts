@@ -92,6 +92,49 @@ describe("groupAudioByChapter", () => {
   })
 })
 
+describe("chapter headings", () => {
+  const heading = (id: string, extra: Partial<CellData> = {}): CellData =>
+    withTake(id, "", { type: "heading", group: "", ...extra })
+
+  it("leaves headings out of the chapter file unless asked", () => {
+    const groups = groupAudioByChapter([
+      heading("title"),
+      withTake("v1", "GEN 1:1"),
+      withTake("v2", "GEN 1:2"),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.key).toBe("GEN 1")
+    expect(groups[0]!.clips.map((c) => c.cellId)).toEqual(["v1", "v2"])
+  })
+
+  it("stitches a heading ahead of the verses that follow it", () => {
+    // Source order, the order the editor hands the export: the chapter title,
+    // then its verses, with a section heading between them, then the next chapter.
+    const groups = groupAudioByChapter(
+      [
+        heading("title"),
+        withTake("v1", "GEN 1:1"),
+        heading("section"),
+        withTake("v2", "GEN 1:2"),
+        heading("next"),
+        withTake("c2", "GEN 2:1"),
+      ],
+      { includeChapterHeadings: true },
+    )
+    expect(groups.map((g) => g.key)).toEqual(["GEN 1", "GEN 2"])
+    expect(groups[0]!.clips.map((c) => c.cellId)).toEqual(["title", "v1", "section", "v2"])
+    expect(groups[1]!.clips.map((c) => c.cellId)).toEqual(["next", "c2"])
+  })
+
+  it("uses an explicit chapter label on the heading when the cell still has one", () => {
+    const groups = groupAudioByChapter(
+      [heading("title", { group: "MAT 3" }), withTake("v1", "MAT 3:1")],
+      { includeChapterHeadings: true },
+    )
+    expect(groups[0]!.clips.map((c) => c.cellId)).toEqual(["title", "v1"])
+  })
+})
+
 describe("previewAudioByChapter", () => {
   it("counts recorded verses and still-missing verses", () => {
     const preview = previewAudioByChapter([

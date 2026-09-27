@@ -20,6 +20,7 @@ import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CellData } from "@/hooks/useCells"
 import { parseCanonicalRef } from "@/lib/progress/canonical-rollup"
+import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
 
 export interface ChapterClip {
@@ -32,8 +33,20 @@ export interface ChapterClip {
   /** First number in the verse label, so "1-2" sorts with verse 1. */
   verseSort: number
   documentIndex: number
+  /** A chapter or section heading, placed by document order rather than a verse number. */
+  heading: boolean
   trimStartMs?: number | null
   trimEndMs?: number | null
+}
+
+export interface GroupAudioByChapterOptions {
+  /**
+   * When true, a heading's take is stitched into its chapter at the place it
+   * occupies in the document. When false, headings are left out. They have no
+   * verse number, so treating them like any other unreferenced cell used to
+   * drop them into a leftover file of headings only.
+   */
+  includeChapterHeadings?: boolean
 }
 
 export interface ChapterGroup {
@@ -72,31 +85,134 @@ function chapterSortValue(group: ChapterGroup): number {
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
 }
 
+function isChapterHeading(cell: CellData): boolean {
+  return cell.type === "heading"
+}
+
+/** "GEN 1", "GEN 1:1", or "GEN 1:h:1" → the chapter those addresses share. */
+function chapterFromLabel(raw: string | null | undefined): { book: string; chapter: string; key: string } | null {
+  const label = chapterLabelForCell({ group: raw ?? "" })
+  if (!label) return null
+  const parts = label.split(/\s+/)
+  const chapter = parts.pop()
+  const book = parts.join(" ")
+  if (!chapter || !book) return null
+  return { book, chapter, key: label }
+}
+
+function chapterOfVerse(cell: CellData): { book: string; chapter: string; key: string } | null {
+  const ref = canonicalOf(cell)
+  if (!ref) return null
+  return { book: ref.book, chapter: ref.chapter, key: `${ref.book} ${ref.chapter}` }
+}
+
+/**
+ * Which chapter each cell belongs to.
+ *
+ * A heading often has no verse ref of its own (USFM stores "GEN 1" on the
+ * section, and the editor cell may only still say `type: "heading"`). Those
+ * take the chapter of the next verse, or the previous verse when the heading
+ * closes the file. Other cells without a verse ref stay unassigned and collect
+ * into one file, as before.
+ */
+function chaptersForCells(
+  cells: CellData[],
+  includeChapterHeadings: boolean,
+): Array<{ book: string; chapter: string; key: string } | null> {
+  const direct = cells.map((cell) => {
+    if (isChapterHeading(cell)) {
+      if (!includeChapterHeadings) return null
+      return chapterFromLabel(cell.group) ?? chapterFromLabel(cell.section) ?? chapterFromLabel(cell.context)
+    }
+    return chapterOfVerse(cell)
+  })
+  if (!includeChapterHeadings) return direct
+  for (let i = 0; i < cells.length; i++) {
+    if (!isChapterHeading(cells[i]!) || direct[i]) continue
+    let found: { book: string; chapter: string; key: string } | null = null
+    for (let j = i + 1; j < cells.length; j++) {
+      if (direct[j] && !isChapterHeading(cells[j]!)) {
+        found = direct[j]
+        break
+      }
+    }
+    if (!found) {
+      for (let j = i - 1; j >= 0; j--) {
+        if (direct[j] && !isChapterHeading(cells[j]!)) {
+          found = direct[j]
+          break
+        }
+      }
+    }
+    direct[i] = found
+  }
+  return direct
+}
+
+/**
+ * Verses stay in verse order. Headings slot in ahead of the first verse that
+ * follows them in the document, so a title recorded before 1:1 plays first
+ * even when the verse rows arrived out of order.
+ */
+function orderClips(clips: ChapterClip[]): ChapterClip[] {
+  if (!clips.some((c) => c.heading)) {
+    return [...clips].sort((a, b) => a.verseSort - b.verseSort || a.documentIndex - b.documentIndex)
+  }
+  const verses = clips
+    .filter((c) => !c.heading)
+    .sort((a, b) => a.verseSort - b.verseSort || a.documentIndex - b.documentIndex)
+  const headings = clips.filter((c) => c.heading).sort((a, b) => a.documentIndex - b.documentIndex)
+  const ordered: ChapterClip[] = []
+  let h = 0
+  for (const verse of verses) {
+    while (h < headings.length && headings[h]!.documentIndex < verse.documentIndex) {
+      ordered.push(headings[h]!)
+      h += 1
+    }
+    ordered.push(verse)
+  }
+  while (h < headings.length) {
+    ordered.push(headings[h]!)
+    h += 1
+  }
+  return ordered
+}
+
 /**
  * Recorded takes, bucketed by chapter, each bucket in verse order.
  *
  * Verses with no take are omitted — a gap is a skip, not a pad of silence.
  * Cells without a parseable BOOK CH:V ref (a subtitle file, a notes dump)
  * collect into one group so the same export still produces a continuous listen.
+ * Chapter headings are the exception: they join their chapter only when
+ * `includeChapterHeadings` is set, and otherwise they are left out.
  */
-export function groupAudioByChapter(cells: CellData[]): ChapterGroup[] {
+export function groupAudioByChapter(
+  cells: CellData[],
+  opts?: GroupAudioByChapterOptions,
+): ChapterGroup[] {
+  const includeChapterHeadings = opts?.includeChapterHeadings === true
+  const chapters = chaptersForCells(cells, includeChapterHeadings)
   const order: string[] = []
   const byKey = new Map<string, ChapterGroup>()
 
   cells.forEach((cell, documentIndex) => {
+    if (isChapterHeading(cell) && !includeChapterHeadings) return
     const audioId = bestAudioId(cell)
     if (!audioId) return
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) return
 
     const ref = canonicalOf(cell)
-    const key = ref ? `${ref.book} ${ref.chapter}` : FILE_GROUP_KEY
+    const chapter = chapters[documentIndex] ?? null
+    const heading = isChapterHeading(cell)
+    const key = chapter?.key ?? FILE_GROUP_KEY
     let group = byKey.get(key)
     if (!group) {
       group = {
         key,
-        book: ref?.book ?? null,
-        chapter: ref?.chapter ?? null,
+        book: chapter?.book ?? ref?.book ?? null,
+        chapter: chapter?.chapter ?? ref?.chapter ?? null,
         clips: [],
       }
       byKey.set(key, group)
@@ -106,11 +222,12 @@ export function groupAudioByChapter(cells: CellData[]): ChapterGroup[] {
       cellId: cell.id,
       audioId,
       url: attachment.url,
-      book: ref?.book ?? null,
-      chapter: ref?.chapter ?? null,
-      verse: ref?.verse ?? null,
-      verseSort: ref ? verseSortNumber(ref.verse) : documentIndex,
+      book: chapter?.book ?? ref?.book ?? null,
+      chapter: chapter?.chapter ?? ref?.chapter ?? null,
+      verse: heading ? null : ref?.verse ?? null,
+      verseSort: ref && !heading ? verseSortNumber(ref.verse) : documentIndex,
       documentIndex,
+      heading,
       trimStartMs: attachment.trimStartMs ?? null,
       trimEndMs: attachment.trimEndMs ?? null,
     })
@@ -118,7 +235,7 @@ export function groupAudioByChapter(cells: CellData[]): ChapterGroup[] {
 
   const groups = order.map((k) => byKey.get(k)!)
   for (const group of groups) {
-    group.clips.sort((a, b) => a.verseSort - b.verseSort || a.documentIndex - b.documentIndex)
+    group.clips = orderClips(group.clips)
   }
   return groups.sort((a, b) => {
     if (a.book && b.book && a.book !== b.book) return a.book.localeCompare(b.book)
@@ -127,11 +244,15 @@ export function groupAudioByChapter(cells: CellData[]): ChapterGroup[] {
 }
 
 /** Cheap read of who would be in the zip, before any fetch/decode. */
-export function previewAudioByChapter(cells: CellData[]): ChapterPreview {
-  const groups = groupAudioByChapter(cells)
+export function previewAudioByChapter(
+  cells: CellData[],
+  opts?: GroupAudioByChapterOptions,
+): ChapterPreview {
+  const groups = groupAudioByChapter(cells, opts)
   const recorded = new Set(groups.flatMap((g) => g.clips.map((c) => c.cellId)))
   let missingCount = 0
   for (const cell of cells) {
+    if (isChapterHeading(cell)) continue
     if (!recorded.has(cell.id) && !bestAudioId(cell)) missingCount += 1
   }
   return {
@@ -153,6 +274,7 @@ export interface ExportChapterArgs {
   fetchBytes: (args: { projectId: string; fileId: string; audioId: string; ext: string }) => Promise<Uint8Array>
   decode: (bytes: Uint8Array) => Promise<Float32Array>
   onProgress?: (done: number, total: number) => void
+  includeChapterHeadings?: boolean
 }
 
 export interface ExportChapterResult {
@@ -167,7 +289,9 @@ export interface ExportChapterResult {
 }
 
 export async function exportAudioByChapter(args: ExportChapterArgs): Promise<ExportChapterResult> {
-  const groups = groupAudioByChapter(args.cells)
+  const groups = groupAudioByChapter(args.cells, {
+    includeChapterHeadings: args.includeChapterHeadings,
+  })
   const cellById = new Map(args.cells.map((c) => [c.id, c]))
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
   const pcmByClip = new Map<string, Promise<Float32Array | null>>()

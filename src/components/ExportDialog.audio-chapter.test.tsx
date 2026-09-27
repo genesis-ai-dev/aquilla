@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
@@ -127,6 +128,29 @@ describe("chapter audio export (AQU-1201)", () => {
     expect(mockByCharacter).not.toHaveBeenCalled()
     expect(mockByLine).not.toHaveBeenCalled()
     expect(mockDownload).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/_MAT_1\.wav$/))
+    expect(mockChapter).toHaveBeenCalledWith(expect.objectContaining({ includeChapterHeadings: false }))
+  })
+
+  it("remembers a checked include-chapter-headings box and sends it with the export", async () => {
+    const heading = verse("h1", "")
+    heading.type = "heading"
+    heading.group = ""
+    render(<ExportDialog {...BASE} cells={[heading, ...BASE.cells]} />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    fireEvent.click(screen.getByText("Chapter audio"))
+    const box = screen.getByTestId("export-include-chapter-headings")
+    expect(box).toHaveAttribute("aria-checked", "false")
+    await userEvent.click(box)
+    expect(box).toHaveAttribute("aria-checked", "true")
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("aq.exportdlg.v1")!) as {
+        state: { includeChapterHeadings: boolean }
+      }[]
+      expect(stored[0]!.state.includeChapterHeadings).toBe(true)
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockChapter).toHaveBeenCalledTimes(1))
+    expect(mockChapter).toHaveBeenCalledWith(expect.objectContaining({ includeChapterHeadings: true }))
   })
 
   it("still exports by-character without going through the stitcher", async () => {

@@ -92,6 +92,14 @@ describe("a stored value that cannot be trusted", () => {
     expect(normalizeExportMemory({ audioMode: "audio-chapter" }).audioMode).toBe("audio-chapter")
   })
 
+  it("remembers whether chapter headings belong in the stitched file", () => {
+    expect(normalizeExportMemory({}).includeChapterHeadings).toBe(false)
+    expect(normalizeExportMemory({ includeChapterHeadings: true }).includeChapterHeadings).toBe(true)
+    expect(normalizeExportMemory({ includeChapterHeadings: "true" }).includeChapterHeadings).toBe(false)
+    writeExportMemory("sam", "p1", { ...DEFAULT_EXPORT_MEMORY, includeChapterHeadings: true })
+    expect(readExportMemory("sam", "p1").includeChapterHeadings).toBe(true)
+  })
+
   it("refuses a subtitle target it does not recognise", () => {
     expect(normalizeExportMemory({ subtitleTarget: "video" }).subtitleTarget).toBe("subtitle")
   })

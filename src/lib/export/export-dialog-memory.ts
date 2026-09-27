@@ -38,6 +38,8 @@ export interface ExportDialogMemory {
   cueSplitting: boolean
   excludeLabels: boolean
   includeSource: boolean
+  /** Chapter-audio stitch: play heading takes inside each chapter file. */
+  includeChapterHeadings: boolean
 }
 
 export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
@@ -48,6 +50,7 @@ export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
   cueSplitting: false,
   excludeLabels: false,
   includeSource: false,
+  includeChapterHeadings: false,
 }
 
 interface Entry {
@@ -97,6 +100,7 @@ export function normalizeExportMemory(raw: unknown): ExportDialogMemory {
     cueSplitting: bool(v.cueSplitting, false),
     excludeLabels: bool(v.excludeLabels, false),
     includeSource: bool(v.includeSource, false),
+    includeChapterHeadings: bool(v.includeChapterHeadings, false),
   }
 }
 

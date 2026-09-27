@@ -530,6 +530,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
       "chapter straight through.",
+    "importExport.dialog.includeChapterHeadings": "Include chapter headings",
+    "importExport.dialog.includeChapterHeadingsHint":
+      "Adds each heading's recording to its chapter file, in reading order. Off keeps the file to verses only.",
     "importExport.dialog.chapterStitchPreview":
       "{clips} verses recorded · {chapters} chapters",
     "importExport.status.stitchingChapterAudio": "Stitching chapter audio…",
@@ -1645,6 +1648,17 @@ export const importExport = defineNamespace({
       "importExport.status.exportedAudioByCharacterWithSkipped": {
         description: "Success-status message after an audio-by-character export where some clips were skipped (missing audio).",
         placeholders: { count: "Number of clips skipped." },
+      },
+      "importExport.dialog.includeChapterHeadings": {
+        description:
+          "Checkbox on the chapter-audio export. On stitches each chapter or section heading's " +
+          "recording into that chapter's file. Off leaves headings out so the file is verses only. " +
+          "The choice is remembered with the rest of the export dialog.",
+      },
+      "importExport.dialog.includeChapterHeadingsHint": {
+        description:
+          "Hint under the include-chapter-headings checkbox, saying headings play in reading order " +
+          "when the box is on and that an unchecked box exports verses only.",
       },
       "importExport.dialog.chapterStitchPreview": {
         description:

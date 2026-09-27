@@ -170,6 +170,35 @@ describe("exportAudioByChapter", () => {
     expect(result.blob.size).toBe(0)
   })
 
+  it("puts a chapter heading's samples ahead of the verses only when asked", async () => {
+    const cells = [
+      withTake("title", "", { type: "heading", group: "" }),
+      withTake("v1", "GEN 1:1"),
+      withTake("v2", "GEN 1:2"),
+    ]
+    const pcmById: Record<string, Float32Array> = {
+      "a-title": new Float32Array([0.9]),
+      "a-v1": new Float32Array([0.5]),
+      "a-v2": new Float32Array([-0.5]),
+    }
+    const run = (includeChapterHeadings: boolean) =>
+      exportAudioByChapter({
+        cells,
+        projectId: "p1",
+        includeChapterHeadings,
+        fetchBytes: async ({ audioId }) => new TextEncoder().encode(audioId),
+        decode: async (bytes) => pcmById[new TextDecoder().decode(bytes)] ?? new Float32Array([0]),
+      })
+    const versesOnly = await run(false)
+    expect(await pcmFromWav(versesOnly.blob)).toEqual([quantisePcm16(0.5), quantisePcm16(-0.5)])
+    const withHeading = await run(true)
+    expect(await pcmFromWav(withHeading.blob)).toEqual([
+      quantisePcm16(0.9),
+      quantisePcm16(0.5),
+      quantisePcm16(-0.5),
+    ])
+  })
+
   it("counts a fetch failure as skipped rather than throwing", async () => {
     const result = await exportAudioByChapter({
       cells: [withTake("v1", "MAT 1:1"), withTake("v2", "MAT 1:2")],

@@ -507,6 +507,8 @@ export function ExportDialog({
   /** Source above target in every cue — a review artifact, played against the
    *  picture to check the translation line by line. */
   const [vttIncludeSource, setVttIncludeSource] = useState(false)
+  /** Chapter stitch only. Off keeps each chapter file to its verses. */
+  const [includeChapterHeadings, setIncludeChapterHeadings] = useState(false)
   /** Which audio deliverable the Audio card will produce. Mix tracks, a review
    *  folder, and a chapter stitch share a card and a button rather than
    *  competing as separate entries in the format list. */
@@ -554,6 +556,7 @@ export function ExportDialog({
       setVttCueSplitting(remembered.cueSplitting)
       setVttExcludeLabels(remembered.excludeLabels)
       setVttIncludeSource(remembered.includeSource)
+      setIncludeChapterHeadings(remembered.includeChapterHeadings)
       // The remembered format is checked against what is actually on offer —
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
@@ -659,8 +662,8 @@ export function ExportDialog({
     [audioPreview],
   )
   const chapterPreview = useMemo(
-    () => previewAudioByChapter(audioSourceCells),
-    [audioSourceCells],
+    () => previewAudioByChapter(audioSourceCells, { includeChapterHeadings }),
+    [audioSourceCells, includeChapterHeadings],
   )
   /**
    * AQU-646 stage 4: takes living on ADDED tracks, which the preview above
@@ -755,6 +758,7 @@ export function ExportDialog({
       cueSplitting: vttCueSplitting,
       excludeLabels: vttExcludeLabels,
       includeSource: vttIncludeSource,
+      includeChapterHeadings,
     })
   }, [
     open,
@@ -767,6 +771,7 @@ export function ExportDialog({
     vttCueSplitting,
     vttExcludeLabels,
     vttIncludeSource,
+    includeChapterHeadings,
   ])
 
   /**
@@ -1386,6 +1391,7 @@ export function ExportDialog({
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           decode: decodeToMono48k,
+          includeChapterHeadings,
           onProgress: (d, tot) =>
             setStatus({ kind: "busy", msg: t("importExport.status.decodingCount", { done: d, total: tot }) }),
         })
@@ -1839,6 +1845,17 @@ export function ExportDialog({
     const preview = chapterPreview
     return (
       <div className="flex flex-col gap-1 text-xs" data-testid="export-chapter-preview">
+        <label className="flex items-start gap-2 text-muted-foreground">
+          <Checkbox
+            data-testid="export-include-chapter-headings"
+            checked={includeChapterHeadings}
+            onCheckedChange={(c) => setIncludeChapterHeadings(c === true)}
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-foreground">{t("importExport.dialog.includeChapterHeadings")}</span>
+            <span>{t("importExport.dialog.includeChapterHeadingsHint")}</span>
+          </span>
+        </label>
         <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
         {preview.clipCount === 0 ? (
           <p className="text-muted-foreground">{t("importExport.dialog.nothingRecordedYet")}</p>

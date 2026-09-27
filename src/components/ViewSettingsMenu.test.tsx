@@ -128,12 +128,27 @@ describe("ViewSettingsMenu popover", () => {
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 
-  it("offers low-memory mode with no file open — it is a device setting, not a file one", () => {
+  // AQU-1191: the control is not gated on `fileOpen` the way the file-scoped
+  // rows above it are — it is a device setting, so it stays live when the rest
+  // of the popover greys out. NOTE this is a property of THIS component only:
+  // `ProjectWorkspace` mounts the whole file toolbar (and so this menu) only
+  // when a file is active, so in the running app the mode is not yet reachable
+  // with no file open. The QA bot walk on PR #897 caught that gap; making the
+  // menu reachable without a file is a separate change to a shared surface.
+  it("leaves low-memory mode enabled when fileOpen is false, unlike the file-scoped rows", () => {
     renderViewSettings({ fileOpen: false })
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
     const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
-    fireEvent.click(within(modeTabs).getByRole("tab", { name: "Off" }))
+    // These primitives mark disabled state with `aria-disabled`, not the
+    // `disabled` attribute, so assert the attribute the user's AT actually sees.
+    const off = within(modeTabs).getByRole("tab", { name: "Off" })
+    expect(off).not.toHaveAttribute("aria-disabled", "true")
+    // A file-scoped control in the same popover IS disabled at this point.
+    expect(screen.getByRole("switch", { name: "Show line numbers" }))
+      .toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.click(off)
 
     expect(getLowMemoryMode()).toBe("off")
     expect(isLowMemoryActive()).toBe(false)

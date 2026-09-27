@@ -4441,6 +4441,7 @@ export const zh_Hans: Catalog = {
   "knowledgeBase.status.pending": "创建索引中…",
   "knowledgeBase.status.ready": "已创建索引",
   "knowledgeBase.status.failed": "创建索引失败",
+  "knowledgeBase.status.stalled": "创建索引已停滞",
   "knowledgeBase.open": "查看文档",
   "knowledgeBase.openOriginal": "打开源文件",
   "knowledgeBase.reindex": "重新尝试创建索引",

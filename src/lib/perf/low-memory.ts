@@ -40,10 +40,16 @@ export type LowMemoryMode = "auto" | "on" | "off"
 /**
  * `navigator.deviceMemory` reports approximate RAM in GiB, rounded down to a
  * power of two and capped for fingerprinting reasons — so the useful readings
- * are 0.25, 0.5, 1, 2, 4 and 8. 4 GiB and below is the field-device class the
- * Biblica ETT test surfaced; 8 is a normal laptop.
+ * are 0.25, 0.5, 1, 2, 4 and 8.
+ *
+ * The line sits at 2, not 4, because the rounding makes 4 a wide bucket: it
+ * covers everything from 4 GB to just under 8 GB, which is an ordinary laptop
+ * that runs the full editor fine today. Auto changes what a translator sees
+ * without being asked, so it fires only where the tab is genuinely at risk —
+ * a reading of 2 or below. Anyone on a 4 GB-reporting device that struggles
+ * still has the explicit `on`.
  */
-export const LOW_MEMORY_DEVICE_MEMORY_GB = 4
+export const LOW_MEMORY_DEVICE_MEMORY_GB = 2
 
 /**
  * `performance.memory.jsHeapSizeLimit` is the tab's own heap ceiling, which is

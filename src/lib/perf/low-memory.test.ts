@@ -53,6 +53,12 @@ describe("isConstrainedDevice", () => {
     expect(isConstrainedDevice({ jsHeapSizeLimitBytes: 4 * LOW_MEMORY_HEAP_LIMIT_BYTES })).toBe(false)
   })
 
+  it("leaves the wide 4 GiB bucket alone — it is an ordinary laptop, not a field device", () => {
+    // `deviceMemory` rounds down to a power of two, so 4 means anything from
+    // 4 GB to just under 8 GB. Auto must not quietly strip the editor there.
+    expect(isConstrainedDevice({ deviceMemoryGb: 4 })).toBe(false)
+  })
+
   it("trips on a small heap ceiling even when RAM reads roomy", () => {
     expect(
       isConstrainedDevice({ deviceMemoryGb: 8, jsHeapSizeLimitBytes: LOW_MEMORY_HEAP_LIMIT_BYTES }),

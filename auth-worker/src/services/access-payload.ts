@@ -26,7 +26,7 @@ import {
 // Duplicated from src/lib/access/types.ts (the source of truth — the worker
 // cannot import the SPA). Keep field names identical.
 export type ScopeType = "org" | "team" | "project" | "lane"
-export interface ScopeRef { type: ScopeType; id: string; name: string }
+export interface ScopeRef { type: ScopeType; id: string; name: string; hidden?: true }
 export type ScopePath = ScopeRef[]
 export interface GrantOrigin { kind: "direct" | "inherited" | "creator" | "platform"; from?: ScopePath }
 export interface AccessChainEntry {
@@ -35,6 +35,7 @@ export interface AccessChainEntry {
   origin: GrantOrigin
   grantedBy?: string
   grantedAt?: string
+  descendantCount?: number
 }
 export interface MemberAccess {
   userId: string
@@ -274,6 +275,8 @@ export async function buildMemberAccess(
   }
   elsewhere.sort((a, b) => pathText(a.scopePath).localeCompare(pathText(b.scopePath)))
 
+  countDescendants(elsewhere, [...chain, ...elsewhere])
+  if (!isSelf) await hideUnseenAncestors(vs, [...chain, ...elsewhere])
   await nameGranters(env, [...chain, ...elsewhere])
 
   const isGuest = scope.orgId == null
@@ -296,6 +299,41 @@ export async function buildMemberAccess(
 async function visibleTo(vs: ViewerScope, g: NamedGrant): Promise<boolean> {
   if (g.scopeType === "project") return vs.canSeeProject(g.scopeId, g.orgId)
   return g.orgId != null && vs.canSeeOrg(g.orgId)
+}
+
+/**
+ * Spec §3.8 rule 1: containers show "▸ N projects". Counted from `visible`
+ * (entries already filtered for the viewer), so the count leaks nothing.
+ */
+function countDescendants(targets: AccessChainEntry[], visible: AccessChainEntry[]): void {
+  const projects = visible
+    .map((e) => e.scopePath)
+    .filter((p) => p[p.length - 1]?.type === "project")
+  for (const e of targets) {
+    const c = e.scopePath[e.scopePath.length - 1]
+    if (c?.type !== "org" && c?.type !== "team") continue
+    const ids = new Set(
+      projects.filter((p) => p.some((r) => r.type === c.type && r.id === c.id)).map((p) => p[p.length - 1].id),
+    )
+    e.descendantCount = ids.size
+  }
+}
+
+/**
+ * Spec §3.9 rule 4: org/team crumbs the viewer cannot see are marked hidden
+ * and their real names are replaced with "" — the name never leaves the
+ * server. Covers both the grant's own path and its inherited-from path.
+ */
+async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainEntry[]): Promise<void> {
+  const redact = async (path: ScopePath): Promise<ScopePath> => {
+    const orgId = path[0]?.type === "org" ? Number(path[0].id) : null
+    if (orgId == null || (await vs.canSeeOrg(orgId))) return path
+    return path.map((r) => (r.type === "org" || r.type === "team" ? { type: r.type, id: r.id, name: "", hidden: true } : r))
+  }
+  for (const e of entries) {
+    e.scopePath = await redact(e.scopePath)
+    if (e.origin.from) e.origin = { ...e.origin, from: await redact(e.origin.from) }
+  }
 }
 
 const pathText = (p: ScopePath) => p.map((r) => r.name).join(" › ")

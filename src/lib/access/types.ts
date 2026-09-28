@@ -14,6 +14,11 @@ export interface ScopeRef {
   type: ScopeType
   id: string
   name: string
+  /**
+   * Spec §3.9 rule 4: an ancestor the viewer may not see. The server sends a
+   * placeholder `name` (never the real one); formatScopePath renders "…".
+   */
+  hidden?: true
 }
 
 /** Outermost → innermost, e.g. org › team › project › lane. */
@@ -39,6 +44,9 @@ export interface AccessChainEntry {
   grantedBy?: string
   /** ISO-8601 timestamp. */
   grantedAt?: string
+  /** Org/team containers only: how many projects under this scope hold a grant
+   *  the viewer can see (spec §3.8 rule 1, "▸ 3 projects"). */
+  descendantCount?: number
 }
 
 export interface MemberAccess {

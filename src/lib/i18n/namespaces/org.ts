@@ -25,6 +25,7 @@ export const org = defineNamespace({
     "org.access.inherited.tooltip": "Set at {path} — change it there",
     "org.access.inherited.link": "Change at {path}",
     "org.access.noAccess": "No access",
+    "org.access.unknownRole": "Unknown role",
     "org.access.inspector.yourAccess": "Your access",
     "org.access.inspector.guest": "Guest",
     "org.access.inspector.guestOf": "Guest of {org}",
@@ -1564,6 +1565,10 @@ export const org = defineNamespace({
       "org.access.inspector.effectiveHere": {
         description: "Member inspector section heading: the role at the scope the inspector was opened from.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.open": {
+        description: "Accessible label on a roster name that opens the member access inspector.",
+        placeholders: { name: "Username of the member." },
       },
       "org.access.inspector.grantedBy": {
         description: "Who made a grant, inside a member inspector row.",

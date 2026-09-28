@@ -11,18 +11,14 @@ export const SCOPE_SEPARATOR = " › "
 /** U+2026 HORIZONTAL ELLIPSIS — placeholder for ancestors the viewer cannot see. */
 export const HIDDEN_ANCESTORS = "…"
 
-export interface FormatScopePathOptions {
-  /**
-   * Number of leading crumbs the viewer may not see (spec §3.9 rule 4). They
-   * collapse into a single "…" crumb: "… › Pattani Malay Bible".
-   */
-  truncateBefore?: number
-}
-
-export function formatScopePath(path: ScopePath, opts: FormatScopePathOptions = {}): string {
-  const hidden = Math.min(Math.max(opts.truncateBefore ?? 0, 0), path.length)
-  const names = path.slice(hidden).map((s) => s.name)
-  if (hidden > 0) names.unshift(HIDDEN_ANCESTORS)
+/**
+ * Spec §3.9 rule 4: ancestors marked `hidden` by the server collapse into a
+ * single "…" crumb for every caller — "… › Pattani Malay Bible". Visibility
+ * travels on the wire, so no caller can forget to truncate.
+ */
+export function formatScopePath(path: ScopePath): string {
+  const names = path.filter((s) => !s.hidden).map((s) => s.name)
+  if (names.length < path.length) names.unshift(HIDDEN_ANCESTORS)
   return names.join(SCOPE_SEPARATOR)
 }
 

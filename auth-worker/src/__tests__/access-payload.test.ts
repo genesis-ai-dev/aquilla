@@ -15,9 +15,10 @@ import { authHeader, jwtFor } from "./helpers/db"
 import { FIXTURE_USERS, seedAccessFixture, type FixtureUser } from "./helpers/access-fixture"
 
 interface Entry {
-  scopePath: { type: string; id: string; name: string }[]
+  scopePath: { type: string; id: string; name: string; hidden?: true }[]
   roleLevel: number | null
-  origin: { kind: string; from?: { type: string; name: string }[] }
+  origin: { kind: string; from?: { type: string; name: string; hidden?: true }[] }
+  descendantCount?: number
   grantedBy?: string
 }
 interface Payload {
@@ -79,6 +80,33 @@ describe("AQU-1352 §3.8 member access payload", () => {
     expect(body.effectiveHere.roleLevel).toBe(400)
     expect(body.elsewhere).toEqual([])
     expect(JSON.stringify(body)).not.toContain('"p2"')
+  })
+
+  it("never ships the name of an ancestor the viewer cannot see — it is marked hidden instead (§3.9 rule 4)", async () => {
+    // direct_above cannot list the Fixture Org roster, yet team_only's p1 chain
+    // runs through the org and team. Truncation must be enforced on the wire,
+    // not left to each client caller.
+    const body = (await (await access("direct_above", "team_only", "project:p1")).json()) as Payload
+    const text = JSON.stringify(body)
+    expect(text).not.toContain("Fixture Org")
+    expect(text).not.toContain("fixture/translators")
+    const refs = body.effectiveHere.chain.flatMap((e) => [...e.scopePath, ...(e.origin.from ?? [])])
+    const ancestors = refs.filter((r) => r.type === "org" || r.type === "team")
+    expect(ancestors.length).toBeGreaterThan(0)
+    for (const r of ancestors) expect(r).toMatchObject({ hidden: true, name: "" })
+    // Self and org owners still see real names.
+    const self = JSON.stringify(await (await access("team_only", "team_only", "project:p1")).json())
+    expect(self).toContain("Fixture Org")
+    expect(self).not.toContain('"hidden"')
+  })
+
+  it("gives org/team containers a descendant count from visible grants only (§3.8 rule 1)", async () => {
+    // creator: org 400 (opens nothing, AQU-435) + creator of p3 → org row sits in
+    // "everything else" and contains exactly one visible project.
+    const body = (await (await access("owner", "creator", "project:p1")).json()) as Payload
+    const orgEntry = body.elsewhere.find((e) => inner(e)?.type === "org")
+    expect(orgEntry?.descendantCount).toBe(1)
+    expect(body.elsewhere.filter((e) => inner(e)?.type === "project").every((e) => e.descendantCount == null)).toBe(true)
   })
 
   it("an outsider gets 403 rather than an empty-but-revealing payload", async () => {

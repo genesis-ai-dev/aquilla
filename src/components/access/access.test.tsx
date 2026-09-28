@@ -18,6 +18,11 @@ const team = { type: "team" as const, id: "t1", name: "biblica/pattani-malay" }
 const project = { type: "project" as const, id: "p1", name: "Pattani Malay Bible" }
 const teamPath: ScopePath = [org, team]
 const projectPath: ScopePath = [org, team, project]
+// What the server sends a guest who cannot see the org (§3.9 rule 4): no real names.
+const hiddenOrg = { type: "org" as const, id: "o1", name: "", hidden: true as const }
+const hiddenTeam = { type: "team" as const, id: "t1", name: "", hidden: true as const }
+const guestProjectPath: ScopePath = [hiddenOrg, hiddenTeam, project]
+const guestTeamPath: ScopePath = [hiddenOrg, hiddenTeam]
 
 describe("ScopeBreadcrumb (§3.9)", () => {
   it("renders the same text as formatScopePath so title and chips match byte for byte", () => {
@@ -32,7 +37,7 @@ describe("ScopeBreadcrumb (§3.9)", () => {
   })
 
   it("hides ancestors a guest cannot see behind an ellipsis (rule 4)", () => {
-    const { container } = render(<ScopeBreadcrumb path={projectPath} truncateBefore={2} />)
+    const { container } = render(<ScopeBreadcrumb path={guestProjectPath} />)
     expect(container.textContent).toBe("… › Pattani Malay Bible")
     expect(screen.queryByText("Biblica ETT")).toBeNull()
   })
@@ -47,6 +52,52 @@ describe("GrantOriginBadge (§3.7 rule 1)", () => {
   ])("labels %o as %s", (origin, text) => {
     render(<GrantOriginBadge origin={origin} />)
     expect(screen.getByText(text)).toBeInTheDocument()
+  })
+})
+
+describe("guest truncation applies to every component, not just opt-in callers (§3.9 rule 4)", () => {
+  it("badge", () => {
+    render(<GrantOriginBadge origin={{ kind: "inherited", from: guestProjectPath }} />)
+    expect(screen.getByText("Inherited · … › Pattani Malay Bible")).toBeInTheDocument()
+  })
+  it("effective role cell", () => {
+    const { container } = render(
+      <EffectiveRoleCell
+        directRoleLevel={ROLE.CONTRIBUTOR}
+        effectiveRoleLevel={ROLE.PROJECT_LEAD}
+        effectiveOrigin={{ kind: "inherited", from: guestProjectPath }}
+      />,
+    )
+    expect(container.textContent).toContain("(via … › Pattani Malay Bible)")
+  })
+  it("inherited control: hint uses the ellipsis and never links into a hidden scope", () => {
+    render(
+      <InheritedRoleControl origin={{ kind: "inherited", from: guestTeamPath }} hrefFor={(s) => `/access/${s.id}`}>
+        <button type="button">Role</button>
+      </InheritedRoleControl>,
+    )
+    expect(screen.getByRole("button", { name: "Role" })).toHaveAccessibleDescription("Set at … — change it there")
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+  it("inspector rows", () => {
+    const m: MemberAccess = {
+      userId: "u1",
+      displayName: "Naladda",
+      isGuest: true,
+      effectiveHere: { roleLevel: ROLE.CONTRIBUTOR, chain: [{ scopePath: guestProjectPath, roleLevel: ROLE.CONTRIBUTOR, origin: { kind: "direct" } }] },
+      elsewhere: [],
+    }
+    render(<MemberInspector member={m} herePath={guestProjectPath} />)
+    expect(screen.getByTestId("member-inspector").textContent).toContain("@ … › Pattani Malay Bible")
+  })
+})
+
+describe("roleLabel (§3.7: never a number)", () => {
+  it("renders an off-ladder level as a translated generic label", () => {
+    const { container } = render(
+      <EffectiveRoleCell effectiveRoleLevel={450} effectiveOrigin={{ kind: "direct" }} />,
+    )
+    expect(container.textContent).toBe("Unknown role")
   })
 })
 
@@ -88,6 +139,9 @@ describe("InheritedRoleControl (§3.7 rule 2)", () => {
     )
     expect(screen.getByRole("button", { name: "Role" })).toBeDisabled()
     const path = formatScopePath(teamPath)
+    // a11y: the disabled control is described, and the link is the only extra tab stop.
+    expect(screen.getByRole("button", { name: "Role" })).toHaveAccessibleDescription(`Set at ${path} — change it there`)
+    expect(screen.getByTestId("inherited-role-control")).not.toHaveAttribute("tabindex")
     expect(screen.getByRole("link", { name: `Change at ${path}` })).toHaveAttribute("href", "/access/t1")
 
     const trigger = screen.getByTestId("inherited-role-control")
@@ -135,11 +189,22 @@ describe("MemberInspector (§3.8)", () => {
     expect(here.getAllByText("Project lead").length).toBeGreaterThan(0)
   })
 
-  it("groups everything else outermost-first and shows 'No access' rather than a number", () => {
-    render(<MemberInspector member={member} herePath={projectPath} />)
-    const rows = screen.getByTestId("member-inspector").querySelectorAll('section[data-section="everything-else"] li')
-    expect(rows[0]).toHaveTextContent("No access")
-    expect(rows[1]).toHaveTextContent("biblica/bsb")
+  it("groups everything else under one heading per scope type, outermost first (rule 1)", () => {
+    const withCount: MemberAccess = {
+      ...member,
+      elsewhere: [
+        { scopePath: [org, project], roleLevel: ROLE.VIEWER, origin: { kind: "direct" } },
+        ...member.elsewhere.map((e) => (e.scopePath.length === 1 ? { ...e, descendantCount: 3 } : e)),
+      ],
+    }
+    render(<MemberInspector member={withCount} herePath={projectPath} />)
+    const section = screen.getByTestId("member-inspector").querySelector('section[data-section="everything-else"]')!
+    const groups = [...section.querySelectorAll("[data-group]")]
+    expect(groups.map((g) => g.getAttribute("data-group"))).toEqual(["org", "team", "project"])
+    expect(groups.map((g) => g.querySelector("h5")?.textContent)).toEqual(["Organizations", "Teams", "Projects"])
+    expect(groups[0]).toHaveTextContent("No access")
+    expect(groups[0]).toHaveTextContent("3 projects")
+    expect(groups[1]).toHaveTextContent("biblica/bsb")
     expect(screen.getByTestId("member-inspector").textContent).not.toMatch(/\b[1-7]00\b/)
   })
 

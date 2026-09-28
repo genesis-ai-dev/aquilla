@@ -1,4 +1,4 @@
--- Migration 0112 (AQU-1242): read-only API credentials.
+-- Migration 0113 (AQU-1242): read-only API credentials.
 --
 -- A PAT was all-or-nothing: every token could stage and commit changesets, so a
 -- partner who only wanted an agent to REPORT on a project had to hand it the

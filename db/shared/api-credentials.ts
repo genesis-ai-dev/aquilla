@@ -209,7 +209,7 @@ export async function validateApiCredential(
     username: row.username,
     mode: row.mode,
     // AQU-1242: only an explicit 'read' narrows the token. Any other stored
-    // value — including a NULL from a row written before 0112 landed — is the
+    // value — including a NULL from a row written before 0113 landed — is the
     // original read-write grant, so existing tokens keep working unchanged.
     access: row.access === "read" ? "read" : "write",
     orgId: row.org_id,

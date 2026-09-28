@@ -273,7 +273,7 @@ describe('read-write credential — unchanged (back-compat)', () => {
   })
 
   it('a credential row written without the column defaults to read-write', async () => {
-    // What every token minted before 0112 is. If this ever came back 'read', the
+    // What every token minted before 0113 is. If this ever came back 'read', the
     // migration would have locked partners out of their own agents overnight.
     const { token, tokenHash, tokenPrefix } = await mintApiToken()
     await tdb.pg.query(

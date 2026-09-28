@@ -174,7 +174,7 @@ for broadly compatible remote MCP (connector directories) as a fast follow.
 all?** `mode` is the autonomy dial for writes that are already permitted — an ask-mode
 token still writes, with a human at the approval page.
 
-- **`write`** (the default, and what every token minted before migration 0112 carries)
+- **`write`** (the default, and what every token minted before migration 0113 carries)
   — the original grant: stage, commit, upload artifacts.
 - **`read`** — the whole API is read-only. Changeset prepare, changeset commit and
   artifact upload answer `403 scope_denied`; reads, search, history and export are

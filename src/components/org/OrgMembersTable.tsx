@@ -6,6 +6,7 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
+import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -93,8 +94,11 @@ export function OrgMembersTable({
   addMany,
   onRequestRemove,
   loading = false,
+  orgName,
 }: {
   orgId: number
+  /** AQU-1352: names the "Effective here" scope in the member inspector. */
+  orgName?: string
   members: OrgMember[]
   callerOrgRoleLevel: number | null
   canAddToProjects: boolean
@@ -188,7 +192,17 @@ export function OrgMembersTable({
                   <ChevronRight className="size-3.5" />
                 )}
               </button>
-              <UsernameWithAvatar username={m.username} size="xs" nameClassName="font-normal" />
+              <MemberInspectorTrigger
+                userId={m.userId}
+                username={m.username}
+                from={{ type: "org", id: String(orgId) }}
+                herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
+                onManageAccess={() => {
+                  if (!expanded.has(m.userId)) toggleExpand(m.userId)
+                }}
+              >
+                <UsernameWithAvatar username={m.username} size="xs" nameClassName="font-normal" />
+              </MemberInspectorTrigger>
             </div>
           )
         },

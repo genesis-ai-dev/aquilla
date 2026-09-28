@@ -34,7 +34,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
     projects: await fetchAccessibleProjects(...a),

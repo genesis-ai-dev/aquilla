@@ -15,9 +15,28 @@ describe("forbiddenReasonCopy", () => {
   })
   it("maps a lane-scope refusal", () => {
     expect(forbiddenReasonCopy("lane 'es' not in scope for cell.validate")).toMatch(
-      /language lane was outside your assigned scope/i,
+      /weren't allowed to work in es/i,
     )
   })
+  it("names the language in a lane-scope refusal (AQU-581 review)", () => {
+    expect(forbiddenReasonCopy("lane 'Spanish' not in scope for target.cell.commit")).toBe(
+      "you weren't allowed to work in Spanish at the time",
+    )
+    expect(forbiddenReasonCopy("lane '' not in scope for target.cell.commit")).toBe(
+      "you weren't allowed to work in the main language at the time",
+    )
+  })
+
+  it("says EDIT, not validate, when an edit is refused on role (AQU-581 review)", () => {
+    expect(forbiddenReasonCopy("role too low for target.cell.commit")).toBe(
+      "your role wasn't allowed to edit translations on this project",
+    )
+    expect(forbiddenReasonCopy("role too low for cell.validate")).toMatch(/validate/)
+    expect(forbiddenReasonCopy("role too low for assignment.unassign")).toBe(
+      "your role wasn't allowed to make this change on this project",
+    )
+  })
+
   it("maps a self-validation refusal", () => {
     expect(forbiddenReasonCopy("self-validation is not allowed on this project")).toMatch(
       /self-validation was off for this project at the time/i,

@@ -14,6 +14,8 @@
 //     by the caller, so it cannot be accidentally omitted.
 
 import type { SyncTokenClaims } from "../auth"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
+import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -221,6 +223,12 @@ export async function queryScopedSearch(
     "FROM cells",
     "WHERE cells.value_tsv @@ plainto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: a parked cell is not searchable. The anti-join is required
+    // rather than `cells.hidden_at IS NULL` because this query matches EITHER
+    // side and the flag lives only on the shared source row — reading it off the
+    // matched row would let every target-side hit through. It also settles
+    // Find & Replace, whose candidates are these results.
+    `AND ${notHiddenSql("cells")}`,
   ]
   const binds: unknown[] = [q, q, q, verifiedProjectId]
 
@@ -293,6 +301,9 @@ export async function queryScopedExact(
     "  AND paired.side       = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
     "WHERE cells.value_tsv @@ phraseto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: as in queryScoped — parked cells leave the results, and with
+    // them the Find & Replace candidate list built from those results.
+    `AND ${notHiddenSql("cells")}`,
   ]
   const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
 
@@ -380,6 +391,9 @@ export async function querySourceNeighbors(
     "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
   ]
   const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
@@ -476,6 +490,9 @@ export async function querySimilarSourceCells(
     "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
   ]
   const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
@@ -580,8 +597,11 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells t" +
     "    ON t.project_id = s.project_id AND t.file_id = s.file_id" +
     "   AND t.cell_id = s.cell_id AND t.side = 'target'" +
-    "   AND t.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("t") +
     "  WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'" +
+    // AQU-1424: a parked cell does not ASK for neighbors either — nothing will
+    // be drafted into it while it is hidden.
+    "    AND " + visibleSourceSql("s") +
     "    AND t.value <> '' AND t.validated = 0" +
     "  LIMIT ?" +
     ") " +
@@ -599,8 +619,10 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells tc" +
     "    ON tc.project_id = c.project_id AND tc.file_id = c.file_id" +
     "   AND tc.cell_id = c.cell_id AND tc.side = 'target' AND tc.value <> ''" +
-    "   AND tc.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("tc") +
     "  WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'" +
+    // AQU-1424: and it is not offered AS a neighbor.
+    "    AND " + visibleSourceSql("c") +
     "    AND c.cell_id <> a.asker_id" +
     "    AND c.value_tsv @@ to_tsquery('simple', q.terms)" +
     "  ORDER BY rank DESC" +
@@ -610,7 +632,16 @@ export async function queryFileSourceNeighbors(
   const result = await withNeighborTimeout(db, (h) =>
     h
       .prepare(sql)
-      .bind(targetLang, verifiedProjectId, fileId, maxAskers, targetLang, verifiedProjectId, fileId, topK)
+      .bind(
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        maxAskers,
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        topK,
+      )
       .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
   )
 

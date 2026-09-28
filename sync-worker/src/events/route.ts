@@ -702,6 +702,58 @@ async function prefetchLastEditors(
   return editors
 }
 
+interface TakeKey extends CellKey {
+  audioId: string
+}
+
+const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: string) =>
+  `${projectId} ${fileId} ${cellId} ${audioId}`
+
+/**
+ * AQU-490: who RECORDED each take a batch is about to validate, for the audio
+ * self-validation check.
+ *
+ * The text twin above asks `cells.last_editor`, which a take has no equivalent
+ * of. `cell_audio.event_id` cannot stand in either: the transcription re-attach
+ * lands about 800ms after every recording and overwrites it, so a take would
+ * name whoever last touched it — meaning a reviewer who trimmed somebody's
+ * recording would become its recorder, and on a project with self-validation
+ * off would then be refused permission to validate it. Hence the dedicated
+ * `created_by` column, written fill-only and backfilled from the EARLIEST
+ * attach event.
+ *
+ * A NULL recorder — a take whose attach event is gone, or one on a project the
+ * rollout has not reached — is "unknown", never a match. It must not silently
+ * equal the caller.
+ */
+async function prefetchTakeRecorders(
+  db: AquillaDb,
+  takes: readonly TakeKey[],
+): Promise<Map<string, string | null>> {
+  const recorders = new Map<string, string | null>()
+  if (takes.length === 0) return recorders
+
+  const placeholders = takes.map(() => '(?, ?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const t of takes) binds.push(t.projectId, t.fileId, t.cellId, t.audioId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, audio_id, created_by FROM cell_audio
+       WHERE (project_id, file_id, cell_id, audio_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      audio_id: string; created_by: string | null
+    }>()
+
+  for (const r of results) {
+    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), r.created_by)
+  }
+  return recorders
+}
+
 /**
  * POST /events
  *
@@ -875,6 +927,9 @@ export async function handleEventsWriteRequest(
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
+  const validateTakes = new Map<string, TakeKey>()
+  /** Takes attached earlier in THIS request, by author. */
+  const batchTakeAuthors = new Map<string, string>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -915,15 +970,42 @@ export async function handleEventsWriteRequest(
     if (e.kind === 'cell.validate') {
       validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
     }
+    // AQU-490: the audio twin (see prefetchTakeRecorders), gathered on the
+    // same terms — before the project's allowSelfValidationAudio setting is
+    // known, because it is not known until the per-event loop below.
+    if (e.kind === 'cell.audio.validate') {
+      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
+      if (typeof audioId === 'string' && audioId) {
+        validateTakes.set(`${key}\u0000${audioId}`, {
+          projectId: e.projectId, fileId: e.fileId, cellId: e.cellId, audioId,
+        })
+      }
+    }
+    // AQU-490: who attaches a take IN THIS BATCH. The prefetch below reads
+    // cell_audio, which cannot know about a row this same request is about to
+    // create — and that is exactly the recorder's own save: the modal enqueues
+    // the attach and its auto-validation back to back with no server ack
+    // between them, and the flusher posts them together. So the self-
+    // validation gate was a no-op on the one path it exists to guard.
+    // (Adversarial review, 2026-09-22.)
+    if (e.kind === 'cell.audio.attach') {
+      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
+      if (typeof audioId === 'string' && audioId && e.author) {
+        batchTakeAuthors.set(`${key}\u0000${audioId}`, e.author)
+      }
+    }
   }
-  const [existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors] =
-    await Promise.all([
+  const [
+    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors,
+    takeRecorders,
+  ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
       prefetchCellHeads(db, [...chainCells.values()]),
       prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
       prefetchCommentAuthors(db, foreignComments),
       prefetchLastEditors(db, [...validateCells.values()]),
+      prefetchTakeRecorders(db, [...validateTakes.values()]),
     ])
 
   // PERF-2: project_settings is read at most once per (request, project) —
@@ -1406,6 +1488,108 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // ── Audio validation config enforcement (AQU-490) ──────────────────────
+    // The same three gates as FRO-189 above, read from the project's SEPARATE
+    // audio keys: a project can want two ears on a recording and one on a
+    // translation, or trust a different set of people with each. The audio
+    // keys are never read as fallbacks for the text ones and vice versa —
+    // absent means unrestricted on both sides.
+    //
+    // Settings failure stays non-fatal here exactly as it is above: skip
+    // enforcement rather than block every validate in the project.
+    if (rawEvent.kind === 'cell.audio.validate' || rawEvent.kind === 'cell.audio.unvalidate') {
+      const parsed = await readProjectSettings(rawEvent.projectId)
+
+      // Stripping SOMEBODY ELSE'S vote is a maintainer act, and the only place
+      // it can be gated: by the time the event reaches the projection the
+      // question is settled, and the projection honours the field as written.
+      // A payload with no targetUsername means "remove my own", which anyone
+      // who could cast it may do.
+      if (rawEvent.kind === 'cell.audio.unvalidate') {
+        const target = (rawEvent.payload as { targetUsername?: unknown } | undefined)?.targetUsername
+        if (typeof target === 'string' && target.trim() && target.trim() !== callerUsername) {
+          if (callerRole < ROLE.MAINTAINER) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `only a maintainer can remove another user's audio validation`,
+            })
+            continue
+          }
+        }
+      }
+
+      if (rawEvent.kind === 'cell.audio.validate') {
+        let roleFloor: string | undefined
+        let namedUsers: string[] | undefined
+        let allowSelf: boolean | undefined
+        if (parsed) {
+          if (typeof parsed.validationRoleFloorAudio === 'string') {
+            roleFloor = parsed.validationRoleFloorAudio as string
+          }
+          if (Array.isArray(parsed.validationNamedUsersAudio)) {
+            namedUsers = parsed.validationNamedUsersAudio as string[]
+          }
+          if (typeof parsed.allowSelfValidationAudio === 'boolean') {
+            allowSelf = parsed.allowSelfValidationAudio
+          }
+        }
+
+        // 1. Role floor.
+        if (roleFloor != null) {
+          const FLOOR_MAP: Record<string, number> = {
+            reviewer: ROLE.REVIEWER,
+            project_lead: ROLE.PROJECT_LEAD,
+            maintainer: ROLE.MAINTAINER,
+          }
+          const floorLevel = FLOOR_MAP[roleFloor]
+          if (floorLevel != null && callerRole < floorLevel) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `role too low to validate audio (project requires ${roleFloor} or above)`,
+            })
+            continue
+          }
+        }
+
+        // 2. Named-user allowlist.
+        if (namedUsers != null && namedUsers.length > 0 && !namedUsers.includes(callerUsername)) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `user '${callerUsername}' is not in the project's audio validator allowlist`,
+          })
+          continue
+        }
+
+        // 3. Self-validation, against the take's RECORDER. A NULL recorder is
+        // unknown, not a match: a take whose attach event has been pruned must
+        // not become unvalidatable-by-everyone or validatable-by-anyone by
+        // accident. The strict === on two strings gives that for free, and it
+        // is the reason this reads the column rather than the event author.
+        if (allowSelf === false && rawEvent.fileId && rawEvent.cellId) {
+          const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
+          if (typeof audioId === 'string' && audioId) {
+            const takeKey = takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId)
+            // The stored recorder, or — for a take this very batch is
+            // attaching — the author of that attach. Without the fallback the
+            // check silently passes for every fresh recording, which is the
+            // only case that reliably reaches it.
+            const recorder = takeRecorders.get(takeKey) ?? batchTakeAuthors.get(takeKey)
+            if (recorder != null && recorder === callerUsername) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating your own recording is not allowed on this project`,
+              })
+              continue
+            }
+          }
+        }
+      }
+    }
+
     // ── Harmonize config enforcement (FRO-186) ────────────────────────────
     // Enforce project-level harmonize_min_role for target.cell.commit events
     // that carry a harmonize_origin payload (the cell.commit.harmonize variant
@@ -1524,38 +1708,48 @@ export async function handleEventsWriteRequest(
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
-      /** QW-10 recompute statements — run in a SECOND batch after `stmts` commit. */
-      recompute: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
-    let currentChunk: PendingChunk = { entries: [], stmts: [], recompute: [] }
+    let currentChunk: PendingChunk = { entries: [], stmts: [] }
 
-    // QW-10: the deferred file-counter recompute runs once per (file, chunk),
-    // built when the chunk is sealed — 1/N the aggregate scans of the old
-    // per-event recompute.
+    // QW-10 / AQU-1261: the deferred file-counter recompute runs once per FILE
+    // per request — built from the entries that actually committed, after the
+    // last chunk commits — rather than once per (file, chunk).
+    //
+    // The recompute is a full-file aggregate scan, so its cost is a function of
+    // the file, not of how many events touched it. Rebuilding it per chunk made
+    // a 400-event bulk write over a 10k-cell file scan that file four times for
+    // one identical answer; only the last pass survived. Coalescing to one pass
+    // keeps the same end state and drops the redundant scans — which is what
+    // concurrent writers on the same file were queueing behind.
     //
     // perf/events-write-path: it runs in its OWN transaction, immediately
-    // after the chunk's write transaction commits (same request, awaited
-    // before the broadcast — never waitUntil), rather than inside it. The
-    // recompute is a full-file aggregate scan over `cells`; carrying it inside
-    // the write transaction meant the events/cells row locks stayed held for
-    // the whole scan, which on prod showed up as 200ms+ lock waits and
-    // deadlocks on single-row commits. The contract is therefore: counters
-    // are consistent by the time this request RESPONDS (and broadcasts), not
-    // by the time the events commit. The window between the two is only
-    // observable to a concurrent reader, who would see counters at most one
-    // chunk behind — and that reader's own next commit recomputes them again.
+    // after the write transactions commit (same request, awaited before the
+    // broadcast — never waitUntil), rather than inside them. The recompute is a
+    // full-file aggregate scan over `cells`; carrying it inside the write
+    // transaction meant the events/cells row locks stayed held for the whole
+    // scan, which on prod showed up as 200ms+ lock waits and deadlocks on
+    // single-row commits. The contract is therefore: counters are consistent by
+    // the time this request RESPONDS (and broadcasts), not by the time the
+    // events commit. The window between the two is only observable to a
+    // concurrent reader, who would see counters behind by at most this
+    // request — and that reader's own next commit recomputes them again.
     // A recompute failure is logged loudly and does not un-accept the events
     // (they are durably committed); the next commit on the file self-heals.
-    const sealChunk = (chunk: PendingChunk): void => {
+    //
+    // AQU-1261: this is built from COMMITTED entries only, so a request whose
+    // later chunk fails still recomputes over its durable prefix — the totals
+    // match the events that actually landed rather than the ones we hoped to
+    // write.
+    const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
       const counterFiles = new Map<string, {
         projectId: string
         fileId: string
         fullSections: boolean
         cellIds: Set<string>
       }>()
-      for (const entry of chunk.entries) {
+      for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
           let impact = counterFiles.get(key)
@@ -1571,20 +1765,23 @@ export async function handleEventsWriteRequest(
         }
       }
       const recomputeTs = Date.now()
+      const stmts: AquillaStatement[] = []
       for (const f of counterFiles.values()) {
-        chunk.recompute.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
-          chunk.recompute.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+          // A full rebuild supersedes any per-cell section recompute for the
+          // same file, so the touched cell ids are deliberately dropped here.
+          stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
         } else {
-          chunk.recompute.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
           if (f.cellIds.size > 0) {
-            chunk.recompute.push(
+            stmts.push(
               sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
             )
           }
         }
       }
-      chunks.push(chunk)
+      return stmts
     }
 
     for (const entry of pendingEntries) {
@@ -1606,8 +1803,8 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length > 0 &&
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
-        sealChunk(currentChunk)
-        currentChunk = { entries: [], stmts: [], recompute: [] }
+        chunks.push(currentChunk)
+        currentChunk = { entries: [], stmts: [] }
       }
 
       currentChunk.entries.push(entry)
@@ -1615,7 +1812,7 @@ export async function handleEventsWriteRequest(
     }
 
     if (currentChunk.stmts.length > 0) {
-      sealChunk(currentChunk)
+      chunks.push(currentChunk)
     }
 
     const committedEntries: PendingEntry[] = []
@@ -1628,8 +1825,9 @@ export async function handleEventsWriteRequest(
     // client would treat "accepted" as "saved" (the old silent-loss bug).
     // Reading the row count back from the same transaction is race-free:
     // no later request can change what THIS write did. (The recompute
-    // statements are NOT in this batch — see sealChunk — so `results` indexes
-    // line up with `chunk.stmts` exactly as the per-entry offsets assume.)
+    // statements are NOT in this batch — see buildRecomputeStmts — so
+    // `results` indexes line up with `chunk.stmts` exactly as the per-entry
+    // offsets assume.)
     const flagChainLosers = (
       chunk: PendingChunk,
       results: ReadonlyArray<{ meta: { changes: number } }>,
@@ -1667,27 +1865,39 @@ export async function handleEventsWriteRequest(
     const runBatch = (stmts: AquillaStatement[]) =>
       db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
 
+    /**
+     * One recompute pass over everything that committed, in its own
+     * transaction. Called exactly once per request — on the success path after
+     * the last chunk, and on the failure path over the durable prefix.
+     */
+    const recomputeCommitted = async (): Promise<void> => {
+      try {
+        const stmts = buildRecomputeStmts(committedEntries)
+        if (stmts.length === 0) return
+        await runBatch(stmts)
+      } catch (recomputeErr) {
+        // The events are committed; only the derived counters are behind.
+        // Loud, because a silent miss here is a counter drift nobody can
+        // trace back — but not fatal, and NOT reported as a rejection.
+        console.error(
+          `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
+          recomputeErr,
+        )
+      }
+    }
+
     try {
       for (const chunk of chunks) {
         const results = await runBatch(chunk.stmts)
         flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
-        if (chunk.recompute.length > 0) {
-          try {
-            await runBatch(chunk.recompute)
-          } catch (recomputeErr) {
-            // The events are committed; only the derived counters are behind.
-            // Loud, because a silent miss here is a counter drift nobody can
-            // trace back — but not fatal, and NOT reported as a rejection.
-            console.error(
-              `[events] file counter recompute failed after commit (${chunk.entries.length} events accepted; counters self-heal on the next commit):`,
-              recomputeErr,
-            )
-          }
-        }
       }
+      await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      // The chunks that did commit are durable, so their counters must still
+      // be brought up to date (AQU-1261) before we report the partial result.
+      await recomputeCommitted()
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {

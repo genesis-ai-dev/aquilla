@@ -96,11 +96,10 @@ describe("AssignedToMe", () => {
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
-  // AQU-729: every row names its language. A named lane deep-links with
-  // ?lane=<tag>. The default lane ('') shows the project's target language
-  // and still opens the editor without a lane query.
+  // AQU-729 / AQU-538 (§3.5): every assignment shows its lane; named lanes use
+  // the tag, the default lane ('') uses the project's target language label.
   // AQU-690: when fileId is present, open that file in the editor.
-  it("shows the language lane on every assignment and deep-links only a named lane", async () => {
+  it("renders lane chips and navigates with ?lane= for a lane-pinned assignment", async () => {
     mockGetMy.mockResolvedValue([
       { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
       { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },

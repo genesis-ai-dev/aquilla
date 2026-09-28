@@ -910,6 +910,68 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
   return eventId
 }
 
+// ── Audio validation (AQU-490) ────────────────────────────────────────────
+// A vote is on a TAKE, so these carry an audioId where the text pair carries
+// an editEventId. Non-chain-mutating like the text pair, for the same reason:
+// the projection treats them as additive writes to cell_audio_validators
+// rather than as a new head, so parentId is omitted.
+//
+// These kinds have existed server-side since AQU-508 and no client has ever
+// emitted them — which is why every audio-validated number in the product is
+// zero, and why the plan board measures audio on "recorded" instead.
+
+export interface CellAudioValidateInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.validate` — one person's vote on one take. */
+export async function emitCellAudioValidate(input: CellAudioValidateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.validate",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioUnvalidateInput extends CellAudioValidateInput {
+  /**
+   * Whose vote to remove. Omit for your own — which is what every caller but
+   * the maintainer's "remove this person's validation" does. Naming somebody
+   * else is gated on MAINTAINER at the route; sending it as your own username
+   * is allowed and means the same as omitting it.
+   */
+  targetUsername?: string
+}
+
+/** Mirror of `emitCellAudioValidate` for withdrawing a vote. */
+export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.unvalidate",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      ...(input.targetUsername ? { targetUsername: input.targetUsername } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Back-translation helper ───────────────────────────────────────────────
 
 export interface CellBacktranslationSetInput {

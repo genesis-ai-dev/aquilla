@@ -205,4 +205,63 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     // settled by the batch's settle statement
     expect(await liveAllocations()).toBe(0)
   })
+
+  it("AQU-1240: ingest creates lanes and projects lane_id onto source and target cells", async () => {
+    const events: IngestEventIn[] = [
+      {
+        id: "f1",
+        kind: "file.create",
+        fileId: FILE,
+        cellId: null,
+        parentId: null,
+        author: "legacy-import",
+        clientTs: 1600000000000,
+        payload: { name: "GEN", fileType: "codex" },
+      },
+      cellCreate("s1", "cell-1", "Hello"),
+      {
+        id: "t-default",
+        kind: "target.cell.commit",
+        fileId: FILE,
+        cellId: "cell-1",
+        parentId: "s1",
+        author: "legacy-import",
+        clientTs: 1600000000001,
+        payload: { value: "Bonjour" },
+      },
+      {
+        id: "t-es",
+        kind: "target.cell.commit",
+        fileId: FILE,
+        cellId: "cell-1",
+        parentId: "s1",
+        author: "legacy-import",
+        clientTs: 1600000000002,
+        payload: { value: "Hola", targetLang: "es" },
+      },
+    ]
+    const res = await handleMigrateIngestRequest(ingestRequest(events), env())
+    expect(res?.status).toBe(200)
+
+    const laneRows = await t.pg.query<{ role: string; legacy_tag: string | null }>(
+      `SELECT role, legacy_tag FROM lanes WHERE project_id=$1 ORDER BY role, legacy_tag NULLS FIRST`,
+      [PROJECT],
+    )
+    expect(laneRows.rows).toEqual([
+      { role: "source", legacy_tag: null },
+      { role: "target", legacy_tag: "" },
+      { role: "target", legacy_tag: "es" },
+    ])
+
+    const cells = await t.pg.query<{ side: string; target_lang: string; lane_id: string | null }>(
+      `SELECT side, target_lang, lane_id FROM cells WHERE project_id=$1 ORDER BY side, target_lang`,
+      [PROJECT],
+    )
+    expect(cells.rows).toHaveLength(3)
+    expect(cells.rows.every((r) => typeof r.lane_id === "string" && r.lane_id.length > 0)).toBe(true)
+    const sourceId = cells.rows.find((r) => r.side === "source")?.lane_id
+    const defaultId = cells.rows.find((r) => r.side === "target" && r.target_lang === "")?.lane_id
+    const esId = cells.rows.find((r) => r.side === "target" && r.target_lang === "es")?.lane_id
+    expect(new Set([sourceId, defaultId, esId]).size).toBe(3)
+  })
 })

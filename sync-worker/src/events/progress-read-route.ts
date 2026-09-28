@@ -1,4 +1,6 @@
 import { verifyTokenForProject } from '../auth'
+import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { walkAnchorChain } from './cells-read-route'
 
@@ -30,6 +32,27 @@ interface ProgressRow {
   // not reached yet, which reads as nothing to subtract — today's behaviour.
   structural_audio_count?: number | string | null
   structural_audio_validated_count?: number | string | null
+  // AQU-490: buckets of the per-cell MINIMUM vote count across that cell's
+  // selected dub takes. Optional for the same reason as the pair above — a row
+  // the backfill has not reached reads as '{}', which is "nothing validated",
+  // today's behaviour exactly.
+  audio_validator_histogram?: ProgressRow['validator_histogram']
+  structural_audio_validator_histogram?: ProgressRow['validator_histogram']
+  /**
+   * When the projection last rewrote this row — the ETag's backfill clock.
+   *
+   * `revision` cannot serve: it tracks the event sequence, and a BACKFILL
+   * rewrites counts without emitting an event, so a client holding the
+   * pre-backfill body revalidates its unchanged ETag and is handed a 304
+   * forever. plan-route.ts has carried this second clock since AQU-1092 and
+   * its comment names the failure; this route is the sibling that never got
+   * it, which is how a filled-in audio column stayed invisible on the chapter
+   * grid while the (uncached) book row showed it immediately.
+   *
+   * Optional, like the rest: a caller building a row by hand has no clock, and
+   * absent reads as 0, which is the behaviour this route had before.
+   */
+  updated_at?: number | string | bigint | null
 }
 
 export interface ProgressCounts {
@@ -38,12 +61,24 @@ export interface ProgressCounts {
   validatedCount: number
   validationLevels: number[]
   /**
-   * AQU-1098: source cells carrying a live take, and those whose take is
-   * selected AND approved. Same rule the org portfolio counts by, so a
-   * chapter's audio and the project's audio can never disagree.
+   * AQU-1098: source cells carrying a live dub take, and those where every
+   * selected dub take has reached the project's required validator count.
+   * Same rule the org portfolio counts by, so a chapter's audio and the
+   * project's audio can never disagree.
+   *
+   * AQU-490 narrowed "carrying a take" to a selected DUB take — an imported
+   * media file attaches the shared programme audio to every cell, which used
+   * to make the whole file read as fully recorded — and turned "validated"
+   * from a boolean stamp into a count against a threshold.
    */
   audioCount: number
   audioValidatedCount: number
+  /**
+   * The audio twin of validationLevels: how many cells have at least 1, 2, …
+   * validators on every one of their selected dub takes. Cumulative, so a
+   * reader can show a project's answer at any threshold without refetching.
+   */
+  audioValidationLevels: number[]
 }
 
 export interface FileProgressResponse {
@@ -138,32 +173,59 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
 }
 
 /**
- * The numbers a row reports, with the policy applied. `countStructural`
- * defaults to counting — the behaviour every caller had before the setting
- * existed — so a caller that has not resolved the policy gets today's numbers.
+ * Cumulative "how many cells have at least N validators", from a histogram of
+ * exact counts. Shared by the text and audio halves because the arithmetic is
+ * the same; only the histogram and the threshold differ.
+ */
+function levelsFrom(histogram: Map<number, number>, count: number): number[] {
+  const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, count))
+  return Array.from({ length: levelCap }, (_, index) => {
+    const threshold = index + 1
+    let total = 0
+    for (const [bucket, amount] of histogram) if (bucket >= threshold) total += amount
+    return total
+  })
+}
+
+/** Subtract one histogram from another bucket-wise, dropping empties. */
+function subtractHistogram(from: Map<number, number>, take: Map<number, number>): void {
+  for (const [bucket, amount] of take) {
+    const remaining = (from.get(bucket) ?? 0) - amount
+    if (remaining > 0) from.set(bucket, remaining)
+    else from.delete(bucket)
+  }
+}
+
+/**
+ * The numbers a row reports, with the policy applied.
+ *
+ * Both thresholds are REQUIRED, and `countStructural` lost its default to make
+ * them so. That is deliberate: the text side shipped a rebuild that replayed
+ * at the default threshold and quietly un-validated every cell on a project
+ * that required two reviewers, precisely because the count had somewhere safe
+ * to fall back to. Here the compiler names every caller instead.
  */
 export function counts(
   row: ProgressRow,
   validationCount: number,
-  countStructural = true,
+  countStructural: boolean,
+  validationCountAudio: number,
 ): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
+  const audioHistogram = parseHistogram(row.audio_validator_histogram ?? null)
   if (!countStructural) {
     // Bucket-wise, because the levels are cumulative on read: a validated
     // chapter title would otherwise still be counted at every level below it.
-    for (const [bucket, amount] of parseHistogram(row.structural_validator_histogram ?? null)) {
-      const remaining = (histogram.get(bucket) ?? 0) - amount
-      if (remaining > 0) histogram.set(bucket, remaining)
-      else histogram.delete(bucket)
-    }
+    subtractHistogram(histogram, parseHistogram(row.structural_validator_histogram ?? null))
+    subtractHistogram(
+      audioHistogram,
+      parseHistogram(row.structural_audio_validator_histogram ?? null),
+    )
   }
   const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCount))
-  const validationLevels = Array.from({ length: levelCap }, (_, index) => {
-    const threshold = index + 1
-    let count = 0
-    for (const [bucket, amount] of histogram) if (bucket >= threshold) count += amount
-    return count
-  })
+  const audioLevelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCountAudio))
+  const validationLevels = levelsFrom(histogram, validationCount)
+  const audioValidationLevels = levelsFrom(audioHistogram, validationCountAudio)
   const structuralTotal = countStructural ? 0 : Number(row.structural_count) || 0
   const structuralFilled = countStructural ? 0 : Number(row.structural_filled_count) || 0
   // AQU-1278: recorded headings leave the audio numbers with the headings
@@ -171,8 +233,6 @@ export function counts(
   // numerator alone, so a book whose chapter headings were voiced reported
   // more audio than it had cells.
   const structuralAudio = countStructural ? 0 : Number(row.structural_audio_count) || 0
-  const structuralAudioValidated =
-    countStructural ? 0 : Number(row.structural_audio_validated_count) || 0
   return {
     // Clamped at zero: an un-backfilled row has structural counts of 0, but a
     // partially backfilled one must never report a negative denominator.
@@ -181,10 +241,14 @@ export function counts(
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
     audioCount: Math.max(0, (Number(row.audio_count) || 0) - structuralAudio),
-    audioValidatedCount: Math.max(
-      0,
-      (Number(row.audio_validated_count) || 0) - structuralAudioValidated,
-    ),
+    // AQU-490: read from the histogram at the project's threshold, NOT from
+    // the stored audio_validated_count. That column is fixed at "one vote",
+    // so on a project that asks for two it would report cells as validated
+    // that the board and the gutter both call outstanding. It stays written
+    // for readers that have not moved yet; nothing here consults it.
+    audioValidatedCount:
+      audioValidationLevels[Math.min(audioLevelCap, validationCountAudio) - 1] ?? 0,
+    audioValidationLevels,
   }
 }
 
@@ -247,18 +311,36 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
-export async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
+async function readSettingsCount(
+  db: AquillaDb,
+  projectId: string,
+  key: 'validationCount' | 'validationCountAudio',
+): Promise<number> {
   const row = await db
     .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
     .bind(projectId)
     .first<{ settings: string | null }>()
   try {
-    const parsed = row?.settings ? JSON.parse(row.settings) as { validationCount?: unknown } : null
-    const value = Math.floor(Number(parsed?.validationCount))
+    const parsed = row?.settings ? JSON.parse(row.settings) as Record<string, unknown> : null
+    const value = Math.floor(Number(parsed?.[key]))
     return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVELS, Math.max(1, value)) : 1
   } catch {
     return 1
   }
+}
+
+export function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
+  return readSettingsCount(db, projectId, 'validationCount')
+}
+
+/**
+ * AQU-490: how many people must validate a TAKE. A separate setting from the
+ * text count by Sam's ruling — a project can want two ears on a recording and
+ * one on a translation — and clamped identically, because the same blob is
+ * written by clients that do not clamp (a `999` reaches it today).
+ */
+export function readValidationCountAudio(db: AquillaDb, projectId: string): Promise<number> {
+  return readSettingsCount(db, projectId, 'validationCountAudio')
 }
 
 /**
@@ -275,18 +357,46 @@ function chapterKeySql(alias: string): string {
 }
 
 /**
- * Does the cell at (`fileExpr`, `cellExpr`) carry a live take — or, with
- * `signed`, one that is selected AND approved? The definitions are the
- * projection's (`AUDIO_CTE_SQL`): a cell HAS audio when any take is live, and
- * is validated when its selected take is approved. Correlated on `s`, the
- * source-cell alias every query here uses, for the project id.
+ * Does the cell at (`fileExpr`, `cellExpr`) carry a live dub take — or, with
+ * `signed`, one where EVERY selected dub take has reached the project's
+ * required number of validators?
+ *
+ * The definitions are the projection's (`AUDIO_CTE_SQL`) and must stay in step
+ * with it, or a queue sends somebody to a cell the board calls finished.
+ * AQU-490 moved both: "recorded" excludes the imported source clip that sits
+ * selected on every cell of a media file, and "signed" is a vote count against
+ * a threshold rather than the `approved` boolean nothing ever wrote.
+ *
+ * `signed` is NOT EXISTS over the takes that fall short, not EXISTS over the
+ * ones that pass: with two tracks on a line, "some take is validated" would
+ * call the line done while a whole track went unheard.
+ *
+ * `threshold` is INTERPOLATED rather than bound. These fragments are spliced
+ * into a column list whose binds are positional, and a `?` here would consume
+ * whichever bind happened to be next. It is a clamped integer from
+ * readValidationCountAudio, never user text.
  */
-function liveTakeSql(fileExpr: string, cellExpr: string, signed: boolean): string {
-  return `EXISTS (SELECT 1 FROM cell_audio a
-                   WHERE a.project_id = s.project_id AND a.file_id = ${fileExpr}
-                     AND a.cell_id = ${cellExpr} AND a.deleted = 0${
-                       signed ? ' AND a.selected = 1 AND a.approved = 1' : ''
-                     })`
+function liveTakeSql(
+  fileExpr: string,
+  cellExpr: string,
+  signed: boolean,
+  threshold = 1,
+): string {
+  const dubTake = `a.project_id = s.project_id AND a.file_id = ${fileExpr}
+                     AND a.cell_id = ${cellExpr} AND a.deleted = 0
+                     AND a.selected = 1 AND a.role = 'dub'`
+  if (!signed) return `EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})`
+  // ONE TAKE PER TRACK, the same rule AUDIO_CTE_SQL applies — and this is the
+  // second of three readers that did not have it. A leftover generated voice
+  // beside a real recording is silent, so nobody can judge it; counting it
+  // here kept sending "go to the next unsigned recording" to lines the board
+  // already called finished, which is the exact disagreement this function's
+  // docstring warns about. Found by an adversarial review, 2026-09-22.
+  return `(EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})
+           AND NOT EXISTS (SELECT 1 FROM cell_audio a
+                            WHERE ${dubTake}
+                              AND ${takeSoundsOnItsTrackSql('a')}
+                              AND a.validator_count < ${Math.max(1, Math.floor(threshold))}))`
 }
 
 interface FirstOpenRow {
@@ -370,10 +480,12 @@ export async function readFirstOpenCell(
   // fraction of it; production files are twenty times that size.
   const wantsText = kind === 'untranslated' || kind === 'unvalidated'
   const wantsAudio = kind === 'unrecorded' || kind === 'unsigned'
-  const [countStructural, validationCount, sheet] = await Promise.all([
+  const [countStructural, validationCount, validationCountAudio, sheet] = await Promise.all([
     readCountStructuralCells(db, projectId),
     // Only the unvalidated queue compares endorsements against the threshold.
     kind === 'unvalidated' ? readValidationCount(db, projectId) : Promise.resolve(1),
+    // ...and only `unsigned` compares take votes against the audio one.
+    kind === 'unsigned' ? readValidationCountAudio(db, projectId) : Promise.resolve(1),
     // The cue sheet can only matter to the audio queues, and looking it up IS
     // the direct test for whether this unit records against one — no need to
     // guess from the file's kind.
@@ -394,7 +506,7 @@ export async function readFirstOpenCell(
          AND l.from_file_id = s.file_id AND l.from_cell_id = s.cell_id AND l.to_file_id = ?
          AND ${predicate})`
   const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
-  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true)
+  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio)
 
   const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`]
   const binds: unknown[] = []
@@ -411,15 +523,17 @@ export async function readFirstOpenCell(
       binds.push(sheetId, sheetId)
     } else {
       columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take`,
-        `${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed`)
+        `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed`)
     }
   }
+  // AQU-1240 slice 7: the lane join dual-reads (lane_id once backfilled,
+  // target_lang while it is still NULL) like every other hot read here.
   const targetJoin = wantsText
     ? `LEFT JOIN cells t
          ON t.project_id = s.project_id AND t.file_id = s.file_id
-        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?`
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND ${targetLaneDualReadSql('t')}`
     : ''
-  if (wantsText) binds.push(lane)
+  if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
   if (unit) binds.push(unit, `${unit} %`)
 
@@ -492,7 +606,14 @@ export async function handleProgressReadRequest(
 
   if (sectionMatch) {
     const sectionKey = decodeURIComponent(sectionMatch[3]).trim()
-    const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
+    // Both of these are read BEFORE the batch rather than inside it: each is
+    // interpolated into the SQL below, so it has to exist before the string
+    // does. The text threshold is only compared to a column afterwards, which
+    // is why it can still ride along in the Promise.all.
+    const [countStructural, validationCountAudio] = await Promise.all([
+      readCountStructuralCells(env.AQUILLA_PG, projectId),
+      readValidationCountAudio(env.AQUILLA_PG, projectId),
+    ])
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
         `SELECT s.cell_id,
@@ -500,18 +621,18 @@ export async function handleProgressReadRequest(
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count,
                 ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
-                ${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed
+                ${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND t.target_lang = ?
+            AND ${targetLaneDualReadSql('t')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             AND ${chapterKeySql('s')} = ?
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
-      ).bind(lane, projectId, fileId, sectionKey).all<{
+      ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         cell_id: string
         canonical_ref: string | null
         target_value: string
@@ -521,11 +642,22 @@ export async function handleProgressReadRequest(
       }>(),
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
-        `SELECT revision FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ? AND target_lang = ?`,
-      ).bind(projectId, fileId, sectionKey, lane).first<{ revision: number | string | bigint }>(),
+        `SELECT revision, updated_at FROM file_section_progress
+          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ?
+            AND ${targetLaneDualReadSql()}`,
+      ).bind(projectId, fileId, sectionKey, ...targetLaneDualReadBinds(projectId, lane)).first<{
+        revision: number | string | bigint
+        updated_at: number | string | bigint | null
+      }>(),
     ])
     const revision = Number(revisionRow?.revision) || 0
+    // The same backfill clock the file-level key below carries, and needed for
+    // the same reason twice over: these verses are read LIVE from cells and
+    // cell_audio, so a backfill that rewrites validator counts changes this
+    // body without touching an event. Harmless today only because this call is
+    // uncached on the client — which is a fact about one caller, not a
+    // property of the key.
+    const progressUpdatedAt = Number(revisionRow?.updated_at) || 0
     // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
     // append a lane segment so caches never cross lanes.
     const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
@@ -542,7 +674,14 @@ export async function handleProgressReadRequest(
     // outstanding cell" link would have silently done nothing, on exactly the
     // chapters a user had already looked at. `s3` is the same lesson applied
     // again, for the two audio flags each verse carries now.
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:s3${structuralTag}${laneTag}"`
+    //
+    // AQU-490 needs BOTH halves of that. `va` joins the key because take_signed
+    // is now computed against the audio threshold, so raising it changes the
+    // body with no data write to move `revision`. And `s4` because the meaning
+    // of take_signed changed under clients holding an `s3` body: same field,
+    // same type, different question — the one kind of change a revision can
+    // never express.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s4${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -567,19 +706,22 @@ export async function handleProgressReadRequest(
   }
 
   const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
-  const [rowsResult, validationCount] = await Promise.all([
+  const [rowsResult, validationCount, validationCountAudio] = await Promise.all([
     env.AQUILLA_PG
       .prepare(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram,
                 structural_count, structural_filled_count, structural_validator_histogram,
                 revision, audio_count, audio_validated_count,
-                structural_audio_count, structural_audio_validated_count
+                structural_audio_count, structural_audio_validated_count,
+                audio_validator_histogram, structural_audio_validator_histogram,
+                updated_at
            FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
+          WHERE project_id = ? AND file_id = ? AND ${targetLaneDualReadSql()}`,
       )
-      .bind(projectId, fileId, lane)
+      .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
       .all<ProgressRow>(),
     readValidationCount(env.AQUILLA_PG, projectId),
+    readValidationCountAudio(env.AQUILLA_PG, projectId),
   ])
 
   let rows = rowsResult.results
@@ -627,6 +769,15 @@ export async function handleProgressReadRequest(
   const fileRow = rows.find((row) => row.scope === 'file')
   if (!fileRow) return new Response('progress backfill pending', { status: 503 })
   const revision = Math.max(0, ...rows.map((row) => Number(row.revision) || 0))
+  // THE BACKFILL CLOCK, and the reason it is here rather than folded into the
+  // revision: a recompute rewrites these rows without emitting an event, so
+  // `revision` does not move and every cached body revalidates true. The
+  // client cache this feeds is DURABLE (IndexedDB, per account, per file), so
+  // a false 304 is not a stale second — it is stale until someone clears the
+  // store. Found on the chapter grid reading 0 recorded / 0 validated for a
+  // whole book whose rows were correct in the database (AQU-490, 2026-09-21).
+  // plan-route.ts already carries this exact clock; this route is its sibling.
+  const progressUpdatedAt = Math.max(0, ...rows.map((row) => Number(row.updated_at) || 0))
   // A backfill can replace the rollout fallback without advancing the event
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
@@ -637,9 +788,12 @@ export async function handleProgressReadRequest(
   // the same reason — flipping it changes every number without moving the
   // revision either. s2 = audio counts added (AQU-1098); s3 = recorded
   // headings left those counts (AQU-1278), which the 0094 backfill applies to
-  // existing rows without touching a single event sequence.
+  // existing rows without touching a single event sequence. s4 = AQU-490:
+  // audioValidationLevels joins the body, audioValidatedCount is now measured
+  // against a threshold, and audioCount stopped counting imported source
+  // clips — three changes the 0096 backfill likewise makes with no event.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s3${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:${source === 'projection' ? 'p' : 'f'}:s4${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
@@ -649,13 +803,13 @@ export async function handleProgressReadRequest(
     fileId,
     revision,
     validationCount,
-    file: counts(fileRow, validationCount, countStructural),
+    file: counts(fileRow, validationCount, countStructural, validationCountAudio),
     sections: sectionRows
       .sort((a, b) => compareSections(a.section_key, b.section_key))
       .map((row) => ({
         key: row.section_key,
         rawTotal: Number(row.total_count) || 0,
-        ...counts(row, validationCount, countStructural),
+        ...counts(row, validationCount, countStructural, validationCountAudio),
       }))
       // A section made ENTIRELY of structural cells — USFM front matter is one,
       // its \h/\toc/\mt lines all sitting before chapter 1 — has nothing left

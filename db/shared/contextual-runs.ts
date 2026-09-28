@@ -902,10 +902,14 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   try {
     const row = await db
       .prepare(
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
+        // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
         `INSERT INTO contextual_runs
             (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
-             anchor_cell_id, scope_group, span_allowance)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?)
+             anchor_cell_id, scope_group, span_allowance, lane_id)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -924,6 +928,9 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
           : input.spanAllowance === null
             ? null
             : Math.max(0, Math.round(input.spanAllowance)),
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang).
+        input.projectId,
+        lane,
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1620,9 +1627,13 @@ export async function insertDrafts(
     ...input.drafts.map((d) =>
       db
         .prepare(
-          `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+          // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql). COALESCE on
+        // conflict so a resolved id is never regressed to NULL.
+        `INSERT INTO contextual_drafts
+              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb,
+                   (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
            ON CONFLICT (project_id, file_id, cell_id, target_lang) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
@@ -1631,6 +1642,7 @@ export async function insertDrafts(
              text = EXCLUDED.text,
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
+             lane_id = COALESCE(EXCLUDED.lane_id, contextual_drafts.lane_id),
              created_at = now()`,
         )
         .bind(
@@ -1644,6 +1656,8 @@ export async function insertDrafts(
           d.text,
           d.verdicts ?? null,
           d.provenance ?? null,
+          input.projectId,
+          lane,
         ),
     ),
   ]

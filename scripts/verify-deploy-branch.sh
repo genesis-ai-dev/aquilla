@@ -4,7 +4,8 @@
 # Complements verify-dist-host.sh, which only catches a stale dist/ — this
 # catches the sync-worker/auth-worker deploys too, which have no SPA build.
 #
-# Usage: verify-deploy-branch.sh <expected-branch>
+# Usage: verify-deploy-branch.sh <expected-branch | release>
+# "release" accepts any release/YYYY/MM/DD or release/YYYY/MM/DD-NN branch (production).
 set -euo pipefail
 
 expected="$1"
@@ -26,6 +27,15 @@ elif [ -n "$ci_branch" ]; then
 else
   echo "ABORT: detached HEAD without trusted CI branch metadata." >&2
   exit 1
+fi
+
+if [ "$expected" = "release" ]; then
+  if ! [[ "$current" =~ ^release/[0-9]{4}/[0-9]{2}/[0-9]{2}(-[0-9]{2})?$ ]]; then
+    echo "ABORT: this deploy target requires a release/YYYY/MM/DD branch (currently on '$current')." >&2
+    echo "Cut a release branch from dev and deploy from it." >&2
+    exit 1
+  fi
+  expected="$current"
 fi
 
 if [ "$current" != "$expected" ]; then

@@ -17,6 +17,14 @@
 // a take against text written days later. `recordedAt` still carries the
 // server timestamp because the human-facing question ("recorded when?") wants
 // a date — it just never decides ordering.
+//
+// AQU-1372 adds the other half of that human-facing question, "by whom?", as
+// `recordedBy`. It rides here rather than in a module of its own because the
+// answer is a field of the very attach event this resolver already has to
+// find: a separate resolver would mean a second read of the same cell history
+// on every takes strip, and two places that could disagree about WHICH attach
+// dates a take (see `firstAttachFor` — the earliest one, not the Whisper
+// re-attach ~800ms later).
 
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 import { computeOnChainSet } from "@/lib/sync/chain"
@@ -28,6 +36,17 @@ export interface RecordingTextDrift {
   audioId: string
   /** Server clock when the take was attached (ms epoch) — the "date stamp". */
   recordedAt: number
+  /**
+   * AQU-1372: WHO made the take — the `author` of the very same attach event
+   * `recordedAt` is read from, so the two can never disagree about which
+   * attach they describe.
+   *
+   * Read off the event log rather than off `cell_audio`, which has no
+   * author column at all: the projection keeps `created_ts` and the
+   * `event_id` that produced the row, and the event behind that id is the
+   * only record of the person who made the recording.
+   */
+  recordedBy: string
   /** The text as it stood when this take was recorded. Null when the take
    *  predates any commit on the cell (recorded before the line had text). */
   textAtRecording: string | null
@@ -132,6 +151,7 @@ export function resolveRecordingTextDrift(
   return {
     audioId,
     recordedAt: attach.serverTs,
+    recordedBy: attach.author,
     textAtRecording,
     textAtRecordingEventId: atRecording?.id ?? null,
     latestText,

@@ -106,7 +106,7 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
+      "The first language is the project's primary target; each one you add below becomes its own lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",
@@ -308,6 +308,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -426,6 +428,8 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
+    "workspace.targetAudioLane.takeValidated": "This take is validated",
+    "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -1359,6 +1363,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +
@@ -1753,6 +1769,22 @@ export const workspace = defineNamespace({
           "button. It plays only that one clip, trimmed exactly as the " +
           "timeline draws it, without moving the playhead or starting the " +
           "rest of the timeline.",
+      },
+      "workspace.targetAudioLane.takeValidated": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip whose "
+          + "recording has reached the number of validators the project asks "
+          + "for. Read-only — the vote itself is cast in the editor, the "
+          + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
+      },
+      "workspace.targetAudioLane.takeValidatedByYou": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip that YOU "
+          + "have validated, on a project that asks for more validators than "
+          + "just you. A single tick rather than a double one, matching the "
+          + "editor's margin: your part is done, the line is not.",
+        maxLength: 30,
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

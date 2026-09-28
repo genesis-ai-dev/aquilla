@@ -5,6 +5,7 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import { orgPathContribution } from "../../../db/shared/project-roles"
+import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1436,7 +1437,17 @@ const PORTFOLIO_UNIT_COLUMNS = `
 const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
        SELECT p.id AS project_id,
-              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded,
+              -- AQU-490: how many validators a TAKE needs on this project, read
+              -- from the generated column rather than the settings blob, which
+              -- runs to several megabytes and is what timed this dashboard out
+              -- at fifteen seconds once already. The regex guard is not
+              -- decoration: the column is TEXT off a jsonb ->>, so a project
+              -- that ever stored a non-integer would abort the whole portfolio
+              -- query with a cast error rather than just reading wrong.
+              GREATEST(1, LEAST(15, COALESCE(
+                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
+                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
@@ -1446,25 +1457,52 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM cells c
          JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
         WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+     ), au_cells AS MATERIALIZED (
+       -- AQU-490, level one: one row per CELL, carrying the minimum vote count
+       -- across its selected dub takes. Two tracks sound together, so a cell is
+       -- only as validated as its least-validated track, and the minimum turns
+       -- that into a number the level above can simply compare.
+       --
+       -- The role filter is what keeps a media project honest. The shared
+       -- programme audio is attached, selected, to every cell of an imported
+       -- file, so counting it made audio-first-test read as fully recorded with
+       -- 52.9 hours of work done — one clip's duration multiplied across 508
+       -- cells — when almost nothing had been dubbed.
+       -- ONE TAKE PER TRACK. The third of three readers of this definition,
+       -- and the last to get the rule: a generated voice left selected beside
+       -- a real recording is silent, so nobody can judge it, and counting it
+       -- held whole projects' tiles below the board's own number (adversarial
+       -- review, 2026-09-22). The recorded-milliseconds sum below deliberately
+       -- keeps every selected dub take: that is hours of audio present, not
+       -- hours left to judge.
+       SELECT a.project_id, a.file_id, a.cell_id,
+              MIN(a.validator_count) FILTER (
+                WHERE ${takeSoundsOnItsTrackSql('a')}
+              ) AS dub_votes,
+              SUM(a.duration_ms) AS recorded_ms,
+              BOOL_OR(sc.cell_id IS NOT NULL) AS structural
+         FROM cell_audio a
+         LEFT JOIN structural_cells sc
+           ON sc.project_id = a.project_id
+          AND sc.file_id = a.file_id
+          AND sc.cell_id = a.cell_id
+        WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
+        GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE NOT ca.structural) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (
-                WHERE ca.selected = 1 AND ca.approved = 1 AND NOT ca.structural
+       -- Level two: count those cells per project, against the project's own
+       -- threshold. A plain join to policy, deliberately -- asking for the
+       -- threshold with a correlated subquery per row is the shape that caused
+       -- the timeout, and it must not come back through this door.
+       SELECT c.project_id,
+              COUNT(*) FILTER (WHERE NOT c.structural) AS audio_cells,
+              COUNT(*) FILTER (
+                WHERE NOT c.structural AND c.dub_votes >= pol.audio_threshold
               ) AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM (
-           SELECT a.project_id, a.cell_id, a.selected, a.approved, a.duration_ms,
-                  sc.cell_id IS NOT NULL AS structural
-             FROM cell_audio a
-             LEFT JOIN structural_cells sc
-               ON sc.project_id = a.project_id
-              AND sc.file_id = a.file_id
-              AND sc.cell_id = a.cell_id
-            WHERE a.deleted = 0
-              AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
-         ) ca
-        GROUP BY ca.project_id
+              COALESCE(SUM(c.recorded_ms), 0) AS recorded_ms
+         FROM au_cells c
+         JOIN policy pol ON pol.project_id = c.project_id
+        GROUP BY c.project_id
      ), pu AS MATERIALIZED (
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`

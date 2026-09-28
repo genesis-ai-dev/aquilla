@@ -12,7 +12,7 @@ interface AssignmentLaneBadgeProps {
   className?: string
 }
 
-/** Lane chip for an assignment row. Always visible so the assignee can see which language the work is in. */
+/** Lane chip for an assignment row — always visible so assignees know which language lane they're in. */
 export function AssignmentLaneBadge({
   targetLang = "",
   defaultLaneLabel,

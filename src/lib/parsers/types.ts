@@ -604,6 +604,17 @@ export interface ProjectRecord {
    */
   allowSelfValidation?: boolean
   /**
+   * AQU-490: the audio twins of the three above. SEPARATE keys, by Sam's
+   * ruling — a project can want two ears on a recording and one on a
+   * translation, or trust a different set of people with each. Neither set is
+   * ever read as a fallback for the other; absent means unrestricted on both
+   * sides. All three ARE enforced server-side (sync-worker route.ts), unlike
+   * the text trio's long-standing SWARM-TODOs.
+   */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
+  /**
    * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).
    * Lowering below project_lead is not allowed (hard floor per spec).

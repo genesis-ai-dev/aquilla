@@ -436,3 +436,120 @@ describe("buildProjectExport — source-doc honesty & slug safety", () => {
     expect(egressSlug("v1..2 notes", "file")).toBe("v1..2-notes") // interior dots stay
   })
 })
+
+describe("buildProjectExport — file×lane fetch concurrency", () => {
+  it("runs at most 4 file×lane fetches at once and still emits entries in input order", async () => {
+    const files = Array.from({ length: 6 }, (_, i) => ({
+      id: `f${i}`,
+      name: `File${i}.SFM`,
+      type: "usfm" as const,
+    }))
+    const lanes = ["fr", "de"]
+    const totalUnits = files.length * lanes.length
+    let inFlight = 0
+    let maxInFlight = 0
+    const pendingReleases: Array<() => void> = []
+    const completionOrder: string[] = []
+
+    const fetchInjectedText = vi.fn<NonNullable<BuildProjectExportDeps["fetchInjectedText"]>>(
+      async ({ fileId, targetLang }) => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        try {
+          await new Promise<void>((resolve) => {
+            pendingReleases.push(resolve)
+          })
+        } finally {
+          inFlight -= 1
+        }
+        completionOrder.push(`${targetLang}:${fileId}`)
+        return `\\id ${fileId} lane=${targetLang}`
+      },
+    )
+
+    const pending = buildProjectExport(
+      sel(files),
+      opts({ lanes }),
+      makeDeps({ fetchInjectedText }),
+    )
+
+    let finished = 0
+    while (finished < totalUnits) {
+      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4))
+      await new Promise((r) => setTimeout(r, 0))
+      expect(pendingReleases).toHaveLength(4)
+      expect(inFlight).toBe(4)
+      const wave = pendingReleases.splice(0, 4)
+      finished += wave.length
+      // Finish the wave last-started-first so completion order diverges from
+      // lane/file order. Archive entries must stay in input order anyway.
+      while (wave.length > 0) wave.pop()!()
+    }
+
+    expect(maxInFlight).toBe(4)
+    expect(completionOrder).not.toEqual(
+      lanes.flatMap((lane) => files.map((file) => `${lane}:${file.id}`)),
+    )
+
+    const { entries, report } = await pending
+    expect(entries.map((e) => e.path)).toEqual([
+      ...files.map((file) => `fr/${file.name.replace(/\.SFM$/, "")}.usfm`),
+      ...files.map((file) => `de/${file.name.replace(/\.SFM$/, "")}.usfm`),
+    ])
+    expect(entries.map((e) => e.data)).toEqual([
+      ...files.map((file) => `\\id ${file.id} lane=fr`),
+      ...files.map((file) => `\\id ${file.id} lane=de`),
+    ])
+    expect(report.files[0].entries).toEqual(["fr/File0.usfm", "de/File0.usfm"])
+    expect(fetchInjectedText).toHaveBeenCalledTimes(totalUnits)
+  })
+
+  it("assigns deduped paths from input order when a later file finishes first", async () => {
+    const releases = new Map<string, () => void>()
+    const loadCellFiles = vi.fn<NonNullable<BuildProjectExportDeps["loadCellFiles"]>>(
+      async ({ projectFiles, lane }) => {
+        const file = projectFiles[0]!
+        await new Promise<void>((resolve) => {
+          releases.set(`${lane}:${file.id}`, resolve)
+        })
+        return [
+          {
+            fileId: file.id,
+            fileName: file.name,
+            cells: [cell({ fileId: file.id, translated: `${lane}:${file.id}` })],
+          },
+        ]
+      },
+    )
+
+    const pending = buildProjectExport(
+      sel([
+        { id: "slow", name: "a b.txt", type: "txt" },
+        { id: "fast", name: "a-b.txt", type: "txt" },
+      ]),
+      opts({ lanes: ["fr", "de"], textMode: "convert", convertFormat: "txt" }),
+      makeDeps({ loadCellFiles }),
+    )
+
+    await vi.waitFor(() => expect(releases.size).toBe(4))
+    for (const key of ["fr:fast", "de:fast", "fr:slow", "de:slow"]) releases.get(key)!()
+
+    const { entries, report } = await pending
+    expect(entries.map((e) => e.path)).toEqual([
+      "fr/a-b.txt",
+      "fr/a-b_2.txt",
+      "de/a-b.txt",
+      "de/a-b_2.txt",
+    ])
+    expect(report.files.map((f) => f.entries)).toEqual([
+      ["fr/a-b.txt", "de/a-b.txt"],
+      ["fr/a-b_2.txt", "de/a-b_2.txt"],
+    ])
+    expect(await Promise.all(entries.map((e) => (e.data as Blob).text()))).toEqual([
+      "fr:slow\n",
+      "fr:fast\n",
+      "de:slow\n",
+      "de:fast\n",
+    ])
+  })
+})

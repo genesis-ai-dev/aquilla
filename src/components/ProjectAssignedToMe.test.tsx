@@ -61,16 +61,20 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("100%")).toBeTruthy()
   })
 
-  // AQU-729: every assignment says which language lane it is. The default
-  // lane ('') shows the project's target language, not a blank and not the
-  // word "default". An explicit tag still shows that tag.
-  it("shows the project's language for a default-lane assignment and the tag for an explicit one", async () => {
+  // AQU-729 / AQU-538 (§3.5): every assignment renders a lane chip — named
+  // lanes use the tag, the default lane uses the project's target language
+  // (never a blank and never the word "default").
+  it("renders a lane chip for every assignment", async () => {
     mockGetMyAssignments.mockResolvedValue([
       makeAssignment({ assignmentId: "asgn-es", scopeLabel: "Genesis", targetLang: "es" }),
       makeAssignment({ assignmentId: "asgn-def", scopeLabel: "Exodus", targetLang: "" }),
     ])
     render(
-      <ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" defaultLaneLabel="Portuguese" />,
+      <ProjectAssignedToMe
+        projectId="proj-1"
+        jwt="test-jwt"
+        defaultLaneLabel="Portuguese"
+      />,
     )
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
     expect(screen.getByText("es")).toBeTruthy()

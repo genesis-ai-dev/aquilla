@@ -175,10 +175,14 @@ UI chrome that used to be one smoke file per click is covered under
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- Chapter audio stitch (AQU-1201): concatenate a chapter's verse recordings into one continuous WAV. A checkbox includes chapter-heading takes in that file; the choice is remembered in export-dialog localStorage — RTL in `audio-chapter.group.test.ts`, `audio-chapter.export.test.ts`, `ExportDialog.audio-chapter.test.tsx`, `export-dialog-memory.test.ts`. Existing by-character / by-line exports stay on their own tests.
 - New-voice leftover Kokoro project defaults remap to Inworld; picker offers Inworld / Gemini / MMS (`NewVoiceModal.test.tsx`)
+- Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
+- Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
+- Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

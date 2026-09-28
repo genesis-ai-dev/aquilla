@@ -14,6 +14,7 @@
 //     by the caller, so it cannot be accidentally omitted.
 
 import type { SyncTokenClaims } from "../auth"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -580,7 +581,7 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells t" +
     "    ON t.project_id = s.project_id AND t.file_id = s.file_id" +
     "   AND t.cell_id = s.cell_id AND t.side = 'target'" +
-    "   AND t.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("t") +
     "  WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'" +
     "    AND t.value <> '' AND t.validated = 0" +
     "  LIMIT ?" +
@@ -599,7 +600,7 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells tc" +
     "    ON tc.project_id = c.project_id AND tc.file_id = c.file_id" +
     "   AND tc.cell_id = c.cell_id AND tc.side = 'target' AND tc.value <> ''" +
-    "   AND tc.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("tc") +
     "  WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'" +
     "    AND c.cell_id <> a.asker_id" +
     "    AND c.value_tsv @@ to_tsquery('simple', q.terms)" +
@@ -610,7 +611,16 @@ export async function queryFileSourceNeighbors(
   const result = await withNeighborTimeout(db, (h) =>
     h
       .prepare(sql)
-      .bind(targetLang, verifiedProjectId, fileId, maxAskers, targetLang, verifiedProjectId, fileId, topK)
+      .bind(
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        maxAskers,
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        topK,
+      )
       .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
   )
 

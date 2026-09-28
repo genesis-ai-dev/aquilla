@@ -93,7 +93,7 @@ workers_dev = true
 routes = ["aquilla.app/*"]
 
 [env.production.build]
-command = "bash scripts/verify-deploy-branch.sh main"
+command = "bash scripts/verify-deploy-branch.sh release"
 
 [env.production.assets]
 directory = "./dist"

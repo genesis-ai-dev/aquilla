@@ -54,8 +54,9 @@ import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
-import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
-import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { exportConceptsCsv } from "@/lib/terminology/csv"
+import { exportConceptsTbx } from "@/lib/terminology/tbx"
+import { importTermbaseFile } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -514,9 +515,14 @@ export function GlossaryEditor({
       reader.onload = () => {
         try {
           const text = String(reader.result ?? "")
-          const imported = file.name.toLowerCase().endsWith(".tbx")
-            ? importConceptsTbx(text)
-            : importConceptsCsv(text)
+          const imported = importTermbaseFile(file.name, text)
+          // AQU-684: a file that yields nothing used to persist an unchanged
+          // list and look like success — the exact way a FLEx export failed
+          // silently. Say so instead.
+          if (imported.length === 0) {
+            setError(t("terminology.editor.errorImportFailed"))
+            return
+          }
           void persist({ terminology: [...(p.terminology ?? []), ...imported] })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
@@ -583,7 +589,7 @@ export function GlossaryEditor({
         <input
           ref={importInputRef}
           type="file"
-          accept=".csv,.tsv,.tbx"
+          accept=".csv,.tsv,.tbx,.lift,.xml"
           className="hidden"
           disabled={!canWriteTermbase}
           onChange={(e) => {

@@ -45,6 +45,10 @@ export type OutboxEventKind =
   | "cell.audio.trim"
   | "cell.audio.place"
   | "cell.audio.measure"
+  // AQU-490: a vote on a TAKE. Reviewer-level, unlike the contributor-level
+  // audio kinds above — it is a review action, like the text pair.
+  | "cell.audio.validate"
+  | "cell.audio.unvalidate"
   // Stage 4: one edge between a subtitle cell and an audio cue
   // (contributor-level; non-chain-mutating).
   | "cell.link.set"
@@ -358,6 +362,24 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+  }
+  /**
+   * AQU-490: one person's vote that this TAKE is good. Presence of the
+   * validator row IS the vote, so there is nothing to carry but which take —
+   * no editEventId equivalent, because a take has no chain.
+   */
+  "cell.audio.validate": {
+    audioId: string
+  }
+  /**
+   * Withdrawing a vote. `targetUsername` names WHOSE, for a maintainer
+   * removing somebody else's; omitted means your own. The route gates a
+   * foreign name on MAINTAINER, so an absent field is the safe spelling and
+   * the one every ordinary caller uses.
+   */
+  "cell.audio.unvalidate": {
+    audioId: string
+    targetUsername?: string
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue. The subtitle

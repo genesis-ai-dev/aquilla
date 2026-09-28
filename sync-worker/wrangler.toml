@@ -144,7 +144,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.aquilla.app/sync/*"]
 
 [env.production.build]
-command = "bash ../scripts/verify-deploy-branch.sh main"
+command = "bash ../scripts/verify-deploy-branch.sh release"
 
 # Observability is NOT inherited from the top-level block by named envs —
 # without this, production has Workers Logs disabled and 4xx/5xx are invisible.

@@ -35,14 +35,21 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(denied.status).toBe(403)
   })
 
-  it("includes per-project audio progress (distinct live cells + selected recorded ms)", async () => {
+  it("includes per-project audio progress (cells with a selected dub + its recorded ms)", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Mark', 1, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e3', 1, 'pb', 'file.create', 'wendi', '{}', 500, 500, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000), ('f3', 'pb', 'MRK', 'e3', 50, 50, 500)").run()
-    // pa: c1+c2 selected recordings (90000ms); c3 unselected (counts as a cell w/ audio, not recorded ms); c4 deleted (excluded)
+    // pa: c1+c2 selected recordings (90000ms); c3 unselected; c4 deleted.
+    //
+    // AQU-490 narrowed "has audio" from any live take to a SELECTED dub take,
+    // so c3 no longer counts. The word that does the work in practice is
+    // "dub", not "selected" — attaching selects, so an unselected-only cell is
+    // vanishingly rare — but the two must name the same set as the histogram
+    // the board reads, or a cell could sit in the denominator and never reach
+    // the numerator and audio could never read 100%.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts) VALUES
         ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',60000,1,0,'ae1',1),
@@ -55,7 +62,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; recordedMs: number }> }
     const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
-    expect(byId.pa).toMatchObject({ audioCells: 3, recordedMs: 90000 })
+    expect(byId.pa).toMatchObject({ audioCells: 2, recordedMs: 90000 })
     expect(byId.pb).toMatchObject({ audioCells: 0, recordedMs: 0 })
   })
 
@@ -165,20 +172,20 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
   })
 
-  it("AQU-508: validatedAudioCells counts cells whose selected clip is approved, distinct from coverage", async () => {
+  it("AQU-490: validatedAudioCells counts votes against the threshold, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000)").run()
-    // c1: selected + approved            → audio-validated
-    // c2: selected, not approved         → covered, not validated
-    // c3: approved but NOT selected (a re-record superseded the approved take)
+    // c1: selected, one vote             → audio-validated
+    // c2: selected, no votes              → covered, not validated
+    // c3: a validated take superseded by a re-record that has no votes yet
     //     → covered (the new selected take), NOT audio-validated
     // c4: deleted (excluded from both)
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, approved, event_id, created_ts) VALUES
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts) VALUES
         ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',60000,1,0,1,'ae1',1),
         ('pa','f1','c2','a2','recording','frontier-audio://a2.wav',30000,1,0,0,'ae2',1),
         ('pa','f1','c3','a3old','recording','frontier-audio://a3old.wav',30000,0,0,1,'ae3o',1),
@@ -190,11 +197,67 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number }> }
     const pa = body.projects.find((p) => p.id === "pa")!
-    // Coverage: c1, c2, c3 have a live clip (c4 deleted) → 3.
+    // Coverage: c1, c2, c3 each have a selected dub (c4 deleted) → 3.
     expect(pa.audioCells).toBe(3)
-    // Validated: only c1 (selected + approved). c3's approved take is no longer
-    // selected, so the re-record correctly drops it back to needs-re-validation.
+    // Validated: only c1. c3's validated take is no longer selected, so the
+    // re-record correctly drops it back to needing validation again.
     expect(pa.validatedAudioCells).toBe(1)
+  })
+
+  // AQU-490. Measured on this machine's dev database before the fix: a media
+  // project reported 52.9 HOURS recorded and every cell covered, because one
+  // imported programme clip is attached and selected on all of them and its
+  // duration was counted once per cell. Nobody had dubbed a line of it.
+  it("AQU-490: an imported source clip is neither coverage nor recorded time", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Episode 1', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'EP1', 'e1', 3, 0, 1000)").run()
+    // The same forty-minute clip on all three cells, as an import leaves it,
+    // plus one real dub on c1.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, role, validator_count, event_id, created_ts) VALUES
+        ('pa','f1','c1','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c2','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c3','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c1','dub1','track-2','frontier-audio://dub1.wav',8000,1,0,'dub',1,'ae2',2)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number; recordedMs: number }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa).toMatchObject({ audioCells: 1, validatedAudioCells: 1, recordedMs: 8000 })
+  })
+
+  // Two tracks sound together, so the weaker one governs. Without the MIN,
+  // "some selected take is validated" would call c1 done while a whole track
+  // went unheard.
+  it("AQU-490: a multi-track cell is only as validated as its weakest track", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Episode 1', 1, 1)").run()
+    // This project asks for two validators on a recording.
+    await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)")
+      .bind(JSON.stringify({ validationCountAudio: 2 })).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'EP1', 'e1', 2, 0, 1000)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, role, validator_count, event_id, created_ts) VALUES
+        ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',1000,1,0,'dub',3,'ae1',1),
+        ('pa','f1','c1','a2','track-2','frontier-audio://a2.wav',1000,1,0,'dub',1,'ae2',2),
+        ('pa','f1','c2','b1','recording','frontier-audio://b1.wav',1000,1,0,'dub',2,'ae3',3),
+        ('pa','f1','c2','b2','track-2','frontier-audio://b2.wav',1000,1,0,'dub',2,'ae4',4)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    // c1's second track has one vote against a threshold of two, so only c2
+    // counts — even though c1's first track has three.
+    expect(pa).toMatchObject({ audioCells: 2, validatedAudioCells: 1 })
   })
 
   // AQU-1083 — the org/project policy reaching the dashboard.
@@ -221,7 +284,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
               ('pa','f1','v1','source','In the beginning','verse','e1',1)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, approved, event_id, created_ts) VALUES
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts) VALUES
         ('pa','f1','h1','ah','generatedVoice','frontier-audio://h.wav',5000,1,0,1,'aeh',1),
         ('pa','f1','v1','av','recording','frontier-audio://v.wav',7000,1,0,1,'aev',1)`,
     ).run()

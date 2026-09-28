@@ -58,6 +58,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
+  emitCellAudioValidate: vi.fn(async () => "evt"),
   emitCellAudioRemove: vi.fn(async () => "evt"),
   emitCellAudioRename: vi.fn(async () => "evt"),
 }))

@@ -128,6 +128,20 @@ describe("tag-release.sh", () => {
     expect(originTags()).toEqual([])
   })
 
+  it("takes the branch's -NN suffix as the tag number", () => {
+    git(work, "checkout", "-q", "-b", "release/2026/09/28-02")
+    expect(run().status).toBe(0)
+    expect(originTags()).toEqual(["2026.09.28.02"])
+  })
+
+  it("moves past the branch number when a hotfix or earlier deploy already holds it", () => {
+    git(work, "checkout", "-q", "-b", "release/2026/09/28-01")
+    run()
+    commit("hotfix")
+    expect(run().status).toBe(0)
+    expect(originTags()).toEqual(["2026.09.28.01", "2026.09.28.02"])
+  })
+
   it("refuses to tag from a non-release branch", () => {
     git(work, "checkout", "-q", "-b", "dev")
     const result = run()

@@ -21,7 +21,7 @@
 import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import { handleParseArtifact } from './import-parse'
-import { assertCredentialScope } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
@@ -71,12 +71,18 @@ interface AuthOk {
 export type AuthResult = AuthOk | { ok: false; response: Response }
 
 /** Credential → scope → live role. `minRole` gates the operation. Exported for
- *  the sibling parse route (import-parse.ts), which shares this gate. */
+ *  the sibling parse route (import-parse.ts), which shares this gate.
+ *
+ *  `writes` (AQU-1242) marks the operations that put bytes or rows somewhere — an
+ *  upload — so a read-only credential is refused. Parsing is deliberately NOT a
+ *  write: a preview parse returns cells without storing anything, and the
+ *  `stage: true` half goes on to `handlePrepare`, which owns that refusal. */
 export async function authArtifact(
   request: Request,
   env: ExternalEnv,
   projectId: string,
   minRole: number,
+  opts: { writes?: boolean } = {},
 ): Promise<AuthResult> {
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
@@ -85,6 +91,7 @@ export async function authArtifact(
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
+    if (opts.writes === true) assertCredentialMayWrite(cred, 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
   } catch (err) {
     return { ok: false, response: toErrorResponse(err) }
@@ -166,7 +173,7 @@ async function handleUpload(
   projectId: string,
 ): Promise<Response> {
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
-  const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR)
+  const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR, { writes: true })
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
 

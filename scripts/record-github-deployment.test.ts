@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process"
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { hasSuccessfulDeployment, recordDeployment } from "./record-github-deployment.mjs"
 
@@ -108,5 +112,23 @@ describe("recordDeployment", () => {
     const statusCall = calls.find((c) => c.method === "POST" && c.url.includes("/statuses"))
     const body = JSON.parse(statusCall?.body ?? "{}")
     expect(body.description.length).toBeLessThanOrEqual(140)
+  })
+})
+
+describe("record-github-deployment.mjs as a command", () => {
+  // The entrypoint check once compared against a hand-built `file://` string,
+  // which never matches a percent-encoded path, so the script exited 0 having
+  // recorded nothing.
+  it("runs its main code from a path with a space in it", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "record deployment "))
+    try {
+      const script = path.join(dir, "record-github-deployment.mjs")
+      copyFileSync(path.join(import.meta.dirname, "record-github-deployment.mjs"), script)
+      const result = spawnSync("node", [script], { encoding: "utf8" })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain("Usage: record-github-deployment.mjs")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

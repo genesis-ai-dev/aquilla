@@ -906,6 +906,10 @@ describe('isChainMutatingKind', () => {
     // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
     // would lose the genesis slot to the cell's own create on rebuild).
     'source.cell.reanchor': false,
+    // AQU-1422: hide/show moves only cells.hidden_at on the shared source
+    // row and never advances the source head (a hide must not make every
+    // lane's translation go stale under AD-9) — non-chain-mutating by design.
+    'source.cell.visibility.set': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,

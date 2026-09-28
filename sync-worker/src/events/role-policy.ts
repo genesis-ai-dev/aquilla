@@ -65,6 +65,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
+  // AQU-1422: hiding a cell takes it out of translation and (AQU-1423) out of
+  // every export for EVERYONE, in every lane. That is a decision about what the
+  // file contains, so it sits with source.cell.commit at PROJECT_LEAD and NOT
+  // with the create/delete/reorder trio at COMMENTER — those are floored low
+  // because re-import, DCS repair and diarization all emit them through a
+  // user's own outbox, and nothing emits this but a person choosing it.
+  'source.cell.visibility.set': ROLE.PROJECT_LEAD,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,

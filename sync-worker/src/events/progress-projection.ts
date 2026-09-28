@@ -1,6 +1,7 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
+import { visibleSourceSql } from './hidden-cells-scope'
 // AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
 // when auth-worker's per-unit assignment read started needing them. They are
 // re-exported here so every existing importer of this module keeps working and
@@ -213,6 +214,11 @@ export function fileProgressRecomputeStmt(
           AND t.target_lang = lanes.lane
          LEFT JOIN audio a ON a.cell_id = s.cell_id
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+          -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
+          -- both the numerator and the denominator in one move, for every scope this
+          -- CTE feeds (file, section, book) and every lane, so hiding the last
+          -- untranslated verse reads 100% instead of 90%.
+          AND ${visibleSourceSql('s')}
      ), buckets AS (
        SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count,
               ${STRUCTURAL_BUCKET_SQL}
@@ -368,6 +374,11 @@ export function sectionsProgressRecomputeStmt(
           AND t.target_lang = lanes.lane
          LEFT JOIN audio a ON a.cell_id = s.cell_id
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+          -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
+          -- both the numerator and the denominator in one move, for every scope this
+          -- CTE feeds (file, section, book) and every lane, so hiding the last
+          -- untranslated verse reads 100% instead of 90%.
+          AND ${visibleSourceSql('s')}
      )${affectedCte}, summaries AS (
        SELECT lane, 'section'::text AS scope, section_key,
               COUNT(*)::integer AS total_count,
@@ -510,6 +521,9 @@ export function fullProgressRecomputeStmts(
             AND t.target_lang = lanes.lane
            LEFT JOIN audio a ON a.cell_id = s.cell_id
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+            -- AQU-1424: see the note on the other paired CTEs — parked cells leave
+            -- progress entirely, numerator and denominator together.
+            AND ${visibleSourceSql('s')}
        ), summaries AS (
          SELECT lane,
                 'file'::text AS scope,
@@ -664,6 +678,10 @@ export function fullProgressRecomputeStmts(
                 COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+' AS is_scripture
            FROM cells source
           WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
+            -- AQU-1424: a section whose every cell is now parked has no surviving key,
+            -- so its progress row is deleted rather than left behind at a stale count
+            -- that no later recompute would revisit.
+            AND ${visibleSourceSql('source')}
        ), surviving_keys AS (
          SELECT 'section'::text AS scope, section_key FROM source_keys
          UNION

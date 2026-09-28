@@ -1,8 +1,9 @@
-export type WalkVerdict = "PASS" | "FAIL" | "FLAKY" | "BLOCKED"
+export type WalkVerdict = "PASS" | "FAIL" | "FLAKY" | "BLOCKED" | "NOT CHECKED"
 
 // FLAKY and BLOCKED both mean the bot could not prove the outcome; the
-// release planner holds on either exactly like a FAIL.
-export function normalizeVerdict(verdict: string): "PASS" | "fail"
+// release planner holds on either exactly like a FAIL. NOT CHECKED means no
+// UI claim to walk (scripts/CLI-only) and normalizes to "none", not a hold.
+export function normalizeVerdict(verdict: string): "PASS" | "fail" | "none"
 
 export interface ParsedWalkComment {
   prNumber: number
@@ -32,7 +33,7 @@ export interface LookupWalkOptions {
 // Resolves one dev-branch merge commit to the walk verdict for the PR it
 // closed. Returns "unknown" when that isn't possible yet: no associated PR,
 // no matching comment, or a comment whose sha is stale.
-export function lookupWalk(options: LookupWalkOptions): Promise<"PASS" | "fail" | "unknown">
+export function lookupWalk(options: LookupWalkOptions): Promise<"PASS" | "fail" | "none" | "unknown">
 
 // Fills `walk` for every PR still "unknown". One PR's lookup failing never
 // blocks the others; it just stays "unknown", which holds.

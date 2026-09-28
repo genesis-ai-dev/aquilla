@@ -76,21 +76,44 @@ me.get("/create-targets", authMiddleware, async (c) => {
       .filter((t) => t.orgId === orgId)
       .map((t) => ({ teamId: t.teamId, name: t.name, role: t.role }))
 
+  // A legacy org (billing_scope NULL) that other people belong to is a shared
+  // org the caller happens to own, not a private workspace. Found on a live
+  // stack: "Dev Org" (3 members) was offered as "Personal". List it under its
+  // own name and offer no separate Personal entry pointing at the same org.
+  // POST without orgId still resolves to it (getOrCreateUserOrg is unchanged).
+  let sharedLegacy = false
+  if (personal) {
+    const meta = await env.AQUILLA_PG.prepare(
+      `SELECT o.billing_scope AS scope,
+              (SELECT COUNT(*) FROM org_members om WHERE om.org_id = o.id AND om.user_id <> ?) AS others
+         FROM organizations o WHERE o.id = ?`,
+    )
+      .bind(user.id, Number(personal.id))
+      .first<{ scope: string | null; others: number }>()
+    sharedLegacy = meta?.scope == null && Number(meta?.others ?? 0) > 0
+  }
+
   const personalId = personal ? Number(personal.id) : null
   const personalName = personal?.name ?? `${user.username}'s workspace`
-  const targets: CreateTarget[] = [
-    {
-      kind: "personal",
-      orgId: personalId,
-      name: personalName,
-      path: [personalName],
-      role: 700,
-      teams: teamsFor(personalId),
-    },
-  ]
+  const targets: CreateTarget[] = sharedLegacy
+    ? []
+    : [
+        {
+          kind: "personal",
+          orgId: personalId,
+          name: personalName,
+          path: [personalName],
+          role: 700,
+          teams: teamsFor(personalId),
+        },
+      ]
+  if (sharedLegacy && personalId != null && !orgRoles.has(personalId)) {
+    // The owner may lack an org_members row on a legacy org; they still own it.
+    targets.push({ kind: "org", orgId: personalId, name: personalName, path: [personalName], role: 700, teams: teamsFor(personalId) })
+  }
   for (const r of rows.results ?? []) {
     const id = Number(r.id)
-    if (id === personalId) continue
+    if (!sharedLegacy && id === personalId) continue
     const name = r.name ?? `Organization ${id}`
     // SWARM-TODO(AQU-1352): path is flat until org > team nesting lands.
     targets.push({ kind: "org", orgId: id, name, path: [name], role: Number(r.role), teams: teamsFor(id) })

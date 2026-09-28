@@ -56,6 +56,25 @@ describe("AQU-1352 personal org resolution with legacy NULL billing_scope", () =
     expect(t.filter((x) => x.orgId === 20)).toHaveLength(1)
   })
 
+  it("a legacy NULL-scope org that other people belong to is listed by name, never as Personal", async () => {
+    // Found on a live stack: an owner of a shared legacy org ("Dev Org", three
+    // members) saw it offered as "Personal" in the create dialog. Legacy orgs
+    // are ambiguous; a co-member makes it a shared org, so the picker must name
+    // it. Creating without an orgId still lands in it (no duplicate workspace).
+    await seedUser(1, "owner")
+    await seedUser(2, "colleague")
+    await addOrg(30, "Shared Legacy Org", 1, null)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (30, 2, 400, 1)",
+    ).run()
+    const t = (await targets("owner")) as Array<{ kind: string; orgId: number | null; name?: string }>
+    expect(t.filter((x) => x.kind === "personal")).toEqual([])
+    expect(t.filter((x) => x.orgId === 30)).toEqual([expect.objectContaining({ kind: "org", name: "Shared Legacy Org" })])
+    const res = await createProject("owner", "p-shared")
+    expect(res.status).toBe(200)
+    expect(await orgsOwnedBy(1)).toHaveLength(1)
+  })
+
   it("an owned TEAM org is never picked as personal", async () => {
     await seedUser(1, "teamowner")
     await addOrg(30, "Team", 1, "team")

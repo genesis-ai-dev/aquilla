@@ -107,6 +107,12 @@ describe("AudioWaveform — the take, growing", () => {
     expect(grown()).toBe("25%")
   })
 
+  // Sam, 2026-09-26: in the colour of the track being recorded onto.
+  it("wears the colour of the track it records onto", () => {
+    render(<AudioWaveform stream={null} tone="armed" trackVars={{ "--tl-track-hue": "#eba720" }} />)
+    expect(screen.getByTestId("rec-live-waveform").style.getPropertyValue("--tl-track-hue")).toBe("#eba720")
+  })
+
   it("with no microphone stream it draws nothing", () => {
     render(<AudioWaveform stream={null} tone="live" />)
     expect(grown()).toBe("0%")

@@ -4,7 +4,8 @@
 //
 // AQU-1210 (Sam, 2026-09-25): this used to be a trace scrolling past. It is
 // now the same rectangle every saved take is drawn as — the timeline chip's
-// body, outline and 40% ink, in grey — filling from the left as you speak,
+// body, outline and 40% ink, in the colour of the track being recorded onto
+// (Sam, 2026-09-26) — filling from the left as you speak,
 // with a red line at the growing edge. During the countdown the mic is hot but
 // no take has begun, so the rectangle is an empty body. The span matches the
 // target bar below it, and widens once the take runs past it. Its shape is
@@ -40,6 +41,8 @@ interface Props {
   headroomSec?: number
   /** The span when there is no target. */
   windowSec?: number
+  /** The colour of the track being recorded onto (take-colors.ts). */
+  trackVars?: Record<string, string>
   className?: string
   /** "armed": the mic is hot but the take has not begun (the countdown) — an
    *  empty body. "live": the take is being recorded and the shape grows. A
@@ -56,6 +59,7 @@ export function AudioWaveform({
   targetSec = null,
   headroomSec = 1.5,
   windowSec = 8,
+  trackVars = NEUTRAL_TRACK_VARS,
   className,
   tone = "live",
 }: Props) {
@@ -231,14 +235,14 @@ export function AudioWaveform({
       ref={boxRef}
       data-testid="rec-live-waveform"
       className={cn(
-        // The chip's body in grey, with its playing split doing the growing:
+        // The chip's body in its track's colour, with its playing split doing the growing:
         // the recorded part at the body's own strength, the rest not yet.
         "relative overflow-hidden rounded-[6px] border",
         trackChipClass("take"),
         trackChipPlayingClass("take"),
         className,
       )}
-      style={{ ...NEUTRAL_TRACK_VARS, height, "--tl-play-x": "0%" } as CSSProperties}
+      style={{ ...trackVars, height, "--tl-play-x": "0%" } as CSSProperties}
     >
       <canvas
         ref={canvasRef}

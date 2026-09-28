@@ -1602,8 +1602,10 @@ export function AudioRecordingModal({
 
   const displayPhase: Phase = phase
   const elapsedMs = recorder.elapsedMs
-  // The take on the ready screen wears its own track's colour (Sam,
-  // 2026-09-26), as it does on the timeline and in the Audio view.
+  // In the colour of the track being recorded onto (Sam, 2026-09-26): the
+  // growing take and the preview say which track the take lands on, and the
+  // take on the ready screen wears its own track's colour.
+  const recordingTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: targetSlot })
   const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
 
   // ── AQU-1210: FILM PLAY-ALONG ─────────────────────────────────────────────
@@ -2069,6 +2071,7 @@ export function AudioRecordingModal({
                     // never moves the buttons below it.
                     height={showFilm ? 40 : 56}
                     targetSec={targetSec}
+                    trackVars={recordingTrackVars}
                     // An empty body while the countdown runs — the mic is hot,
                     // the take has not begun — growing from zero (AQU-1210).
                     // Same element, same audio graph (Sam, 2026-08-14).
@@ -2129,6 +2132,7 @@ export function AudioRecordingModal({
                     audioId={previewTakeId(previewBlob)}
                     kept={previewKept}
                     height={showFilm ? 40 : 56}
+                    trackVars={recordingTrackVars}
                     trimEditable
                     onCommitTrim={commitPreviewTrim}
                     testId="rec-preview-waveform"

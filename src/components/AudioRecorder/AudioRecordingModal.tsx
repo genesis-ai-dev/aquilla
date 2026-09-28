@@ -471,8 +471,11 @@ export function AudioRecordingModal({
   // Expanded, the takes list is a disclosure over the column rather than a
   // permanent shelf: the 16:9 column is short, and the instruments are what you
   // are looking at while recording. Collapsed, the drawer is always open
-  // because the portrait column has the room and nothing else wants it.
+  // because the portrait column has the room and nothing else wants it — and
+  // it can also be pulled up over the line and the instruments, to see every
+  // take at once (Sam, 2026-09-28). `takesOpen` is that in both layouts.
   const [takesOpen, setTakesOpen] = useState(false)
+  const takesSheet = !showFilm && takesOpen
 
   // THE READ-ALOUD BLOCK NEVER SCROLLS AND NEVER CLIPS (Sam, 2026-08-13). It
   // owns the height of five line boxes; a line too long for that gets a smaller
@@ -544,6 +547,9 @@ export function AudioRecordingModal({
     if (!box || typeof ResizeObserver === "undefined") return
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0
+      // Hidden under the takes sheet the column measures 0 — not a width to
+      // fit the line to.
+      if (w <= 0) return
       setReadAloudWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev))
     })
     ro.observe(box)
@@ -733,7 +739,7 @@ export function AudioRecordingModal({
   // themselves arrive a moment after the dialog opens, and a measurement taken
   // before them left the line sized for a column that no longer existed.
   useLayoutEffect(() => {
-    if (!open || showFilm) return
+    if (!open || showFilm || takesSheet) return
     if (phase !== "idle" && phase !== "error") return
     const upper = upperEl
     const drawer = drawerEl
@@ -764,7 +770,7 @@ export function AudioRecordingModal({
     ro.observe(upper)
     ro.observe(drawer)
     return () => ro.disconnect()
-  }, [open, showFilm, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
+  }, [open, showFilm, takesSheet, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
   // One sound at a time: playing the waveform silences a Takes-row audition
   // (which in turn silences the waveform — see TakesStrip).
   // Countdown, recording, preview and upload own the instrument area: the
@@ -988,6 +994,9 @@ export function AudioRecordingModal({
 
   const startFlow = useCallback(() => {
     stayOnThisLine()
+    // The takes sheet covers the line and the instruments: a take never
+    // starts under it.
+    if (!showFilm) setTakesOpen(false)
     // Offline gates FIRST — when both fail it is the truer cause ("sign in"
     // is unactionable without a connection anyway).
     if (!online) {
@@ -1057,7 +1066,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdownStep, countdown, recorder, session?.jwt, online, stayOnThisLine])
+  }, [beepEnabled, countdownStep, countdown, recorder, session?.jwt, online, stayOnThisLine, showFilm])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -1561,8 +1570,8 @@ export function AudioRecordingModal({
       // successfully, but it only showed up in the Takes dropdown"). So: stay,
       // and OPEN the takes list, which is where the new take is circled as the
       // keeper and can be auditioned. In the plain layout that drawer is always
-      // rendered, so this is a no-op there and the flag costs nothing.
-      setTakesOpen(true)
+      // rendered, so the sheet stays down: pulling it up would hide Record.
+      if (showFilm) setTakesOpen(true)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
@@ -1574,7 +1583,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, showFilm])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -1670,6 +1679,8 @@ export function AudioRecordingModal({
 
       if (e.key === "Escape") {
         e.preventDefault()
+        // The takes sheet goes down before anything closes.
+        if (takesSheet) { setTakesOpen(false); return }
         if (phase === "recording") { stopRecording(); return }
         if (phase === "counting") { countdown.cancel(); setLeadIn(null); setPhase("idle"); return }
         // Escape used to RETAKE here, which threw the take away and left the
@@ -1726,7 +1737,7 @@ export function AudioRecordingModal({
     // hearing it first changes nothing else.
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview])
+  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview, takesSheet])
 
   if (!open || !activeCell) return null
 
@@ -1786,8 +1797,9 @@ export function AudioRecordingModal({
         if (next) return
         // Escape belongs to the recorder's own key handler, which hears it
         // first (capture) and knows what it means right now: stop the take,
-        // cancel the count, or ask to close. The dialog closing on it as well
-        // would stop a take and ask to close in the same press.
+        // cancel the count, put the takes sheet down, or ask to close. The
+        // dialog closing on it as well would close the recorder over a sheet
+        // that had just gone down.
         if (details?.reason === "escape-key") return
         requestClose()
       }}
@@ -1995,6 +2007,8 @@ export function AudioRecordingModal({
             ref={setUpperEl}
             className={cn(
               "flex min-h-0 flex-col overflow-y-auto",
+              // Under the takes sheet: the strip and the drawer take the panel.
+              takesSheet && "hidden",
               // Expanded it also GROWS, so the spacer below can push the
               // instruments to the bottom of the column.
               showFilm && "flex-1",
@@ -2638,9 +2652,24 @@ export function AudioRecordingModal({
                   <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
-                <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
-                </span>
+                // Without the film: the drawer's handle. Up pulls the takes over
+                // the line and the instruments; down puts them back.
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-takes-toggle"
+                  aria-expanded={takesOpen}
+                  aria-label={t(takesOpen ? "audio.recordingModal.takesCollapse" : "audio.recordingModal.takesExpand")}
+                  disabled={listedTakeCount === 0}
+                  onClick={() => setTakesOpen((v) => !v)}
+                  className="-ms-1.5 h-7 shrink-0 gap-1 px-1.5 text-xs font-medium"
+                >
+                  <ChevronUp className={cn("h-3.5 w-3.5 text-muted-foreground", takesOpen && "rotate-180")} />
+                  <span data-testid="rec-takes-count">
+                    {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
+                  </span>
+                </Button>
               )}
 
               {/* The format lives HERE, not in the header: it describes the

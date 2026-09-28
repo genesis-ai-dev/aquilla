@@ -302,3 +302,65 @@ describe("the selected take, before recording", () => {
     expect(player.pause).toHaveBeenCalled()
   })
 })
+
+// Sam, 2026-09-28: without the film, the drawer can be pulled up over the line
+// and the instruments to see every take at once — as the film layout raises
+// its list.
+describe("the takes drawer, pulled up", () => {
+  const twoTakes = () => entry({
+    selectedAudioId: "audio-c1-3.wav",
+    attachments: {
+      "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 2" }),
+      "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }),
+    },
+  })
+  const draw = (onClose = vi.fn()) => {
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cell]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={onClose}
+      />,
+    )
+    return { toggle: screen.getByTestId("rec-takes-toggle"), onClose }
+  }
+  const lineHidden = () => screen.getByTestId("rec-read-aloud").closest(".hidden") != null
+
+  it("has a handle left of Takes that pulls the takes over the line, and puts them back", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle } = draw()
+    expect(toggle.firstElementChild?.tagName.toLowerCase()).toBe("svg")
+    expect(toggle).toHaveTextContent("Takes 2")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(lineHidden()).toBe(false)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(lineHidden()).toBe(true)
+    fireEvent.click(toggle)
+    expect(lineHidden()).toBe(false)
+  })
+
+  it("goes down on Escape, before anything closes", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle, onClose } = draw()
+    fireEvent.click(toggle)
+    // Pressed where focus is, so the dialog's own Escape handling sees it too.
+    toggle.focus()
+    fireEvent.keyDown(toggle, { key: "Escape" })
+    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("goes down when a take starts, so the line is never under it", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle } = draw()
+    fireEvent.click(toggle)
+    fireEvent.keyDown(window, { key: " " })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(lineHidden()).toBe(false)
+  })
+
+  it("has nothing to pull up on a line with no takes", () => {
+    const { toggle } = draw()
+    expect(toggle).toBeDisabled()
+  })
+})

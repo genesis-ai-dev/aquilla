@@ -293,6 +293,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
     "audio.recordingModal.trimReset": "Reset trim",
     "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
+    "audio.recordingModal.takesExpand": "Show all takes",
+    "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -1319,6 +1321,19 @@ export const audio = defineNamespace({
           "recorded take's trim lines back where they started (the line's own " +
           "start and just after Stop). Nothing is deleted either way.",
         maxLength: 24,
+      },
+      "audio.recordingModal.takesExpand": {
+        description:
+          "Accessible name of the small arrow beside 'Takes' at the bottom of the " +
+          "recording window: pulls the list of takes up over the line and the " +
+          "record button so every take shows at once.",
+        maxLength: 32,
+      },
+      "audio.recordingModal.takesCollapse": {
+        description:
+          "Accessible name of the same arrow once the takes list is pulled up: puts " +
+          "the list back at the bottom of the window.",
+        maxLength: 32,
       },
       "audio.recordingModal.trimHint": {
         description:

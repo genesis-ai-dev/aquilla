@@ -7143,7 +7143,17 @@ function EditorRow({
             // md:pe-3: the card keeps 20px from the health line beside it,
             // not 8 (Sam, 2026-09-28) — a little more than the 12px the
             // checks keep on the line's other side.
-            className={cn("col-start-2 flex flex-col transition-opacity md:col-auto md:pe-3", isSynthBusy && "opacity-70")}
+            // md:pt: the waveform's middle rides the line number's (Sam, same
+            // day). The number's box is the source line — fontSize × 1.6 — set
+            // 26px down the gutter (its 6px padding and the 20px strip
+            // spacer), so its middle is 26 + 0.8·fontSize down; the waveform's
+            // is 28 down (half its 56px). Hence 0.8·fontSize − 2px, and it
+            // follows the reader's font size.
+            className={cn(
+              "col-start-2 flex flex-col transition-opacity md:col-auto md:pe-3 md:pt-[calc(var(--aq-src-fs)*0.8_-_2px)]",
+              isSynthBusy && "opacity-70",
+            )}
+            style={{ "--aq-src-fs": `${sourceFontSize}px` } as React.CSSProperties}
             dir="ltr"
           >
             <CellVoicePanel

@@ -54,7 +54,7 @@ import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
-import { assertCredentialScope } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
@@ -143,6 +143,18 @@ export async function prepareChangesetCore(
   projectId: string,
   raw: Record<string, unknown>,
 ): Promise<Response> {
+  // AQU-1242: a read-only credential cannot stage anything. Checked FIRST —
+  // ahead of command validation and every scope/role gate — because a plan this
+  // token could never commit is pure waste, and the refusal should name the
+  // reason rather than arriving later as a puzzling commit failure. Applies to
+  // every prepare path (PAT, MCP, parse-and-stage); the session principal is
+  // always 'write', so the in-app surface is untouched.
+  try {
+    assertCredentialMayWrite(cred, 'stage a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   // Validate the batch BEFORE the project-existence scope check: a
   // receipt-only CreateProject (W2-A) files its changeset under a
   // not-yet-existing project id and so takes its own path that must skip

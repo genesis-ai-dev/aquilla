@@ -93,6 +93,33 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
 }
 
+/** An open assignment the caller handed out (mirrors the server). */
+export interface GivenAssignment {
+  assignmentId: string
+  /** Routes the unassign event's sync token; null when the scope resolved to no cells. */
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+}
+
+/**
+ * AQU-581: the open assignments the caller handed out in one project — what a
+ * lane coordinator can take back. Any project member (only ever their own).
+ */
+export async function getAssignmentsGivenByMe(jwt: string, projectId: string): Promise<GivenAssignment[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/given`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignments: GivenAssignment[] }).assignments
+}
+
 /** An inbox assignment with its project name, from the org-wide read. */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string

@@ -694,6 +694,10 @@ interface EditorTableProps {
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
+  /** The lanes a lane-limited member below MAINTAINER may switch between
+   *  (`scopedLanesFor`). With two or more, they get the switcher — offering
+   *  only those lanes — which AQU-608 otherwise keeps from their role. */
+  scopedLanes?: string[] | null
   /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
    *  project/file's default target-language name. Non-default lanes label
    *  themselves with their own tag string. */
@@ -928,7 +932,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, onClearCellErrors,
@@ -970,6 +974,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
 }, ref) {
   const t = useT()
+  // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
+  // lane-limited member over their own lanes only (`scopedLanesFor`).
+  const switchableLanes = canSwitchLanes(project.syncRole?.level) ? lanes : scopedLanes
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
   // it, so the "Edit source" affordance must stay off. Loading counts as
@@ -2676,10 +2683,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 AQU-608: lane switching is a maintainer-and-above affordance —
                 below maintainer the tag stays a static pill so translators keep
                 to their assigned lane. */}
-            {lanes &&
-            lanes.length > 1 &&
-            onLaneChange &&
-            canSwitchLanes(project.syncRole?.level) ? (
+            {switchableLanes &&
+            switchableLanes.length > 1 &&
+            onLaneChange ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)
@@ -2687,7 +2693,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={(lanes ?? []).map((lane) => ({
+                options={switchableLanes.map((lane) => ({
                   value: lane,
                   label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
                   archived: isLaneArchived(lane, archivedLanes),
@@ -5345,6 +5351,10 @@ function EditorRow({
           cellId: cell.id,
           editEventId: eventId,
           author: username,
+          // The same lane the commit above went to. Without it the validation
+          // landed on the MAIN language: editing Spanish silently validated the
+          // German row, and a member limited to Spanish had it refused.
+          targetLang: activeLane,
         }).catch((err) => {
           // Telemetry-adjacent, non-blocking: the commit already landed.
           console.warn("[auto-validate] emit failed:", err)

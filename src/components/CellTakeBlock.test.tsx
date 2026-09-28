@@ -168,6 +168,19 @@ describe("which part of the recording it plays", () => {
   })
 })
 
+// Sam, 2026-09-28: validation lives in the row's audio column, which sits right
+// above the expanded cell — the waveform only shows the audio.
+describe("validation", () => {
+  it("draws no validation tick on the waveform, even for a validated take", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const validated = { ...owner, attachments: { [id]: { ...owner.attachments![id], validatorCount: 3, validators: ["u", "a", "b"] } } } as unknown as CellData
+    draw({ owner: validated })
+    expect(screen.getByTestId("cell-take-waveform")).toBeInTheDocument()
+    expect(screen.queryByTestId("cell-take-waveform-validated")).toBeNull()
+  })
+})
+
 // Sam, 2026-09-26: off the timeline a take wears its TRACK'S colour, the one
 // stored with its file — not grey.
 describe("its colour", () => {

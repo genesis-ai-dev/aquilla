@@ -30,7 +30,6 @@ import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
-import { takeBadgeState } from "./cell/audio-validation-state"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
@@ -152,7 +151,6 @@ function CellTakeBlockView({
   // file (an untrimmed take, and on a source section the entire reading).
   const kept = keptWindowSec(owner, selectedAudioId, attachment)
   const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
-  const badge = attachment ? takeBadgeState(attachment, username, audioValidation.validationRequirement) : null
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
@@ -256,7 +254,9 @@ function CellTakeBlockView({
         // thing, but a screen reader should not hear two "Re-record"s.
         recordLabel={t("workspace.targetAudioLane.recordAudio")}
         recordGlyph={<Mic className="h-2.5 w-2.5" />}
-        validation={badge === "self" || badge === "full" ? badge : null}
+        // No validation tick on the waveform (Sam, 2026-09-28): the row's
+        // audio check sits right above this expanded cell, and this block's
+        // own control is in its button row. The waveform shows the audio.
         testId="cell-take-waveform"
       />
       {timings && timings.length > 0 && (

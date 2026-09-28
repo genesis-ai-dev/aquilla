@@ -98,6 +98,29 @@ describe("AQU-1352 PATCH team member role", () => {
     expect((await patchRole("maint", 2, 100)).status).toBe(404)
   })
 
+  // Review finding: with `current > callerLevel`, two team maintainers could
+  // demote each other (and mint more peers). Team-derived authority must stay
+  // strictly below the caller's own level; org maintainers keep <= rights.
+  it("team-only authority: a team maintainer cannot demote a peer team maintainer", async () => {
+    await seed(600)
+    await env.AQUILLA_PG.prepare("UPDATE group_members SET role_level = 600 WHERE group_id = 1 AND user_id = 5").run()
+    expect((await patchRole("tim", 5, 100)).status).toBe(403)
+    expect(await teamRole(TEAM_A, 5)).toBe(600)
+  })
+
+  it("team-only authority: a team maintainer cannot grant maintainer (their own level)", async () => {
+    await seed(600)
+    expect((await patchRole("tim", 4, 600)).status).toBe(403)
+    expect(await teamRole(TEAM_A, 4)).toBeNull()
+  })
+
+  it("org maintainer is unaffected: may grant 600 and demote a 600 team member", async () => {
+    await seed(600)
+    expect((await patchRole("maint", 4, 600)).status).toBe(200)
+    expect((await patchRole("maint", 3, 100)).status).toBe(200)
+    expect(await teamRole(TEAM_A, 3)).toBe(100)
+  })
+
   it("a team role on another team grants nothing here", async () => {
     await seed(600)
     expect((await patchRole("tim", 3, 600, TEAM_B)).status).toBe(403)

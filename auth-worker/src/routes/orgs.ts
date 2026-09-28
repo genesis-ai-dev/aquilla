@@ -735,13 +735,17 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   if (roleLevel != null && !TEAM_SCOPE_ROLES.includes(roleLevel)) {
     return c.json({ error: "team role must be maintainer, project lead, viewer, or none" }, 400)
   }
-  if (roleLevel != null && roleLevel > callerLevel) {
-    return c.json({ error: "cannot grant a team role above your own" }, 403)
+  // Authority from a TEAM role alone is strictly below-own-level: a team
+  // maintainer may not mint or demote peers. Org maintainer+ keeps <= rights.
+  const teamOnly = orgRole < ROLE.MAINTAINER
+  const exceeds = (level: number) => (teamOnly ? level >= callerLevel : level > callerLevel)
+  if (roleLevel != null && exceeds(roleLevel)) {
+    return c.json({ error: teamOnly ? "cannot grant a team role at or above your own" : "cannot grant a team role above your own" }, 403)
   }
   const current = await getTeamMemberRole(c.env, groupId, targetUserId)
   if (current === undefined) return c.json({ error: "user is not on this team" }, 404)
-  if (current != null && current > callerLevel) {
-    return c.json({ error: "cannot change the team role of someone above you" }, 403)
+  if (current != null && exceeds(current)) {
+    return c.json({ error: "cannot change the team role of someone at or above you" }, 403)
   }
   await setTeamMemberRole(c.env, groupId, targetUserId, roleLevel)
   return c.json({ userId: targetUserId, teamRoleLevel: roleLevel })

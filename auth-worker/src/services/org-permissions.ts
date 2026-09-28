@@ -24,6 +24,26 @@ export interface UserOrg {
 }
 
 /**
+ * Find the user's personal org without creating one. Prefers billing_scope
+ * 'personal'; falls back to an owned org with billing_scope NULL (legacy
+ * personal workspaces predate the column and were never backfilled). A
+ * 'team' org is never personal.
+ */
+export async function findPersonalOrg(
+  env: Env,
+  userId: number,
+): Promise<{ id: number; name: string | null } | null> {
+  return env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      WHERE owner_user_id = ? AND (billing_scope = 'personal' OR billing_scope IS NULL)
+      ORDER BY (billing_scope = 'personal') DESC NULLS LAST, id ASC
+      LIMIT 1`,
+  )
+    .bind(userId)
+    .first<{ id: number; name: string | null }>()
+}
+
+/**
  * Return the user's personal organization, lazy-creating one if absent.
  * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
@@ -33,11 +53,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? AND billing_scope = 'personal' LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: number; name: string | null }>()
+  const existing = await findPersonalOrg(env, user.id)
 
   if (existing) {
     return { id: existing.id, name: existing.name, role: 700 }

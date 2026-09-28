@@ -125,6 +125,28 @@ describe("isDocsOrTestOnly", () => {
   it("is false for an empty diff", () => {
     expect(isDocsOrTestOnly([])).toBe(false)
   })
+
+  it("is true for a non-infra scripts-only diff", () => {
+    expect(isDocsOrTestOnly(["scripts/release-plan.mjs", "scripts/release-plan.d.mts"])).toBe(true)
+  })
+
+  it("is false once a scripts file mixes in with app code", () => {
+    expect(isDocsOrTestOnly(["scripts/release-plan.mjs", "src/components/Editor.tsx"])).toBe(false)
+  })
+})
+
+// An infra-area script (tag-release, verify-deploy, resolve-deployment,
+// cloudflare-*) is "no UI claim" too, but must still hold on its own via
+// pathHolds — isDocsOrTestOnly skipping the walk must not let it slip
+// through prHolds.
+describe("scripts-only PR that is also infra", () => {
+  it("holds even though it has no UI claim", () => {
+    const files = ["scripts/tag-release.sh"]
+    expect(isDocsOrTestOnly(files)).toBe(true)
+    const { pathHolds } = classifyFiles(files)
+    expect(pathHolds).toBe(true)
+    expect(prHolds({ pathHolds, walk: "none" })).toBe(true)
+  })
 })
 
 // A misclassified migration or deploy-infra change would skip the one gate

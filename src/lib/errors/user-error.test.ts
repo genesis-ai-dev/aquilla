@@ -164,3 +164,33 @@ describe("UserError", () => {
     expect(err.name).toBe("UserError")
   })
 })
+
+// AQU-1352 §3.9 rule 2: a role-gated 403 names the viewer's role, its origin,
+// and the required role — so "no permission" is actionable. Without the
+// structure the generic copy must still stand (older servers, other 403s).
+describe("messageForStatus 403 role_required", () => {
+  const body = (actual: Record<string, unknown>) =>
+    JSON.stringify({ error: "maintainer+ required", code: "role_required", required: { roleLevel: 600 }, actual })
+
+  it("names role, origin and required role", () => {
+    const r = messageForStatus(403, body({ roleLevel: 400, source: "group" }))
+    expect(r.category).toBe("forbidden")
+    expect(r.message).toBe("You are Contributor here (Via group). Maintainer is required.")
+  })
+
+  it("never renders a numeric level", () => {
+    const r = messageForStatus(403, body({ roleLevel: 400, source: "org" }))
+    expect(r.message).not.toMatch(/\d/)
+  })
+
+  it("handles a caller with no role", () => {
+    expect(messageForStatus(403, body({ roleLevel: null, source: null })).message).toBe(
+      "You don't have a role here. Maintainer is required.",
+    )
+  })
+
+  it("falls back to the generic copy for an unstructured 403", () => {
+    const r = messageForStatus(403, JSON.stringify({ error: "nope" }))
+    expect(r.message).toBe("You don't have permission to do that.")
+  })
+})

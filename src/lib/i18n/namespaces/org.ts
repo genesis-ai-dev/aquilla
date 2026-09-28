@@ -15,6 +15,7 @@ export const org = defineNamespace({
 
     // -- AQU-1352 access primitives: grant-origin badges, inspector, inherited controls --
     // "Direct"/"Creator" origin badges → org.accessModelLegend.{direct,creator}.label (same grant-path names)
+    "org.access.addPeopleTo": "Add people to {path}",
     "org.access.origin.inherited": "Inherited",
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
@@ -1534,6 +1535,11 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.access.addPeopleTo": {
+        description:
+          "AQU-1352: header of the add-people dialog on a team or project. {path} is the scope breadcrumb, e.g. 'Biblica › Pattani Malay Bible'.",
+        placeholders: { path: "Scope breadcrumb of org/team/project names joined by ' › ' — not translated." },
+      },
       "org.access.origin.inheritedFrom": {
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },

@@ -10,6 +10,8 @@
 // can't call useT(); it uses the standalone `t()` instead — see AQU-832.
 
 import { t } from "../i18n/standalone"
+import type { MessageKey } from "../i18n/messages/en"
+import { resolveRoleName } from "../frontier/roles"
 
 export type NetworkErrorCategory =
   | "forbidden"
@@ -62,7 +64,7 @@ export function messageForStatus(
       }
     case 403:
       return {
-        message: t("error.network.forbidden", { contextSuffix }),
+        message: roleRequiredMessage(raw) ?? t("error.network.forbidden", { contextSuffix }),
         raw,
         category: "forbidden",
         status,
@@ -111,6 +113,50 @@ export function messageForStatus(
         status,
       }
   }
+}
+
+// AQU-1352 §3.9 rule 2: badge labels reused from the access-model legend so the
+// denial names the same origin the members table shows.
+const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
+  override: "org.accessModelLegend.direct.label",
+  group: "org.accessModelLegend.viaGroup.label",
+  team: "org.accessModelLegend.viaGroup.label",
+  org: "org.accessModelLegend.orgWide.label",
+  creator: "org.accessModelLegend.creator.label",
+  platform: "org.access.origin.platform",
+}
+
+/**
+ * AQU-1352 §3.9 rule 2: when a 403 body carries `code: "role_required"`, say
+ * who the caller is here, where that came from, and what is required — never
+ * a numeric level. Returns null for any other body so the generic copy stands.
+ */
+export function roleRequiredMessage(raw: string): string | null {
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!body || typeof body !== "object") return null
+  const b = body as {
+    code?: unknown
+    required?: { roleLevel?: unknown }
+    actual?: { roleLevel?: unknown; source?: unknown; scopePath?: unknown }
+  }
+  if (b.code !== "role_required" || typeof b.required?.roleLevel !== "number") return null
+  const required = resolveRoleName(t, b.required.roleLevel)
+  const actualLevel = b.actual?.roleLevel
+  if (typeof actualLevel !== "number") return t("error.network.roleRequiredNoRole", { required })
+  const role = resolveRoleName(t, actualLevel)
+  const path = Array.isArray(b.actual?.scopePath)
+    ? b.actual.scopePath.filter((s): s is string => typeof s === "string").join(" › ")
+    : ""
+  const sourceKey = typeof b.actual?.source === "string" ? SOURCE_LABEL_KEYS[b.actual.source] : undefined
+  const origin = [sourceKey ? t(sourceKey) : "", path].filter(Boolean).join(" · ")
+  return origin
+    ? t("error.network.roleRequired", { role, origin, required })
+    : t("error.network.roleRequiredNoOrigin", { role, required })
 }
 
 /**

@@ -16,6 +16,9 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
+import { formatScopePath } from "@/lib/access/scope-path"
+import type { ScopePath } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
@@ -553,6 +556,10 @@ export function TeamDetail() {
   )
 
   const teamDescription = team?.description?.trim() || null
+  const teamScopePath: ScopePath = [
+    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
+    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
+  ]
 
   return (
     <AppShell
@@ -703,8 +710,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      {team.name}
+                      <ScopeBreadcrumb path={teamScopePath} />
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -888,7 +896,7 @@ export function TeamDetail() {
                       <DialogContent className="max-w-md gap-4">
                         <DialogHeader>
                           <DialogTitle>
-                            {t("org.teamDetail.addMembersDialogTitle", { name: team.name })}
+                            {t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
                           </DialogTitle>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-2">

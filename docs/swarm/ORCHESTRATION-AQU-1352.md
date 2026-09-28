@@ -20,7 +20,7 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 - root tsc: clean · auth-worker tsc: clean
 - auth-worker vitest: 5 failed / 2259 passed (all pre-existing, unrelated):
   billing-chat-usage, billing-usage-reconcile, billing-workspace-usage ×2, login-enumeration timing
-- sync-worker vitest: (pending) — memory says 2 unit tests red on dev
+- sync-worker vitest: 7 failed / 2791 passed (39 min). Pre-existing: derive-missing-book-rows ×4, export-bundle-route lane, export-route lane, progress-book-audio
 
 ## §1 Operating model and decisions
 - Decisions used: D1 many-to-many teams; D2 org Member = no access; D3 (Luke's); D4 floors 500 team / 600 org;

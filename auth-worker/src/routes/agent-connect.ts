@@ -66,7 +66,7 @@ routes.get("/", (c) => c.json({
   token_endpoint: "token",
   grant_types_supported: [GRANT_TYPE],
   scopes_supported: ["ask", "act"],
-  instructions: "POST client_id, agent_name, optional project_id and scope (default ask) as JSON or form data to device_authorization. Keep device_code private. Show verification_uri_complete and user_code to the human. They must confirm the code and approve in their browser; never approve for them. Poll token with client_id, grant_type and device_code at interval seconds. On slow_down add 5 seconds. Stop on access_denied or expired_token. Store access_token in your credential store, never chat or logs. Use it as a Bearer token with the existing Agent API or MCP transport.",
+  instructions: "POST client_id, agent_name, optional project_id and scope (default ask) as JSON or form data to device_authorization. Keep device_code private. Show verification_uri_complete and user_code to the human. They must confirm the code and approve in their browser; never approve for them. Poll token with client_id, grant_type and device_code at interval seconds. On slow_down add 5 seconds. Stop on access_denied or expired_token. If your polling stops early (for example a tool timeout), keep device_code and wait: after approving, the human pastes you a message saying so, and one token request then returns the credential right away. Store access_token in your credential store, never chat or logs. Use it as a Bearer token with the existing Agent API or MCP transport.",
 }))
 routes.post("/device_authorization", async (c) => {
   const parsed = startSchema.safeParse(await body(c.req.raw))
@@ -161,8 +161,11 @@ routes.post("/decision", authMiddleware, async (c) => {
     const level = await scopeLevel(c.env, c.get("user"), input.project_id, input.org_id)
     if (level == null || level < floor) return c.json({ error: "scope_denied" }, 403)
   }
+  // Approval restarts the ten-minute window so an agent whose polling gave up
+  // can still redeem once the human pastes it the "approved" message.
   const changed = await c.env.AQUILLA_PG.prepare(
-    `UPDATE agent_authorizations SET status = ?, user_id = ?, project_id = ?, org_id = ?, mode = ?
+    `UPDATE agent_authorizations SET status = ?, user_id = ?, project_id = ?, org_id = ?, mode = ?,
+       expires_at = GREATEST(expires_at, now() + interval '10 minutes')
      WHERE user_code_hash = ? AND status = 'pending' AND expires_at > now()
      RETURNING status`,
   ).bind(input.approve ? "approved" : "denied", String(c.get("user").id),
@@ -185,20 +188,28 @@ routes.post("/token", async (c) => {
     return c.json({ error: "expired_token" }, 400)
   }
   if (grant.status === "denied") return c.json({ error: "access_denied" }, 400)
-  // Atomic poll claim: concurrent requests cannot both pass the interval gate.
-  const poll = await c.env.AQUILLA_PG.prepare(
-    `UPDATE agent_authorizations SET last_poll_at = now()
-     WHERE device_hash = ? AND (last_poll_at IS NULL OR
-       last_poll_at <= now() - poll_interval * interval '1 second')
-     RETURNING device_hash`,
-  ).bind(hash).first()
-  if (!poll) {
-    await c.env.AQUILLA_PG.prepare(
-      "UPDATE agent_authorizations SET poll_interval = LEAST(poll_interval + 5, 600) WHERE device_hash = ?",
-    ).bind(hash).run()
-    return c.json({ error: "slow_down" }, 400)
+  // Pacing applies only while pending. An approved grant redeems on the next
+  // request: gating it let an over-eager agent ratchet its interval past the
+  // grant's lifetime and never collect a credential it had been given. The
+  // device code is a 256-bit secret, so pacing was never a brute-force guard;
+  // single use is enforced by the consume-and-mint statement below.
+  if (grant.status === "pending") {
+    // Atomic poll claim: concurrent requests cannot both pass the interval gate.
+    // One second of slack absorbs network jitter on an agent polling on time.
+    const poll = await c.env.AQUILLA_PG.prepare(
+      `UPDATE agent_authorizations SET last_poll_at = now()
+       WHERE device_hash = ? AND (last_poll_at IS NULL OR
+         last_poll_at <= now() - (poll_interval - 1) * interval '1 second')
+       RETURNING device_hash`,
+    ).bind(hash).first()
+    if (!poll) {
+      await c.env.AQUILLA_PG.prepare(
+        "UPDATE agent_authorizations SET poll_interval = LEAST(poll_interval + 5, 60) WHERE device_hash = ?",
+      ).bind(hash).run()
+      return c.json({ error: "slow_down" }, 400)
+    }
+    return c.json({ error: "authorization_pending" }, 400)
   }
-  if (grant.status === "pending") return c.json({ error: "authorization_pending" }, 400)
   const user = await c.env.AQUILLA_PG.prepare("SELECT * FROM users WHERE id::text = ?")
     .bind(grant.user_id).first<AuthUser>()
   // Re-check at mint time, not just at approval: the approver's role may have

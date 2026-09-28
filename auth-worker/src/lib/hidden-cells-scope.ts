@@ -13,7 +13,7 @@
 // and change the other; the client's third mirror is src/lib/cells/hidden.ts.
 //
 // WHERE THE FLAG LIVES, and why there are two forms. `cells.hidden_at`
-// (migration 0112) sits only on the SHARED SOURCE ROW
+// (migration 0116) sits only on the SHARED SOURCE ROW
 // (`side = 'source' AND target_lang = ''`), because hiding is per CELL, not per
 // lane. A query already scanning source rows asks the row it has; a query that
 // matched a row on EITHER side has to go look at the source row, because a
@@ -21,7 +21,7 @@
 // hide (a collaborator's in-flight translation, which must survive) is exactly
 // the row that must not come back.
 //
-// PREREQUISITE: migration 0112 must be applied.
+// PREREQUISITE: migration 0116 must be applied.
 
 /**
  * `<alias>.hidden_at IS NULL` — "this SOURCE row is visible". Pass the SOURCE
@@ -42,7 +42,7 @@ export function visibleSourceSql(alias: string): string {
  * `alias` may be empty for an unaliased `FROM cells`, in which case the
  * correlation names the table.
  *
- * Cost: one indexed probe, covered by 0112's partial index
+ * Cost: one indexed probe, covered by 0116's partial index
  * (`idx_cells_hidden ... WHERE hidden_at IS NOT NULL`), so a project with
  * nothing hidden pays an empty lookup.
  */

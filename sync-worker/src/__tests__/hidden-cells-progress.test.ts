@@ -32,7 +32,7 @@ function source(cellId: string, canonicalRef: string, opts: { hidden?: boolean; 
     target_lang: '', type: opts.type ?? 'verse',
     value: `source ${cellId}`, canonical_ref: canonicalRef, event_id: `source-${cellId}`,
     last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
-    // NULL means visible, which is what every pre-0112 row reads as.
+    // NULL means visible, which is what every pre-0116 row reads as.
     hidden_at: opts.hidden ? 1_700_000_000_000 : null,
   }
 }

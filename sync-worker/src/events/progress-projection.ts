@@ -22,6 +22,24 @@ export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS, AUDIO_CTE_SQL }
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
 /**
+ * AQU-1261 — why every lane join below compares the BARE column.
+ *
+ * `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
+ * fourth column of `idx_cells_file_scan(project_id, file_id, side, target_lang,
+ * cell_id)`. So `t.target_lang = lanes.lane` is an indexable equality that
+ * lands on the full five-column tuple.
+ *
+ * Wrapping it — `COALESCE(t.target_lang, '') = lanes.lane` — is a no-op on the
+ * data (the column cannot be NULL) but makes the predicate non-indexable:
+ * Postgres can only use the `(project_id, file_id, side)` prefix, so it pairs
+ * `lanes × source cells` against EVERY target row in the file and filters
+ * afterwards. On a 10k-cell file one recompute rejected 4,009,599 candidate
+ * pairs that way, and those scans ran against the same rows concurrent writers
+ * were locking. Keep the comparison bare; `progress-lane-join.test.ts` fails
+ * if a COALESCE comes back.
+ */
+
+/**
  * Whether the file is Scripture at all: does any source cell carry a
  * VERSE-shaped canonical_ref ("GEN 1:1")? Chapter- and heading-shaped refs
  * ("GEN 1", "GEN 1:s1:1") are not enough on their own — a non-Scripture file
@@ -261,7 +279,7 @@ export function fileProgressRecomputeStmt(
               '{}'::jsonb
             )
        FROM summary CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(
     projectId, fileId,
@@ -353,7 +371,7 @@ export function sectionsProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND COALESCE(t.target_lang, '') = lanes.lane
+          AND t.target_lang = lanes.lane
          LEFT JOIN audio a ON a.cell_id = s.cell_id
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
@@ -452,7 +470,7 @@ export function sectionsProgressRecomputeStmt(
         AND audio_histograms.scope = summaries.scope
         AND audio_histograms.section_key = summaries.section_key
        CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(...binds)
 }
@@ -500,7 +518,7 @@ export function fullProgressRecomputeStmts(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND COALESCE(t.target_lang, '') = lanes.lane
+            AND t.target_lang = lanes.lane
            LEFT JOIN audio a ON a.cell_id = s.cell_id
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1424: see the note on the other paired CTEs — parked cells leave
@@ -629,7 +647,7 @@ export function fullProgressRecomputeStmts(
           AND audio_histograms.scope = summaries.scope
           AND audio_histograms.section_key = summaries.section_key
          CROSS JOIN watermark
-       ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+       ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,
     ).bind(
       projectId, fileId,

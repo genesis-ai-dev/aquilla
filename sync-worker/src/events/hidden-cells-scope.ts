@@ -17,7 +17,7 @@
 // with a pointer back here.
 //
 // WHERE THE FLAG LIVES, and why there are TWO forms below. `cells.hidden_at`
-// (migration 0112) sits only on the SHARED SOURCE ROW
+// (migration 0116) sits only on the SHARED SOURCE ROW
 // (`side = 'source' AND target_lang = ''`), because hiding is per CELL, not per
 // lane — it parks the row for every language at once. So:
 //
@@ -31,7 +31,7 @@
 //     collaborator's in-flight translation, which must survive) is exactly the
 //     row that must not come back.
 //
-// PREREQUISITE: migration 0112 must be applied. Referenced unguarded, following
+// PREREQUISITE: migration 0116 must be applied. Referenced unguarded, following
 // the convention every prior column here uses (`lane_id` from AQU-1240 is in
 // the hot read path the same way) — the column ships applied, not probed.
 
@@ -58,7 +58,7 @@ export function visibleSourceSql(alias: string): string {
  * Correlates on (project, file, cell) and pins `side = 'source'` plus
  * `target_lang = ''` so it reads the one shared row that carries the flag.
  *
- * Cost: the partial index migration 0112 adds
+ * Cost: the partial index migration 0116 adds
  * (`idx_cells_hidden ... WHERE hidden_at IS NOT NULL`) covers exactly this
  * lookup, so a file with no hidden cells pays an empty index probe.
  */

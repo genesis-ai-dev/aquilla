@@ -19,9 +19,10 @@ import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudi
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
-import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
+import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
+  injectOptimisticAudioDeselect,
   injectOptimisticAudioRemove,
   notifyAudioAttachmentsChanged,
   retryFailedAudioSync,
@@ -247,14 +248,14 @@ export function TakesStrip({
     // per-(cell, slot) deselect would drop whatever was really there.
     const slot = take?.slot ?? RECORDING_SLOT
     // Round 8c: a generated take only sounds when no recorded take holds the
-    // recording slot — hand that slot back to the source clip alongside.
+    // recording slot — hand that slot back to the source clip alongside, or,
+    // with no source clip to park it on (every text file), empty it: that case
+    // used to do nothing, and the recording kept playing (Sam, 2026-09-28).
     //
     // THE DEFAULT TRACK ONLY. An added track has one slot holding both kinds,
-    // so picking either already deselects the other and there is no shared
-    // source clip to park anything on.
-    const displaceToSource =
+    // so picking either already deselects the other.
+    const displaceRecording =
       slot === GENERATED_VOICE_SLOT &&
-      sourceClip != null &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
     try {
       const selectP = emitCellAudioSelect({
@@ -263,12 +264,13 @@ export function TakesStrip({
       })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
-      if (displaceToSource) {
-        const displaceP = emitCellAudioSelect({
-          projectId, fileId, cellId, audioId: sourceClip.audioId, slot: "recording", author,
-          ...(targetLang ? { targetLang } : {}),
-        })
-        injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
+      if (displaceRecording) {
+        const where = { projectId, fileId, cellId, slot: RECORDING_SLOT, author, ...(targetLang ? { targetLang } : {}) }
+        const displaceP = sourceClip
+          ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
+          : emitCellAudioDeselect(where)
+        if (sourceClip) injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
+        else injectOptimisticAudioDeselect(fileId, cellId, RECORDING_SLOT, displaceP)
         await displaceP
       }
       notifyAudioAttachmentsChanged(fileId)

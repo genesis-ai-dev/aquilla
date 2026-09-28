@@ -491,7 +491,12 @@ export interface EventPayloads {
     targetLang?: string
   }
   'cell.audio.select': {
-    audioId: string
+    /** The take to select — or null to leave the slot with NOTHING selected
+     *  (2026-09-28). A line plays its recording-slot take whenever there is
+     *  one, so switching a line with no imported source clip to its generated
+     *  voice has to empty the recording slot, and there is no source clip to
+     *  park it on instead. */
+    audioId: string | null
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
     /** AQU-1462: see `cell.audio.attach`. */

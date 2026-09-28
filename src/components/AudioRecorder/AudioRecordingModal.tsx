@@ -77,10 +77,10 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
-import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioDeselect } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -1226,14 +1226,21 @@ export function AudioRecordingModal({
         // and generated takes are siblings in one slot, so picking either
         // deselects the other through the per-(cell, slot) rule the server
         // already enforces.
+        //
+        // With no source clip (every text file) there is nothing to park the
+        // slot on, and this used to do nothing — the new voice was saved and
+        // never played. The slot is emptied instead (2026-09-28).
         const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
-        if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
-          const displaceP = emitCellAudioSelect({
-            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
-            audioId: sourceClip.audioId, slot: "recording", author: username,
+        if (recSel && audioIdSeededWith(recSel, activeCell.id)) {
+          const where = {
+            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id, slot: "recording", author: username,
             ...(laneTag ? { targetLang: laneTag } : {}),
-          })
-          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          }
+          const displaceP = sourceClip
+            ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
+            : emitCellAudioDeselect(where)
+          if (sourceClip) injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          else injectOptimisticAudioDeselect(activeCell.fileId, activeCell.id, "recording", displaceP)
           await displaceP
           notifyAudioAttachmentsChanged(activeCell.fileId)
         }

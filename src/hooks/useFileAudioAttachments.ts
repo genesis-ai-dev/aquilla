@@ -83,6 +83,13 @@ function applyShadow(
   sync: ShadowSyncView,
 ): CellAudioEntry {
   const base = entry ?? emptyEntry()
+  if (shadow.kind === "deselect") {
+    // Mirrors the projection's `selected = 0` for the whole slot: the slot
+    // simply empties, its takes stay listed (2026-09-28).
+    const selectedBySlot = { ...slotSelections(base) }
+    delete selectedBySlot[shadow.slot]
+    return withProjections({ ...base, selectedBySlot })
+  }
   if (shadow.kind === "remove") {
     const attachments = { ...base.attachments }
     delete attachments[shadow.audioId]
@@ -139,6 +146,7 @@ function applyShadow(
 
 /** Has the server read caught up with what this overlay was asserting? */
 function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticShadow): boolean {
+  if (shadow.kind === "deselect") return !entry || !slotSelections(entry)[shadow.slot]
   if (shadow.kind === "remove") {
     // The read omits deleted rows, so absence IS the confirmation.
     return !entry?.attachments[shadow.audioId]

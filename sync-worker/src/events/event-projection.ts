@@ -1712,6 +1712,18 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      // null: empty the slot, select nothing in its place (2026-09-28).
+      if (p.audioId == null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET selected = 0
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, p.slot),
+        )
+        return ['cell_audio']
+      }
       stmts.push(
         db
           .prepare(

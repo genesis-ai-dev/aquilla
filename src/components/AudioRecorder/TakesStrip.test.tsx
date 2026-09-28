@@ -12,9 +12,12 @@ const emitRemove = vi.fn(async (..._args: unknown[]) => "evt-2")
 const emitRename = vi.fn(async (..._args: unknown[]) => "evt-3")
 const notify = vi.fn((..._args: unknown[]) => {})
 const injectOptimistic = vi.fn((..._args: unknown[]) => {})
+const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-4")
+const injectDeselect = vi.fn((..._args: unknown[]) => {})
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
+  emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioRemove: (...args: unknown[]) => emitRemove(...args),
   emitCellAudioRename: (...args: unknown[]) => emitRename(...args),
 }))
@@ -23,6 +26,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...args: unknown[]) => notify(...args),
   injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
   injectOptimisticAudioRemove: (...args: unknown[]) => injectOptimisticRemove(...args),
+  injectOptimisticAudioDeselect: (...args: unknown[]) => injectDeselect(...args),
 }))
 
 // AQU-464: the strip resolves each take against the cell's text history. That
@@ -385,6 +389,30 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
     expect(injectOptimistic).toHaveBeenCalledWith(
       "f1", "c1", expect.objectContaining({ audioId: SOURCE_CLIP.audioId }), expect.anything(),
     )
+  })
+
+  // Sam, 2026-09-28 (Mark 1:3): a line with NO imported source clip — every
+  // text file — had nothing to hand the recording slot to, so picking the
+  // generated take changed nothing and the recording kept playing.
+  it("with no source clip, activating a TTS take empties the recording slot instead", async () => {
+    emitDeselect.mockClear()
+    injectDeselect.mockClear()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm" // a recorded take holds the slot
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={null}
+      />,
+    )
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
+    fireEvent.click(useButtons[useButtons.length - 1]) // the TTS row
+    await waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "audio-c1-2-g.wav", slot: "generatedVoice" }))
+    expect(emitDeselect).toHaveBeenCalledWith(expect.objectContaining({ cellId: "c1", slot: "recording" }))
+    expect(injectDeselect).toHaveBeenCalledWith("f1", "c1", "recording", expect.anything())
   })
 
   it("activating a TTS take when the source already holds the slot emits ONE select", async () => {

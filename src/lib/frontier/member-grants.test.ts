@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest"
 import {
   MEMBER_GRANT_MIN_ROLE,
+  callerLevelFromRoster,
   canManageProjectMembers,
   grantableProjectRoles,
   roleChangeBlock,
@@ -116,6 +117,25 @@ describe("grantableProjectRoles", () => {
 
   it("keeps the full picker while the caller's level is unknown", () => {
     expect(grantableProjectRoles(null)).toHaveLength(6)
+  })
+})
+
+describe("callerLevelFromRoster", () => {
+  const roster = [
+    { username: "alice", role: { level: ROLE.MAINTAINER } },
+    { username: "carol", role: { level: ROLE.PROJECT_LEAD } },
+  ]
+
+  it("reads the caller's own level out of the roster", () => {
+    expect(callerLevelFromRoster(roster, "carol")).toBe(ROLE.PROJECT_LEAD)
+    expect(callerLevelFromRoster(roster, "alice")).toBe(ROLE.MAINTAINER)
+  })
+
+  it("is null when the caller is unknown, absent, or the roster is empty", () => {
+    expect(callerLevelFromRoster(roster, null)).toBeNull()
+    expect(callerLevelFromRoster(roster, undefined)).toBeNull()
+    expect(callerLevelFromRoster(roster, "nobody")).toBeNull()
+    expect(callerLevelFromRoster([], "carol")).toBeNull()
   })
 })
 

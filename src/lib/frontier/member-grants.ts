@@ -100,3 +100,20 @@ export function grantableProjectRoles(callerLevel: number | null): RoleOption[] 
 export function canManageProjectMembers(callerLevel: number | null): boolean {
   return callerLevel === null || callerLevel >= MEMBER_GRANT_MIN_ROLE
 }
+
+/**
+ * The caller's own effective role level, read out of the project roster every
+ * member surface already renders. `null` when the roster hasn't loaded or
+ * carries no row for them — see `RoleChangeContext.callerLevel` for why that
+ * is treated as "don't block".
+ *
+ * Every surface derives it through this one function so they cannot drift
+ * apart again: AQU-853 began with three surfaces each assuming MAINTAINER.
+ */
+export function callerLevelFromRoster(
+  roster: ReadonlyArray<{ username: string; role: { level: number } }>,
+  callerUsername: string | null | undefined,
+): number | null {
+  if (!callerUsername) return null
+  return roster.find((m) => m.username === callerUsername)?.role.level ?? null
+}

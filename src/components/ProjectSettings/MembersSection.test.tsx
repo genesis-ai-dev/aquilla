@@ -240,6 +240,19 @@ describe("MembersSection — caller-role gating (AQU-853)", () => {
     )
   })
 
+  // Found by the QA bot's walk of PR #798: the row menu was capped correctly
+  // but the "Add a member" dialog still filtered PROJECT_ROLE_OPTIONS to
+  // <= MAINTAINER, so a project_lead was offered a Maintainer grant the server
+  // refuses with `role_above_caller`.
+  it("caps the Add-a-member role picker at the caller's own level too", () => {
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
+    fireEvent.click(screen.getByRole("combobox", { name: /role/i }))
+    expect(screen.getByRole("option", { name: /project lead/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /maintainer/i })).toBeNull()
+  })
+
   it("explains that a member at or above the caller's own role can't be changed", () => {
     mockSessionUsername = "carol" // project_lead (500)
     renderSection()

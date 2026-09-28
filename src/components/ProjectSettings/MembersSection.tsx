@@ -40,7 +40,8 @@ import {
   ROLE, humanRoleName, resolveRoleName, roleDescription,
 } from "@/lib/frontier/roles"
 import {
-  canManageProjectMembers, grantableProjectRoles, roleChangeBlock,
+  callerLevelFromRoster, canManageProjectMembers, grantableProjectRoles,
+  roleChangeBlock,
 } from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -84,10 +85,10 @@ export function MembersSection({ projectId }: { projectId: string }) {
   // the "the option didn't appear / didn't work" confusion this ticket is
   // about. `null` while the roster is still loading; the server stays the
   // security boundary either way.
-  const callerLevel = useMemo(() => {
-    if (!callerUsername) return null
-    return members.find((m) => m.username === callerUsername)?.role.level ?? null
-  }, [members, callerUsername])
+  const callerLevel = useMemo(
+    () => callerLevelFromRoster(members, callerUsername),
+    [members, callerUsername],
+  )
   const canManageMembers = canManageProjectMembers(callerLevel)
 
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all")
@@ -351,6 +352,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
         onOpenChange={setAddOpen}
         members={members}
         addMany={addMany}
+        callerLevel={callerLevel}
       />
 
       <ConfirmActionDialog

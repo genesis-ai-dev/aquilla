@@ -76,14 +76,23 @@ for attempt in 1 2 3; do
   fi
 
   git tag -a "$tag" -m "$tag_message"
-  if git push --quiet origin "refs/tags/$tag"; then
+  if push_output="$(git push --quiet origin "refs/tags/$tag" 2>&1)"; then
     echo "OK: tagged and pushed $tag."
     exit 0
   fi
+  git tag -d "$tag" >/dev/null
+
+  # A ruleset rejection (GH013) fails the same way on every attempt, so a
+  # retry would only report it as a number clash three times.
+  if grep -q "GH013" <<<"$push_output"; then
+    echo "$push_output" >&2
+    echo "ABORT: GitHub's rules rejected $tag; no other deploy has claimed it. Check the rule named above." >&2
+    exit 1
+  fi
 
   # Someone else claimed this number between fetch and push; retry with the next one.
-  git tag -d "$tag" >/dev/null
-  echo "WARN: $tag was taken on origin (attempt $attempt); retrying." >&2
+  echo "$push_output" >&2
+  echo "WARN: pushing $tag failed (attempt $attempt); retrying in case another deploy claimed it." >&2
 done
 
 echo "ABORT: could not claim a release tag for $series after 3 attempts." >&2

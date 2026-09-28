@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -89,6 +89,20 @@ describe("tag-release.sh", () => {
     commit("next")
     expect(run().status).toBe(0)
     expect(originTags()).toContain("2026.09.23.10")
+  })
+
+  it("stops at once when a GitHub ruleset rejects the push", () => {
+    // A pre-receive hook stands in for GitHub's "release tags" ruleset.
+    const hook = path.join(origin, "hooks", "pre-receive")
+    writeFileSync(hook, "#!/bin/sh\necho 'error: GH013: Repository rule violations found for refs/tags/2026.09.23.00.' >&2\nexit 1\n")
+    chmodSync(hook, 0o755)
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("GH013")
+    expect(result.stderr).toContain("GitHub's rules rejected 2026.09.23.00")
+    expect(result.stderr).not.toContain("retrying")
+    expect(git(work, "tag", "--list")).toBe("")
+    expect(originTags()).toEqual([])
   })
 
   it("refuses to tag from a non-release branch", () => {

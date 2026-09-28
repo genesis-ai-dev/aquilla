@@ -50,6 +50,28 @@ describe("browser authorization → existing credential consumer", () => {
     expect(await (await poll(request.device_code)).json()).toEqual({ error: "slow_down" })
     expect(await env.AQUILLA_PG.prepare("SELECT poll_interval FROM agent_authorizations").first()).toEqual({ poll_interval: 10 })
   })
+  it("hands an approved credential to an agent that polled too eagerly", async () => {
+    // The reported failure: an agent ignores slow_down, ratchets its interval,
+    // and every later poll — including after approval — is refused as early.
+    // Pacing exists to spare the server while pending, not to withhold a grant.
+    const jwt = await seed(); const request = await start()
+    for (let i = 0; i < 5; i++) await poll(request.device_code)
+    expect(await (await poll(request.device_code)).json()).toEqual({ error: "slow_down" })
+    await approve(request.user_code, jwt)
+    const response = await poll(request.device_code)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toHaveProperty("access_token")
+  })
+  it("keeps an approved grant redeemable after the agent's polling gave up", async () => {
+    // A human who approves near the deadline then pastes "approved" to the
+    // agent; approval must leave a fresh window for that one redemption.
+    const jwt = await seed(); const request = await start()
+    await env.AQUILLA_PG.prepare("UPDATE agent_authorizations SET expires_at = now() + interval '5 seconds'").run()
+    await approve(request.user_code, jwt)
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT expires_at > now() + interval '9 minutes' AS fresh FROM agent_authorizations").first()
+    expect(row).toEqual({ fresh: true })
+  })
   it("denial is terminal", async () => {
     const jwt = await seed(); const request = await start()
     expect((await post("decision", { user_code: request.user_code, approve: false }, jwt)).status).toBe(200)

@@ -31,13 +31,15 @@ export type SubtitleTarget = "subtitle" | "audio"
 
 export interface ExportDialogMemory {
   section: ExportSection | null
-  audioMode: "audio-by-character" | "audio-by-line"
+  audioMode: "audio-by-character" | "audio-by-line" | "audio-chapter"
   subtitleTarget: SubtitleTarget
   /** The chosen format inside the third section. */
   foldFormat: string | null
   cueSplitting: boolean
   excludeLabels: boolean
   includeSource: boolean
+  /** Chapter-audio stitch: play heading takes inside each chapter file. */
+  includeChapterHeadings: boolean
 }
 
 export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
@@ -48,6 +50,7 @@ export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
   cueSplitting: false,
   excludeLabels: false,
   includeSource: false,
+  includeChapterHeadings: false,
 }
 
 interface Entry {
@@ -60,6 +63,7 @@ const SECTIONS: readonly ExportSection[] = ["audio", "subtitle", "fold"]
 const AUDIO_MODES: readonly ExportDialogMemory["audioMode"][] = [
   "audio-by-character",
   "audio-by-line",
+  "audio-chapter",
 ]
 const TARGETS: readonly SubtitleTarget[] = ["subtitle", "audio"]
 
@@ -96,6 +100,7 @@ export function normalizeExportMemory(raw: unknown): ExportDialogMemory {
     cueSplitting: bool(v.cueSplitting, false),
     excludeLabels: bool(v.excludeLabels, false),
     includeSource: bool(v.includeSource, false),
+    includeChapterHeadings: bool(v.includeChapterHeadings, false),
   }
 }
 

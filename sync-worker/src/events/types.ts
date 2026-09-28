@@ -52,6 +52,13 @@ export type EventKind =
   // cells.event_id (the AD-9 staleness comparison depends on the source head
   // moving only when content changes) and replays unconditionally on rebuild.
   | 'source.cell.reanchor'
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row. Deliberately NOT a
+  // reuse of source.cell.delete, which hard-deletes the projection row: the
+  // whole point is that the source text, every lane's translation, recordings,
+  // comments and validations survive and come back on show. Hiding is per CELL,
+  // not per lane, which is why one source-side kind covers every language.
+  | 'source.cell.visibility.set'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -174,6 +181,12 @@ export type EventKind =
   // that only by hand. Deliberately never recomputed: recomputing would
   // silently undo every manual correction on the next import.
   | 'cell.link.set'
+  // AQU-777: per-cell file attachments (screenshots / reference images).
+  // Non-chain-mutating; contributor-level. The bytes are PUT to R2 (see
+  // sync-worker/src/cell-attachments.ts) BEFORE the event is emitted, so a
+  // projected row always points at an object that exists.
+  | 'cell.attachment.add'
+  | 'cell.attachment.remove'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -273,6 +286,10 @@ export interface EventPayloads {
     valueHtml?: string
     /** Optional canonical current target HTML; text/history stay untouched. */
     targetHtml?: string
+  }
+  'source.cell.visibility.set': {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
@@ -423,6 +440,17 @@ export interface EventPayloads {
     /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
     label?: string
     /**
+     * AQU-490: what this clip IS. Absent (the overwhelming majority) means a
+     * dub — somebody's translation of the line, the thing that gets recorded,
+     * counted and validated. `'source'` is the shared programme audio an
+     * import attaches, which sits SELECTED in the recording slot of every cell
+     * in a media file; without this the rule "every selected take must be
+     * validated" would hold those cells hostage to somebody validating
+     * untranslated source audio. Fill-only in the projection — an import
+     * decides it once and a later re-attach cannot change it.
+     */
+    role?: 'dub' | 'source'
+    /**
      * Non-destructive playback trim window into the clip, in ms — the clip's
      * BIRTH values only. The projection COALESCEs these, so an attach may SET a
      * window but can never clear one; changing or clearing a window afterwards
@@ -528,14 +556,42 @@ export interface EventPayloads {
   'cell.audio.remove': {
     audioId: string
   }
-  // AQU-508: reviewer approves the given clip (the cell's selected take). The
-  // audio-validated rollup counts a cell iff its selected, live clip is
-  // approved, so validating the active take marks the cell audio-validated.
+  // AQU-490 (was AQU-508): one reviewer's vote on ONE take. A cell counts as
+  // audio-validated when every SELECTED, live dub take on it has at least the
+  // project's required number of votes — so a line dubbed on two tracks needs
+  // both signed off, and re-recording drops the cell back until the new take
+  // earns its own votes. The threshold is applied when somebody reads, never
+  // stamped on the row, so changing it reprojects nothing.
   'cell.audio.validate': {
     audioId: string
   }
   'cell.audio.unvalidate': {
     audioId: string
+    /**
+     * AQU-490: whose vote to remove. Absent — and it always is, unless a
+     * maintainer is clearing up after somebody — means the caller's own. The
+     * maintainer floor for naming anyone else is enforced in route.ts, exactly
+     * as it is for the text-side `cell.unvalidate`.
+     */
+    targetUsername?: string
+  }
+  // AQU-777: attach a file (primarily a screenshot) to a cell. The envelope
+  // carries fileId + cellId; everything else the projection needs to render a
+  // link without fetching the bytes rides here.
+  'cell.attachment.add': {
+    /** Client-generated uuidv7; the projection's key within the project. */
+    attachmentId: string
+    /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+    objectName: string
+    /** The user-visible file name, as picked. */
+    name: string
+    mimeType?: string
+    sizeBytes?: number
+  }
+  // Soft-delete, as comment.delete does it: the row survives with deleted_at
+  // stamped so a removal replays from the log.
+  'cell.attachment.remove': {
+    attachmentId: string
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────

@@ -60,4 +60,58 @@ describe("TargetValidationControl", () => {
 
     expect(screen.getByRole("button", { name: /Validated/ })).toHaveAttribute("aria-pressed", "true")
   })
+
+  // Sam, 2026-09-23: a line with no text draws a FADED circle that does
+  // nothing, instead of an empty slot, so the gutter is full on every row.
+  it("draws a faded, unclickable circle when there is no text", () => {
+    const onValidationChange = vi.fn()
+    render(
+      <TargetValidationControl
+        cellRef="Mark 1:1"
+        hasContent={false}
+        validationStatus="none"
+        activeValidators={[]}
+        validationHistory={[]}
+        currentUsername="alice"
+        validationRequirement={1}
+        canValidate
+        canValidateThisCell
+        onValidationChange={onValidationChange}
+      />,
+    )
+    expect(screen.queryByRole("button")).toBeNull()
+    const faded = screen.getByTestId("validation-unavailable")
+    expect(faded).toHaveAccessibleName(/no text to validate/i)
+    fireEvent.click(faded)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  // Sam, 2026-09-23: the same hover rule as audio. The tooltip names which
+  // half it is about, and a why-not survives somebody else voting first.
+  it("names the text half in its tooltip", async () => {
+    render(
+      <TargetValidationControl
+        cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+        validationHistory={[]} currentUsername="alice" validationRequirement={1}
+        canValidate canValidateThisCell onValidationChange={vi.fn()}
+      />,
+    )
+    fireEvent.mouseEnter(screen.getByRole("button"))
+    fireEvent.pointerEnter(screen.getByRole("button"))
+    fireEvent.focus(screen.getByRole("button"))
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Text not validated — click to validate")
+  })
+
+  it("puts the why-not at the foot of the Validated by list", async () => {
+    render(
+      <TargetValidationControl
+        cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+        validationHistory={[]} currentUsername="alice" validationRequirement={2}
+        canValidate canValidateThisCell={false} onValidationChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button"))
+    expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+    expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
+  })
 })

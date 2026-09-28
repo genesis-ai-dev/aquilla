@@ -39,7 +39,9 @@ vi.mock("@/lib/frontier/teams", () => ({
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
   projectsResultError: vi.fn(() => new Error("project load failed")),
 }))

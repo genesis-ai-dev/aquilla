@@ -2,8 +2,9 @@
 // scope-label helper the surrounding dialogs share.
 //
 // Extracted from ApiTokensSection so the scope/date presentation has one home:
-// a token's blast radius (which org or project, which mode) has to be legible
-// at a glance, which is display logic with its own rules, not list plumbing.
+// a token's blast radius (which org or project, which mode, whether it can write
+// at all) has to be legible at a glance, which is display logic with its own
+// rules, not list plumbing.
 
 import { Building2, Eye, Folder, Globe, Pencil } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -62,16 +63,27 @@ export function CredentialRow({
   const expired =
     !revoked && Boolean(credential.expiresAt) && new Date(credential.expiresAt!).getTime() < Date.now()
   const ModeIcon = credential.mode === "act" ? Pencil : Eye
+  // AQU-1242: on a read-only token the mode badge would be a lie by omission —
+  // `mode` is never consulted, so showing "ask" suggests writes are merely
+  // gated rather than impossible. One badge, the true one.
+  const readOnly = credential.access === "read"
 
   return (
     <li className="flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5">
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <code className="text-xs font-mono">{credential.tokenPrefix}…</code>
-          <Badge variant={credential.mode === "act" ? "default" : "secondary"} className="gap-1">
-            <ModeIcon className="size-3 shrink-0" aria-hidden />
-            {credential.mode}
-          </Badge>
+          {readOnly ? (
+            <Badge variant="outline" className="gap-1">
+              <Eye className="size-3 shrink-0" aria-hidden />
+              {t("onboarding.apiTokens.accessReadBadge")}
+            </Badge>
+          ) : (
+            <Badge variant={credential.mode === "act" ? "default" : "secondary"} className="gap-1">
+              <ModeIcon className="size-3 shrink-0" aria-hidden />
+              {credential.mode}
+            </Badge>
+          )}
           {revoked && <Badge variant="destructive">{t("onboarding.apiTokens.revokedBadge")}</Badge>}
           {expired && <Badge variant="outline">{t("onboarding.apiTokens.expiredBadge")}</Badge>}
         </div>

@@ -1606,10 +1606,6 @@ export const org = defineNamespace({
         description: "Member inspector section heading: the role at the scope the inspector was opened from.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
-      "org.access.inspector.open": {
-        description: "Accessible label on a roster name that opens the member access inspector.",
-        placeholders: { name: "Username of the member." },
-      },
       "org.access.inspector.grantedBy": {
         description: "Who made a grant, inside a member inspector row.",
         placeholders: { name: "Display name of the granting user." },

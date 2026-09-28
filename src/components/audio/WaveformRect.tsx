@@ -21,9 +21,9 @@
 //     grey audio). Read-only edges are the same line in grey.
 //   - BUTTONS THAT STEP ASIDE (Sam, 2026-09-28). While a line is dragged or
 //     nudged, anything drawn over the waveform that the line comes within
-//     STEP_ASIDE_PX of — a corner button, the running time, a card's own tools
-//     — fades out and stops taking clicks, so the audio under it can be seen
-//     and cut. Overlays opt in with `data-wave-overlay` (WAVE_OVERLAY_CLASS
+//     STEP_ASIDE_PX of — a corner button, the running time, a voice pill —
+//     fades almost to nothing (15%) and stops taking clicks, so the audio under
+//     it can be seen and cut. Overlays opt in with `data-wave-overlay` (WAVE_OVERLAY_CLASS
 //     does the fading); a nudge keeps them aside for a moment after the key.
 //
 // SVG, not canvas, for the reasons TargetChipWaveform gives: the ink inherits

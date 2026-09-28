@@ -134,6 +134,8 @@ describe("WaveformRect", () => {
       expect(aside("w-play")).toBe("true")
       expect(aside("w-record")).toBeNull()
       expect(screen.getByTestId("w-play").className).toContain("data-[stepped-aside=true]:pointer-events-none")
+      // Extremely translucent, not gone (Sam, 2026-09-28).
+      expect(screen.getByTestId("w-play").className).toContain("data-[stepped-aside=true]:opacity-15!")
     })
 
     it("brings it back when the line is let go", () => {

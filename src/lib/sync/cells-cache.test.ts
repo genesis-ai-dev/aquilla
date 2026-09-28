@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CellRow } from "./cells-read-types"
 import {
+  grantsVersionFromSyncToken,
   mergeCellsDelta,
   readCellsCache,
   writeCellsCache,
@@ -302,6 +303,51 @@ describe("cells cache maxServerSeq cursor", () => {
     await writeCellsCache("p1", "f-noepoch", [row("a", "source")], 42)
     const entry = await readCellsCache("p1", "f-noepoch")
     expect(entry?.projectEpoch).toBeUndefined()
+  })
+})
+
+function tokenWithGrants(grants: { lane: string; level: number }[] | null): string {
+  const payload = grants === null ? {} : { laneGrants: grants }
+  const b64 = btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  return `hdr.${b64}.sig`
+}
+
+describe("cells cache grant version", () => {
+  beforeEach(async () => {
+    await resetCellsCacheConnectionForTests()
+  })
+
+  it("keeps today's key when the token has no lane grants", () => {
+    expect(grantsVersionFromSyncToken(null)).toBe("")
+    expect(grantsVersionFromSyncToken(tokenWithGrants(null))).toBe("")
+    expect(grantsVersionFromSyncToken(tokenWithGrants([]))).toBe("")
+  })
+
+  it("does not paint a snapshot written under a different grant set", async () => {
+    const spanish = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 400 }]))
+    const french = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "fr", level: 400 }]))
+    expect(spanish).not.toBe("")
+    expect(spanish).not.toBe(french)
+
+    await writeCellsCache("p1", "f1", [row("es-row", "target")], 1, undefined, spanish)
+    expect((await readCellsCache("p1", "f1", spanish))?.rows[0].cellId).toBe("es-row")
+    expect(await readCellsCache("p1", "f1", french)).toBeNull()
+    expect(await readCellsCache("p1", "f1")).toBeNull()
+  })
+
+  it("drops the unversioned snapshot once a grant-scoped one is stored", async () => {
+    await writeCellsCache("p1", "f1", [row("old", "target")], 1)
+    const version = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 400 }]))
+    await writeCellsCache("p1", "f1", [row("granted", "target")], 2, undefined, version)
+    expect(await readCellsCache("p1", "f1")).toBeNull()
+    expect((await readCellsCache("p1", "f1", version))?.rows[0].cellId).toBe("granted")
+  })
+
+  it("drops the unversioned snapshot when a grant-scoped read misses", async () => {
+    await writeCellsCache("p1", "f1", [row("old", "target")], 1)
+    const version = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 300 }]))
+    expect(await readCellsCache("p1", "f1", version)).toBeNull()
+    expect(await readCellsCache("p1", "f1")).toBeNull()
   })
 })
 

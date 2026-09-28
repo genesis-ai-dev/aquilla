@@ -31,6 +31,7 @@ import {
 } from './event-insert'
 import type { EventKind } from './types'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { dataTargetTagsFromEvents, ensureProjectLanes } from '../../../db/shared/lanes'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -219,6 +220,19 @@ export async function handleMigrateIngestRequest(
   }
   const fresh = replayed.size ? prepared.filter((p) => !replayed.has(p.row.id)) : prepared
   if (fresh.length === 0) return Response.json({ accepted: 0, replayed: replayed.size })
+
+  // AQU-1240 slice 6: lanes must exist before projection (slice 5) resolves
+  // lane_id. Codex upserts the project first (placeholders) then ingests;
+  // this call is still required so extra targetLang tags in the chunk get
+  // rows, and so already-migrated re-runs stay idempotent.
+  try {
+    await ensureProjectLanes(db, body.projectId, {
+      dataTargetTags: dataTargetTagsFromEvents(body.events),
+    })
+  } catch (err) {
+    console.error("[migrate-ingest] ensure lanes failed:", err)
+    return Response.json({ error: "ensure lanes failed" }, { status: 500 })
+  }
 
   let nextSeq: number
   let seqBase: number

@@ -35,10 +35,10 @@ export interface ProjectLaneSubRowsProps {
   onStaffed?: () => void
 }
 
-function laneOpenTo(projectId: string, lane: string): string {
-  return lane
-    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
-    : `/project/${projectId}/editor`
+function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
+  const key = lane.laneId || lane.lane
+  if (!key) return `/project/${projectId}/editor?lane=`
+  return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
 }
 
 export function ProjectLaneSubRows({
@@ -59,7 +59,7 @@ export function ProjectLaneSubRows({
       <TableCell colSpan={colSpan} className="bg-muted/20 p-0">
         <div className="divide-y">
           {lanes.map((lane) => {
-            const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))
+            const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
             const tpct = safePct(laneTranslatedPct(lane))
             const vpct = safePct(laneValidatedPct(lane))
             const lastEdit = lane.lastEditAt
@@ -92,7 +92,7 @@ export function ProjectLaneSubRows({
 
                 <span className="ms-auto flex items-center gap-1.5">
                   <Button
-                    render={<Link to={laneOpenTo(projectId, lane.lane)} />}
+                    render={<Link to={laneOpenTo(projectId, lane)} />}
                     size="xs"
                     variant="outline"
                   >

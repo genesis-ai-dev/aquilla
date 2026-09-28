@@ -47,6 +47,13 @@ export interface CodexData {
   /** Codex cell-merge marker: the cell's content was absorbed into another
    *  cell (heading consolidation, verse-range merge) and Codex hides it. */
   merged?: boolean;
+  /** Codex Source Editing Mode eye icon: the cell is PARKED — dropped from the
+   *  normal view, progress and every exporter, but its data is kept and an
+   *  unhide brings it back. Written on both the `.source` and the paired
+   *  `.codex` cell; unhide writes `false` rather than removing the key
+   *  (AQU-1425). Reversible, so unlike `deleted`/`merged` it must NOT migrate
+   *  as a retraction. */
+  hidden?: boolean;
   originalText?: string;
   globalReferences?: string[];
   /**
@@ -104,6 +111,28 @@ export interface CodexCellAttachment {
    *  so the server has no attachment for it and won't without user action. The
    *  clip stays visible in this state instead of silently disappearing. */
   syncFailed?: true;
+  /**
+   * AQU-490: this take's validation state, carried so the gutter, the take
+   * block, the recorder's list, the timeline chip and the voice panel all read
+   * one answer instead of five.
+   *
+   * `validatorCount` is what gets compared to the project's threshold;
+   * `validators` is the hover list and the "have I validated this?" test.
+   * `role` distinguishes a dub from the imported programme audio, which is
+   * selected on every cell of a media file and is never counted. `recordedBy`
+   * is UNKNOWN when absent and must never be read as a match for the viewer.
+   *
+   * All optional: a hand-built cell stub has no server row to copy them from,
+   * and a worker predating AQU-490 sends none of them.
+   */
+  validatorCount?: number;
+  validators?: string[];
+  role?: "dub" | "source";
+  recordedBy?: string | null;
+  /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
+   *  rename). Carried so the Recording tab can head an added-track take with
+   *  its own name rather than its track id. */
+  label?: string | null;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

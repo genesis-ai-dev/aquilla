@@ -497,11 +497,15 @@ export async function snapshotSourceCells(
           .run()
       } else {
         await env.AQUILLA_PG.prepare(
+          // AQU-1240 slice 8: snapshotted source rows -> the target project's
+          // source lane. Inlined (mirrors laneIdResolveSql('source')); NULL until
+          // the project's lanes exist, then filled by the backfill.
           `INSERT INTO cells (
             project_id, file_id, cell_id, side, value, value_html, type,
             canonical_ref, anchor_cell_id, event_id, source_event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash
-          ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)`,
+            last_editor, last_edit_at, validated, word_count, content_hash, lane_id
+          ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+                    (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'source'))`,
         )
           .bind(
             args.targetProjectId,
@@ -517,6 +521,7 @@ export async function snapshotSourceCells(
             now,
             wordCount,
             hash,
+            args.targetProjectId,
           )
           .run()
       }

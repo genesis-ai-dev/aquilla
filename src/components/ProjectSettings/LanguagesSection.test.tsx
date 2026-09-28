@@ -63,12 +63,21 @@ describe("LanguagesSection", () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
-  it("rejects a lane equal to the default target language (case-insensitive)", async () => {
+  it("allows adding the primary target language when it is not yet in targetLanes", async () => {
     const { patch } = renderSection({ defaultTargetLanguage: "French", targetLanes: [] })
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "french" } })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
-    await waitFor(() => expect(screen.getByText(/already the default/i)).toBeTruthy())
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ targetLanes: ["french"] }))
+    expect(screen.queryByText(/already the default/i)).toBeNull()
+  })
+
+  it("rejects re-adding the primary once it is already registered in targetLanes", async () => {
+    const { patch } = renderSection({ defaultTargetLanguage: "French", targetLanes: ["French"] })
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "french" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() => expect(screen.getByText(/already exists/i)).toBeTruthy())
     expect(patch).not.toHaveBeenCalled()
+    expect(screen.queryByText(/already the default/i)).toBeNull()
   })
 
   it("rejects a lane over 64 characters", async () => {

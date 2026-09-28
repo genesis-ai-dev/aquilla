@@ -23,6 +23,7 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { visibleSourceSql } from "../lib/hidden-cells-scope"
 import { ROLE, type Env } from "../types"
 import { errorJson, requireRole } from "./_contextual-helpers"
 import { runAiGuard } from "../lib/ai-budget"
@@ -692,9 +693,14 @@ contextual.post(
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
     if (body.scope === "project") {
+      // AQU-935: discovery and conflict detection both read the lane the start
+      // request named. Without it a multi-lane project's second language sees
+      // the default lane's finished work and its in-flight runs, so a start
+      // there either finds nothing to do or skips every file as "already
+      // running". `lane` is `''` for a single-language project — unchanged.
       const [candidates, activeFiles] = await Promise.all([
-        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId),
-        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId),
+        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId, lane),
+        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId, lane),
       ])
       if (candidates.length === 0) {
         const { body: err, status } = errorJson(
@@ -866,7 +872,10 @@ async function readinessCellCounts(
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''`,
+          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            -- AQU-1424: a parked cell is not untranslated work waiting for
+            -- autopilot, so it leaves both of these counts.
+            AND ${visibleSourceSql('s')}`,
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()

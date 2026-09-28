@@ -334,7 +334,15 @@ export function expectedCounts(f: FixtureFile): FixtureCounts {
     filledCount: cells.filter((c) => c.target !== "").length,
     validatedCount: cells.filter((c) => c.validated && c.target !== "").length,
     audioCount: cues.filter((c) => c.recorded).length,
-    audioValidatedCount: 0,
+    // AQU-490: these fixtures were written when "recorded" WAS "finished" —
+    // the board judged audio on what had been recorded, because no client
+    // could validate a take. Now that it judges on validation, a recorded
+    // take with nobody signed off is an unfinished one, and every group claim
+    // these fixtures make would be wrong for a reason that has nothing to do
+    // with what they are demonstrating (grouping, denominators, the headings
+    // policy). So a recorded line here is a validated one, which is what a
+    // finished dubbed project actually looks like.
+    audioValidatedCount: cues.filter((c) => c.recorded).length,
     audioTotalCount: f.cues ?? null,
   }
 }

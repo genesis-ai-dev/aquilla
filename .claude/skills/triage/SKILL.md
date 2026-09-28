@@ -49,7 +49,7 @@ Every triaged issue should carry exactly one category role and one state role. I
 
 The consequence that matters: **`ready-for-agent` = `Todo` is the only thing `/issue next` and `/swarm` pick up. Everything a human must touch stays in `Triage`.** HITL / `ready-for-human` work is safe from agents by construction — it never leaves `Triage` until you promote it to `Todo`.
 
-**Creating a new issue during triage:** create it **from the team's issue template** — pass `template` to `save_issue`: `Bug Report` (bug), `Feature Request` (new user-facing capability), or `Task` (everything else; it carries the `Improvement` label). The template applies the category label itself. Author the description using the template's exact section headings — a passed `description` replaces the template body, so fill its sections rather than inventing your own. ⚠️ All three templates embed status `Todo`: pass `state: Triage` explicitly (it overrides the template's) and confirm the create response says `Triage`. Leave the issue **unassigned** — the team rotation auto-assigns at create time; if the response shows an assignee, clear it with a follow-up `assignee: null` save. Set a **milestone** on it (`milestone` on `save_issue`): Prototype Debugging's milestones are the Road to V1 areas — `list_milestones` the project for the live list; every issue in the project carries exactly one.
+**Creating a new issue during triage:** create it **from the team's issue template** — pass `template` to `save_issue`: `Bug Report` (bug), `Feature Request` (new user-facing capability), or `Task` (everything else; it carries the `Improvement` label). The template applies the category label itself. Author the description using the template's exact section headings — a passed `description` replaces the template body, so fill its sections rather than inventing your own. ⚠️ All three templates embed status `Todo`: pass `state: Triage` explicitly (it overrides the template's) and confirm the create response says `Triage`. Leave the issue **unassigned** — the team rotation auto-assigns at create time; if the response shows an assignee, clear it with a follow-up `assignee: null` save. Set an **`Area` label** on it (pass it in `labels` on `save_issue`): the team's `Area` label group holds the codebase areas — `list_issue_labels` for the live list; every issue carries exactly one. Put it in the right **project**: the area's `<Area> V1` project (under the **Road to V1** initiative) if the work gates V1, otherwise `Prototype Debugging` (the maintenance bucket). Default to `Prototype Debugging` when unsure.
 
 State transitions: an un-triaged issue lands in **`Triage`** (`needs-triage`); from there it moves to `needs-info` (stays in Triage), `ready-for-agent` (→ `Todo`), `ready-for-human` (stays in Triage), or `wontfix` (→ `Canceled`). `needs-info` returns to active-Triage attention once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
@@ -69,7 +69,8 @@ Query the issue tracker and present three buckets, oldest first:
 1. **Unlabeled** — never triaged.
 2. **`needs-triage`** — evaluation in progress.
 3. **`needs-info` with reporter activity since the last triage notes** — needs re-evaluation.
-4. **No milestone** — in Prototype Debugging but not yet assigned a Road to V1 area; set one while you're there.
+4. **No Area label** — not yet assigned a codebase area; set one while you're there.
+5. **No project** — belongs in an `<Area> V1` project or in `Prototype Debugging`; recommend one.
 
 Show counts and a one-line summary per issue. Let the maintainer pick.
 
@@ -91,7 +92,7 @@ Show counts and a one-line summary per issue. Let the maintainer pick.
    - `wontfix` (enhancement) — write to `.out-of-scope/`, link to it from a comment, then close ([OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)).
    - `needs-triage` — apply the role. Optional comment if there's partial progress.
 
-6. **Set the milestone.** Every Prototype Debugging issue carries exactly one milestone (its Road to V1 area). If the issue has none, set it as part of applying the outcome (`milestone` on `save_issue`; `list_milestones` for the live list).
+6. **Set the Area label and check the project.** Every issue carries exactly one `Area` label (its codebase area). If the issue has none, set it as part of applying the outcome (`labels` on `save_issue`; `list_issue_labels` for the live list). Confirm the project matches the placement rule: `<Area> V1` for work that gates V1, `Prototype Debugging` for maintenance. Moving an issue between the two is a human call — recommend it, don't do it, unless the maintainer says so.
 
 ## Quick state override
 

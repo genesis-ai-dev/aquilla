@@ -7,9 +7,9 @@ import type { GrantOrigin } from "@/lib/access/types"
 export function originLabel(t: TFunction, origin: GrantOrigin): string {
   switch (origin.kind) {
     case "direct":
-      return t("org.access.origin.direct")
+      return t("org.accessModelLegend.direct.label")
     case "creator":
-      return t("org.access.origin.creator")
+      return t("org.accessModelLegend.creator.label")
     case "platform":
       return t("org.access.origin.platform")
     case "inherited":

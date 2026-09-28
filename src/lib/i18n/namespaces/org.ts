@@ -14,10 +14,9 @@ export const org = defineNamespace({
     "org.breadcrumb.organizationFallback": "Organization",
 
     // -- AQU-1352 access primitives: grant-origin badges, inspector, inherited controls --
-    "org.access.origin.direct": "Direct",
+    // "Direct"/"Creator" origin badges → org.accessModelLegend.{direct,creator}.label (same grant-path names)
     "org.access.origin.inherited": "Inherited",
     "org.access.origin.inheritedFrom": "Inherited · {path}",
-    "org.access.origin.creator": "Creator",
     "org.access.origin.platform": "Platform admin",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",

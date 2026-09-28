@@ -99,11 +99,16 @@ export function RulesSurface({
   // AQU-609: lane scope for PROJECT rules. Named lanes come from the project
   // record; `''` (the default lane) is labeled with the base target language.
   const projectLanes = project.targetLanes ?? []
-  const defaultLaneLabel = project.targetLanguage || undefined
-  const laneBadgeLabel = (rule: TranslationRule): string =>
-    (rule.lane ?? "") === ""
-      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-      : rule.lane ?? ""
+  const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
+  const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
+  const defaultLaneLabel = defaultLaneRow?.name || project.targetLanguage || undefined
+  const laneLabels = Object.fromEntries(
+    laneRows.map((lane) => [lane.legacyTag ?? "", lane.name]),
+  )
+  const laneBadgeLabel = (rule: TranslationRule): string => {
+    const tag = rule.lane ?? ""
+    return laneLabels[tag] || (tag === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : tag)
+  }
 
   // AQU-609: display filter for the Project Rules list. Options list only
   // lanes that actually hold rules — a 150-lane project must not produce a
@@ -245,6 +250,7 @@ export function RulesSurface({
             className="shrink-0 rounded-none border-0"
             cells={cells}
             lanes={projectLanes}
+            laneLabels={laneLabels}
             defaultLaneLabel={defaultLaneLabel}
             onSave={async (rule) => {
               await addRule(rule)
@@ -447,6 +453,7 @@ export function RulesSurface({
                             initialRule={rule}
                             cells={cells}
                             lanes={projectLanes}
+                            laneLabels={laneLabels}
                             defaultLaneLabel={defaultLaneLabel}
                             onSave={async (updates) => {
                               await updateRule(rule.id, updates)

@@ -101,6 +101,8 @@ interface AssignModalProps {
    * to the pre-lane flow).
    */
   targetLanes?: string[]
+  /** Display names keyed by lane tag, including '' for the default lane. */
+  laneLabels?: Readonly<Record<string, string>>
   /**
    * AQU-538 (§3.5): lane to pre-select — the surface's active lane (workspace)
    * or the lane row the modal was launched from (PM surfaces). Defaults to ''
@@ -194,6 +196,7 @@ export function AssignModal({
   activeFileId,
   projectFiles,
   targetLanes,
+  laneLabels,
   defaultLane = "",
   defaultLaneLabel,
   members,
@@ -353,11 +356,12 @@ export function AssignModal({
     // "Portuguese"). The option value is a sentinel, not '': Base UI treats
     // '' as "nothing selected", which is what made this control read as
     // "default". The sentinel is mapped back to the default lane on submit
-    // and is never stored.
-    const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
+    // and is never stored. AQU-1418: a lane row's name wins over the tag for
+    // every lane, the default included; the tag is the fallback.
+    const defaultLabel = laneLabels?.[""]?.trim() || defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
     const all = [
       { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
-      ...extra.map((lane) => ({ value: lane, label: lane })),
+      ...extra.map((lane) => ({ value: lane, label: laneLabels?.[lane] || lane })),
     ]
     // AQU-581: a lane delegate may only assign inside the lanes the org
     // scoped them to, so don't offer the rest — a lane in this picker that
@@ -369,7 +373,7 @@ export function AssignModal({
     return allowed.length > 0
       ? all.filter((item) => allowed.includes(laneTagForAssignment(item.value) ?? ""))
       : all
-  }, [targetLanes, defaultLaneLabel, effectiveDelegate, t])
+  }, [targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.

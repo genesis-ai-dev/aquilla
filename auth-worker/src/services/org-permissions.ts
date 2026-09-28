@@ -1109,6 +1109,12 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the `lanes` row. Absent when the project has no row yet. */
+  name?: string | null
+  /** Opaque lane id. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1244,7 +1250,7 @@ async function fetchPortfolioLanes(
       : ""
   const orgBinds: unknown[] = [...orgIds]
   const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
-  const [laneRows, settingsRows] = await Promise.all([
+  const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
@@ -1271,6 +1277,19 @@ async function fetchPortfolioLanes(
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT l.project_id AS project_id, l.id AS id, l.name AS name,
+              l.legacy_tag AS legacy_tag, l.position AS position
+         FROM lanes l
+         JOIN projects p ON p.id = l.project_id
+        WHERE l.role = 'target' AND p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<{
+      project_id: string
+      id: string
+      name: string
+      legacy_tag: string | null
+      position: number
+    }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
   // AQU-1083: which projects leave structural cells out. Absent = count them,
@@ -1327,10 +1346,35 @@ async function fetchPortfolioLanes(
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
     }
   }
+  for (const row of nameRows.results ?? []) {
+    const tag = row.legacy_tag ?? ""
+    let lanes = acc.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      acc.set(row.project_id, lanes)
+    }
+    let entry = lanes.get(tag)
+    if (!entry) {
+      const denominator = lanes.get("")?.totalCells ?? 0
+      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
+      lanes.set(tag, entry)
+    }
+    entry.name = row.name
+    entry.laneId = row.id
+    entry.position = Number(row.position) || 0
+  }
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
-      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+      [...lanes.values()].sort((a, b) => {
+        const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
+        const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
+        if (ap !== bp) return ap - bp
+        if (a.lane === b.lane) return 0
+        if (a.lane === "") return -1
+        if (b.lane === "") return 1
+        return a.lane < b.lane ? -1 : 1
+      }),
     )
   }
   return byProject

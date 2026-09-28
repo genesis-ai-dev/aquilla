@@ -15,8 +15,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
-// AQU-1352: the destination picker fetches create-targets on open; empty keeps the prop orgId.
-vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn().mockResolvedValue([]) }))
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -92,6 +97,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -115,6 +121,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -143,6 +150,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
     fillValidSelfContained()
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {

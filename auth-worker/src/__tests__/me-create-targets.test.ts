@@ -75,10 +75,24 @@ describe("AQU-1352 GET /api/v2/me/create-targets", () => {
 
   it("an existing personal org is returned once, as personal (not duplicated as an org)", async () => {
     await seedOrg()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (11, 'maint''s workspace', 2, 'personal')",
+    ).run()
+    const targets = await targetsFor("maint")
+    expect(targets.filter((t) => t.orgId === 11)).toHaveLength(1)
+    expect(targets[0]).toMatchObject({ kind: "personal", orgId: 11 })
+  })
+
+  it("an owned TEAM org is an org target, not Personal (billing_scope identifies personal)", async () => {
+    // Review finding: owner_user_id alone mislabeled user 1's team org 10 as
+    // Personal and hid it from the org list, so picking "Personal" created
+    // into the team org. User 1 has no personal org yet.
+    await seedOrg()
     const targets = await targetsFor("owner")
-    // user 1 owns org 10, which is what getOrCreateUserOrg would return.
-    expect(targets.filter((t) => t.orgId === 10)).toHaveLength(1)
-    expect(targets[0]).toMatchObject({ kind: "personal", orgId: 10 })
+    expect(targets.find((t) => t.orgId === 10)).toMatchObject({ kind: "org", name: "Biblica ETT", role: 700 })
+    expect(targets.filter((t) => t.kind === "personal")).toEqual([
+      expect.objectContaining({ kind: "personal", orgId: null }),
+    ])
   })
 
   it("a platform admin sees every org (getEffectiveOrgRole treats them as owner)", async () => {

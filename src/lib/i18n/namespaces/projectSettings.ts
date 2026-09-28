@@ -38,6 +38,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.destinationThisOrg": "this organization",
     "projectSettings.create.destinationRoleHint":
       "You're a {role} in {org}, so you can't create projects there. You can create one in Personal.",
+    "projectSettings.create.destinationNotAllowedHint":
+      "You can't create projects in {org}. You can create one in Personal.",
+    "projectSettings.create.destinationLoadError":
+      "Couldn't load where you can create projects. Close this dialog and try again.",
+    "projectSettings.create.createdToast": "Created {name} in {destination}",
     // AQU-1352 P2: teams multi-select under the destination picker.
     "projectSettings.create.teamsLabel": "Teams",
     "projectSettings.create.teamsPlaceholder": "Choose teams",
@@ -876,6 +881,24 @@ export const projectSettings = defineNamespace({
         placeholders: {
           role: "Singular localized role name, e.g. 'Contributor' or 'Guest'.",
           org: "Organization name, e.g. 'Biblica ETT'.",
+        },
+      },
+      "projectSettings.create.destinationNotAllowedHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller may " +
+          "not create projects in the page's org and their role there is unknown.",
+        placeholders: { org: "Organization name, e.g. 'Biblica ETT'." },
+      },
+      "projectSettings.create.destinationLoadError": {
+        description:
+          "Error in the create-project dialog when the list of places the user may " +
+          "create a project could not be loaded. Creating is blocked until it loads.",
+      },
+      "projectSettings.create.createdToast": {
+        description: "Success toast after creating a project, naming where it was created.",
+        placeholders: {
+          name: "The new project's name.",
+          destination: "Where it was created: an organization name or the user's personal workspace name.",
         },
       },
       "projectSettings.create.teamsLabel": {

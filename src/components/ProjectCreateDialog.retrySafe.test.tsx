@@ -10,8 +10,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
-// AQU-1352: the destination picker fetches create-targets on open; empty keeps the prop orgId.
-vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn().mockResolvedValue([]) }))
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -102,6 +107,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics()
 
     clickCreate()
@@ -132,6 +138,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     // Session 1: create "Russian BSB" successfully → dialog closes.
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {
@@ -143,6 +150,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     // Session 2: reopen and create a project with the SAME name.
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {

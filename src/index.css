@@ -565,7 +565,8 @@ textarea,
 /* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
    each other, since a validated line shows the same green check for text and
    audio. Pointing at the audio check outlines the waveform it is about;
-   pointing at the waveform rings its check. Hooks: `.audio-check` on the
+   pointing at the waveform frames its check — in a rounded square, the
+   waveform's own 6px corners, not a circle (Sam, same day). Hooks: `.audio-check` on the
    validation column (AudioValidationControl), `.voice-card-wave` on the card's
    waveform (CellVoicePanel). */
 [data-grid-row]:has(.audio-check:hover) .voice-card-wave {
@@ -575,5 +576,5 @@ textarea,
 [data-grid-row]:has(.voice-card-wave:hover) .audio-check > * {
   outline: 2px solid color-mix(in oklab, var(--foreground) 35%, transparent);
   outline-offset: 2px;
-  border-radius: 9999px;
+  border-radius: 6px;
 }

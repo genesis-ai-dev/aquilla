@@ -112,9 +112,10 @@ branches cut from `dev`; `main` is retired.
    HEAD — the branch guard and the tag script both need it), run
    `pnpm run deploy:aquilla`. After the live checks pass,
    `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes the tag. The
-   date comes from the branch, NN starts at `00` and counts verified
-   production deploys in that date's series independently of the branch's own
-   `-NN` suffix, and redeploying an already-tagged commit reuses its tag. The
+   date and the first NN come from the branch: `release/YYYY/MM/DD-02` is
+   tagged `YYYY.MM.DD.02`, and a plain `release/YYYY/MM/DD` branch starts at
+   `00`. If that number is already taken, the tag takes one past the highest
+   in the series. Redeploying an already-tagged commit reuses its tag. The
    annotated tag message includes the release branch, deployed commit SHA,
    GitHub commit/checks URLs, and the Workers Builds preview URL for that
    release branch, tying the production tag back to the QA preview artifact.

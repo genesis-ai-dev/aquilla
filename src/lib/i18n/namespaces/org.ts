@@ -42,6 +42,16 @@ export const org = defineNamespace({
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
     "org.access.scope.lane": "lane",
+    // -- AQU-1352 §3.6 People & access page (AQU-1072) --
+    "org.access.page.title": "People & access",
+    "org.access.page.treeView": "By scope",
+    "org.access.page.noDirect": "No direct grants",
+    "org.access.page.chip": "{role} @ {path}",
+    "org.access.page.loadError": "Couldn't load people and access for this organization.",
+    "org.access.page.csvPerson": "Person",
+    "org.access.page.csvOrigin": "Origin",
+    "org.access.page.csvGrantedBy": "Granted by",
+    "org.access.page.csvGrantedAt": "Granted at",
 
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
@@ -1539,6 +1549,14 @@ export const org = defineNamespace({
       },
       "org.access.effective.via": {
         description: "Effective role and the ancestor scope it is inherited through.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.open": {
+        description: "Accessible name of the button that opens the member-access inspector for a person.",
+        placeholders: { name: "The person's username or display name." },
+      },
+      "org.access.page.chip": {
+        description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
       "org.access.effective.creator": {

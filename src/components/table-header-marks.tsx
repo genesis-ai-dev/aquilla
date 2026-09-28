@@ -25,8 +25,9 @@ function Mark({ label, className, children }: { label: string; className?: strin
 }
 
 /** Over the row gutter: select, notices, and the number when lines are
- *  numbered — by verse in a scripture file, by line otherwise. */
-export function GutterMarks({ numbers }: { numbers: "verse" | "line" | null }) {
+ *  numbered — "Verse number" in a file of chapters (a book of the Bible),
+ *  "Cell number" anywhere else (Sam, 2026-09-28). */
+export function GutterMarks({ numbers }: { numbers: "verse" | "cell" | null }) {
   const t = useT()
   return (
     <div data-testid="table-gutter-marks" className="hidden items-center md:flex">
@@ -39,7 +40,7 @@ export function GutterMarks({ numbers }: { numbers: "verse" | "line" | null }) {
         </Mark>
         {numbers && (
           <Mark
-            label={t(numbers === "verse" ? "editor.gutter.verseNumber" : "editor.gutter.lineNumber")}
+            label={t(numbers === "verse" ? "editor.gutter.verseNumber" : "editor.gutter.cellNumber")}
             className="min-w-0 flex-1"
           >
             <Hash className="h-3 w-3" />

@@ -16,9 +16,10 @@ describe("the table header's column marks", () => {
     await expectTooltip(marks[1], /^Notices:/)
   })
 
-  it("says Line number where lines are counted, not verses", () => {
-    renderWithTooltips(<GutterMarks numbers="line" />)
-    expect(screen.getByRole("img", { name: "Line number" })).toBeInTheDocument()
+  // Sam, 2026-09-28: "Cell number" everywhere but a file of chapters.
+  it("says Cell number where cells are counted, not verses", () => {
+    renderWithTooltips(<GutterMarks numbers="cell" />)
+    expect(screen.getByRole("img", { name: "Cell number" })).toBeInTheDocument()
   })
 
   it("has no number mark when line numbers are off", () => {
@@ -27,7 +28,7 @@ describe("the table header's column marks", () => {
   })
 
   it("keeps each mark to its column's width", () => {
-    renderWithTooltips(<GutterMarks numbers="line" />)
+    renderWithTooltips(<GutterMarks numbers="cell" />)
     const [select, notices, number] = screen.getAllByRole("img")
     expect(select.className).toContain("w-5")
     expect(notices.className).toContain("w-5")

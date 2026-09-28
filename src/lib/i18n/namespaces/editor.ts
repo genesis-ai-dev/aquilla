@@ -1379,7 +1379,7 @@ export const editor = defineNamespace({
     "editor.gutter.select": "Select lines for batch actions. Drag up or down the column to select a range.",
     "editor.gutter.notices": "Notices: open comments, a changed source, lost formatting, a voice that failed",
     "editor.gutter.verseNumber": "Verse number",
-    "editor.gutter.lineNumber": "Line number",
+    "editor.gutter.cellNumber": "Cell number",
     "editor.gutter.textChecks": "Text validation",
     "editor.gutter.audioChecks": "Audio validation",
 
@@ -5067,10 +5067,10 @@ export const editor = defineNamespace({
           "of numbers, when those numbers are Bible verse numbers.",
         maxLength: 24,
       },
-      "editor.gutter.lineNumber": {
+      "editor.gutter.cellNumber": {
         description:
-          "Tooltip on the same mark when the numbers simply count the lines (not " +
-          "Bible verses).",
+          "Tooltip on the same mark when the numbers simply count the cells (the " +
+          "rows of the table) rather than being Bible verse numbers.",
         maxLength: 24,
       },
       "editor.gutter.textChecks": {

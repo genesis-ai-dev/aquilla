@@ -2777,7 +2777,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               )}
             </div>
           ) : (
-            <GutterMarks numbers={lineNumbersEnabled ? (scriptureNumbering ? "verse" : "line") : null} />
+            <GutterMarks numbers={lineNumbersEnabled ? (scriptureNumbering ? "verse" : "cell") : null} />
           )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}

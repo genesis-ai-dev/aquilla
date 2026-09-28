@@ -102,24 +102,6 @@ describe("lane read wall", () => {
     expect(named.settings.targetLanes).toEqual(["Yoruba Team"])
   })
 
-  it("drops lane records the caller was not granted", () => {
-    const filtered = filterSettingsToVisibleLanes(
-      {
-        settings: { targetLanes: ["es"] },
-        lanes: [
-          { id: "es", name: "Spanish" },
-          { id: "fr", name: "French" },
-        ],
-      },
-      new Set(["es"]),
-      [
-        { id: "es", name: "Spanish", legacyTag: "es" },
-        { id: "fr", name: "French", legacyTag: "fr" },
-      ],
-    )
-    expect(filtered.lanes.map((lane) => lane.id)).toEqual(["es"])
-  })
-
   it("sums only the granted lanes and hides the default language name", () => {
     const lanes = [
       { id: "def", name: "Spanish", legacyTag: "" },
@@ -144,5 +126,27 @@ describe("lane read wall", () => {
     expect(visibleDefaultLaneLanguage("Spanish", tags)).toBeNull()
     expect(visibleDefaultLaneLanguage("Spanish", new Set([""]))).toBe("Spanish")
     expect(portfolioTextFromVisibleLanes([], null)).toBeNull()
+  })
+
+  it("keeps only the granted target lane rows, and every source lane row (AQU-1418)", () => {
+    const lanes = [
+      { id: "es", name: "Spanish", legacyTag: "es" },
+      { id: "fr", name: "French", legacyTag: "fr" },
+    ]
+    const rows = [
+      { id: "src", role: "source" },
+      { id: "es", role: "target" },
+      { id: "fr", role: "target" },
+    ]
+    const filtered = filterSettingsToVisibleLanes(
+      { settings: { targetLanes: ["Spanish", "French"] }, lanes: rows },
+      new Set(["es"]),
+      lanes,
+    )
+    expect(filtered.lanes?.map((lane) => lane.id)).toEqual(["src", "es"])
+    expect(filtered.settings.targetLanes).toEqual(["Spanish"])
+    // A response without rows, and an unrestricted caller, are left alone.
+    expect(filterSettingsToVisibleLanes({ settings: {}, lanes: undefined }, new Set(["es"]), lanes).lanes).toBeUndefined()
+    expect(filterSettingsToVisibleLanes({ settings: {}, lanes: rows }, null, lanes).lanes).toBe(rows)
   })
 })

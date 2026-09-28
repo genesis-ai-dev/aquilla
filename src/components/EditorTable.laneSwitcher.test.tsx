@@ -1,11 +1,15 @@
 /**
- * The editor-header target-lane switcher. A maintainer always sees the
- * dropdown. A contributor sees it when more than one lane was handed in, and
- * a static pill when there is only one.
+ * AQU-608: the editor-header TARGET-tag lane switcher is a maintainer-and-above
+ * affordance. This test renders the real EditorTable with more than one lane and
+ * an `onLaneChange` handler, and proves:
+ *   - a maintainer (600) sees the interactive dropdown (`lane-switcher`);
+ *   - a contributor (400) does NOT — the tag falls back to a static pill that
+ *     still names the target language, so translators keep to their lane.
+ * The dropdown UI itself landed with AQU-602; this locks in the role gate.
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -99,7 +103,15 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(level: number, targetLanguage = "fr") {
+function renderTable(
+  level: number,
+  targetLanguage = "fr",
+  {
+    lanes = ["", "es"],
+    scopedLanes = null as string[] | null,
+    laneLabels = undefined as Record<string, string> | undefined,
+  } = {},
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -109,9 +121,11 @@ function renderTable(level: number, targetLanguage = "fr") {
           cellStore={makeStore()}
           username="tester"
           activeLane=""
-          lanes={["", "es"]}
+          lanes={lanes}
+          scopedLanes={scopedLanes}
           onLaneChange={() => {}}
           defaultLaneLabel="fr"
+          laneLabels={laneLabels}
           isCompletionConfigured={false}
           isCompletionAvailable={false}
           completing={new Map()}
@@ -131,50 +145,26 @@ function renderTable(level: number, targetLanguage = "fr") {
   )
 }
 
-describe("EditorTable — lane switcher", () => {
+describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
   it("shows the interactive dropdown for a maintainer", async () => {
     renderTable(ROLE.MAINTAINER)
     expect(await screen.findByTestId("lane-switcher")).toBeInTheDocument()
   })
 
-  it("opens the switcher for a contributor who was handed more than one lane", async () => {
+  it("hides the switcher for a contributor, leaving a static target-language pill", async () => {
     renderTable(ROLE.CONTRIBUTOR)
-    expect(await screen.findByTestId("lane-switcher")).toBeInTheDocument()
-  })
-
-  it("keeps a static pill for a contributor with a single lane", async () => {
-    const qc = new QueryClient()
-    render(
-      <QueryClientProvider client={qc}>
-        <EditorActionsProvider value={{}}>
-          <EditorTable
-            project={makeProject(ROLE.CONTRIBUTOR, "fr")}
-            cellStore={makeStore()}
-            username="tester"
-            activeLane=""
-            lanes={[""]}
-            onLaneChange={() => {}}
-            defaultLaneLabel="fr"
-            isCompletionConfigured={false}
-            isCompletionAvailable={false}
-            completing={new Map()}
-            examples={new Map()}
-            errors={new Map()}
-            previews={new Map()}
-            onCompleteSingle={() => {}}
-            onCompleteBatch={() => {}}
-            healthMap={new Map()}
-            lineNumbersEnabled={false}
-            cellLabelsEnabled={false}
-            sourceTextDirection="ltr"
-            targetTextDirection="ltr"
-          />
-        </EditorActionsProvider>
-      </QueryClientProvider>,
-    )
+    // The row renders (proves the header mounted) but no lane switcher exists…
     await screen.findByText("bonjour")
     expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+    // …and the target language is still shown as a plain pill.
     expect(screen.getByText("fr")).toBeInTheDocument()
+  })
+
+  it("names the static pill from the lane label, the same way the switcher does", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { laneLabels: { "": "Spanish" } })
+    await screen.findByText("bonjour")
+    expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+    expect(screen.getByText("Spanish")).toBeInTheDocument()
   })
 
   // AQU-583: with extra lanes registered but no default target language set, the
@@ -185,5 +175,29 @@ describe("EditorTable — lane switcher", () => {
     const switcher = await screen.findByTestId("lane-switcher")
     expect(switcher).toBeInTheDocument()
     expect(switcher).toHaveTextContent("Set target language")
+  })
+})
+
+// A member the org limited to certain lanes (AQU-553) is below MAINTAINER, so
+// AQU-608 alone would leave them on the default lane with no way to their own —
+// a lane coordinator (AQU-581) couldn't open the lane they hand work out in.
+describe("EditorTable — a lane-limited member switches among their own lanes", () => {
+  it("offers a contributor limited to two lanes a switcher with only those lanes", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es", "de"] })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent)
+    expect(options).toEqual(["es", "de"])
+  })
+
+  it("gives a contributor limited to one lane no switcher — there is nothing to switch to", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"] })
+    await screen.findByText("bonjour")
+    expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+  })
+
+  it("keeps every lane for a maintainer, whatever the scopes say", async () => {
+    renderTable(ROLE.MAINTAINER, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"] })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["fr", "es", "de"])
   })
 })

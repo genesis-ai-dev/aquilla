@@ -21,6 +21,31 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /**
+   * AQU-777: open the attachments drawer scrolled to one attachment. Fired by
+   * an attachment link under a cell. Here rather than on the row bag for this
+   * module's whole reason: the workspace owns the drawer state and renders it
+   * outside the table, so a row only needs a stable way to fire it.
+   */
+  onOpenAttachment?: (cellId: string, attachmentId: string) => void
+  /**
+   * AQU-777: this file's attachments, by cell id. Rows read their own group
+   * out of it to render the links under the cell and count the rail's badge.
+   *
+   * ONE MAP FOR THE FILE, not a per-row array, and that is the point: a fresh
+   * array per row would fail MemoizedRow's shallow compare for every rendered
+   * row on every attach. The map identity changes only when the file's
+   * attachments actually change.
+   */
+  attachmentsByCell?: ReadonlyMap<string, readonly import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord[]>
+  /**
+   * AQU-777: an attachment just landed on this cell, with a record shaped like
+   * the server's. The workspace merges it optimistically so the link shows
+   * before the outbox flush lands.
+   */
+  onAttachmentAdded?: (
+    record: import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord,
+  ) => void
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
@@ -131,6 +156,17 @@ export interface EditorActionsContextValue {
   onInsertCellBeside?: (cellId: string, position: "above" | "below") => void
   /** Take this cell out, after the confirmation its inventory earns. */
   onRemoveCell?: (cellId: string) => void
+  /**
+   * AQU-1422: park this cell, or bring it back. The reversible sibling of
+   * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no
+   * Maintainer: the source text, every lane's translation, recordings, comments
+   * and validations are all still there and come back untouched.
+   *
+   * Absent ⇒ this person may not park cells here at all (the same gate as
+   * "Edit text": Project Lead and up on a cloud project whose source is neither
+   * live-linked nor DCS-pinned).
+   */
+  onSetCellHidden?: (cellId: string, hidden: boolean) => void
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

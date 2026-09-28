@@ -24,9 +24,10 @@ function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  return a.targetLang
-    ? `${base}?lane=${encodeURIComponent(a.targetLang)}`
-    : base
+  const lane = a.laneId || a.targetLang
+  return lane
+    ? `${base}?lane=${encodeURIComponent(lane)}`
+    : `${base}?lane=`
 }
 
 function progressPct(a: MyOrgAssignment): number {
@@ -69,9 +70,12 @@ export function AssignedToMe() {
     setError(null)
     void (async () => {
       try {
+        // AQU-729: lane labels are display-only. A portfolio miss must not
+        // hide the assignments themselves — that is the bug this list is
+        // here to avoid.
         const [all, portfolio] = await Promise.all([
           getMyAssignmentsForOrg(jwt, activeOrgId),
-          getPortfolio(jwt, activeOrgId),
+          getPortfolio(jwt, activeOrgId).catch(() => []),
         ])
         if (cancelled) return
         const labels = new Map(
@@ -107,6 +111,7 @@ export function AssignedToMe() {
               <span className="truncate">{a.scopeLabel}</span>
               <AssignmentLaneBadge
                 targetLang={a.targetLang}
+                laneName={a.laneName}
                 defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
                 fallbackLabel={laneFallbackLabel}
               />
@@ -224,6 +229,7 @@ export function AssignedToMe() {
                   a.targetLang ?? "",
                   defaultLaneLabelByProjectId.get(a.projectId) ?? "",
                   laneFallbackLabel,
+                  a.laneName,
                 )
                 return (
                   a.scopeLabel.toLowerCase().includes(q) ||

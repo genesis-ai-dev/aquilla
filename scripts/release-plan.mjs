@@ -19,9 +19,17 @@ export function isReleaseBranch(name) {
 // not hold by themselves — see the 2026-09-23 note in the release line plan.
 const HOLDING_AREAS = new Set(["migration", "infra"])
 
+// "verify-" catches every verify-*.{sh,mjs} script (verify-deploy-branch,
+// verify-dist-host, verify-deployment-artifacts, verify-live-environment,
+// verify-worker-deployment) — all of them run unattended during
+// `deploy:aquilla*` or are imported by scripts/cloudflare-version-deploy.mjs,
+// which does. tag-metadata and record-github-deployment run from
+// tag-release.sh right before the tag push; assert-workers-build-env and
+// ci-build are what Cloudflare's own build trigger runs for every branch,
+// including the production one.
 const AREA_PATTERNS = [
   ["migration", /^db\/postgres\/(migrations\/|schema\.sql$)/],
-  ["infra", /(^|\/)wrangler\.toml$|^config\/cloudflare-deployments\.json$|^scripts\/(cloudflare-|verify-deploy|resolve-deployment|tag-release)/],
+  ["infra", /(^|\/)wrangler\.toml$|^config\/cloudflare-deployments\.json$|^scripts\/(cloudflare-|verify-|resolve-deployment|tag-release|tag-metadata|record-github-deployment|assert-workers-build-env|ci-build)/],
   ["sync", /^(sync-worker\/src\/|src\/lib\/sync\/|db\/shim\/)/],
   ["auth", /^auth-worker\/src\//],
 ]

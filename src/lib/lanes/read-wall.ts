@@ -103,8 +103,14 @@ export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds
 /**
  * Drop lane labels the caller was not granted. `visible === null` returns the
  * response unchanged. `lanes` maps those ids to the names the UI shows.
+ *
+ * AQU-1418 lane rows (`response.lanes`) ride the same response: behind the
+ * wall only the granted target lane rows are kept, like `targetLanes`.
+ * Source lane rows are not hidden by the wall.
  */
-export function filterSettingsToVisibleLanes<T extends { settings: Record<string, unknown> }>(
+export function filterSettingsToVisibleLanes<
+  T extends { settings: Record<string, unknown>; lanes?: readonly { id: string; role: string }[] },
+>(
   response: T,
   visible: VisibleLaneTags,
   lanes: readonly LaneIdentity[] = [],
@@ -121,5 +127,11 @@ export function filterSettingsToVisibleLanes<T extends { settings: Record<string
   if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
     settings.targetLanguage = ""
   }
-  return { ...response, settings }
+  const rows = response.lanes
+  if (rows === undefined) return { ...response, settings }
+  return {
+    ...response,
+    settings,
+    lanes: rows.filter((lane) => lane.role !== "target" || visible.has(lane.id)),
+  }
 }

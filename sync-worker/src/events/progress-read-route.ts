@@ -636,7 +636,7 @@ export async function handleProgressReadRequest(
       validationCount: 1,
       file: {
         totalCount: 0, filledCount: 0, validatedCount: 0, validationLevels: [0],
-        audioCount: 0, audioValidatedCount: 0,
+        audioCount: 0, audioValidatedCount: 0, audioValidationLevels: [0],
       },
       sections: [],
       source: 'projection',

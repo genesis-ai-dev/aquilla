@@ -323,20 +323,26 @@ describe("the takes drawer, pulled up", () => {
     )
     return { toggle: screen.getByTestId("rec-takes-toggle"), onClose }
   }
-  const lineHidden = () => screen.getByTestId("rec-read-aloud").closest(".hidden") != null
+  const sheet = () => screen.getByTestId("rec-takes-group").getAttribute("data-sheet")
+  const lineCovered = () => screen.getByTestId("rec-read-aloud").closest("[inert]") != null
 
-  it("has a handle left of Takes that pulls the takes over the line, and puts them back", () => {
+  it("has a handle left of Takes that raises the takes over the line, and puts them back", () => {
     attachmentsState.byCellId = twoTakes()
     const { toggle } = draw()
     expect(toggle.firstElementChild?.tagName.toLowerCase()).toBe("svg")
     expect(toggle).toHaveTextContent("Takes 2")
     expect(toggle).toHaveAttribute("aria-expanded", "false")
-    expect(lineHidden()).toBe(false)
+    expect(sheet()).toBe("down")
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-    expect(lineHidden()).toBe(true)
+    // Risen from the bottom, as tall as its takes (the height is the
+    // browser's; the live walk measures it) — the line is covered, not gone.
+    expect(sheet()).toBe("up")
+    expect(screen.getByTestId("rec-takes-group").className).toContain("bottom-0")
+    expect(lineCovered()).toBe(true)
     fireEvent.click(toggle)
-    expect(lineHidden()).toBe(false)
+    expect(sheet()).toBe("down")
+    expect(lineCovered()).toBe(false)
   })
 
   it("goes down on Escape, before anything closes", () => {
@@ -356,7 +362,7 @@ describe("the takes drawer, pulled up", () => {
     fireEvent.click(toggle)
     fireEvent.keyDown(window, { key: " " })
     expect(toggle).toHaveAttribute("aria-expanded", "false")
-    expect(lineHidden()).toBe(false)
+    expect(sheet()).toBe("down")
   })
 
   it("has nothing to pull up on a line with no takes", () => {

@@ -472,8 +472,9 @@ export function AudioRecordingModal({
   // permanent shelf: the 16:9 column is short, and the instruments are what you
   // are looking at while recording. Collapsed, the drawer is always open
   // because the portrait column has the room and nothing else wants it — and
-  // it can also be pulled up over the line and the instruments, to see every
-  // take at once (Sam, 2026-09-28). `takesOpen` is that in both layouts.
+  // it can also be pulled up over the line and the instruments, as far as its
+  // takes need, to see every one at once (Sam, 2026-09-28). `takesOpen` is
+  // that in both layouts.
   const [takesOpen, setTakesOpen] = useState(false)
   const takesSheet = !showFilm && takesOpen
 
@@ -1990,6 +1991,9 @@ export function AudioRecordingModal({
             </div>
           </div>
 
+          {/* Everything under the header, positioned so the takes sheet can
+              rise within it — never over the header. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
           {/* THE LINE — source above, the line to speak below.
               The read-aloud block owns the space of FIVE line boxes (26/33
               expanded, 23/30 collapsed) and a longer line shrinks to fit it
@@ -2005,10 +2009,10 @@ export function AudioRecordingModal({
               read-aloud block inside keeps its own five-line cap regardless. */}
           <div
             ref={setUpperEl}
+            // Under the takes sheet nothing here can be reached — not even by Tab.
+            inert={takesSheet || undefined}
             className={cn(
               "flex min-h-0 flex-col overflow-y-auto",
-              // Under the takes sheet: the strip and the drawer take the panel.
-              takesSheet && "hidden",
               // Expanded it also GROWS, so the spacer below can push the
               // instruments to the bottom of the column.
               showFilm && "flex-1",
@@ -2612,6 +2616,20 @@ export function AudioRecordingModal({
 
           </div>{/* end line + instruments */}
 
+          {/* THE TAKES — the strip, and without the film the drawer under it.
+              Pulled up (Sam, 2026-09-28) they rise from the bottom over the
+              line and the instruments, only as far as the takes need, capped
+              at the room under the header and scrolling past it. */}
+          <div
+            data-testid="rec-takes-group"
+            data-sheet={takesSheet ? "up" : "down"}
+            className={cn(
+              "flex flex-col",
+              // Down: the drawer takes whatever the column leaves.
+              !showFilm && !takesSheet && "flex-1",
+              takesSheet && "absolute inset-x-0 bottom-0 z-20 max-h-full bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]",
+            )}
+          >
           {/* THE UTILITY STRIP — takes, the format the takes are in, and the
               settings that describe recording. One row, always in the same
               place. Expanded it is a disclosure bar with the list raised over
@@ -2826,6 +2844,8 @@ export function AudioRecordingModal({
               )}
             </div>
           )}
+          </div>{/* end takes */}
+          </div>{/* end body */}
         </div>
 
         {/* i18n-exempt CSS keyframes for the countdown "pop", not user-visible copy */}

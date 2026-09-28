@@ -1171,7 +1171,7 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
 CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     project_id TEXT    NOT NULL,
     user_id    BIGINT  NOT NULL,
-    lane       TEXT    NOT NULL,          -- lanes.id (0112). The UI shows lanes.name, never this id.
+    lane       TEXT    NOT NULL,          -- lanes.id (0115). The UI shows lanes.name, never this id.
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),

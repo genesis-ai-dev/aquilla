@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -198,7 +199,14 @@ export function MembersTab({
         key={m.userId}
         className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
       >
-        <UsernameWithAvatar username={m.username} />
+        <MemberInspectorTrigger
+          userId={m.userId}
+          username={m.username}
+          from={{ type: "project", id: projectId }}
+          herePath={[{ type: "project", id: projectId, name: t("org.access.inspector.thisProject") }]}
+        >
+          <UsernameWithAvatar username={m.username} />
+        </MemberInspectorTrigger>
         <SourceBadge source={m.role.source} />
         <RoleLabel name={m.role.name} />
 

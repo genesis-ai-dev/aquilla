@@ -52,7 +52,7 @@ export function parseFromScope(raw: string | undefined): FromScope | null {
 }
 
 // ── Grant rows, named ─────────────────────────────────────────────────────
-interface NamedGrantRow {
+export interface NamedGrantRow {
   scope_type: string
   scope_id: string
   role_level: number
@@ -67,7 +67,7 @@ interface NamedGrantRow {
   project_name: string | null
 }
 
-interface NamedGrant {
+export interface NamedGrant {
   scopeType: string
   scopeId: string
   roleLevel: number
@@ -105,7 +105,12 @@ async function loadNamedGrants(env: Env, userId: number): Promise<NamedGrant[]> 
   )
     .bind(userId)
     .all<NamedGrantRow>()
-  return (results ?? []).map((r) => ({
+  return (results ?? []).map(toNamedGrant)
+}
+
+/** Row → NamedGrant; shared with the org People & access read (routes/org-access.ts). */
+export function toNamedGrant(r: NamedGrantRow): NamedGrant {
+  return {
     scopeType: r.scope_type,
     scopeId: String(r.scope_id),
     roleLevel: Number(r.role_level),
@@ -118,7 +123,7 @@ async function loadNamedGrants(env: Env, userId: number): Promise<NamedGrant[]> 
     teamId: str(r.team_id),
     teamName: r.team_name,
     projectName: r.project_name,
-  }))
+  }
 }
 
 const grantKey = (g: { scopeType: string; scopeId: string; source: string; viaTeamId: string | null }) =>
@@ -149,7 +154,7 @@ function originOf(g: NamedGrant): GrantOrigin {
 }
 
 // ── Viewer visibility (rule 4) ────────────────────────────────────────────
-class ViewerScope {
+export class ViewerScope {
   private orgRoles = new Map<number, number | null>()
   private rosterFloors = new Map<number, number>()
   private projectFloors = new Map<number, number>()
@@ -293,7 +298,7 @@ export async function buildMemberAccess(
   }
 }
 
-async function visibleTo(vs: ViewerScope, g: NamedGrant): Promise<boolean> {
+export async function visibleTo(vs: ViewerScope, g: NamedGrant): Promise<boolean> {
   if (g.scopeType === "project") return vs.canSeeProject(g.scopeId, g.orgId)
   return g.orgId != null && vs.canSeeOrg(g.orgId)
 }
@@ -301,7 +306,7 @@ async function visibleTo(vs: ViewerScope, g: NamedGrant): Promise<boolean> {
 const pathText = (p: ScopePath) => p.map((r) => r.name).join(" › ")
 
 // grantedBy carries a user id until nameGranters swaps in the display name.
-function toEntry(g: NamedGrant): AccessChainEntry {
+export function toEntry(g: NamedGrant): AccessChainEntry {
   return {
     scopePath: scopePathOf(g),
     roleLevel: g.roleLevel,
@@ -323,7 +328,7 @@ function chainEntry(link: ChainLink, byKey: Map<string, NamedGrant>): { key: str
   return { key, entry }
 }
 
-async function nameGranters(env: Env, entries: AccessChainEntry[]): Promise<void> {
+export async function nameGranters(env: Env, entries: AccessChainEntry[]): Promise<void> {
   const ids = [...new Set(entries.map((e) => e.grantedBy).filter((v): v is string => !!v))]
   if (ids.length === 0) return
   const { results } = await env.AQUILLA_PG.prepare(

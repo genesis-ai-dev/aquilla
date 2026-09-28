@@ -221,13 +221,46 @@ describe("the take after Stop", () => {
     await waitFor(() => expect(screen.getByTestId("rec-trim-readout")).toHaveTextContent("0:00.2 – 0:03.3"))
   })
 
-  it("leaves Space its job: with a line focused it still saves", async () => {
+  // Sam, 2026-09-28: in the preview Space LISTENS to the take and Enter keeps
+  // it. Space used to save, with nothing on screen saying so.
+  it("plays the take on Space — with a line focused too — and saves nothing", async () => {
+    const ready = vi.spyOn(window.HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(4)
+    // happy-dom plays nothing; stand in for the element reporting that it started.
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+      this.onplay?.(new Event("play"))
+      return Promise.resolve()
+    })
+    try {
+      render(modalEl())
+      await previewShown()
+      const start = screen.getByRole("slider", { name: "Start of the kept audio" })
+      start.focus()
+      fireEvent.keyDown(start, { key: " " })
+      await waitFor(() => expect(play).toHaveBeenCalled())
+      expect(emitAttach).not.toHaveBeenCalled()
+    } finally {
+      ready.mockRestore()
+      play.mockRestore()
+    }
+  })
+
+  it("saves on Enter, with a line focused too, and says so on the button", async () => {
     render(modalEl())
     await previewShown()
+    expect(screen.getByTestId("rec-save")).toHaveTextContent("Save · ENTER")
     const start = screen.getByRole("slider", { name: "Start of the kept audio" })
     start.focus()
-    fireEvent.keyDown(start, { key: " " })
+    fireEvent.keyDown(start, { key: "Enter" })
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+  })
+
+  it("leaves Enter to a focused button: tab to Retake and Enter retakes, never saves", async () => {
+    render(modalEl())
+    await previewShown()
+    const retake = screen.getByTestId("rec-retake")
+    retake.focus()
+    fireEvent.keyDown(retake, { key: "Enter" })
+    expect(emitAttach).not.toHaveBeenCalled()
   })
 })
 

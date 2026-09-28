@@ -1496,7 +1496,7 @@ export const ms: Catalog = {
   "audio.recordingModal.nextCellTooltip": "Sel seterusnya (→)",
   "audio.recordingModal.retakeTooltip": "Rakam semula (Esc)",
   "audio.recordingModal.retakeButton": "Rakam semula",
-  "audio.recordingModal.saveTooltip": "Simpan (Space atau Enter)",
+  "audio.recordingModal.saveTooltip": "Simpan (Enter)",
   "audio.recordingModal.stopTooltip": "Henti (Space atau Esc)",
   "audio.recordingModal.startButton": "Mula",
   "audio.recordingModal.startTooltip": "Mula merakam (Space)",

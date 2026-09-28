@@ -220,7 +220,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.nextCellTooltip": "Next cell (→)",
     "audio.recordingModal.retakeTooltip": "Retake (Esc)",
     "audio.recordingModal.retakeButton": "Retake",
-    "audio.recordingModal.saveTooltip": "Save (Space or Enter)",
+    "audio.recordingModal.saveTooltip": "Save (Enter)",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
     "audio.recordingModal.startButton": "Start",
     "audio.recordingModal.startTooltip": "Start recording (Space)",
@@ -292,7 +292,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.readyTakeCaption": "{label} · {seconds}s",
     "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
     "audio.recordingModal.trimReset": "Reset trim",
-    "audio.recordingModal.trimHint": "Drag a line to trim",
+    "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -1324,10 +1324,11 @@ export const audio = defineNamespace({
       },
       "audio.recordingModal.trimHint": {
         description:
-          "Tiny hint beside the trim readout: the two vertical lines on the " +
-          "waveform can be dragged to cut silence off the start and end of the " +
-          "take before saving. Imperative, very short.",
-        maxLength: 28,
+          "Tiny hint beside the trim readout, in two parts: the Space bar plays the " +
+          "just-recorded take, and the two vertical lines on the waveform can be " +
+          "dragged to cut silence off the start and end of the take before saving. " +
+          "'Space' is the keyboard key. Very short.",
+        maxLength: 40,
       },
       "audio.recordingModal.readyTakeCaption": {
         description:

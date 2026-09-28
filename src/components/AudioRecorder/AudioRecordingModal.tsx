@@ -680,6 +680,7 @@ export function AudioRecordingModal({
   const stoppedTake = recorder.state.kind === "stopped" ? recorder.state : null
   const previewBlob = stoppedTake?.blob ?? null
   const preview = usePreviewTake(previewBlob)
+  const { isPlaying: previewPlaying, play: playPreview, pause: pausePreview } = preview
   const previewDurationMs = stoppedTake ? Math.round(stoppedTake.durationSec * 1000) : 0
   const previewDefaults = useMemo(
     () => stoppedTake
@@ -1583,7 +1584,14 @@ export function AudioRecordingModal({
         e.preventDefault()
         if (phase === "idle" || phase === "error") { startFlow(); return }
         if (phase === "recording") { stopRecording(); return }
-        if (phase === "preview") { void save(); return }
+        // In the preview Space LISTENS to the take and Enter keeps it (Sam,
+        // 2026-09-28). Space used to save, with nothing on screen saying so —
+        // a take went off to the server when he meant to hear it back.
+        if (phase === "preview") {
+          if (previewPlaying) pausePreview()
+          else void playPreview()
+          return
+        }
       }
       // ⌥/Alt + arrow, not bare arrow. The preview phase puts an <audio
       // controls> in this dialog, and a focused media control treats bare
@@ -1592,11 +1600,18 @@ export function AudioRecordingModal({
       // what the header's ‹ › buttons announce in their tooltips.
       if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); gotoIndex(activeIndex + 1); return }
       if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); gotoIndex(activeIndex - 1); return }
-      if (e.key === "Enter" && phase === "preview") { e.preventDefault(); void save(); return }
+      if (e.key === "Enter" && phase === "preview") {
+        // As with Space: a focused button acts for itself — tab to Retake and
+        // Enter retakes, rather than saving the take being thrown away.
+        if (target?.tagName === "BUTTON" || target?.getAttribute?.("role") === "button") return
+        e.preventDefault()
+        void save()
+        return
+      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex])
+  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview])
 
   if (!open || !activeCell) return null
 
@@ -2268,7 +2283,7 @@ export function AudioRecordingModal({
                       onClick={save}
                       className="h-[52px] w-full text-sm font-semibold"
                     >
-                      {t("common.save")}
+                      {t("common.save")} <span className="ml-1.5 opacity-60">· ENTER</span>
                     </Button>
                   </span>
                 </AppTooltip>

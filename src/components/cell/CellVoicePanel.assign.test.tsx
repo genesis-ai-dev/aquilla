@@ -7,8 +7,9 @@ import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/typ
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 
 // Keep the audio element + real synth out of this render — we only care that the
-// card follows the line's assignment (AQU-768). Since 2026-09-28 the voice is
-// picked in the row's gutter, not on the card; the card's Generate names it.
+// card follows the line's assignment (AQU-768). The voice is picked in the field
+// under the waveform (the Media view gutter's picker, 2026-09-28); picking only
+// assigns, and the card's Generate names it.
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: () => ({
     state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
@@ -23,6 +24,8 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({
 }))
 
 import { CellVoicePanel } from "./CellVoicePanel"
+import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/voices"
 
 const voices: Voice[] = [
   { id: "v-mary", name: "Mary", color: "#000", provider: "gemini", voiceName: "Kore", prompt: "{text}" },
@@ -46,16 +49,26 @@ function serverSettings(): ProjectTtsSettings {
 const project = { id: "proj-1", name: "P", ttsSettings: serverSettings() } as unknown as ProjectRecord
 
 // Mirror the workspace wiring: the panel resolves the active voice from
-// `settings` itself; the gutter assigns through the same hook (stood in for by a
-// button here); a successful generate swaps serverSettings identity (as
-// useProject.refresh() does).
+// `settings` itself; the field picker assigns through the same hook; a
+// successful generate swaps serverSettings identity (as useProject.refresh()
+// does).
 function Harness() {
   const [srv, setSrv] = useState(serverSettings())
   const tts = useProjectTts("proj-1", srv, cellSummaries, () => {})
   return (
     <>
-      <button type="button" onClick={() => tts.assignCells([cell.id], "v-john")}>Cast John</button>
       <CellVoicePanel
+        voicePicker={
+          <CastGutterVoice
+            variant="field"
+            voice={resolveCastVoice(tts.settings, cell.id)}
+            explicit={Boolean(findVoice(tts.settings, assignedCastVoiceId(tts.settings, cell.id)))}
+            castName={null}
+            editable
+            voices={voices}
+            onPick={(voiceId) => tts.assignCells([cell.id], voiceId)}
+          />
+        }
         cell={cell}
         project={{ ...project, ttsSettings: tts.settings } as ProjectRecord}
         projectId="proj-1"
@@ -77,8 +90,13 @@ describe("CellVoicePanel follows the line's voice (AQU-768)", () => {
     render(<Harness />)
     // Nobody cast yet: the default/narrator (Mary).
     expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · Mary")
-    await act(async () => { fireEvent.click(screen.getByText("Cast John")) })
+    expect(screen.getByTestId("voice-field")).toHaveTextContent("Mary (default)")
+    await act(async () => { fireEvent.click(screen.getByTestId("voice-field")) })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /John/ })) })
+    // Picking only assigns: nothing was generated.
+    expect(generateCellVoice).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · John"))
+    expect(screen.getByTestId("voice-field")).toHaveTextContent("John")
     await act(async () => { fireEvent.click(screen.getByTestId("voice-card-generate")) })
     // Generated in the line's own voice…
     expect(generateCellVoice).toHaveBeenCalledTimes(1)

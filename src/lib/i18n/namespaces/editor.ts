@@ -1363,18 +1363,17 @@ export const editor = defineNamespace({
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
-    // Sam, 2026-09-28: the Audio view card after the voice picker moved to the gutter.
+    // Sam, 2026-09-28: the Audio view card — the take, then a row with its voice.
     "editor.voice.generateWith": "Generate · {voice}",
     "editor.voice.generateDefaultTooltip": "Nobody chose a character for this line, so it uses the default voice",
     "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
     "editor.voice.generatingAs": "Generating as {voice}…",
     "editor.voice.tryAgain": "Try again",
     "editor.voice.failedTooltip": "Couldn’t generate: {reason}",
-    "editor.voice.generateAgain": "Generate again",
-    "editor.voice.generateAgainTooltip": "Generate again · {voice}",
+    "editor.voice.generateAgainAs": "Generate again · {voice}",
+    "editor.voice.takeVoicedBy": "This take was voiced by {voice}",
     "editor.voice.noAudioYet": "No audio yet",
     "editor.voice.record": "Record",
-    "editor.column.character": "Character",
     "editor.audioLens.textChecks": "Text validation",
     "editor.audioLens.audioChecks": "Audio validation",
 
@@ -5007,16 +5006,21 @@ export const editor = defineNamespace({
           "line's voice failed.",
         placeholders: { reason: "The error message from the voice service." },
       },
-      "editor.voice.generateAgain": {
+      "editor.voice.generateAgainAs": {
         description:
-          "Small button on a generated (synthetic) voice's waveform: synthesize the " +
-          "line again, in its current voice, as a new take. Never shown on a human " +
-          "recording.",
-        maxLength: 18,
-      },
-      "editor.voice.generateAgainTooltip": {
-        description: "Tooltip on that button, naming the voice it will use.",
+          "Button beside the voice picker under a generated (synthetic) voice's " +
+          "waveform: synthesize the line again, in the named voice, as a new take. " +
+          "Never shown on a human recording. Usually a small icon, with this as its " +
+          "tooltip; written out as its label when the line's voice was changed after " +
+          "the take was generated.",
         placeholders: { voice: "The voice's display name." },
+        maxLength: 40,
+      },
+      "editor.voice.takeVoicedBy": {
+        description:
+          "Tooltip on that button when it is written out: the take was generated in " +
+          "another voice than the one the line now has.",
+        placeholders: { voice: "The display name of the voice the take was generated in." },
       },
       "editor.voice.noAudioYet": {
         description:
@@ -5028,13 +5032,6 @@ export const editor = defineNamespace({
         description:
           "Button in an Audio view line's empty slot that opens the recorder on this " +
           "line. Imperative verb.",
-        maxLength: 14,
-      },
-      "editor.column.character": {
-        description:
-          "Heading above the column of voice circles at the far left of the editing " +
-          "table in the audio lens: each line's character (the cast member who speaks " +
-          "it); an empty circle means nobody was chosen.",
         maxLength: 14,
       },
       "editor.audioLens.textChecks": {

@@ -45,6 +45,13 @@ const recorded = {
 const empty = { ...generated, selectedGeneratedVoiceAudioId: undefined, attachments: {} } as unknown as CellData
 
 const settings = { voices, defaultVoiceId: "v-mary" } as ProjectTtsSettings
+/** The same line with John cast on it. */
+const castJohn = { ...settings, castAssignments: { "cell-1": "v-john" } } as ProjectTtsSettings
+/** A generated take that remembers Mary made it. */
+const byMary = {
+  ...generated,
+  attachments: { a1: { url: "blob:x", type: "audio/wav", voiceId: "v-mary" } },
+} as unknown as CellData
 const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
 
 function draw(
@@ -77,14 +84,23 @@ beforeEach(() => {
   setTtsStatus(ttsStatusKey("cell-1"), { kind: "idle" })
 })
 
-// Sam, 2026-09-28: the voice picker moved to the row's gutter and validation
-// lives in its column — the card is the waveform itself.
-describe("CellVoicePanel — the card is the waveform", () => {
-  it("has no voice picker and no validation of its own", () => {
+const row = () => document.querySelector("[data-slot=voice-card-row]") as HTMLElement
+
+// Sam, 2026-09-28: the take, then a row under it with the line's voice, Generate
+// again, volume and clone. Validation lives in its column, not on the card.
+describe("CellVoicePanel — the take, then a row with its voice", () => {
+  it("has no validation of its own", () => {
     draw()
-    expect(screen.queryByRole("button", { name: /Voice: / })).toBeNull()
     expect(screen.queryByTestId("voice-card-waveform-validated")).toBeNull()
     expect(document.querySelector("[data-slot=voice-take-tools]")).toBeNull()
+  })
+
+  it("puts the host's voice picker at the start of the row under the waveform", () => {
+    draw({ voicePicker: <button type="button">Narrator</button> })
+    const picker = screen.getByRole("button", { name: "Narrator" })
+    expect(row().contains(picker)).toBe(true)
+    expect(row().firstElementChild!.contains(picker)).toBe(true)
+    expect(screen.getByTestId("voice-card-waveform").contains(row())).toBe(false)
   })
 
   it("is 56px tall, the height of an empty card too", () => {
@@ -116,14 +132,14 @@ describe("CellVoicePanel — the card is the waveform", () => {
     expect(screen.getByRole("slider", { name: "End of the kept audio" })).toBeInTheDocument()
   })
 
-  it("puts volume and clone on the waveform, shown on hover or focus", () => {
+  it("puts volume and clone at the end of the row, always visible", () => {
     draw()
     const wave = screen.getByTestId("voice-card-waveform")
     for (const name of ["Volume", "Clone a voice from this take"]) {
       const b = screen.getByRole("button", { name })
-      expect(wave.contains(b)).toBe(true)
-      expect(b.className).toContain("group-hover/wave:opacity-100")
-      expect(b).toHaveAttribute("data-wave-overlay")
+      expect(row().lastElementChild!.contains(b)).toBe(true)
+      expect(wave.contains(b)).toBe(false)
+      expect(b.className).not.toContain("opacity-0")
     }
   })
 
@@ -161,15 +177,39 @@ describe("CellVoicePanel — the card is the waveform", () => {
 // Sam, 2026-09-28: on every generated voice, whatever its voice — the same
 // voice can come out differently a second time. Never on a recording.
 describe("CellVoicePanel — Generate again", () => {
-  it("sits on a generated voice and regenerates it in the line's voice", async () => {
-    draw()
+  it("sits beside the picker as a quiet icon naming the voice, and regenerates in it", async () => {
+    draw({ voicePicker: <span data-testid="picker" /> })
     const again = screen.getByTestId("voice-card-regenerate")
-    expect(again).toHaveTextContent("Generate again")
-    expect(again.className).toContain("group-hover/wave:opacity-100")
+    expect(row().contains(again)).toBe(true)
+    expect(again).toHaveAttribute("data-stale", "false")
+    expect(again).toHaveAccessibleName("Generate again · Mary")
+    expect(again.textContent).toBe("")
     await expectTooltip(again, "Generate again · Mary")
     await act(async () => { fireEvent.click(again) })
     expect(generateCellVoice).toHaveBeenCalledTimes(1)
     expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-mary")
+  })
+
+  it("stays quiet when the take is in the line's voice", () => {
+    draw({ cell: byMary })
+    expect(screen.getByTestId("voice-card-regenerate")).toHaveAttribute("data-stale", "false")
+  })
+
+  // Picking only assigns, so the take can be in a voice the line no longer has.
+  it("shows its label and the new voice, highlighted, when the line's voice changed since", async () => {
+    draw({ cell: byMary, settings: castJohn })
+    const again = screen.getByTestId("voice-card-regenerate")
+    expect(again).toHaveAttribute("data-stale", "true")
+    expect(again).toHaveTextContent("Generate again · John")
+    expect(again.className).toContain("var(--tl-track-hue)")
+    await expectTooltip(again, "This take was voiced by Mary")
+    await act(async () => { fireEvent.click(again) })
+    expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-john")
+  })
+
+  it("is off an untranslated line", () => {
+    draw({ cell: { ...generated, translated: "" } as unknown as CellData })
+    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
   })
 
   it("is never on a recording", () => {
@@ -188,6 +228,14 @@ describe("CellVoicePanel — Generate again", () => {
 describe("CellVoicePanel — a line with no audio yet", () => {
   const slot = () => screen.getByTestId("voice-card-empty")
 
+  it("has the same row under the slot, holding the picker and nothing else", () => {
+    draw({ cell: empty, voicePicker: <span data-testid="picker" /> })
+    expect(row().contains(screen.getByTestId("picker"))).toBe(true)
+    expect(slot().contains(row())).toBe(false)
+    expect(screen.queryByRole("button", { name: "Volume" })).toBeNull()
+    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+  })
+
   it("offers Generate in the default voice, saying why on hover, and Record", async () => {
     const { onRecord } = draw({ cell: empty })
     expect(slot()).toHaveAttribute("data-state", "ready")
@@ -200,7 +248,7 @@ describe("CellVoicePanel — a line with no audio yet", () => {
   })
 
   it("names the line's character when one is cast, with no default-voice tooltip", () => {
-    draw({ cell: empty, settings: { ...settings, castAssignments: { "cell-1": "v-john" } } as ProjectTtsSettings })
+    draw({ cell: empty, settings: castJohn })
     expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · John")
   })
 
@@ -238,10 +286,12 @@ describe("CellVoicePanel — a line with no audio yet", () => {
   })
 
   it("tells someone who can't edit that there is no audio, with nothing to press", () => {
-    draw({ cell: empty, canEdit: false })
+    draw({ cell: empty, canEdit: false, voicePicker: <span data-testid="picker">Narrator</span> })
     expect(slot()).toHaveAttribute("data-state", "readonly")
     expect(slot()).toHaveTextContent("No audio yet")
     expect(screen.queryByRole("button")).toBeNull()
+    // The voice is still named, under the slot.
+    expect(row().contains(screen.getByTestId("picker"))).toBe(true)
   })
 
   it("keeps Record but refuses it, with the reason, where this browser can't record", async () => {

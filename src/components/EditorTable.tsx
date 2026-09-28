@@ -1940,12 +1940,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  // The voice gutter (a 32px character circle per row) — in the Media view's
-  // text table, and in Audio mode, where it replaced the per-card voice
-  // dropdown (Sam, 2026-09-28). Deliberately separate from `castGutter`,
-  // which also switches the chapter navigation to the media band's strip.
-  const voiceGutter = castGutter || Boolean(audioLens)
-  const gridCols: EditorGridCols = voiceGutter
+  const gridCols: EditorGridCols = castGutter
     ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
     : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
@@ -2445,7 +2440,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
             <div className="col-span-full flex items-center py-1 md:col-span-1">
-              {voiceGutter && <div className="me-2 w-10 shrink-0" aria-hidden="true" />}
+              {castGutter && <div className="me-2 w-10 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
@@ -2544,7 +2539,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
-          castGutter={voiceGutter}
+          castGutter={castGutter}
           ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
@@ -2587,6 +2582,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     sourceLineEditing,
     activeEditorCellId,
+    castGutter,
     ttsSettings,
     focusedRailCellId,
     handleRowFocusPin,
@@ -2595,7 +2591,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     activeLane,
     audioByCellId,
     audioLens,
-    voiceGutter,
+    castGutter,
     ttsSettings,
     backtranslationByCellId,
     linkedTakesByCell,
@@ -2766,7 +2762,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {renderChapterNavigation()}
         <div className={cn(
             "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
-            voiceGutter
+            castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
               : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
           )}>
@@ -2774,12 +2770,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
               gutter-width away from the side; otherwise the track is
               unlabeled (select + badges + number). */}
-          {audioLens ? (
-            // Audio mode: the gutter holds each line's voice (Sam, 2026-09-28).
-            <div data-testid="table-voice-header" className="hidden items-center gap-2 md:flex">
-              {t("editor.column.character")}
-            </div>
-          ) : castGutter ? (
+          {castGutter ? (
             <div data-testid="table-source-header" className="hidden items-center gap-2 md:flex">
               {t("editor.column.source")}
               {project.sourceLanguage && (
@@ -2794,9 +2785,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="col-start-1 flex min-w-0 flex-wrap items-center gap-1 ps-1 md:col-auto md:gap-2 md:ps-2">
-            {audioLens ? t("editor.column.controls") : castGutter ? (
-              <span className="md:hidden">{t("editor.column.source")}</span>
-            ) : t("editor.column.source")}
+            {castGutter ? (
+              <span className="md:hidden">{audioLens ? t("editor.column.controls") : t("editor.column.source")}</span>
+            ) : audioLens ? t("editor.column.controls") : t("editor.column.source")}
             {/* Sam, 2026-09-26: the colour the file's takes are drawn in, beside
                 the heading of the column they sit in. Maintainers only. */}
             {audioLens && onSetAudioTrackColor && (
@@ -6422,7 +6413,10 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
+  //
+  // The Audio view uses the same picker, opened from a field under each line's
+  // waveform rather than from a gutter (Sam, 2026-09-28).
+  const gutterSpeaking = (castGutter || Boolean(audioLens)) && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -7178,6 +7172,20 @@ function EditorRow({
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+              voicePicker={gutterVoice && (
+                <CastGutterVoice
+                  variant="field"
+                  voice={gutterVoice}
+                  explicit={gutterExplicit}
+                  castName={gutterCastName}
+                  editable={editable && Boolean(onAssignCastVoice)}
+                  voices={gutterVoices}
+                  showLanguageBadge={gutterLanguageBadge}
+                  onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                  onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
+                  countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
+                />
+              )}
             />
           </div>
         ) : (

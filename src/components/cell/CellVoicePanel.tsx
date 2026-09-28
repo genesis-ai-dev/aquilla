@@ -3,41 +3,44 @@
 // translate); in Audio mode there's no source to read, so the column carries
 // this line's audio.
 //
-// THE CARD IS THE WAVEFORM (Sam, 2026-09-28). The voice picker moved to the
-// row's gutter, as in the Media view, and audio validation lives only in the
-// validation column beside the text check — so the card is the take itself,
-// drawn as its timeline chip, 56px tall, in the file's track colour:
+// Anatomy (Sam, 2026-09-28):
 //
-//   ▶ top-left              play (and the running time bottom-left)
-//   🔊 ⧉ top-right          volume and clone, on hover or keyboard focus
-//   ✦ Generate again         bottom-right, on a GENERATED voice only — never
-//                           on a recording — whatever its voice: the same
-//                           voice can come out differently a second time
+//   ▶ ━━━━━━━━━━━━━━━━━━━  the take, drawn as its timeline chip, 56px tall, in
+//   0:00 / 0:03            the file's track colour; play top-left, the running
+//                          time bottom-left, the trim lines dragged right here
+//   [N Narrator ⌄] ✦   🔊 ⧉  the row: the line's voice (the Media view gutter's
+//                          picker, opened from a field — picking only assigns),
+//                          Generate again, then volume and clone
 //
-// The trim lines are dragged or nudged right here, for recordings and
-// generated voices alike; the buttons step aside for a line that comes close.
+// Generate again is on a GENERATED voice only — never on a recording — whatever
+// its voice, since the same voice can come out differently a second time. It is
+// a quiet icon until the line's voice no longer matches the take's; then it
+// shows its label and the new voice, highlighted.
+//
+// Audio validation is not here: it lives in the validation column beside the
+// text check. (For three days the voice sat in a gutter left of the row, as in
+// the Media view, and this card was the waveform alone — a column of circles on
+// the far left unbalanced the page, and in narration nearly every one was the
+// Narrator.)
 //
 // A LINE WITH NO AUDIO is the timeline's empty slot — a dashed outline in the
-// track colour, the same 56px, so nothing moves when audio arrives — holding
-// Generate (named for the line's voice) and Record. Record is always there;
-// Upload stays in the recorder. Explanations live in tooltips, not on the card.
+// track colour, the same 56px — holding Generate (named for the line's voice)
+// and Record, with the same row under it, so nothing moves when audio arrives.
+// Record is always there; Upload stays in the recorder. Explanations live in
+// tooltips, not on the card.
 //
 // Playback uses the row's player when the host passes one, so the word
 // highlight in the cell follows this play button. Without that, the panel
 // keeps its own element. The app-wide audio-coordinator still guarantees
 // only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { CircleAlert, CopyPlus, Mic, Sparkles, Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
-import {
-  WAVE_OVERLAY_BUTTON_CLASS,
-  WAVE_OVERLAY_CLASS,
-  WAVE_OVERLAY_REVEAL_CLASS,
-} from "@/components/audio/chip-classes"
+import { WAVE_OVERLAY_CLASS } from "@/components/audio/chip-classes"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -86,6 +89,9 @@ interface CellVoicePanelProps {
   onMakeCharacter: () => void
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** The line's voice picker, for the row under the waveform. The host owns
+   *  it — it is the Media view gutter's picker, in its field form. */
+  voicePicker?: ReactNode
 }
 
 function fmtTime(s: number): string {
@@ -97,25 +103,26 @@ function fmtTime(s: number): string {
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
 
-/** Volume, as a 16px button on the waveform with its slider in a popover. */
-function VolumeOverlay({ volume, onChange, className }: { volume: number; onChange: (v: number) => void; className: string }) {
+/** Volume, with its slider in a popover. */
+function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
   const t = useT()
   return (
     <Popover>
       <AppTooltip content={t("common.volume")}>
         <PopoverTrigger
           render={
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label={t("common.volume")}
-              data-wave-overlay=""
               data-testid="voice-card-volume"
-              className={cn(WAVE_OVERLAY_BUTTON_CLASS, WAVE_OVERLAY_CLASS, WAVE_OVERLAY_REVEAL_CLASS, "data-popup-open:opacity-100", className)}
-            />
+              className="shrink-0 text-muted-foreground"
+            >
+              {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </Button>
           }
-        >
-          {volume === 0 ? <VolumeX className="h-2.5 w-2.5" /> : <Volume2 className="h-2.5 w-2.5" />}
-        </PopoverTrigger>
+        />
       </AppTooltip>
       <PopoverContent align="end" side="bottom" className="w-44 p-2.5">
         <div className="flex items-center gap-2">
@@ -139,32 +146,6 @@ function VolumeOverlay({ volume, onChange, className }: { volume: number; onChan
   )
 }
 
-/** A small round button on the waveform, shown on hover or keyboard focus. */
-function OverlayButton({
-  label, onClick, className, testId, children,
-}: {
-  label: string
-  onClick: () => void
-  className: string
-  testId?: string
-  children: React.ReactNode
-}) {
-  return (
-    <AppTooltip content={label}>
-      <button
-        type="button"
-        aria-label={label}
-        data-wave-overlay=""
-        data-testid={testId}
-        onClick={onClick}
-        className={cn(WAVE_OVERLAY_BUTTON_CLASS, WAVE_OVERLAY_CLASS, WAVE_OVERLAY_REVEAL_CLASS, className)}
-      >
-        {children}
-      </button>
-    </AppTooltip>
-  )
-}
-
 export function CellVoicePanel({
   cell,
   project,
@@ -179,6 +160,7 @@ export function CellVoicePanel({
   onMakeCharacter,
   controller,
   targetLang,
+  voicePicker,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -186,8 +168,8 @@ export function CellVoicePanel({
 
   // AQU-768: resolve THIS line's active voice from the saved cast assignment
   // here in the leaf that displays it, rather than trusting a pre-resolved prop
-  // computed upstream. Same three-part rule the gutter circle uses, so the
-  // card's Generate names exactly the voice the circle shows.
+  // computed upstream. Same three-part rule the picker uses, so the card's
+  // Generate names exactly the voice the picker shows.
   const active = useMemo(
     () => resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId),
     [settings, cell.id, cell.ttsSettings?.voiceId],
@@ -284,7 +266,7 @@ export function CellVoicePanel({
     }
   }, [hasTake, playableId, play])
 
-  // Always in the line's own voice — the gutter picks it; picking there never
+  // Always in the line's own voice — the picker sets it; picking never
   // generates. A second generate in the same voice is a new take, selected;
   // the old one stays in the recorder's takes list.
   const generate = useCallback(async () => {
@@ -308,14 +290,64 @@ export function CellVoicePanel({
     sourceSection: isSourceClip,
   })
 
+  // The row under the waveform (or the empty slot): the voice on the left,
+  // the take's own controls on the right. Present in both states, so an empty
+  // card and a full one are the same height.
+  const row = (middle: ReactNode, end: ReactNode) => (
+    <div data-slot="voice-card-row" className="mt-2 flex h-7 min-w-0 items-center gap-1">
+      {voicePicker && <div className="flex min-w-0 shrink items-center">{voicePicker}</div>}
+      {middle}
+      {end && <div className="ms-auto flex shrink-0 items-center">{end}</div>}
+    </div>
+  )
+
   if (hasTake) {
     // The running time is over the part that plays (the whole clip untrimmed).
     const effStart = kept.start ?? 0
     const effEnd = kept.end ?? duration
     const effDur = Math.max(0, effEnd - effStart)
     const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
-    const canClone = canEdit
     const showRegenerate = isGenerated && canEdit && canGenerate && !sharedClips.has(playableId!)
+    // Picking a voice only assigns it, so a generated take can be in a voice
+    // the line no longer has. Then Generate again says so out loud.
+    const takeVoiceId = playableAtt?.voiceId
+    const stale = Boolean(takeVoiceId && takeVoiceId !== active.id)
+    const takeVoiceName = stale ? findVoice(settings, takeVoiceId)?.name : undefined
+    const againLabel = t("editor.voice.generateAgainAs", { voice: active.name })
+    const again = !showRegenerate ? null : stale ? (
+      <AppTooltip content={takeVoiceName ? t("editor.voice.takeVoicedBy", { voice: takeVoiceName }) : againLabel}>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          data-testid="voice-card-regenerate"
+          data-stale="true"
+          disabled={isVoicing}
+          onClick={() => void generate()}
+          style={trackVars}
+          className="shrink-0 border-[color:var(--tl-track-hue)] bg-[color-mix(in_oklab,var(--tl-track-hue)_14%,var(--background))] hover:bg-[color-mix(in_oklab,var(--tl-track-hue)_24%,var(--background))]"
+        >
+          {isVoicing ? <Spinner /> : <Sparkles />}
+          {againLabel}
+        </Button>
+      </AppTooltip>
+    ) : (
+      <AppTooltip content={againLabel}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={againLabel}
+          data-testid="voice-card-regenerate"
+          data-stale="false"
+          disabled={isVoicing}
+          onClick={() => void generate()}
+          className="shrink-0 text-muted-foreground"
+        >
+          {isVoicing ? <Spinner className="size-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+        </Button>
+      </AppTooltip>
+    )
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
         <TakeWaveform
@@ -342,33 +374,28 @@ export function CellVoicePanel({
           >
             {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
           </span>
-          <VolumeOverlay volume={volume} onChange={changeVolume} className={canClone ? "right-7 top-1" : "right-2 top-1"} />
-          {canClone && (
-            <OverlayButton label={t("editor.voice.clone")} onClick={onMakeCharacter} className="right-2 top-1" testId="voice-card-clone">
-              <CopyPlus className="h-2.5 w-2.5" />
-            </OverlayButton>
-          )}
-          {showRegenerate && (
-            <AppTooltip content={t("editor.voice.generateAgainTooltip", { voice: active.name })}>
-              <button
-                type="button"
-                data-wave-overlay=""
-                data-testid="voice-card-regenerate"
-                disabled={isVoicing}
-                onClick={() => void generate()}
-                className={cn(
-                  "absolute bottom-1 right-2 z-10 flex h-4 items-center gap-1 rounded-full bg-background/80 px-1.5 text-[10px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
-                  WAVE_OVERLAY_CLASS,
-                  // Stays in view while its own generation runs.
-                  isVoicing ? "opacity-100" : WAVE_OVERLAY_REVEAL_CLASS,
-                )}
-              >
-                {isVoicing ? <Spinner className="size-2.5" /> : <Sparkles className="h-2.5 w-2.5" />}
-                {t("editor.voice.generateAgain")}
-              </button>
-            </AppTooltip>
-          )}
         </TakeWaveform>
+        {row(
+          again,
+          <>
+            <VolumeButton volume={volume} onChange={changeVolume} />
+            {canEdit && (
+              <AppTooltip content={t("editor.voice.clone")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("editor.voice.clone")}
+                  data-testid="voice-card-clone"
+                  onClick={onMakeCharacter}
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <CopyPlus className="h-3.5 w-3.5" />
+                </Button>
+              </AppTooltip>
+            )}
+          </>,
+        )}
       </div>
     )
   }
@@ -380,8 +407,11 @@ export function CellVoicePanel({
   )
   if (!canEdit) {
     return (
-      <div data-testid="voice-card-empty" data-state="readonly" className={slotClass} style={trackVars} dir="ltr">
-        <span className="text-xs text-muted-foreground">{t("editor.voice.noAudioYet")}</span>
+      <div className="min-w-0" dir="ltr" data-voice-card="">
+        <div data-testid="voice-card-empty" data-state="readonly" className={slotClass} style={trackVars}>
+          <span className="text-xs text-muted-foreground">{t("editor.voice.noAudioYet")}</span>
+        </div>
+        {row(null, null)}
       </div>
     )
   }
@@ -404,42 +434,45 @@ export function CellVoicePanel({
 
   const state = isVoicing ? "generating" : failure ? "failed" : !canGenerate ? "notext" : "ready"
   return (
-    <div data-testid="voice-card-empty" data-state={state} className={slotClass} style={trackVars} dir="ltr">
-      {state === "generating" && (
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-          <Spinner className="size-3" />
-          {t("editor.voice.generatingAs", { voice: active.name })}
-        </span>
-      )}
-      {state === "failed" && (
-        <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure ?? "" })}>
-          <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
-            <CircleAlert className="text-destructive" />
-            {t("editor.voice.tryAgain")}
-          </Button>
-        </AppTooltip>
-      )}
-      {state === "notext" && (
-        // A disabled button fires no pointer events, so its tooltip hangs on
-        // a wrapper that does.
-        <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
-          <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+    <div className="min-w-0" dir="ltr" data-voice-card="">
+      <div data-testid="voice-card-empty" data-state={state} className={slotClass} style={trackVars}>
+        {state === "generating" && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Spinner className="size-3" />
+            {t("editor.voice.generatingAs", { voice: active.name })}
+          </span>
+        )}
+        {state === "failed" && (
+          <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure ?? "" })}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+              <CircleAlert className="text-destructive" />
+              {t("editor.voice.tryAgain")}
+            </Button>
+          </AppTooltip>
+        )}
+        {state === "notext" && (
+          // A disabled button fires no pointer events, so its tooltip hangs on
+          // a wrapper that does.
+          <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
+            <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+                <Sparkles />
+                {t("editor.voice.generateWith", { voice: active.name })}
+              </Button>
+            </span>
+          </AppTooltip>
+        )}
+        {state === "ready" && (
+          <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
               <Sparkles />
               {t("editor.voice.generateWith", { voice: active.name })}
             </Button>
-          </span>
-        </AppTooltip>
-      )}
-      {state === "ready" && (
-        <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-          <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
-            <Sparkles />
-            {t("editor.voice.generateWith", { voice: active.name })}
-          </Button>
-        </AppTooltip>
-      )}
-      {recordButton}
+          </AppTooltip>
+        )}
+        {recordButton}
+      </div>
+      {row(null, null)}
     </div>
   )
 }

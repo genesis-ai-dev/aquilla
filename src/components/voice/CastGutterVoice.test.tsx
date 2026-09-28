@@ -124,6 +124,45 @@ describe("CastGutterVoice", () => {
     })
   })
 
+  // Sam, 2026-09-28: the Audio view opens the same picker from a field under
+  // each line's waveform.
+  describe("the field form, under a waveform", () => {
+    it("names the voice beside its mark and opens the same picker below it", () => {
+      const onPick = vi.fn()
+      ui(
+        <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={onPick} countSpeakerLines={() => 3} />,
+      )
+      const field = screen.getByTestId("voice-field")
+      expect(field.tagName).toBe("BUTTON")
+      expect(field).toHaveTextContent("Mary")
+      expect(field).toHaveAttribute("aria-label", "Mary. Choose a character")
+      fireEvent.click(field)
+      expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
+      expect(screen.getByTestId("gutter-voice-all").closest("label")).toHaveTextContent("Apply to all 3 «Mary» lines")
+      fireEvent.click(screen.getByRole("button", { name: /John/ }))
+      expect(onPick).toHaveBeenCalledWith("v-john", { applyToSpeaker: false })
+    })
+
+    it("reads as the default voice, with the NC mark, when nobody was cast", () => {
+      ui(
+        <CastGutterVoice variant="field" voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} />,
+      )
+      const field = screen.getByTestId("voice-field")
+      expect(field).toHaveTextContent("NCNarrator (default)")
+    })
+
+    it("read-only, names the voice with no picker", () => {
+      ui(
+        <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,
+      )
+      const field = screen.getByTestId("voice-field")
+      expect(field.tagName).not.toBe("BUTTON")
+      expect(field).toHaveTextContent("Mary")
+      fireEvent.click(field)
+      expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+    })
+  })
+
   it("read-only surfaces show the identity but no picker", () => {
     ui(
       <CastGutterVoice voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,

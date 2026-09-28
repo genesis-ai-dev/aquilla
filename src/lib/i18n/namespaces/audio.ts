@@ -451,6 +451,7 @@ export const audio = defineNamespace({
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
+    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -2347,6 +2348,16 @@ export const audio = defineNamespace({
         placeholders: {
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
+      },
+      "audio.castGutter.defaultVoiceLabel": {
+        description:
+          "The voice field under a line's waveform in the Audio view, when nobody " +
+          "chose a character for the line and it falls back to the default voice — " +
+          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
+        placeholders: {
+          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
+        },
+        maxLength: 32,
       },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:

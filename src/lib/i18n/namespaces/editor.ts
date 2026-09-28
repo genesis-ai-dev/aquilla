@@ -909,7 +909,7 @@ export const editor = defineNamespace({
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
     "editor.timeline.trackRename": "Rename",
-    "editor.timeline.trackColor": "Colour",
+    "editor.timeline.trackColor": "Color",
     // AQU-646 stage 7: one hue per track, picked from six swatches, so the
     // whole vocabulary of axes, weights and previews is gone with the picker.
     // A colour name and a count is all this menu says now.
@@ -917,8 +917,8 @@ export const editor = defineNamespace({
     // design — Sam is using it to craft a palette, and when the palette exists
     // this dialog and these four keys go with it.
     "editor.timeline.trackColorCount": plural({
-      one: "Colour {count} track",
-      other: "Colour {count} tracks",
+      one: "Color {count} track",
+      other: "Color {count} tracks",
     }),
     "editor.timeline.trackNewFolderFrom": "New folder from this track",
     "editor.timeline.trackNewFolderFromCount": plural({
@@ -1517,8 +1517,8 @@ export const editor = defineNamespace({
 
     // — Table header, lane switcher and whole-file empty states ——————
     "editor.column.controls": "Controls",
-    "editor.audioLens.trackColorAria": "Audio colour: {color}",
-    "editor.audioLens.trackColorLabel": "Audio colour",
+    "editor.audioLens.trackColorAria": "Audio color: {color}",
+    "editor.audioLens.trackColorLabel": "Audio color",
     "editor.lane.activeAria": "Active translation lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",

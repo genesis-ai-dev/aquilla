@@ -12,11 +12,9 @@
 // caller withholds the whole control from anyone who cannot change it — the
 // cards below already say what the colour is.
 //
-// The swatches are just swatches, three across (Sam, 2026-09-28): no colour
-// names on screen, so nothing to translate there. Each keeps its name for
-// screen readers — the timeline's own names for the same six.
+// The swatches are just swatches, three across (Sam, 2026-09-28) — the same
+// grid as the timeline's track menu (TrackColorSwatches).
 
-import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { TRACK_HUES, parseTrackHue } from "@/lib/timeline/track-colors"
+import { TrackColorSwatches } from "@/components/timeline/TrackColorSwatches"
 
 export function AudioTrackColorPicker({
   color,
@@ -63,23 +62,7 @@ export function AudioTrackColorPicker({
           <DropdownMenuLabel className="px-1 pb-1.5 pt-0.5 text-xs font-normal text-muted-foreground">
             {t("editor.audioLens.trackColorLabel")}
           </DropdownMenuLabel>
-          <div data-testid="audio-track-color-grid" className="grid grid-cols-3 gap-1">
-            {TRACK_HUES.map((hue) => (
-              <MenuPrimitive.RadioItem
-                key={hue.id}
-                value={hue.hex}
-                aria-label={t(hue.labelKey as Parameters<typeof t>[0])}
-                onClick={() => onPick(hue.id)}
-                className="group/swatch grid size-8 cursor-pointer place-items-center rounded-md outline-none data-highlighted:bg-accent"
-              >
-                <span
-                  aria-hidden
-                  className="size-5 rounded-full ring-1 ring-foreground/15 group-data-checked/swatch:ring-2 group-data-checked/swatch:ring-foreground/70 group-data-checked/swatch:ring-offset-2 group-data-checked/swatch:ring-offset-popover"
-                  style={{ backgroundColor: hue.hex }}
-                />
-              </MenuPrimitive.RadioItem>
-            ))}
-          </div>
+          <TrackColorSwatches onPick={onPick} />
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

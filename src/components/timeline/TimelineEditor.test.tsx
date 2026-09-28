@@ -2158,7 +2158,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
       .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
     expect(screen.getByText("Rename")).toBeTruthy()
-    expect(screen.queryByText("Colour")).toBeNull()
+    expect(screen.queryByText("Color")).toBeNull()
     expect(screen.queryByText("New folder from this track")).toBeNull()
     unmount()
 
@@ -2439,8 +2439,8 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
-    fireEvent.click(screen.getByText("Colour 2 tracks"))
-    fireEvent.click(screen.getByText("Magenta"))
+    fireEvent.click(screen.getByText("Color 2 tracks"))
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Magenta" }))
 
     expect(onSetTrackColor).toHaveBeenCalledTimes(1)
     // ONE CALL, ONE VALUE PER TRACK — the payload's shape never depended on
@@ -2461,8 +2461,12 @@ describe("TimelineEditor — rows come from the track model", () => {
     render(selectable({ onSetTrackColor, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     fireEvent.contextMenu(named("Target audio"))
-    fireEvent.click(screen.getByText("Colour"))
-    fireEvent.click(screen.getByText("Cyan"))
+    fireEvent.click(screen.getByText("Color"))
+    // Swatches only, three across (Sam, 2026-09-28): no names on screen, each
+    // swatch named for screen readers.
+    expect(screen.getByTestId("track-color-swatches").className).toContain("grid-cols-3")
+    expect(screen.queryByText("Cyan")).toBeNull()
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Cyan" }))
     expect(onSetTrackColor).toHaveBeenCalledWith([{ trackId: "target-audio", color: "cyan" }])
     fireEvent.contextMenu(named("Spanish"))
     expect(screen.queryByText(/^Delete/)).toBeNull()
@@ -2473,7 +2477,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     render(selectable({ onRenameTrack: undefined, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     fireEvent.contextMenu(named("Target audio"))
-    expect(screen.queryByText(/^Colour/)).toBeNull()
+    expect(screen.queryByText(/^Color/)).toBeNull()
   })
 
   // Stage 3c, Sam's revision: ALL of them or none. Colouring "the two of these
@@ -2485,20 +2489,20 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
-    expect(screen.getByText("Colour 2 tracks")).toBeInTheDocument()
+    expect(screen.getByText("Color 2 tracks")).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: "Escape" })
 
     // Add the Source text row, which is not colourable — grey is deliberate
     // (Sam) — and the whole item goes rather than silently acting on two.
     fireEvent.click(named("Source text"), { metaKey: true })
     fireEvent.contextMenu(named("Source text"))
-    expect(screen.queryByText(/^Colour/)).toBeNull()
+    expect(screen.queryByText(/^Color/)).toBeNull()
   })
 
   it("offers no colour on a single row that cannot take one", () => {
     render(selectable({ trackEditing: editingActions() }))
     fireEvent.contextMenu(rows()[0])
-    expect(screen.queryByText("Colour")).toBeNull()
+    expect(screen.queryByText("Color")).toBeNull()
   })
 
   // Stage 3c (Sam, 2026-08-24): the verb used to eject the track from the

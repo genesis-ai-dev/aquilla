@@ -21,19 +21,17 @@ import { cn } from "@/lib/utils"
 export function ScopeBreadcrumb({
   path,
   hrefFor,
-  truncateBefore = 0,
   className,
 }: {
   path: ScopePath
   hrefFor?: (scope: ScopeRef) => string | undefined
-  /** Leading crumbs the viewer may not see — rendered as a faded "…" (rule 4). */
-  truncateBefore?: number
   className?: string
 }) {
-  const hidden = Math.min(Math.max(truncateBefore, 0), path.length)
-  const visible = path.slice(hidden)
+  // Rule 4: server-hidden ancestors render as one faded "…" crumb.
+  const visible = path.filter((s) => !s.hidden)
+  const hidden = path.length - visible.length
   return (
-    <Breadcrumb aria-label={formatScopePath(path, { truncateBefore: hidden })} className={className}>
+    <Breadcrumb aria-label={formatScopePath(path)} className={className}>
       <BreadcrumbList className="gap-0 sm:gap-0">
         {hidden > 0 && (
           <BreadcrumbItem className="text-muted-foreground/60" data-testid="scope-hidden-ancestors">
@@ -44,7 +42,7 @@ export function ScopeBreadcrumb({
           const last = i === visible.length - 1
           const href = last ? undefined : hrefFor?.(scope)
           return (
-            <Fragment key={scopePathKey(path.slice(0, hidden + i + 1))}>
+            <Fragment key={scopePathKey(visible.slice(0, i + 1))}>
               {(i > 0 || hidden > 0) && <BreadcrumbSeparator className="whitespace-pre">{SCOPE_SEPARATOR}</BreadcrumbSeparator>}
               <BreadcrumbItem>
                 {last ? (

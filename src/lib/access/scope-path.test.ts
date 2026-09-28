@@ -24,13 +24,14 @@ describe("formatScopePath (AQU-1352 §3.9)", () => {
     expect(Buffer.from(a, "utf8").equals(Buffer.from(b, "utf8"))).toBe(true)
   })
 
-  it("collapses ancestors a guest cannot see into one ellipsis crumb (rule 4)", () => {
-    expect(formatScopePath(path.slice(0, 3), { truncateBefore: 2 })).toBe("… › Pattani Malay Bible")
-  })
-
-  it("ignores out-of-range truncation instead of throwing", () => {
-    expect(formatScopePath(path, { truncateBefore: -1 })).toBe(formatScopePath(path))
-    expect(formatScopePath([], { truncateBefore: 3 })).toBe("")
+  it("collapses server-hidden ancestors into one ellipsis crumb by default (rule 4)", () => {
+    const hidden: ScopePath = [
+      { type: "org", id: "o1", name: "", hidden: true },
+      { type: "team", id: "t1", name: "", hidden: true },
+      path[2],
+    ]
+    expect(formatScopePath(hidden)).toBe("… › Pattani Malay Bible")
+    expect(formatScopePath([])).toBe("")
   })
 
   it("keys by id so a renamed scope keeps its identity", () => {

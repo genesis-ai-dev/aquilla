@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Tags the deployed HEAD of a release/YYYY/MM/DD branch as YYYY.MM.DD.NN and
-# pushes the tag. Run only after a verified production deploy.
-# The date comes from the branch (not today), so hotfixes stay in one series.
+# Tags the deployed HEAD of a release/YYYY/MM/DD[-NN] branch as YYYY.MM.DD.NN
+# and pushes the tag. Run only after a verified production deploy.
+# The date and first NN come from the branch (not today), so release/.../28-02
+# is tagged 2026.09.28.02 and hotfixes stay in one series (next free NN).
 # Re-deploying an already-tagged commit reuses its tag instead of bumping NN.
 set -euo pipefail
 
@@ -11,6 +12,10 @@ if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})(-[0-9]{2})?$ ]]; 
   exit 1
 fi
 series="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+# The branch's own -NN suffix is the tag number a first deploy should claim, so
+# release/2026/09/28-02 becomes 2026.09.28.02. A plain date branch claims 00.
+branch_nn="${BASH_REMATCH[4]#-}"
+want=$((10#${branch_nn:-0}))
 
 # Tag only the commit production is serving. The deploy chain runs this
 # straight after its live checks, but a later manual run may have a newer
@@ -61,8 +66,9 @@ for attempt in 1 2 3; do
   fi
 
   last="$(git tag --list "$series.*" | sort -V | tail -1)"
-  next=0
-  if [ -n "$last" ]; then
+  next=$want
+  if [ -n "$last" ] && [ $((10#${last##*.} + 1)) -gt "$want" ]; then
+    # The branch's number is taken (hotfix, re-cut) or behind: go one past the highest.
     next=$((10#${last##*.} + 1))
   fi
   tag="$series.$(printf '%02d' "$next")"

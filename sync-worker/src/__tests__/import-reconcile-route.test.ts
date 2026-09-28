@@ -325,8 +325,17 @@ describe('POST /import/reconcile', () => {
     const sourceLaneId = 'src00001'
     const targetLaneId = 'tgt00001'
 
-    // Seed lanes after bulk import: that path also resolves lane_id when lanes
-    // already exist, so seeding first would not prove the reconcile INSERT.
+    // lane_id is NOT NULL, so the lanes have to exist before the first cell
+    // write. Reconcile still has to stamp the same ids on the rows it inserts.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'source', ?, ?, NULL, 0)`,
+    ).bind(sourceLaneId, PROJECT_ID, 'Source', 'en').run()
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'target', ?, ?, ?, 1)`,
+    ).bind(targetLaneId, PROJECT_ID, 'French', 'fr', 'fr').run()
+
     const initial = new Request('https://worker/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
@@ -352,15 +361,6 @@ describe('POST /import/reconcile', () => {
       }),
     })
     expect((await handleBulkImportRequest(initial, env(db)))?.status).toBe(200)
-
-    await db.prepare(
-      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-       VALUES (?, ?, 'source', ?, ?, NULL, 0)`,
-    ).bind(sourceLaneId, PROJECT_ID, 'Source', 'en').run()
-    await db.prepare(
-      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-       VALUES (?, ?, 'target', ?, ?, ?, 1)`,
-    ).bind(targetLaneId, PROJECT_ID, 'French', 'fr', 'fr').run()
 
     const request = new Request('https://worker/import/reconcile', {
       method: 'POST',

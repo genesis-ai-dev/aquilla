@@ -343,18 +343,18 @@ describe("AudioRecordingModal — the countdown preference", () => {
 
     const beep = screen.getByTestId("rec-beep") as HTMLButtonElement
     // Default: the countdown runs, so the beep is a live choice.
-    expect(beep).not.toBeDisabled()
-    expect(beep).toHaveAttribute("aria-pressed", "true")
+    expect(beep).not.toHaveAttribute("aria-disabled", "true")
+    expect(beep).toHaveAttribute("aria-checked", "true")
 
     fireEvent.click(screen.getByRole("tab", { name: "Off" }))
-    expect(screen.getByTestId("rec-beep")).toBeDisabled()
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-disabled", "true")
     // Not applicable, not changed — the stored answer survives.
-    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
 
     // Any speed gives it back — the beep belongs to the count, not to Normal.
     fireEvent.click(screen.getByRole("tab", { name: "Fast" }))
-    expect(screen.getByTestId("rec-beep")).not.toBeDisabled()
-    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-beep")).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
   })
 
   it("persists the opt-out per device", () => {
@@ -440,7 +440,7 @@ describe("AudioRecordingModal — the film plays along", () => {
     const { rerender } = render(modal(projectWithFilm))
     fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-film-follow"))
-    expect(screen.getByTestId("rec-film-follow")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-film-follow")).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aq.recording-film-follow.v1")).toBe("off")
     readyPlayer.isPlaying = true
     readyPlayer.currentTime = 1.5

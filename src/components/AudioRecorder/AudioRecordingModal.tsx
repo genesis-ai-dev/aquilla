@@ -7,12 +7,13 @@
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
-import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronLeft, Clapperboard, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
@@ -218,6 +219,50 @@ const READ_ALOUD_LINES = 5
  *  the line stops being something you can perform from, so more shrinking would
  *  be trading readability for a scrollbar we would rather just have. */
 const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
+/**
+ * One recorder setting: its icon, its name, and a real switch — the whole row
+ * toggles it, and what it does is said on hover (Sam, 2026-09-28).
+ */
+function SettingSwitch({
+  testId, icon, title, tip, checked, disabled = false, onCheckedChange,
+}: {
+  testId: string
+  icon: React.ReactElement<{ className?: string }>
+  title: string
+  tip: string
+  checked: boolean
+  disabled?: boolean
+  onCheckedChange: (next: boolean) => void
+}) {
+  return (
+    <AppTooltip content={tip}>
+      {/* Not a <label>: the switch keeps a hidden checkbox, and a label passes
+          a click on the switch to it as well — two toggles, no change. The
+          row toggles itself for a click anywhere but the switch. */}
+      <div
+        onClick={(e) => {
+          if (disabled || (e.target as HTMLElement).closest("[role=switch]")) return
+          onCheckedChange(!checked)
+        }}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2.5 rounded-md p-2 hover:bg-muted",
+          disabled && "cursor-default opacity-50 hover:bg-transparent",
+        )}
+      >
+        {cloneElement(icon, { className: "h-4 w-4 shrink-0 text-muted-foreground" })}
+        <span className="min-w-0 flex-1 text-xs font-medium">{title}</span>
+        <Switch
+          data-testid={testId}
+          size="sm"
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={(next) => onCheckedChange(next)}
+          aria-label={title}
+        />
+      </div>
+    </AppTooltip>
+  )
+}
 
 /**
  * The takes list, grouped by track. (AQU-646 stage 3, Sam's choice)
@@ -2567,117 +2612,88 @@ export function AudioRecordingModal({
                   }
                 />
                 <PopoverContent align="end" side="top" className="w-72 p-1.5">
-                  <button
-                    type="button"
-                    data-testid="rec-auto-advance"
-                    aria-pressed={autoAdvance}
-                    onClick={() => setRecordingAutoAdvance(!autoAdvance)}
-                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
-                  >
-                    <ChevronsRight
-                      className={cn("mt-0.5 h-4 w-4 shrink-0", autoAdvance ? "text-foreground" : "text-muted-foreground/50")}
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-xs font-medium">{t("audio.recordingModal.autoAdvanceTitle")}</span>
-                      <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {autoAdvance
-                          ? t("audio.recordingModal.autoAdvanceOnDescription")
-                          : t("audio.recordingModal.autoAdvanceOffDescription")}
-                      </span>
-                    </span>
-                  </button>
+                  {/* Sam, 2026-09-28: every setting but the countdown's speed is
+                      a real switch, and what it does is said on hover rather
+                      than in a line of its own. */}
+                  <SettingSwitch
+                    testId="rec-auto-advance"
+                    icon={<ChevronsRight />}
+                    title={t("audio.recordingModal.autoAdvanceTitle")}
+                    tip={autoAdvance
+                      ? t("audio.recordingModal.autoAdvanceOnDescription")
+                      : t("audio.recordingModal.autoAdvanceOffDescription")}
+                    checked={autoAdvance}
+                    onCheckedChange={setRecordingAutoAdvance}
+                  />
                   {/* AQU-1210: play-along. Only offered on a line with a film —
                       everywhere else there is nothing for it to do. */}
                   {filmUrl != null && (
-                    <button
-                      type="button"
-                      data-testid="rec-film-follow"
-                      aria-pressed={filmFollow}
-                      onClick={() => setRecordingFilmFollow(!filmFollow)}
-                      className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
-                    >
-                      <Clapperboard
-                        className={cn("mt-0.5 h-4 w-4 shrink-0", filmFollow ? "text-foreground" : "text-muted-foreground/50")}
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium">{t("audio.recordingModal.filmFollowTitle")}</span>
-                        <span className="block text-[11px] leading-snug text-muted-foreground">
-                          {filmFollow
-                            ? t("audio.recordingModal.filmFollowOnDescription")
-                            : t("audio.recordingModal.filmFollowOffDescription")}
-                        </span>
-                      </span>
-                    </button>
+                    <SettingSwitch
+                      testId="rec-film-follow"
+                      icon={<Clapperboard />}
+                      title={t("audio.recordingModal.filmFollowTitle")}
+                      tip={filmFollow
+                        ? t("audio.recordingModal.filmFollowOnDescription")
+                        : t("audio.recordingModal.filmFollowOffDescription")}
+                      checked={filmFollow}
+                      onCheckedChange={setRecordingFilmFollow}
+                    />
                   )}
                   {/* AQU-1209. Sits ABOVE the beep because it governs it: with
                       the count off there is nothing left to beep, which is what
                       the disabled state below says. AQU-1210 (Sam, 25 Sep):
                       one four-way choice — Off, Fast, Normal, Slow — where the
                       on/off switch was. */}
-                  <div data-testid="rec-countdown" data-speed={countdownSpeed} className="flex w-full items-start gap-2.5 rounded-md p-2">
-                    {countdownEnabled ? (
-                      <Timer className="mt-0.5 h-4 w-4 shrink-0" />
-                    ) : (
-                      <TimerOff className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
-                    )}
-                    <span className="min-w-0 flex-1 space-y-1.5">
-                      <span className="block">
-                        <span className="block text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
-                        <span className="block text-[11px] leading-snug text-muted-foreground">
-                          {countdownSpeed === "off"
-                            ? t("audio.recordingModal.countdownOffDescription")
-                            : countdownSpeed === "fast"
-                              ? t("audio.recordingModal.countdownFastDescription")
-                              : countdownSpeed === "slow"
-                                ? t("audio.recordingModal.countdownSlowDescription")
-                                : t("audio.recordingModal.countdownNormalDescription")}
-                        </span>
+                  <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1.5 rounded-md p-2">
+                    <AppTooltip
+                      content={countdownSpeed === "off"
+                        ? t("audio.recordingModal.countdownOffDescription")
+                        : countdownSpeed === "fast"
+                          ? t("audio.recordingModal.countdownFastDescription")
+                          : countdownSpeed === "slow"
+                            ? t("audio.recordingModal.countdownSlowDescription")
+                            : t("audio.recordingModal.countdownNormalDescription")}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        {countdownEnabled
+                          ? <Timer className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          : <TimerOff className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                        <span className="text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
                       </span>
-                      <SegmentTabs<CountdownSpeed>
-                        value={countdownSpeed}
-                        onValueChange={setRecordingCountdownSpeed}
-                        aria-label={t("audio.recordingModal.countdownTitle")}
-                        listClassName="w-full"
-                        options={COUNTDOWN_SPEEDS.map((speed) => ({
-                          value: speed,
-                          label: speed === "off"
-                            ? t("audio.recordingModal.countdownSpeedOff")
-                            : speed === "fast"
-                              ? t("audio.recordingModal.countdownSpeedFast")
-                              : speed === "slow"
-                                ? t("audio.recordingModal.countdownSpeedSlow")
-                                : t("audio.recordingModal.countdownSpeedNormal"),
-                        }))}
-                      />
-                    </span>
+                    </AppTooltip>
+                    <SegmentTabs<CountdownSpeed>
+                      value={countdownSpeed}
+                      onValueChange={setRecordingCountdownSpeed}
+                      aria-label={t("audio.recordingModal.countdownTitle")}
+                      listClassName="w-full"
+                      options={COUNTDOWN_SPEEDS.map((speed) => ({
+                        value: speed,
+                        label: speed === "off"
+                          ? t("audio.recordingModal.countdownSpeedOff")
+                          : speed === "fast"
+                            ? t("audio.recordingModal.countdownSpeedFast")
+                            : speed === "slow"
+                              ? t("audio.recordingModal.countdownSpeedSlow")
+                              : t("audio.recordingModal.countdownSpeedNormal"),
+                      }))}
+                    />
                   </div>
                   {/* Not applicable rather than gone: the operator keeps their
                       beep setting, sees why it cannot be reached, and gets it
                       back untouched the moment the count is on again. */}
-                  <button
-                    type="button"
-                    data-testid="rec-beep"
-                    aria-pressed={beepEnabled}
+                  <SettingSwitch
+                    testId="rec-beep"
+                    icon={beepEnabled ? <Volume2 /> : <VolumeX />}
+                    title={t("audio.recordingModal.beepTitle")}
+                    tip={!countdownEnabled
+                      ? t("audio.recordingModal.beepNotApplicableDescription")
+                      : beepEnabled
+                        ? t("audio.recordingModal.beepOnDescription")
+                        : t("audio.recordingModal.beepOffDescription")}
+                    checked={beepEnabled}
                     disabled={!countdownEnabled}
-                    onClick={() => setBeepEnabled(!beepEnabled)}
-                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {beepEnabled ? (
-                      <Volume2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    ) : (
-                      <VolumeX className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
-                    )}
-                    <span className="min-w-0">
-                      <span className="block text-xs font-medium">{t("audio.recordingModal.beepTitle")}</span>
-                      <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {!countdownEnabled
-                          ? t("audio.recordingModal.beepNotApplicableDescription")
-                          : beepEnabled
-                            ? t("audio.recordingModal.beepOnDescription")
-                            : t("audio.recordingModal.beepOffDescription")}
-                      </span>
-                    </span>
-                  </button>
+                    onCheckedChange={setBeepEnabled}
+                  />
                 </PopoverContent>
               </Popover>
             </div>

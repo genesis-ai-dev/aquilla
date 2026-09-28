@@ -394,11 +394,25 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     )
   }
 
+  // Sam, 2026-09-28: the settings are real switches, and what each does is
+  // said on hover, not in a line of its own.
+  it("is a real switch: it toggles once, the row's name toggles it too, and no description line shows", () => {
+    renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    const sw = screen.getByTestId("rec-auto-advance")
+    expect(sw).toHaveAttribute("role", "switch")
+    fireEvent.click(sw)
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(screen.getByText("Move on after saving a recording"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    expect(screen.queryByText(/Saved recordings (jump|stay)/)).toBeNull()
+  })
+
   it("defaults to on — saving still moves to the next line", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
     // By testid, not by name: the settings popover is open at this point, and
     // AQU-1216 put the word "Saved" into the auto-advance description, so a
     // /Save/ role query matches that control too.
@@ -411,7 +425,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
 
     fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
@@ -429,7 +443,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
   })
 })
 

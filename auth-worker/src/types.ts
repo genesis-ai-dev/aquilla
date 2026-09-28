@@ -132,6 +132,10 @@ export interface Env {
    * trimmed + lowercased for matching.
    */
   ADMIN_EMAILS?: string
+  /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+   *  today's per-table queries), "shadow" (today's answer + access_grants
+   *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+  ACCESS_GRANTS_RESOLVER?: string
 
   /**
    * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the

@@ -1358,13 +1358,25 @@ export const editor = defineNamespace({
 
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
-    "editor.voice.translateFirst": "Translate to voice this line",
     "editor.voice.play": "Play this line",
     "editor.voice.clone": "Clone a voice from this take",
     "editor.voice.voicing": "Voicing…",
-    "editor.voice.clickVoiceToGenerate": "Click a voice to generate",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
+    // Sam, 2026-09-28: the Audio view card after the voice picker moved to the gutter.
+    "editor.voice.generateWith": "Generate · {voice}",
+    "editor.voice.generateDefaultTooltip": "Nobody chose a character for this line, so it uses the default voice",
+    "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
+    "editor.voice.generatingAs": "Generating as {voice}…",
+    "editor.voice.tryAgain": "Try again",
+    "editor.voice.failedTooltip": "Couldn’t generate: {reason}",
+    "editor.voice.generateAgain": "Generate again",
+    "editor.voice.generateAgainTooltip": "Generate again · {voice}",
+    "editor.voice.noAudioYet": "No audio yet",
+    "editor.voice.record": "Record",
+    "editor.column.character": "Character",
+    "editor.audioLens.textChecks": "Text validation",
+    "editor.audioLens.audioChecks": "Audio validation",
 
     // — Rich-text editor: formatting bubble, conflict banner, IDML guards ——
     "editor.format.bold": "Bold",
@@ -4939,12 +4951,6 @@ export const editor = defineNamespace({
           "Screen-reader name of the volume slider itself, inside that popover. " +
           "Distinct from common.volume so the two do not read identically.",
       },
-      "editor.voice.translateFirst": {
-        description:
-          "Italic hint shown in place of the voice panel when the cell has no " +
-          "translation yet: there is nothing to speak. 'Voice' is a verb here — " +
-          "produce spoken audio for this line.",
-      },
       "editor.voice.play": {
         description:
           "Tooltip and screen-reader name of the round play button over the " +
@@ -4965,11 +4971,82 @@ export const editor = defineNamespace({
           "'to voice'. Rendered as small as 9px, so keep it very short.",
         maxLength: 12,
       },
-      "editor.voice.clickVoiceToGenerate": {
+      "editor.voice.generateWith": {
         description:
-          "Hint above the cast picker when the line has a translation but no audio " +
-          "yet: choosing a voice immediately synthesizes it. Explains that the " +
-          "picker is also the action.",
+          "Button on an Audio view line that has no audio yet: synthesizes the line in " +
+          "the named voice (the line's character, or the project's default voice).",
+        placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
+        maxLength: 32,
+      },
+      "editor.voice.generateDefaultTooltip": {
+        description:
+          "Tooltip on that Generate button when nobody has chosen a character for the " +
+          "line, so it will use the project's default voice.",
+      },
+      "editor.voice.nothingToReadTooltip": {
+        description:
+          "Tooltip on the greyed-out Generate button when the line has no translation " +
+          "yet: there are no words to synthesize. Says what to do.",
+      },
+      "editor.voice.generatingAs": {
+        description:
+          "Status in an Audio view line's empty slot while its voice is being " +
+          "synthesized, naming the voice.",
+        placeholders: { voice: "The voice's display name." },
+        maxLength: 32,
+      },
+      "editor.voice.tryAgain": {
+        description:
+          "Button that retries synthesizing a line's voice after it failed. Its " +
+          "tooltip gives the reason.",
+        maxLength: 14,
+      },
+      "editor.voice.failedTooltip": {
+        description:
+          "Tooltip on that Try again button: why the last attempt to synthesize the " +
+          "line's voice failed.",
+        placeholders: { reason: "The error message from the voice service." },
+      },
+      "editor.voice.generateAgain": {
+        description:
+          "Small button on a generated (synthetic) voice's waveform: synthesize the " +
+          "line again, in its current voice, as a new take. Never shown on a human " +
+          "recording.",
+        maxLength: 18,
+      },
+      "editor.voice.generateAgainTooltip": {
+        description: "Tooltip on that button, naming the voice it will use.",
+        placeholders: { voice: "The voice's display name." },
+      },
+      "editor.voice.noAudioYet": {
+        description:
+          "Shown in an Audio view line's empty slot to someone who can't generate or " +
+          "record: the line has no audio.",
+        maxLength: 24,
+      },
+      "editor.voice.record": {
+        description:
+          "Button in an Audio view line's empty slot that opens the recorder on this " +
+          "line. Imperative verb.",
+        maxLength: 14,
+      },
+      "editor.column.character": {
+        description:
+          "Heading above the column of voice circles at the far left of the editing " +
+          "table in the audio lens: each line's character (the cast member who speaks " +
+          "it); an empty circle means nobody was chosen.",
+        maxLength: 14,
+      },
+      "editor.audioLens.textChecks": {
+        description:
+          "Tooltip on a small mark above the text-validation column in the audio lens; " +
+          "the column beside it is audio validation.",
+        maxLength: 24,
+      },
+      "editor.audioLens.audioChecks": {
+        description:
+          "Tooltip on a small mark above the audio-validation column in the audio lens.",
+        maxLength: 24,
       },
       "editor.voice.choose": {
         description:

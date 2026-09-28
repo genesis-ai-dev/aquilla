@@ -7,7 +7,8 @@ import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/typ
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 
 // Keep the audio element + real synth out of this render — we only care that the
-// cast combobox reflects the assignment (AQU-768).
+// card follows the line's assignment (AQU-768). Since 2026-09-28 the voice is
+// picked in the row's gutter, not on the card; the card's Generate names it.
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: () => ({
     state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
@@ -16,8 +17,9 @@ vi.mock("@/hooks/useCellAudio", () => ({
     setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
   }),
 }))
+const generateCellVoice = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => true)) // success → fires onAfterGenerate (refresh)
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({
-  generateCellVoice: vi.fn(async () => true), // success → fires onAfterGenerate (refresh)
+  generateCellVoice: (...a: unknown[]) => generateCellVoice(...a),
 }))
 
 import { CellVoicePanel } from "./CellVoicePanel"
@@ -44,49 +46,45 @@ function serverSettings(): ProjectTtsSettings {
 const project = { id: "proj-1", name: "P", ttsSettings: serverSettings() } as unknown as ProjectRecord
 
 // Mirror the workspace wiring: the panel resolves the active voice from
-// `settings` itself; onAssign persists via the same hook; a successful generate
-// swaps serverSettings identity (as useProject.refresh() does).
+// `settings` itself; the gutter assigns through the same hook (stood in for by a
+// button here); a successful generate swaps serverSettings identity (as
+// useProject.refresh() does).
 function Harness() {
   const [srv, setSrv] = useState(serverSettings())
   const tts = useProjectTts("proj-1", srv, cellSummaries, () => {})
   return (
-    <CellVoicePanel
-      cell={cell}
-      project={{ ...project, ttsSettings: tts.settings } as ProjectRecord}
-      projectId="proj-1"
-      settings={tts.settings}
-      voices={tts.voices}
-      session={{ jwt: "x" } as unknown as never}
-      username="tester"
-      onAssign={(voiceId) => tts.assignCells([cell.id], voiceId)}
-      onAfterGenerate={() => setSrv(serverSettings())}
-      onMakeCharacter={() => {}}
-    />
+    <>
+      <button type="button" onClick={() => tts.assignCells([cell.id], "v-john")}>Cast John</button>
+      <CellVoicePanel
+        cell={cell}
+        project={{ ...project, ttsSettings: tts.settings } as ProjectRecord}
+        projectId="proj-1"
+        settings={tts.settings}
+        session={{ jwt: "x" } as unknown as never}
+        username="tester"
+        onRecord={() => {}}
+        onAfterGenerate={() => setSrv(serverSettings())}
+        onMakeCharacter={() => {}}
+      />
+    </>
   )
 }
 
-describe("CellVoicePanel per-cell voice pick (AQU-768)", () => {
-  beforeEach(() => localStorage.clear())
+describe("CellVoicePanel follows the line's voice (AQU-768)", () => {
+  beforeEach(() => { localStorage.clear(); generateCellVoice.mockClear() })
 
-  it("keeps the newly picked voice shown in the trigger, through generate + refresh", async () => {
+  it("names the newly cast voice on Generate, and keeps it through generate + refresh", async () => {
     render(<Harness />)
-
-    // Trigger starts on the default/narrator (Mary).
-    expect(screen.getByRole("button", { name: /Voice: Mary/ })).toBeTruthy()
-
-    // Open the combobox and pick John.
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Voice: Mary/ }))
-    })
-    const johnOption = await screen.findByText("John")
-    await act(async () => {
-      fireEvent.click(johnOption)
-    })
-
-    // The trigger must now show John and stay there (the AQU-768 regression was
-    // it reverting to the previously-active voice after the pick + refresh).
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Voice: John/ })).toBeTruthy(),
-    )
+    // Nobody cast yet: the default/narrator (Mary).
+    expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · Mary")
+    await act(async () => { fireEvent.click(screen.getByText("Cast John")) })
+    await waitFor(() => expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · John"))
+    await act(async () => { fireEvent.click(screen.getByTestId("voice-card-generate")) })
+    // Generated in the line's own voice…
+    expect(generateCellVoice).toHaveBeenCalledTimes(1)
+    expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-john")
+    // …and the AQU-768 regression (reverting to the previous voice after the
+    // refresh) stays fixed.
+    await waitFor(() => expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · John"))
   })
 })

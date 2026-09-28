@@ -309,7 +309,7 @@ export function AudioValidationControl({
   if (state === "empty") {
     if (variant === "inline") return null
     return (
-      <div data-testid="audio-validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
         <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
           <span
             role="img"
@@ -449,7 +449,7 @@ export function AudioValidationControl({
       )
   if (variant === "inline") return wrapped
   return (
-    <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">
+    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">
       {wrapped}
     </div>
   )

@@ -76,6 +76,12 @@ import {
   type LaneDelegateGrant,
 } from "@/lib/sync/role-policy"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import {
+  DEFAULT_LANE_SELECT_VALUE,
+  isDefaultLaneValue,
+  laneTagForAssignment,
+  selectValueForLane,
+} from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -225,7 +231,7 @@ export function AssignModal({
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
-  const [selectedLane, setSelectedLane] = useState<string>(defaultLane)
+  const [selectedLane, setSelectedLane] = useState<string>(() => selectValueForLane(defaultLane))
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [availableChapters, setAvailableChapters] = useState<string[]>([])
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set())
@@ -256,11 +262,16 @@ export function AssignModal({
       // not open pre-set to it — land them on their first scoped lane instead,
       // which is also the only sane default when their grant covers exactly
       // one lane and the picker below stays hidden.
+      // AQU-729: the picker state is the select value (a sentinel stands in
+      // for the '' default lane), so the chosen raw lane is mapped through
+      // selectValueForLane before it lands in state.
       const delegateLanes = laneDelegateLanes(effectiveDelegate)
       setSelectedLane(
-        delegateLanes.length > 0 && !delegateLanes.includes(defaultLane)
-          ? delegateLanes[0]
-          : defaultLane,
+        selectValueForLane(
+          delegateLanes.length > 0 && !delegateLanes.includes(defaultLane)
+            ? delegateLanes[0]
+            : defaultLane,
+        ),
       )
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
@@ -334,24 +345,30 @@ export function AssignModal({
   // lane. Only rendered (length > 1) when the project actually has extra lanes,
   // keeping N=1 projects byte-identical to the pre-lane flow.
   const laneItems = useMemo(() => {
-    const extra = targetLanes ?? []
+    // A lane literally named "default" is not a lane this product can store.
+    const extra = (targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
     if (extra.length === 0) return [] as { value: string; label: string }[]
-    // AQU-728: the '' lane IS a real language — the project's own default
-    // target language. Label it with that language's name (e.g. "Portuguese")
-    // so every lane, including the default, is listed by name and preselecting
-    // the launching default lane reads as the language, not "default". Only
-    // fall back to the generic label when the default language is unknown.
+    // AQU-728 / AQU-729: the '' lane IS a real language — the project's own
+    // default target language. Label it with that language's name (e.g.
+    // "Portuguese"). The option value is a sentinel, not '': Base UI treats
+    // '' as "nothing selected", which is what made this control read as
+    // "default". The sentinel is mapped back to the default lane on submit
+    // and is never stored.
     const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
     const all = [
-      { value: "", label: defaultLabel },
+      { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
       ...extra.map((lane) => ({ value: lane, label: lane })),
     ]
     // AQU-581: a lane delegate may only assign inside the lanes the org
     // scoped them to, so don't offer the rest — a lane in this picker that
     // canSubmitAssignment would then refuse is a dead end, not a choice.
-    // Leads/maintainers pass no grant and keep the full list.
+    // Leads/maintainers pass no grant and keep the full list. Grant scopes
+    // are raw lane tags ('' = default), so compare against the item's raw
+    // tag, not its select value (AQU-729 sentinel).
     const allowed = laneDelegateLanes(effectiveDelegate)
-    return allowed.length > 0 ? all.filter((item) => allowed.includes(item.value)) : all
+    return allowed.length > 0
+      ? all.filter((item) => allowed.includes(laneTagForAssignment(item.value) ?? ""))
+      : all
   }, [targetLanes, defaultLaneLabel, effectiveDelegate, t])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
@@ -450,7 +467,9 @@ export function AssignModal({
       member.userId,
       assignmentMinRole,
       effectiveDelegate,
-      selectedLane,
+      // AQU-729: the policy takes the raw lane tag ('' = default), not the
+      // picker's select value.
+      laneTagForAssignment(selectedLane) ?? "",
     )) {
       // AQU-581: a delegate who picked a lane outside their scopes gets the
       // lane message; everyone else below the floor is still self-only.
@@ -478,7 +497,7 @@ export function AssignModal({
           author,
           assigneeUserId: member.userId,
           entries,
-          targetLang: selectedLane || undefined,
+          targetLang: laneTagForAssignment(selectedLane),
           deadline,
           note: note.trim() || null,
         })
@@ -551,7 +570,7 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
-        targetLang: selectedLane || undefined,
+        targetLang: laneTagForAssignment(selectedLane),
         deadline,
         note: note.trim() || null,
       })
@@ -665,7 +684,7 @@ export function AssignModal({
               <Select
                 items={laneItems}
                 value={selectedLane}
-                onValueChange={(v) => setSelectedLane(v ?? "")}
+                onValueChange={(v) => setSelectedLane(selectValueForLane(v))}
               >
                 <SelectTrigger id="assign-modal-lane">
                   <SelectValue />

@@ -70,6 +70,11 @@ export function sessionPrincipal(claims: SyncTokenClaims): ApiCredentialContext 
     userId: String(claims.userId),
     username,
     mode: 'ask',
+    // AQU-1242: the in-app surface is a signed-in human driving their own
+    // browser; the read-only ceiling is a property of a MINTED token, and there
+    // is none here. Their actual authority is their live project role, which the
+    // perimeter re-checks on every event either way.
+    access: 'write',
     orgId: null,
     projectId: null,
     // AQU-1180: this principal is a signed-in human in their own browser, who

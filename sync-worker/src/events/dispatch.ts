@@ -77,6 +77,7 @@ export function dispatchEvent(
     case 'source.cell.reorder':
     case 'source.cell.metadata.patch':
     case 'source.cell.reanchor':
+    case 'source.cell.visibility.set':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':
@@ -95,6 +96,8 @@ export function dispatchEvent(
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
     case 'cell.link.set':
+    case 'cell.attachment.add':
+    case 'cell.attachment.remove':
       return {
         ok: true,
         result: handleCellEvent(

@@ -581,13 +581,36 @@ CREATE TABLE cells (
     -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
     -- add-a-language flow; the projection treats the value as opaque.
     target_lang       TEXT NOT NULL DEFAULT '',
-    -- AQU-1240 v2: opaque lane this row belongs to (see lanes(id)). Additive and
-    -- nullable until the backfill populates it and reads cut over from target_lang.
-    lane_id           TEXT,
+    -- AQU-1240: opaque lane this row belongs to (lanes.id). Required.
+    -- Writers resolve it from `lanes`; the backfill fills rows that predate that
+    -- (migrations 0104–0111 enforce NOT NULL on databases created before this).
+    lane_id           TEXT NOT NULL,
+    -- AQU-1422: reversible "park this cell" flag (migration 0116). Epoch-ms when
+    -- the cell was hidden, NULL when visible. Set by source.cell.visibility.set
+    -- on the SHARED SOURCE ROW ONLY (side='source', target_lang='') — hiding is
+    -- per cell, not per lane, so every consumer resolves a cell's visibility
+    -- from that one row rather than from its own side. Storing it per row would
+    -- strand a target row created AFTER the hide (a collaborator's in-flight
+    -- translation) with the flag unset, and that is precisely the row that must
+    -- not reappear. Deliberately NOT in `metadata`: the source.cell.create
+    -- UPSERT overwrites that bucket wholesale, so a re-import or a mirror upsert
+    -- would un-hide every parked cell; this column is absent from that SET list
+    -- and survives both. Nothing is deleted — text, translations, recordings,
+    -- comments and validations all come back untouched on show.
+    hidden_at         BIGINT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag:
+    -- '' on source rows (not a lane) and the lane's legacy_tag on target rows.
+    PRIMARY KEY (project_id, file_id, cell_id, lane_id)
 );
+
+-- AQU-1422: hidden cells are a handful per file, so only they are indexed —
+-- serves the "N hidden" counter and the hidden-cell filters without putting a
+-- full-table index on the hottest table in the schema.
+CREATE INDEX IF NOT EXISTS idx_cells_hidden
+  ON cells(project_id, file_id)
+  WHERE hidden_at IS NOT NULL;
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,
@@ -600,7 +623,7 @@ CREATE TABLE file_section_progress (
     scope               TEXT NOT NULL,
     section_key         TEXT NOT NULL DEFAULT '',
     target_lang         TEXT NOT NULL DEFAULT '',
-    lane_id             TEXT, -- AQU-1240 v2: additive; see lanes(id)
+    lane_id             TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -637,7 +660,8 @@ CREATE TABLE file_section_progress (
     structural_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    PRIMARY KEY (project_id, file_id, scope, section_key, lane_id),
     CONSTRAINT file_section_progress_scope_check CHECK (scope IN ('file', 'section', 'book')),
     CONSTRAINT file_section_progress_shape_check CHECK (
       (scope = 'file' AND section_key = '') OR
@@ -689,11 +713,12 @@ CREATE TABLE cell_validators (
     file_id     TEXT NOT NULL,
     cell_id     TEXT NOT NULL,
     target_lang TEXT NOT NULL DEFAULT '',
-    lane_id     TEXT, -- AQU-1240 v2: additive; see lanes(id)
+    lane_id     TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     event_id    TEXT NOT NULL,
     username    TEXT NOT NULL,
     decided_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
+    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)
 );
 
 -- AQU-490: one row per (take, person). Presence IS the vote, exactly as in
@@ -857,6 +882,36 @@ CREATE TABLE comments (
     PRIMARY KEY (project_id, comment_id)
 );
 
+-- ─────────────────────────── cell attachments ──────────────────────────
+-- AQU-777. Projection of `cell.attachment.*`; the bytes live in the same R2
+-- bucket as audio, under projects/{pid}/files/{fid}/attachments/{objectName}.
+-- See db/postgres/migrations/0112_cell_attachments.sql for the rationale.
+
+CREATE TABLE cell_attachments (
+    project_id    TEXT   NOT NULL,
+    attachment_id TEXT   NOT NULL,
+    file_id       TEXT   NOT NULL,
+    cell_id       TEXT   NOT NULL,
+    -- R2 object name within the cell's file scope ("<attachmentId>.<ext>").
+    object_name   TEXT   NOT NULL,
+    -- The user-visible file name, as picked ("chapter-3-layout.png").
+    name          TEXT   NOT NULL,
+    mime_type     TEXT,
+    size_bytes    BIGINT,
+    author_id     TEXT   NOT NULL,
+    author_label  TEXT,
+    created_at    BIGINT NOT NULL,
+    -- Soft-delete, as comments do it: the row survives so a removal is
+    -- replayable from the event log.
+    deleted_at    BIGINT,
+    event_id      TEXT   NOT NULL,
+    PRIMARY KEY (project_id, attachment_id)
+);
+
+CREATE INDEX cell_attachments_file_idx
+    ON cell_attachments (project_id, file_id, cell_id, created_at)
+    WHERE deleted_at IS NULL;
+
 -- ─────────────────────────── terminology concepts ──────────────────────
 -- AQU-1006 follow-up. Projection of `term.*` events; see
 -- db/postgres/migrations/0084_concepts.sql for the rationale.
@@ -892,7 +947,7 @@ CREATE TABLE assignments (
     -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
     -- the PK — assignment_id stays the key; a lane is a property of the unit.
     target_lang      TEXT NOT NULL DEFAULT '',
-    lane_id          TEXT, -- AQU-1240 v2: additive; see lanes(id)
+    lane_id          TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -1166,11 +1221,14 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
 -- of the scopes model above); role >= 600 cascades to every lane. Effective
 -- role in a lane = max(base project role, grant role_level) — grants only
 -- elevate, never demote. kind='file' scopes stay in project_member_scopes.
--- Backfill/enforcement land later and MUST follow AQU-1240 (no default lane).
+-- Grant rows are written by scripts/neon-backfill-lanes.ts (phase 2). The read
+-- wall is LANE_READ_WALL on the deployed workers, after that backfill. The
+-- write wall (enforceScopes allow→deny) is on when LANE_READ_WALL is on
+-- (AQU-1415). It reads laneGrants. File scopes stay in project_member_scopes.
 CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     project_id TEXT    NOT NULL,
     user_id    BIGINT  NOT NULL,
-    lane       TEXT    NOT NULL,
+    lane       TEXT    NOT NULL,          -- lanes.id (0115). The UI shows lanes.name, never this id.
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),
@@ -1251,7 +1309,8 @@ CREATE INDEX IF NOT EXISTS idx_changeset_confirmations_changeset
 
 -- External API credentials (0054_api_credentials.sql): personal access tokens
 -- for the Agent API (AQU-533 §2). Per-user, optionally scoped to an org and/or
--- project, with an autonomy ceiling ('ask' | 'act'). Only a SHA-256 hash is
+-- project, with an autonomy ceiling ('ask' | 'act') and an access ceiling
+-- ('read' | 'write', AQU-1242/0113). Only a SHA-256 hash is
 -- stored; token_prefix (first 12 chars, incl. the 'aqk_' tag) is display-only.
 -- User-scoped like agent_sessions; live role is re-resolved per call.
 CREATE TABLE IF NOT EXISTS api_credentials (
@@ -1270,7 +1329,12 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     -- AQU-1180 (0091): opt-IN human identity. Default false — an agent token
     -- sees stable per-project pseudonyms instead of usernames. Only an OWNER
     -- of the credential's scope may mint one with it on.
-    pii          BOOLEAN NOT NULL DEFAULT false
+    pii          BOOLEAN NOT NULL DEFAULT false,
+    -- AQU-1242 (0113): may this token change anything at all? Orthogonal to
+    -- `mode`, which is the autonomy dial for writes that ARE permitted. 'read'
+    -- makes every write surface answer scope_denied; 'write' (the default, so
+    -- every pre-0113 token keeps working) is the original all-or-nothing grant.
+    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write'))
 );
 CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
@@ -1340,7 +1404,7 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
     target_lang     TEXT NOT NULL DEFAULT '',
-    lane_id         TEXT, -- AQU-1240 v2: additive; see lanes(id)
+    lane_id         TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     member_path     TEXT NOT NULL DEFAULT '',
     profile_id      TEXT NOT NULL,
     profile_version TEXT NOT NULL,
@@ -1520,7 +1584,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   start_cell_id text NOT NULL,      -- endpoint UUIDs, never ordinals
   end_cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '',
-  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
+  lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   construal text NOT NULL,          -- L2: situation/participants/tenor/moves markdown
   ambiguity_register jsonb NOT NULL DEFAULT '[]',
   l1_summary text,                  -- ≤1600 chars, injected into draft prompts
@@ -1589,7 +1653,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   project_id text NOT NULL,
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
-  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
+  lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   status text NOT NULL DEFAULT 'running'
     CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
@@ -1662,7 +1726,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   file_id text NOT NULL,
   cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
-  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
+  lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card
@@ -2019,17 +2083,21 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
 
--- AQU-1240 slice 8 (part 1): composite FK from every lane_id-bearing table to
+-- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
--- schema.sql apply must create the referenced table first. Mirrors migration
--- 0102 — NOT VALID (instant, still enforced on new writes). The post-backfill
--- cutover VALIDATEs these and adds SET NOT NULL.
-ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
-ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id) NOT VALID;
+-- schema.sql apply must create the referenced table first. On live these were
+-- added NOT VALID in migration 0102 (instant, still enforced on new writes) and
+-- flipped to VALIDATED in the cutover migration 0103 — the state declared here.
+-- A fresh apply validates trivially (empty tables). lane_id is NOT NULL here;
+-- live databases reach that via migrations 0104–0111, which must run only after
+-- the backfill has filled every row (they fail closed if any NULL remains).
+ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);

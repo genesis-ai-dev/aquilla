@@ -673,6 +673,29 @@ describe('changesets — target-language lanes', () => {
     expect(body.error.message).toContain('UpdateProjectSettings')
   })
 
+  it('does not echo an ungranted lane in the unregistered-lane error', async () => {
+    const env = { ...makeEnv(tdb.db), LANE_READ_WALL: '1' }
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es', 'fr'])
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+        ('eslane01', $1, 'target', 'Spanish', 'es'),
+        ('frlane01', $1, 'target', 'French', 'fr')`,
+      [PROJECT],
+    )
+    await tdb.pg.query(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+       VALUES ($1, 1, 'eslane01', 400)`,
+      [PROJECT],
+    )
+
+    const { res, body } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.details.registeredLanes).toEqual(['es'])
+  })
+
   it('two lanes on one cell in one changeset land two independent lane rows', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred())

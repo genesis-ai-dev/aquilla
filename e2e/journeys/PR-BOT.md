@@ -89,6 +89,17 @@ in two narrower places: a miss, and the replays.
   harness suspect first and an app bug second. Say which item and
   which run missed; do not call it a bug until a cold walk misses too.
 - **BLOCKED** only for a hard stop above.
+- **NOT CHECKED** as the whole-comment status when the diff has no UI claim
+  at all — a scripts/CLI-only PR, or a backend-only change with no named
+  screen effect (PR 797 is the real example: `scripts/release-plan*` and
+  `scripts/release-plan-walk*`, no user-visible surface). This is different
+  from the per-item **NOT CHECKED** below (a role you lacked on an
+  otherwise-walkable PR): here every claim-walk row is NOT CHECKED with a
+  one-line reason, there is no preview walk to do, and it is not a BLOCKED
+  hard stop — do not invent a preview URL or wait for one. The release
+  planner (`scripts/release-plan-walk.mjs`) reads this verdict and treats it
+  the same as a docs-only diff: no hold, no human gate on this account
+  alone.
 - A step the PR body itself leaves unticked ("secret not configured
   yet") is not walked, with that reason; it is not FAIL. FAIL is for
   an effect the PR claims and the preview does not show (PR 630).
@@ -223,9 +234,9 @@ Those are notes, not a walk.
 ## Comment template
 
 Short. A reviewer reads the first line and knows whether to look. Status
-is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**. Never
-"approved" or "LGTM": the bot may say the change looks good; it may not
-say it is accepted.
+is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,
+**NOT CHECKED**. Never "approved" or "LGTM": the bot may say the change
+looks good; it may not say it is accepted.
 
 The counts are items, not repetitions: "walk 4/4" means four checklist
 items, each seen once; "replays 9/9" means three stories at three runs
@@ -270,6 +281,27 @@ Replay suspect; see streaks.tsv before treating it as a bug.
 ```
 
 On a BLOCKED, one line: the hard stop and what unblocks it.
+
+On a NOT CHECKED, say what the diff is and why there is no screen to walk —
+still one line per checklist item, not a narrative:
+
+```
+## Bot walk — PR <n> @ <sha>
+
+**NOT CHECKED** · SPA skip (scripts-only) · claim walks: none · replays: none · as <role>
+
+<what the diff touches, one line>. No user-visible SPA / named screen effect.
+
+### Claim walks
+| # | Item (PR words) | Result | Notes |
+| --- | --- | --- | --- |
+| 1 | <checklist item, verbatim> | NOT CHECKED | <why: CLI/vitest only, author-ticked, etc.> |
+```
+
+Do not leave a scripts/CLI-only PR with no comment at all — the release
+planner holds any PR whose walk is still `unknown`, so silence blocks it
+exactly like an unproven failure. A NOT CHECKED comment is what tells the
+planner there was never a screen to check.
 
 What stays out: a "Tried" narrative, a "Worked" table on a pass,
 screenshot filenames, timings, notes on how the runner was configured,

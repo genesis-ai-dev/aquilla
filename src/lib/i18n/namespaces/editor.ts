@@ -1370,8 +1370,9 @@ export const editor = defineNamespace({
     "editor.voice.generatingAs": "Generating as {voice}…",
     "editor.voice.tryAgain": "Try again",
     "editor.voice.failedTooltip": "Couldn’t generate: {reason}",
-    "editor.voice.generateAgainAs": "Generate again · {voice}",
-    "editor.voice.takeVoicedBy": "This take was voiced by {voice}",
+    "editor.voice.removedVoice": "Removed voice",
+    "editor.voice.takeVoiceDiffers": "This take was voiced by {takeVoice}. The line’s voice is now {lineVoice}.",
+    "editor.voice.takeVoiceRemoved": "This take was voiced by a voice no longer in the project. The line’s voice is now {lineVoice}.",
     "editor.voice.noAudioYet": "No audio yet",
     "editor.voice.record": "Record",
     "editor.audioLens.textChecks": "Text validation",
@@ -5006,21 +5007,28 @@ export const editor = defineNamespace({
           "line's voice failed.",
         placeholders: { reason: "The error message from the voice service." },
       },
-      "editor.voice.generateAgainAs": {
+      "editor.voice.removedVoice": {
         description:
-          "Button beside the voice picker under a generated (synthetic) voice's " +
-          "waveform: synthesize the line again, in the named voice, as a new take. " +
-          "Never shown on a human recording. Usually a small icon, with this as its " +
-          "tooltip; written out as its label when the line's voice was changed after " +
-          "the take was generated.",
-        placeholders: { voice: "The voice's display name." },
-        maxLength: 40,
+          "Small tag on a generated (synthetic) voice's waveform in the Audio view, " +
+          "where the tag normally shows the name of the voice the take was made in: " +
+          "that voice has since been removed from the project.",
+        maxLength: 16,
       },
-      "editor.voice.takeVoicedBy": {
+      "editor.voice.takeVoiceDiffers": {
         description:
-          "Tooltip on that button when it is written out: the take was generated in " +
-          "another voice than the one the line now has.",
-        placeholders: { voice: "The display name of the voice the take was generated in." },
+          "Tooltip on a small tag on a generated (synthetic) voice's waveform, shown " +
+          "when the take was made in a different voice from the one the line now has " +
+          "(choosing a voice for a line does not regenerate its audio).",
+        placeholders: {
+          takeVoice: "The name of the voice the take was made in (e.g. 'Mary').",
+          lineVoice: "The name of the voice the line now has (e.g. 'Juan').",
+        },
+      },
+      "editor.voice.takeVoiceRemoved": {
+        description:
+          "The same tooltip when the voice the take was made in has since been removed " +
+          "from the project.",
+        placeholders: { lineVoice: "The name of the voice the line now has (e.g. 'Juan')." },
       },
       "editor.voice.noAudioYet": {
         description:

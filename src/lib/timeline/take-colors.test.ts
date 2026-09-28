@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fileTrackColor, takeTrackVars } from "./take-colors"
+import { fileTrackColor, takeTrackColor, takeTrackVars } from "./take-colors"
 
 const files = [
   {
@@ -51,5 +51,14 @@ describe("fileTrackColor", () => {
     expect(fileTrackColor(files, "f1", "target-audio")).toBe("cyan")
     expect(fileTrackColor(files, "f2", "target-audio")).toBeNull()
     expect(fileTrackColor(files, "nope", "target-audio")).toBeNull()
+  })
+})
+
+describe("takeTrackColor", () => {
+  it("names the colour a take is drawn in, null for the default and for a source section", () => {
+    expect(takeTrackColor({ files, fileId: "f1", slot: "generatedVoice" })).toBe("cyan")
+    expect(takeTrackColor({ files, fileId: "f1", slot: "trk-es" })).toBe("magenta")
+    expect(takeTrackColor({ files, fileId: "f2", slot: "recording" })).toBeNull()
+    expect(takeTrackColor({ files, fileId: "f1", sourceSection: true })).toBeNull()
   })
 })

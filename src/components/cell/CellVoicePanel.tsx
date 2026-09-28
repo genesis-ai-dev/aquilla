@@ -6,16 +6,16 @@
 // Anatomy (Sam, 2026-09-28):
 //
 //   ▶ ━━━━━━━━━━━━━━━━━━━  the take, drawn as its timeline chip, 56px tall, in
-//   0:00 / 0:03            the file's track colour; play top-left, the running
+//   0:00 / 0:03 [Mary]     the file's track colour; play top-left, the running
 //                          time bottom-left, the trim lines dragged right here
-//   [N Narrator ⌄] ✦   🔊 ⧉  the row: the line's voice (the Media view gutter's
+//   [N Narrator ⌄]   🎤 🔊 ⧉  the row: the line's voice (the Media view gutter's
 //                          picker, opened from a field — picking only assigns),
-//                          Generate again, then volume and clone
+//                          then the take's tools: the recorder, volume, clone
 //
-// Generate again is on a GENERATED voice only — never on a recording — whatever
-// its voice, since the same voice can come out differently a second time. It is
-// a quiet icon until the line's voice no longer matches the take's; then it
-// shows its label and the new voice, highlighted.
+// The mic opens the recorder, which records over, uploads, generates again and
+// switches takes — it replaced a Generate again button here. And since picking
+// a voice only assigns it, a generated take can be in a voice the line no
+// longer has: then a pill beside the time names the take's voice.
 //
 // Audio validation is not here: it lives in the validation column beside the
 // text check. (For three days the voice sat in a gutter left of the row, as in
@@ -25,8 +25,8 @@
 //
 // A LINE WITH NO AUDIO is the timeline's empty slot — a dashed outline in the
 // track colour, the same 56px — holding Generate (named for the line's voice)
-// and Record, with the same row under it, so nothing moves when audio arrives.
-// Record is always there; Upload stays in the recorder. Explanations live in
+// and Record, with the same row under it holding only the voice, so the card
+// is the same height when audio arrives. Upload stays in the recorder. Explanations live in
 // tooltips, not on the card.
 //
 // Playback uses the row's player when the host passes one, so the word
@@ -51,14 +51,13 @@ import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { useSharedVoiceClips } from "./shared-voice-clips"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -72,7 +71,7 @@ interface CellVoicePanelProps {
   /** May this person change the line's audio (generate, record, trim, clone)?
    *  False draws the card read-only. */
   canEdit?: boolean
-  /** Open the recorder on this line. Absent hides Record. */
+  /** Open the recorder on this line. Absent hides Record and the mic. */
   onRecord?: () => void
   /** Why recording can't work in this browser, when it can't. */
   recordUnavailable?: string | null
@@ -164,7 +163,6 @@ export function CellVoicePanel({
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
-  const sharedClips = useSharedVoiceClips()
 
   // AQU-768: resolve THIS line's active voice from the saved cast assignment
   // here in the leaf that displays it, rather than trusting a pre-resolved prop
@@ -267,8 +265,7 @@ export function CellVoicePanel({
   }, [hasTake, playableId, play])
 
   // Always in the line's own voice — the picker sets it; picking never
-  // generates. A second generate in the same voice is a new take, selected;
-  // the old one stays in the recorder's takes list.
+  // generates.
   const generate = useCallback(async () => {
     if (isVoicing || !canGenerate || !canEdit) return
     autoplayRef.current = true
@@ -283,21 +280,21 @@ export function CellVoicePanel({
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
 
-  const trackVars = takeTrackVars({
+  const trackInput = {
     files: project.files,
     fileId: cell.fileId,
     slot: playableAtt?.slot,
     sourceSection: isSourceClip,
-  })
+  }
+  const trackVars = takeTrackVars(trackInput)
 
   // The row under the waveform (or the empty slot): the voice on the left,
-  // the take's own controls on the right. Present in both states, so an empty
+  // the take's own tools on the right. Present in both states, so an empty
   // card and a full one are the same height.
-  const row = (middle: ReactNode, end: ReactNode) => (
+  const row = (tools: ReactNode) => (
     <div data-slot="voice-card-row" className="mt-2 flex h-7 min-w-0 items-center gap-1">
       {voicePicker && <div className="flex min-w-0 shrink items-center">{voicePicker}</div>}
-      {middle}
-      {end && <div className="ms-auto flex shrink-0 items-center">{end}</div>}
+      {tools && <div className="ms-auto flex shrink-0 items-center">{tools}</div>}
     </div>
   )
 
@@ -307,47 +304,20 @@ export function CellVoicePanel({
     const effEnd = kept.end ?? duration
     const effDur = Math.max(0, effEnd - effStart)
     const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
-    const showRegenerate = isGenerated && canEdit && canGenerate && !sharedClips.has(playableId!)
-    // Picking a voice only assigns it, so a generated take can be in a voice
-    // the line no longer has. Then Generate again says so out loud.
-    const takeVoiceId = playableAtt?.voiceId
-    const stale = Boolean(takeVoiceId && takeVoiceId !== active.id)
-    const takeVoiceName = stale ? findVoice(settings, takeVoiceId)?.name : undefined
-    const againLabel = t("editor.voice.generateAgainAs", { voice: active.name })
-    const again = !showRegenerate ? null : stale ? (
-      <AppTooltip content={takeVoiceName ? t("editor.voice.takeVoicedBy", { voice: takeVoiceName }) : againLabel}>
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          data-testid="voice-card-regenerate"
-          data-stale="true"
-          disabled={isVoicing}
-          onClick={() => void generate()}
-          style={trackVars}
-          className="shrink-0 border-[color:var(--tl-track-hue)] bg-[color-mix(in_oklab,var(--tl-track-hue)_14%,var(--background))] hover:bg-[color-mix(in_oklab,var(--tl-track-hue)_24%,var(--background))]"
-        >
-          {isVoicing ? <Spinner /> : <Sparkles />}
-          {againLabel}
-        </Button>
-      </AppTooltip>
-    ) : (
-      <AppTooltip content={againLabel}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={againLabel}
-          data-testid="voice-card-regenerate"
-          data-stale="false"
-          disabled={isVoicing}
-          onClick={() => void generate()}
-          className="shrink-0 text-muted-foreground"
-        >
-          {isVoicing ? <Spinner className="size-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-        </Button>
-      </AppTooltip>
-    )
+    // The take's voice, when it isn't the line's (Sam, 2026-09-28). Picking a
+    // voice only assigns it, so a generated take can outlive its voice; the
+    // pill names the voice the take was made in until a take in the line's
+    // voice is selected. Takes from before takes carried their voice have none
+    // to compare, and show nothing.
+    const takeVoiceId = isGenerated ? playableAtt?.voiceId : undefined
+    const voiceDiffers = Boolean(takeVoiceId && takeVoiceId !== active.id)
+    const takeVoiceName = voiceDiffers ? findVoice(settings, takeVoiceId)?.name : undefined
+    const takeVoiceTip = takeVoiceName
+      ? t("editor.voice.takeVoiceDiffers", { takeVoice: takeVoiceName, lineVoice: active.name })
+      : t("editor.voice.takeVoiceRemoved", { lineVoice: active.name })
+    // Amber, except on a file coloured amber, where it would sink into the
+    // waveform: there it is blue.
+    const pillOnAmber = takeTrackColor(trackInput) === "amber"
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
         <TakeWaveform
@@ -365,19 +335,52 @@ export function CellVoicePanel({
           className="voice-card-wave"
           testId="voice-card-waveform"
         >
-          <span
-            data-wave-overlay=""
-            className={cn(
-              "pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground",
-              WAVE_OVERLAY_CLASS,
+          <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+            <span
+              data-wave-overlay=""
+              className={cn("rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground", WAVE_OVERLAY_CLASS)}
+            >
+              {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
+            </span>
+            {voiceDiffers && (
+              <AppTooltip content={takeVoiceTip}>
+                <span
+                  data-wave-overlay=""
+                  data-testid="voice-card-take-voice"
+                  data-tone={pillOnAmber ? "blue" : "amber"}
+                  className={cn(
+                    "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
+                    pillOnAmber
+                      ? "bg-blue-100 text-blue-800 ring-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:ring-blue-700"
+                      : "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-700",
+                    WAVE_OVERLAY_CLASS,
+                  )}
+                >
+                  <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
+                  <span className="sr-only">{takeVoiceTip}</span>
+                </span>
+              </AppTooltip>
             )}
-          >
-            {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
           </span>
         </TakeWaveform>
         {row(
-          again,
           <>
+            {canEdit && onRecord && (
+              <AppTooltip content={recordUnavailable ?? t("editor.audio.record")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("editor.audio.record")}
+                  data-testid="voice-card-record"
+                  aria-disabled={recordUnavailable ? true : undefined}
+                  onClick={() => { if (!recordUnavailable) onRecord() }}
+                  className={cn("shrink-0 text-muted-foreground", recordUnavailable && "cursor-not-allowed opacity-50")}
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                </Button>
+              </AppTooltip>
+            )}
             <VolumeButton volume={volume} onChange={changeVolume} />
             {canEdit && (
               <AppTooltip content={t("editor.voice.clone")}>
@@ -411,7 +414,7 @@ export function CellVoicePanel({
         <div data-testid="voice-card-empty" data-state="readonly" className={slotClass} style={trackVars}>
           <span className="text-xs text-muted-foreground">{t("editor.voice.noAudioYet")}</span>
         </div>
-        {row(null, null)}
+        {row(null)}
       </div>
     )
   }
@@ -472,7 +475,7 @@ export function CellVoicePanel({
         )}
         {recordButton}
       </div>
-      {row(null, null)}
+      {row(null)}
     </div>
   )
 }

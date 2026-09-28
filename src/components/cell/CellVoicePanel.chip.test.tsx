@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { act, fireEvent, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -20,7 +20,6 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({
 }))
 
 import { CellVoicePanel } from "./CellVoicePanel"
-import { SharedVoiceClipsContext } from "./shared-voice-clips"
 
 const voices: Voice[] = [
   { id: "v-mary", name: "Mary", color: "#000", provider: "gemini", voiceName: "Kore", prompt: "{text}" },
@@ -54,27 +53,22 @@ const byMary = {
 } as unknown as CellData
 const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
 
-function draw(
-  over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {},
-  { shared = new Set<string>() }: { shared?: ReadonlySet<string> } = {},
-) {
+function draw(over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) {
   const onRecord = vi.fn()
   const onMakeCharacter = vi.fn()
   renderWithTooltips(
-    <SharedVoiceClipsContext.Provider value={shared}>
-      <CellVoicePanel
-        cell={generated}
-        project={project}
-        projectId="proj-1"
-        settings={settings}
-        session={{ jwt: "x" } as unknown as never}
-        username="tester"
-        onRecord={onRecord}
-        onAfterGenerate={() => {}}
-        onMakeCharacter={onMakeCharacter}
-        {...over}
-      />
-    </SharedVoiceClipsContext.Provider>,
+    <CellVoicePanel
+      cell={generated}
+      project={project}
+      projectId="proj-1"
+      settings={settings}
+      session={{ jwt: "x" } as unknown as never}
+      username="tester"
+      onRecord={onRecord}
+      onAfterGenerate={() => {}}
+      onMakeCharacter={onMakeCharacter}
+      {...over}
+    />,
   )
   return { onRecord, onMakeCharacter }
 }
@@ -132,10 +126,12 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     expect(screen.getByRole("slider", { name: "End of the kept audio" })).toBeInTheDocument()
   })
 
-  it("puts volume and clone at the end of the row, always visible", () => {
+  it("ends the row in the take's tools — the recorder, volume, clone — always visible", () => {
     draw()
     const wave = screen.getByTestId("voice-card-waveform")
-    for (const name of ["Volume", "Clone a voice from this take"]) {
+    const tools = row().lastElementChild!.querySelectorAll("button")
+    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Record audio", "Volume", "Clone a voice from this take"])
+    for (const name of ["Record audio", "Volume", "Clone a voice from this take"]) {
       const b = screen.getByRole("button", { name })
       expect(row().lastElementChild!.contains(b)).toBe(true)
       expect(wave.contains(b)).toBe(false)
@@ -163,64 +159,94 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     expect(onMakeCharacter).toHaveBeenCalledTimes(1)
   })
 
-  it("is read-only for someone who can't edit: no trimming, no clone, no Generate again", () => {
+  it("is read-only for someone who can't edit: no trimming, no recorder, no clone", () => {
     draw({ canEdit: false })
     // An untrimmed take shown read-only has no lines at all (a trimmed one
     // would show them grey).
     expect(screen.queryByRole("slider", { name: "Start of the kept audio" })).toBeNull()
     expect(screen.queryByRole("button", { name: /clone/i })).toBeNull()
-    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+    expect(screen.queryByTestId("voice-card-record")).toBeNull()
     expect(screen.getByRole("button", { name: "Volume" })).toBeInTheDocument()
   })
 })
 
-// Sam, 2026-09-28: on every generated voice, whatever its voice — the same
-// voice can come out differently a second time. Never on a recording.
-describe("CellVoicePanel — Generate again", () => {
-  it("sits beside the picker as a quiet icon naming the voice, and regenerates in it", async () => {
-    draw({ voicePicker: <span data-testid="picker" /> })
-    const again = screen.getByTestId("voice-card-regenerate")
-    expect(row().contains(again)).toBe(true)
-    expect(again).toHaveAttribute("data-stale", "false")
-    expect(again).toHaveAccessibleName("Generate again · Mary")
-    expect(again.textContent).toBe("")
-    await expectTooltip(again, "Generate again · Mary")
-    await act(async () => { fireEvent.click(again) })
-    expect(generateCellVoice).toHaveBeenCalledTimes(1)
-    expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-mary")
+// Sam, 2026-09-28: the mic replaced Generate again — the recorder already
+// generates again, and records over, uploads and switches takes.
+describe("CellVoicePanel — the recorder, from a line with audio", () => {
+  it("opens the recorder from the mic, on a recording and on a generated voice", async () => {
+    for (const cell of [recorded, generated]) {
+      const { onRecord } = draw({ cell })
+      const mic = screen.getByTestId("voice-card-record")
+      await expectTooltip(mic, "Record audio")
+      fireEvent.click(mic)
+      expect(onRecord).toHaveBeenCalledTimes(1)
+      cleanup()
+    }
   })
 
-  it("stays quiet when the take is in the line's voice", () => {
-    draw({ cell: byMary })
-    expect(screen.getByTestId("voice-card-regenerate")).toHaveAttribute("data-stale", "false")
+  it("offers no Generate again of its own", () => {
+    draw()
+    expect(screen.queryByRole("button", { name: /Generate again/ })).toBeNull()
   })
 
-  // Picking only assigns, so the take can be in a voice the line no longer has.
-  it("shows its label and the new voice, highlighted, when the line's voice changed since", async () => {
+  it("keeps the mic but refuses it, with the reason, where this browser can't record", async () => {
+    const { onRecord } = draw({ recordUnavailable: "this browser has no MediaRecorder" })
+    const mic = screen.getByTestId("voice-card-record")
+    expect(mic).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(mic)
+    expect(onRecord).not.toHaveBeenCalled()
+    await expectTooltip(mic, "this browser has no MediaRecorder")
+  })
+})
+
+// Sam, 2026-09-28: picking a voice only assigns it, so a generated take can be
+// in a voice the line no longer has — a pill beside the time names it.
+describe("CellVoicePanel — the take's voice", () => {
+  const pill = () => screen.queryByTestId("voice-card-take-voice")
+
+  it("names the take's voice beside the time when the line's voice changed since", async () => {
     draw({ cell: byMary, settings: castJohn })
-    const again = screen.getByTestId("voice-card-regenerate")
-    expect(again).toHaveAttribute("data-stale", "true")
-    expect(again).toHaveTextContent("Generate again · John")
-    expect(again.className).toContain("var(--tl-track-hue)")
-    await expectTooltip(again, "This take was voiced by Mary")
-    await act(async () => { fireEvent.click(again) })
-    expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-john")
+    expect(pill()).toHaveTextContent("Mary")
+    expect(pill()).toHaveAttribute("data-tone", "amber")
+    expect(pill()).toHaveAttribute("data-wave-overlay")
+    const time = screen.getByText("0:00 / 0:10")
+    expect(time.parentElement!.contains(pill())).toBe(true)
+    await expectTooltip(pill()!, "This take was voiced by Mary. The line’s voice is now John.")
   })
 
-  it("is off an untranslated line", () => {
-    draw({ cell: { ...generated, translated: "" } as unknown as CellData })
-    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+  it("is not there when the take is in the line's voice", () => {
+    draw({ cell: byMary })
+    expect(pill()).toBeNull()
+  })
+
+  it("is not there when the take doesn't say which voice made it", () => {
+    draw({ settings: castJohn })
+    expect(pill()).toBeNull()
   })
 
   it("is never on a recording", () => {
-    draw({ cell: recorded })
-    expect(screen.getByTestId("voice-card-waveform")).toBeInTheDocument()
-    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+    draw({ cell: { ...recorded, attachments: { r1: { url: "blob:r", type: "audio/wav", voiceId: "v-mary" } } } as unknown as CellData, settings: castJohn })
+    expect(pill()).toBeNull()
   })
 
-  it("stays off a clip shared by lines voiced together", () => {
-    draw({}, { shared: new Set(["a1"]) })
-    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+  it("says so when the take's voice was removed from the project", async () => {
+    draw({ cell: { ...generated, attachments: { a1: { url: "blob:x", type: "audio/wav", voiceId: "v-gone" } } } as unknown as CellData })
+    expect(pill()).toHaveTextContent("Removed voice")
+    await expectTooltip(pill()!, "This take was voiced by a voice no longer in the project. The line’s voice is now Mary.")
+  })
+
+  it("turns blue on a file coloured amber", () => {
+    draw({
+      cell: byMary,
+      settings: castJohn,
+      project: { ...project, files: [{ id: "file-1", trackOverrides: { "target-audio": { color: "amber" } } }] } as unknown as ProjectRecord,
+    })
+    expect(pill()).toHaveAttribute("data-tone", "blue")
+  })
+
+  it("shows to someone who can't edit too", () => {
+    draw({ cell: byMary, settings: castJohn, canEdit: false })
+    expect(pill()).toHaveTextContent("Mary")
   })
 })
 
@@ -233,7 +259,9 @@ describe("CellVoicePanel — a line with no audio yet", () => {
     expect(row().contains(screen.getByTestId("picker"))).toBe(true)
     expect(slot().contains(row())).toBe(false)
     expect(screen.queryByRole("button", { name: "Volume" })).toBeNull()
-    expect(screen.queryByTestId("voice-card-regenerate")).toBeNull()
+    // Record is in the slot; the mic joins the row once there is audio.
+    expect(row().querySelector("[data-testid=voice-card-record]")).toBeNull()
+    expect(slot().contains(screen.getByTestId("voice-card-record"))).toBe(true)
   })
 
   it("offers Generate in the default voice, saying why on hover, and Record", async () => {

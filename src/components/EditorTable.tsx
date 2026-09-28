@@ -162,7 +162,6 @@ import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-hi
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
-import { SharedVoiceClipsContext, sharedGeneratedClipIds } from "./cell/shared-voice-clips"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -1331,9 +1330,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
-  // Generated clips selected by more than one line ("Voice together"): the
-  // Audio view keeps Generate again off them.
-  const sharedVoiceClips = useMemo(() => sharedGeneratedClipIds(audioByCellId.values()), [audioByCellId])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2735,7 +2731,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }
 
   return (
-    <SharedVoiceClipsContext.Provider value={sharedVoiceClips}>
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
@@ -2974,7 +2969,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
-    </SharedVoiceClipsContext.Provider>
   )
 })
 

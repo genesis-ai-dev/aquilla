@@ -44,17 +44,29 @@ export function fileTrackColor(
  * added track's); absent means the file's dub track. A source-audio section is
  * not a take on any dub track, so it wears the source row's fixed colour.
  */
-export function takeTrackVars(input: {
+interface TakeColorInput {
   files: readonly TrackColorSource[] | null | undefined
   fileId: string | null | undefined
   slot?: string | null
   sourceSection?: boolean
-}): Record<string, string> {
-  if (input.sourceSection) return trackHueVarsFor("source-audio", null)
+}
+
+function takeTrack(input: TakeColorInput) {
   const trackId = input.slot ? trackIdForSlot(input.slot) : DEFAULT_TARGET_TRACK_ID
-  const file = findFile(input.files, input.fileId)
-  const track = deriveTracksForFile(file).find((tr) => tr.id === trackId)
+  return deriveTracksForFile(findFile(input.files, input.fileId)).find((tr) => tr.id === trackId)
+}
+
+export function takeTrackVars(input: TakeColorInput): Record<string, string> {
+  if (input.sourceSection) return trackHueVarsFor("source-audio", null)
+  const track = takeTrack(input)
   // A take whose track is gone (deleted, or from a build this one cannot
   // draw) still shows as a take — in the dub track's colour, never grey.
   return trackHueVarsFor(track?.kind ?? "target-audio", track?.color ?? null)
+}
+
+/** The colour token a take is drawn in ("amber", …); null is the default
+ *  hue, and a source-audio section's fixed colour. */
+export function takeTrackColor(input: TakeColorInput): string | null {
+  if (input.sourceSection) return null
+  return takeTrack(input)?.color ?? null
 }

@@ -90,6 +90,12 @@ import {
   validateStructureCommand,
   type StructureCommand,
 } from './commands-structure'
+import {
+  isVisibilityCommandKind,
+  validateVisibilityCommand,
+  visibilityCommandFloor,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 
 /** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
  *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
@@ -148,6 +154,12 @@ export type {
   StructureCommand,
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
+export type {
+  HideCellCommand,
+  ShowCellCommand,
+  VisibilityCommand,
+} from './commands-hide-cell'
+export { isVisibilityCommand, isVisibilityCommandKind } from './commands-hide-cell'
 export { cellKey, laneCellKey } from './cell-keys'
 export { isCellFieldCommand } from './commands-cell-fields'
 
@@ -291,6 +303,7 @@ export type Command =
   | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
+  | VisibilityCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -831,6 +844,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-1426 HideCell / ShowCell — one validator for the pair.
+    if (isVisibilityCommandKind(c.kind)) {
+      const cmd = validateVisibilityCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -982,6 +1001,13 @@ export function requiredRoleForCommand(
   // a re-import-shaped act. See commands-structure.ts.
   if (c.kind === 'InsertCell' || c.kind === 'DeleteCell' || c.kind === 'SplitCell') {
     return structureCommandFloor()
+  }
+  // AQU-1426 HideCell / ShowCell: whatever floor `source.cell.visibility.set`
+  // carries at the /events perimeter (PROJECT_LEAD). Asked of role-policy, not
+  // restated, so this surface cannot drift below the perimeter that would refuse
+  // the compiled event anyway — see commands-hide-cell.ts.
+  if (isVisibilityCommandKind(c.kind)) {
+    return visibilityCommandFloor()
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

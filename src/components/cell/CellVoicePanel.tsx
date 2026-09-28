@@ -350,9 +350,10 @@ export function CellVoicePanel({
                   data-tone={pillOnAmber ? "blue" : "amber"}
                   className={cn(
                     "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
+                    // A see-through fill, so the take shows through it (Sam).
                     pillOnAmber
-                      ? "bg-blue-100 text-blue-800 ring-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:ring-blue-700"
-                      : "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-700",
+                      ? "bg-blue-500/30 text-blue-950 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-50 dark:ring-blue-400/60"
+                      : "bg-amber-400/45 text-amber-950 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-50 dark:ring-amber-400/60",
                     WAVE_OVERLAY_CLASS,
                   )}
                 >

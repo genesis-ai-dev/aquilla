@@ -13,6 +13,32 @@ export const org = defineNamespace({
     "org.breadcrumb.allOrganizations": "All organizations",
     "org.breadcrumb.organizationFallback": "Organization",
 
+    // -- AQU-1352 access primitives: grant-origin badges, inspector, inherited controls --
+    "org.access.origin.direct": "Direct",
+    "org.access.origin.inherited": "Inherited",
+    "org.access.origin.inheritedFrom": "Inherited · {path}",
+    "org.access.origin.creator": "Creator",
+    "org.access.origin.platform": "Platform admin",
+    "org.access.effective.direct": "{role} (direct)",
+    "org.access.effective.via": "{role} (via {path})",
+    "org.access.effective.creator": "{role} (creator)",
+    "org.access.effective.platform": "{role} (platform admin)",
+    "org.access.inherited.tooltip": "Set at {path} — change it there",
+    "org.access.inherited.link": "Change at {path}",
+    "org.access.noAccess": "No access",
+    "org.access.inspector.yourAccess": "Your access",
+    "org.access.inspector.guest": "Guest",
+    "org.access.inspector.guestOf": "Guest of {org}",
+    "org.access.inspector.effectiveHere": "Effective here ({path})",
+    "org.access.inspector.everythingElse": "Everything else",
+    "org.access.inspector.nothingElse": "No other access you can see",
+    "org.access.inspector.grantedBy": "by {name}",
+    "org.access.inspector.manageAccess": "Manage access",
+    "org.access.scope.org": "org",
+    "org.access.scope.team": "team",
+    "org.access.scope.project": "project",
+    "org.access.scope.lane": "lane",
+
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
@@ -1494,6 +1520,46 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.access.origin.inheritedFrom": {
+        description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.effective.direct": {
+        description: "Direct role shown beside a different effective role.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.effective.via": {
+        description: "Effective role and the ancestor scope it is inherited through.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.effective.creator": {
+        description: "Effective role held because the person created the scope.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.effective.platform": {
+        description: "Effective role held as platform administrator.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.inherited.tooltip": {
+        description: "Tooltip on a disabled role control for an inherited grant.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inherited.link": {
+        description: "Link beside a disabled inherited role control; goes to the scope where the grant lives.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.guestOf": {
+        description: "Member inspector header label for someone with no org membership.",
+        placeholders: { org: "Organization name." },
+      },
+      "org.access.inspector.effectiveHere": {
+        description: "Member inspector section heading: the role at the scope the inspector was opened from.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.grantedBy": {
+        description: "Who made a grant, inside a member inspector row.",
+        placeholders: { name: "Display name of the granting user." },
+      },
       "org.overview.showMoreProjects": {
         description:
           "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",

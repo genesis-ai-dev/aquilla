@@ -184,7 +184,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -333,6 +333,7 @@ import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, useFileFontSizeExplicit, setFileViewPref, clearFileFontSize } from "@/lib/store/file-view-prefs"
+import { useShowHiddenCells, setShowHiddenCells } from "@/lib/store/show-hidden-cells-pref"
 import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
@@ -347,7 +348,9 @@ import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/syn
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
-import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
+import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { draftTargets } from "@/lib/completion/draft-targets"
+import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -1460,6 +1463,25 @@ export function ProjectWorkspace() {
   })
 
   const validationCount = project ? readValidationCount(project) : 1
+  /**
+   * AQU-1422: may this person park cells in this project at all, and have they
+   * asked to see the parked ones?
+   *
+   * The role question is asked HERE as well as in the row, and for a different
+   * job: the row decides whether to draw "Hide cell", this decides whether the
+   * store is even allowed to put a parked row in the display list. They must
+   * agree, so both ask `canPerform` against the one role table the emitter
+   * enforces rather than re-deriving a rank.
+   *
+   * The preference alone is not enough to reveal anything. It is device-scoped
+   * localStorage, so it outlives a demotion — a former lead would otherwise keep
+   * seeing every hidden row in a file they can no longer park.
+   */
+  const mayParkCellsInProject = canPerform(
+    "source.cell.visibility.set",
+    project?.syncRole?.level ?? null,
+  )
+  const showHiddenCellsPref = useShowHiddenCells()
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
   // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
   // rule as useCells) before the one-target-per-cell pairing. N=1 is
@@ -1485,8 +1507,34 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
     countStructural: countStructuralCells,
+    // AQU-1422: reveal parked cells (dimmed) instead of dropping them from the
+    // display list. ANDed with the role gate, not just the preference — the pref
+    // is device-scoped and survives a role downgrade, so on its own a demoted
+    // lead would keep seeing hidden rows in a file they may no longer park.
+    showHidden: showHiddenCellsPref && mayParkCellsInProject,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
+  /**
+   * AQU-1422: the file header's "N hidden" indicator, or undefined when there is
+   * nothing to say.
+   *
+   * Three conditions, and all three have to hold: this person may park cells
+   * (otherwise they must not learn hiding exists here), the file has something
+   * parked (a permanent "0 hidden" is furniture), and the store has the count.
+   * `readAtVersion` because the React Compiler memoises away a version-only
+   * dependency — see the note in useActiveCellStore.
+   */
+  const hiddenCellCount = readAtVersion(cellStoreVersion, () => cellStore.getHiddenCount())
+  const hiddenCellsIndicator = useMemo(
+    () => (mayParkCellsInProject && hiddenCellCount > 0
+      ? {
+          count: hiddenCellCount,
+          revealed: showHiddenCellsPref,
+          onRevealedChange: setShowHiddenCells,
+        }
+      : undefined),
+    [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
+  )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
@@ -2569,6 +2617,69 @@ export function ProjectWorkspace() {
       revalidateCells()
     },
     [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells, timingLocked, canUnlockTiming],
+  )
+
+  /**
+   * AQU-1422: park a cell, or bring it back.
+   *
+   * The whole shape of this is "the reversible one". Removal (`handleRemoveLine`)
+   * has to re-anchor the successor, plan a cascade across lanes, confirm an
+   * inventory with the user and rebase stale siblings, because it destroys rows.
+   * This destroys nothing: one non-chain-mutating event moves one column on the
+   * source row. So there is no confirmation, no cascade, no successor to re-point
+   * and no chain slot to lose — and un-hiding is the same call with `false`.
+   *
+   * Optimistic first so the row leaves (or rejoins) the list on the click; the
+   * snapshot is what puts it back if the server refuses. The refusal paths matter
+   * as much as the happy one here: a hide that vanished the row and was then
+   * rejected would read as data loss, which is the one thing this feature must
+   * never look like.
+   */
+  const handleSetCellHidden = useCallback(
+    async (cellId: string, hidden: boolean) => {
+      if (!project?.id || !activeFileId) return
+      const previous = cellStore.applyOptimisticCellHidden(cellId, hidden)
+      // Null ⇒ no source row to park. Nothing was done, so there is nothing to
+      // say and nothing to roll back.
+      if (previous === null) return
+      const restore = () => {
+        cellStore.applyOptimisticCellHidden(cellId, previous)
+        revalidateCells()
+      }
+      try {
+        await emitSourceCellVisibilitySet({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          hidden,
+          author: currentUsername,
+        })
+      } catch (err) {
+        // `enqueueEvent` mirrors the role floor and throws BEFORE writing, so
+        // nothing is queued and no flush callback can fire. Without this the row
+        // would stay parked on screen behind a freshness floor no refetch can
+        // clear, with no message — see the same note in handleRemoveLine.
+        console.error("[handleSetCellHidden] refused before enqueue:", err)
+        restore()
+        toast.add({
+          type: "error",
+          title: hidden
+            ? t("editor.hideCell.failedToast")
+            : t("editor.showCell.failedToast"),
+        })
+        return
+      }
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: restore,
+        onForbidden: () => {
+          restore()
+          toast.add({ type: "error", title: t("editor.hideCell.forbiddenToast") })
+        },
+      })
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, toast, t],
   )
 
   // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
@@ -5906,11 +6017,12 @@ export function ProjectWorkspace() {
         getSummary,
         health: (cellId) => effectiveHealthMap.get(cellId),
         hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
-        // AQU-1083: draw a heading as "not counted" rather than as work left
-        // to do. The chapter's fraction already excludes it — the store does
-        // that — so this only chooses the colour and what it announces.
-        isExcluded: (cellId) =>
-          !countStructuralCells && isStructuralCell(getSummary(cellId)?.type),
+        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
+        // PARKED cell, as "not counted" rather than as work left to do. The
+        // chapter's fraction already excludes both — the store does that — so this
+        // only chooses the colour and what it announces. The rule itself lives in
+        // `isExcludedFromWork`, where the two cases stay separate and tested.
+        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
       })
     })
   }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
@@ -7456,6 +7568,16 @@ export function ProjectWorkspace() {
     requestRemoveCellRef.current(cellId)
   }, [])
 
+  // AQU-1422: identity-stable wrapper, for the reason the whole
+  // EditorActionsContext exists — `handleSetCellHidden` is rebuilt whenever the
+  // active file or the toast helper changes, and a fresh closure on the context
+  // re-renders every rendered row. Declared here, beside the other wrappers, and
+  // fed by a ref so the memo below never lists the real handler.
+  const setCellHiddenRef = useRef<(cellId: string, hidden: boolean) => void>(() => {})
+  const handleSetCellHiddenStable = useCallback((cellId: string, hidden: boolean) => {
+    setCellHiddenRef.current(cellId, hidden)
+  }, [])
+
   /**
    * Take a maintainer to the switch that locks timings, rather than flipping
    * it from inside the row (Sam, 2026-09-09).
@@ -7506,11 +7628,15 @@ export function ProjectWorkspace() {
     onAddLineAt: handleAddLineAt,
     onInsertCellBeside: handleInsertCellBeside,
     onRemoveCell: handleRemoveCell,
+    // AQU-1422: passed unconditionally — the ROLE gate is applied in the row,
+    // with `canPerform` against the same table the emitter enforces, because
+    // that is where the DCS/live-linked reasons already live.
+    onSetCellHidden: handleSetCellHiddenStable,
     onRetimeCell: handleRetimeSubtitle,
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -8749,18 +8875,20 @@ export function ProjectWorkspace() {
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
+    // AQU-1424: `draftTargets` is the shared rule for "what is left to draft" —
+    // untranslated AND not parked. Both paths go through it so they cannot drift
+    // apart, and the one that would cost money is covered: without the hidden
+    // clause, Draft-all spends AI credits on text nobody will read or export.
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
-      const untranslated = cells.filter((c) => !c.translated.trim())
+      const untranslated = draftTargets(getActiveCells())
       if (untranslated.length === 0) return
       // AQU-586: honor the project's configured completion batch size (default 10).
       completeBatch(untranslated.slice(0, completionBatchSizeFor(project)))
     },
     runCompleteAll: () => {
       if (!activeFileId) return
-      const cells = getActiveCells()
-      const untranslated = cells.filter((c) => !c.translated.trim())
+      const untranslated = draftTargets(getActiveCells())
       if (untranslated.length === 0) return
       // No slice — draft every untranslated cell; useCompletion chunks internally.
       completeBatch(untranslated)
@@ -9451,6 +9579,8 @@ export function ProjectWorkspace() {
   // Publish it to the stable wrapper the editor context hands the rows. See
   // `handleRemoveCell` above for why the indirection exists.
   requestRemoveCellRef.current = requestRemoveCell
+  // AQU-1422: same publication, same reason.
+  setCellHiddenRef.current = (cellId, hidden) => { void handleSetCellHidden(cellId, hidden) }
 
   // AQU-1068: who may add and remove cells at all. ONE question, asked of the
   // project's configured tier — no rank clears it on its own, because the
@@ -11548,6 +11678,7 @@ export function ProjectWorkspace() {
       }}
       menuItems={fileMenuItems}
       fileOptionsAnchorRef={fileOptionsAnchorRef}
+      hiddenCells={hiddenCellsIndicator}
       viewSettingsMenu={(
         <ViewSettingsMenu
           ref={viewSettingsRef}

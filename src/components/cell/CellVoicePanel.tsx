@@ -352,8 +352,8 @@ export function CellVoicePanel({
                     "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
                     // A see-through fill, so the take shows through it (Sam).
                     pillOnAmber
-                      ? "bg-blue-500/30 text-blue-950 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-50 dark:ring-blue-400/60"
-                      : "bg-amber-400/45 text-amber-950 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-50 dark:ring-amber-400/60",
+                      ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
+                      : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
                     WAVE_OVERLAY_CLASS,
                   )}
                 >

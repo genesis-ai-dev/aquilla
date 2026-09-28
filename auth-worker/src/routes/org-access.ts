@@ -11,6 +11,7 @@ import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   ViewerScope,
+  hideUnseenAncestors,
   nameGranters,
   toEntry,
   toNamedGrant,
@@ -142,6 +143,8 @@ export async function buildOrgAccess(
   for (const p of people.values()) p.isGuest = !memberIds.has(p.userId)
 
   const list = [...people.values()].sort((a, b) => a.displayName.localeCompare(b.displayName))
+  // Rule 4: same crumb redaction as the member inspector.
+  await hideUnseenAncestors(vs, list.flatMap((p) => p.grants))
   await nameGranters(env, list.flatMap((p) => p.grants))
   return { ok: true, payload: { tree, people: list } }
 }

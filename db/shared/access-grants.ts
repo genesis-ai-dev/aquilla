@@ -88,7 +88,8 @@ export function resolveFromGrants(
   const teamScope = grants
     .filter((g) => g.scopeType === "team" && attached.has(g.scopeId))
     .map((g): AccessGrant => ({ ...g, viaTeamId: g.scopeId }))
-  const bestTeam = [...onProject.filter((g) => g.source === "team"), ...teamScope]
+  const teamPaths = [...onProject.filter((g) => g.source === "team"), ...teamScope]
+  const bestTeam = teamPaths
     .reduce<AccessGrant | null>(
       (best, g) => (best == null || g.roleLevel > best.roleLevel ? g : best),
       null,
@@ -101,7 +102,12 @@ export function resolveFromGrants(
 
   const chain: ChainLink[] = []
   if (direct) chain.push({ source: "override", level: direct.roleLevel, grant: direct })
+  // Every contributing team path is listed (member inspector); the stable sort
+  // below keeps bestTeam ahead of equal-level siblings, so level/source are unchanged.
   if (bestTeam) chain.push({ source: "group", level: bestTeam.roleLevel, grant: bestTeam })
+  for (const t of teamPaths) {
+    if (t !== bestTeam) chain.push({ source: "group", level: t.roleLevel, grant: t })
+  }
   const orgLevel = orgPathContribution({
     orgLevel: org?.roleLevel ?? null,
     hasDirectGrant: direct != null,

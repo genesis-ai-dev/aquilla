@@ -129,7 +129,7 @@ describe.each(RESOLVER_MODES)("AQU-1352 attack #1 URL guessing (resolver %s)", (
   // {type:"team", name:"fixture/translators"} for other p1 members. The
   // inspector (users/:id/access) marks the same ref hidden:true, name:"" —
   // §3.9 rule 4 is enforced on one surface and not the other.
-  it.fails("GET /orgs/1/access as team_lead does not name a team it is not on (rule 4)", async () => {
+  it("GET /orgs/1/access as team_lead does not name a team it is not on (rule 4)", async () => {
     const res = await req(mode, TEAM_LEAD.name, `/api/v2/orgs/1/access`)
     expect(res.status).toBe(200)
     expect(res.text).not.toContain("fixture/translators")

@@ -150,7 +150,7 @@ function scopePathOf(g: NamedGrant): ScopePath {
 
 function originOf(g: NamedGrant): GrantOrigin {
   if (g.source === "creator") return { kind: "creator" }
-  if (g.source === "team") return { kind: "inherited", from: [...orgRef(g), ...teamRef(g)] }
+  if (g.source === "team" || g.scopeType === "team") return { kind: "inherited", from: [...orgRef(g), ...teamRef(g)] }
   return { kind: "direct" }
 }
 
@@ -329,7 +329,7 @@ function countDescendants(targets: AccessChainEntry[], visible: AccessChainEntry
  * and their real names are replaced with "" — the name never leaves the
  * server. Covers both the grant's own path and its inherited-from path.
  */
-async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainEntry[]): Promise<void> {
+export async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainEntry[]): Promise<void> {
   const redact = async (path: ScopePath): Promise<ScopePath> => {
     const orgId = path[0]?.type === "org" ? Number(path[0].id) : null
     if (orgId == null || (await vs.canSeeOrg(orgId))) return path
@@ -356,7 +356,8 @@ export function toEntry(g: NamedGrant): AccessChainEntry {
 
 function chainEntry(link: ChainLink, byKey: Map<string, NamedGrant>): { key: string | null; entry: AccessChainEntry } {
   if (!link.grant) return { key: null, entry: { scopePath: [], roleLevel: link.level, origin: { kind: "platform" } } }
-  const key = grantKey(link.grant)
+  // resolveFromGrants stamps viaTeamId onto team-scope rows; the view row has none.
+  const key = grantKey(link.grant.scopeType === "team" ? { ...link.grant, viaTeamId: null } : link.grant)
   const named = byKey.get(key)
   if (!named) return { key, entry: { scopePath: [], roleLevel: link.level, origin: { kind: "direct" } } }
   const entry = toEntry(named)

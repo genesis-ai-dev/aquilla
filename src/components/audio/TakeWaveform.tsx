@@ -27,6 +27,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
 import {
+  formatTrimTime,
   moveTrimEnd,
   moveTrimStart,
   sameTrim,
@@ -134,11 +135,11 @@ export function TakeWaveform({
   // ── Edges ─────────────────────────────────────────────────────────────
   const canEdit = trimEditable && !isSection && dur > 0 && Boolean(onCommitTrim)
   const showReadOnly = !canEdit && !isSection && dur > 0 && kept.kind === "trim"
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`
   // The save paints the new window at once (an optimistic overlay, in the same
   // event), so the drag's own value can retire as it is handed over.
+  // A drag that ends where it began saves nothing.
   const commit = (v: TrimValue) => {
-    onCommitTrim?.(v.start, v.end)
+    if (!sameTrim(v, stored)) onCommitTrim?.(v.start, v.end)
     setDraft(null)
   }
   const edges: WaveformEdge[] = canEdit || showReadOnly
@@ -147,7 +148,7 @@ export function TakeWaveform({
           key: "start",
           at: toFrac(trim.start ?? 0),
           label: t("editor.waveform.trimStart"),
-          valueText: fmt(trim.start ?? 0),
+          valueText: formatTrimTime(trim.start ?? 0),
           editable: canEdit,
           onDrag: (f) => setDraft({ audioId, ...moveTrimStart(trim, f * dur, dur) }),
           onNudge: (dir, coarse) => {
@@ -160,7 +161,7 @@ export function TakeWaveform({
           key: "end",
           at: toFrac(trim.end ?? dur),
           label: t("editor.waveform.trimEnd"),
-          valueText: fmt(trim.end ?? dur),
+          valueText: formatTrimTime(trim.end ?? dur),
           editable: canEdit,
           onDrag: (f) => setDraft({ audioId, ...moveTrimEnd(trim, f * dur, dur) }),
           onNudge: (dir, coarse) => {

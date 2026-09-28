@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { WaveformRect } from "./WaveformRect"
 import { envelopePathD } from "@/lib/audio/waveform-shape"
 
@@ -177,12 +177,69 @@ describe("WaveformRect", () => {
       box(screen.getByTestId("w"))
       const line = screen.getByRole("slider", { name: "Trim start" })
       expect(line.className).toContain("cursor-ew-resize")
+      // Grabbed 40px right of the line (at 0.1), moved 40px on: the line
+      // moves 40px, keeping the grab point under the pointer — no jump.
       fireEvent.pointerDown(line, { clientX: 80, buttons: 1 })
+      expect(onDrag).not.toHaveBeenCalled()
       fireEvent.pointerMove(line, { clientX: 120, buttons: 1 })
       fireEvent.pointerUp(line, { clientX: 120 })
-      expect(onDrag).toHaveBeenNthCalledWith(1, 0.2)
-      expect(onDrag).toHaveBeenNthCalledWith(2, 0.3)
+      expect(onDrag).toHaveBeenCalledTimes(1)
+      expect(onDrag.mock.calls[0][0]).toBeCloseTo(0.2)
       expect(onCommit).toHaveBeenCalledTimes(1)
+    })
+
+    it("saves nothing for a click that never moves the line", () => {
+      const onDrag = vi.fn()
+      const onCommit = vi.fn()
+      render(
+        <WaveformRect peaks={peaks} height={56} testId="w"
+          edges={[{ key: "start", at: 0.1, label: "Trim start", editable: true, onDrag, onCommit }]} />,
+      )
+      box(screen.getByTestId("w"))
+      const line = screen.getByRole("slider", { name: "Trim start" })
+      fireEvent.pointerDown(line, { clientX: 43, buttons: 1 })
+      fireEvent.pointerMove(line, { clientX: 43, buttons: 1 })
+      fireEvent.pointerUp(line, { clientX: 43 })
+      expect(onDrag).not.toHaveBeenCalled()
+      expect(onCommit).not.toHaveBeenCalled()
+    })
+
+    // Sam, 2026-09-28: a line being dragged shows its time.
+    it("shows the line's time while it is held, on the side that keeps it inside", () => {
+      const { rerender } = render(
+        <WaveformRect peaks={peaks} height={56} testId="w"
+          edges={[{ key: "start", at: 0.1, label: "Trim start", valueText: "0:00.52", editable: true, onDrag: vi.fn() }]} />,
+      )
+      box(screen.getByTestId("w"))
+      const line = screen.getByRole("slider", { name: "Trim start" })
+      expect(screen.queryByTestId("w-edge-start-time")).toBeNull()
+      fireEvent.pointerDown(line, { clientX: 40, buttons: 1 })
+      expect(screen.getByTestId("w-edge-start-time")).toHaveTextContent("0:00.52")
+      expect(screen.getByTestId("w-edge-start-time").className).toContain("left-full")
+      rerender(
+        <WaveformRect peaks={peaks} height={56} testId="w"
+          edges={[{ key: "start", at: 0.8, label: "Trim start", valueText: "0:04.10", editable: true, onDrag: vi.fn() }]} />,
+      )
+      expect(screen.getByTestId("w-edge-start-time")).toHaveTextContent("0:04.10")
+      expect(screen.getByTestId("w-edge-start-time").className).toContain("right-full")
+      fireEvent.pointerUp(line, { clientX: 320 })
+      expect(screen.queryByTestId("w-edge-start-time")).toBeNull()
+    })
+
+    it("shows it for a moment after an arrow-key nudge", () => {
+      vi.useFakeTimers()
+      try {
+        render(
+          <WaveformRect peaks={peaks} height={56} testId="w"
+            edges={[{ key: "end", at: 0.9, label: "Trim end", valueText: "0:05.00", editable: true, onNudge: vi.fn() }]} />,
+        )
+        fireEvent.keyDown(screen.getByRole("slider", { name: "Trim end" }), { key: "ArrowLeft" })
+        expect(screen.getByTestId("w-edge-end-time")).toHaveTextContent("0:05.00")
+        act(() => { vi.advanceTimersByTime(1000) })
+        expect(screen.queryByTestId("w-edge-end-time")).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it("nudges with bare arrow keys, coarse with Shift, and leaves Alt+Arrow alone", () => {

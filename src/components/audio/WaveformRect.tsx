@@ -18,7 +18,9 @@
 //     line. Where it can be dragged the pointer turns into the left-right
 //     resize arrow over it — and nothing else appears (Sam: no grips, no
 //     arrows; an earlier semi-transparent handle failed on contrast against
-//     grey audio). Read-only edges are the same line in grey.
+//     grey audio). Read-only edges are the same line in grey. While a line
+//     moves — grabbed, or nudged with the arrow keys — its time shows beside
+//     it, and a grab keeps the point you took hold of under the pointer.
 //   - BUTTONS THAT STEP ASIDE (Sam, 2026-09-28). While a line is dragged or
 //     nudged, anything drawn over the waveform that the line comes within
 //     STEP_ASIDE_PX of — a corner button, the running time, a voice pill —
@@ -33,7 +35,7 @@
 // Purely presentational. The caller owns the audio (peaks, position, play) and
 // the rules for moving an edge (see lib/audio/trim-edit).
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from "react"
 import { Play, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -102,8 +104,10 @@ export interface WaveformRectProps {
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
 
-/** How close (px) a moving line comes to an overlay before it steps aside. */
-export const STEP_ASIDE_PX = 28
+/** How close (px) a moving line comes to an overlay before it steps aside.
+ *  Sam, 2026-09-28: 28 cleared them too early — only a line about to cross
+ *  one moves it. */
+export const STEP_ASIDE_PX = 10
 /** After an arrow-key nudge, overlays stay aside this long for the next one. */
 const NUDGE_LINGER_MS = 900
 
@@ -344,8 +348,25 @@ function EdgeLine({
   onActivity?: (what: EdgeActivity, at: number) => void
   testId?: string
 }) {
-  const dragging = useRef(false)
+  // The drag keeps the point of the line you grabbed under the pointer: the
+  // hit area is wider than the line, and grabbing it off-centre used to make
+  // it jump to the pointer — a grab-and-release in place moved the trim.
+  const drag = useRef<{ offset: number; moved: boolean } | null>(null)
   const { editable } = edge
+  // Its time, beside it, while it moves: from the grab to the release, and
+  // for a moment after an arrow-key nudge (Sam, 2026-09-28).
+  const [showTime, setShowTime] = useState(false)
+  const timeLinger = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdTime = (ms: number | null) => {
+    if (timeLinger.current) { clearTimeout(timeLinger.current); timeLinger.current = null }
+    setShowTime(true)
+    if (ms != null) timeLinger.current = setTimeout(() => { timeLinger.current = null; setShowTime(false) }, ms)
+  }
+  const dropTime = () => {
+    if (timeLinger.current) { clearTimeout(timeLinger.current); timeLinger.current = null }
+    setShowTime(false)
+  }
+  useEffect(() => () => { if (timeLinger.current) clearTimeout(timeLinger.current) }, [])
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (!editable) return
@@ -355,23 +376,28 @@ function EdgeLine({
     // Focus follows the grab, so the arrow keys nudge the line you just
     // touched (Sam: "click the line, then the arrow keys").
     e.currentTarget.focus({ preventScroll: true })
-    dragging.current = true
-    const f = fracFromX(e.clientX)
-    edge.onDrag?.(f)
-    onActivity?.("start", f)
+    drag.current = { offset: fracFromX(e.clientX) - edge.at, moved: false }
+    holdTime(null)
+    onActivity?.("start", edge.at)
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!editable || !dragging.current || e.buttons !== 1) return
+    const d = drag.current
+    if (!editable || !d || e.buttons !== 1) return
     e.stopPropagation()
-    const f = fracFromX(e.clientX)
+    const f = clamp01(fracFromX(e.clientX) - d.offset)
+    if (!d.moved && Math.abs(f - edge.at) < 1e-9) return
+    d.moved = true
     edge.onDrag?.(f)
     onActivity?.("move", f)
   }
   const endDrag = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return
-    dragging.current = false
+    const d = drag.current
+    if (!d) return
+    drag.current = null
     e.stopPropagation()
-    edge.onCommit?.()
+    // A click that never moved the line saves nothing.
+    if (d.moved) edge.onCommit?.()
+    dropTime()
     onActivity?.("end", edge.at)
   }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -384,6 +410,7 @@ function EdgeLine({
     e.stopPropagation()
     edge.onNudge?.(e.key === "ArrowLeft" ? -1 : 1, e.shiftKey)
     edge.onCommit?.()
+    holdTime(NUDGE_LINGER_MS)
     onActivity?.("nudge", edge.at)
   }
 
@@ -404,7 +431,7 @@ function EdgeLine({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
-      onBlur={() => onActivity?.("blur", edge.at)}
+      onBlur={() => { dropTime(); onActivity?.("blur", edge.at) }}
       className={cn(
         "absolute inset-y-0 z-10 w-2.5 -translate-x-1/2 touch-none outline-none",
         editable ? "cursor-ew-resize focus-visible:bg-foreground/10" : "pointer-events-none",
@@ -413,6 +440,19 @@ function EdgeLine({
     >
       {/* The line itself: 2px, fully opaque. */}
       <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      {/* Its time, at the top, on whichever side keeps it inside the box. */}
+      {showTime && edge.valueText && (
+        <span
+          aria-hidden
+          data-testid={testId ? `${testId}-time` : undefined}
+          className={cn(
+            "pointer-events-none absolute top-1 z-30 whitespace-nowrap rounded bg-foreground px-1 text-[10px] font-medium tabular-nums leading-4 text-background shadow-sm",
+            edge.at < 0.5 ? "left-full ms-0.5" : "right-full me-0.5",
+          )}
+        >
+          {edge.valueText}
+        </span>
+      )}
     </div>
   )
 }

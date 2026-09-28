@@ -232,13 +232,24 @@ describe("trimming in place", () => {
     draw()
     sized()
     const line = screen.getByRole("slider", { name: /start of the kept audio/i })
-    fireEvent.pointerDown(line, { clientX: 40, buttons: 1 })
+    // Taken where it is (the clip's start) and dragged 40px in.
+    fireEvent.pointerDown(line, { clientX: 0, buttons: 1 })
+    fireEvent.pointerMove(line, { clientX: 40, buttons: 1 })
     fireEvent.pointerUp(line, { clientX: 40 })
     expect(trimEmits).toHaveLength(1)
     expect(trimEmits[0]).toMatchObject({
       fileId: "cue-sibling", cellId: "cue-1", audioId: "audio-cue-1-1700000000-take.webm",
       trimStartMs: 300, trimEndMs: null,
     })
+  })
+
+  it("saves nothing when a line is clicked but not moved", () => {
+    draw()
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(line, { clientX: 4, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 4 })
+    expect(trimEmits).toHaveLength(0)
   })
 
   it("nudges a focused line with the arrow keys", () => {

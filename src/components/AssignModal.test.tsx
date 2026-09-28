@@ -673,6 +673,26 @@ describe("lane select (AQU-538)", () => {
     )
     expect(screen.getByTestId("assign-modal-lane-fixed").textContent).toBe("French")
   })
+
+  // AQU-729 x AQU-581: the picker holds a sentinel for the '' default lane, but
+  // the submit gate and the wire must see the raw '' tag. Otherwise a
+  // coordinator whose only lane is the main language is refused their own lane.
+  it("lets a coordinator scoped to the main language hand out work in it", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish"]}
+        defaultLane=""
+        defaultLaneLabel="French"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "" }] }}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
+  })
 })
 
 // ── Error: no member selected ────────────────────────────────────────────────

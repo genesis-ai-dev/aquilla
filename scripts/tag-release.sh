@@ -12,6 +12,27 @@ if ! [[ "$branch" =~ ^release/([0-9]{4})/([0-9]{2})/([0-9]{2})(-[0-9]{2})?$ ]]; 
 fi
 series="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
 
+# Tag only the commit production is serving. The deploy chain runs this
+# straight after its live checks, but a later manual run may have a newer
+# HEAD. Retries cover the seconds a fresh deploy can take to reach the edge.
+version_url="${TAG_RELEASE_VERSION_URL:-https://aquilla.app/version.json}"
+retry_seconds="${TAG_RELEASE_VERSION_RETRY_SECONDS:-10}"
+head_sha="$(git rev-parse HEAD)"
+live_sha=""
+for check in 1 2 3 4 5 6; do
+  live_sha="$(curl -fsS --max-time 10 -H "Cache-Control: no-cache" "$version_url" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).sha??""))}catch{}})' \
+    || true)"
+  if [[ "$live_sha" =~ ^[0-9a-f]{7,40}$ && "$head_sha" == "$live_sha"* ]]; then
+    break
+  fi
+  [ "$check" -lt 6 ] && sleep "$retry_seconds"
+done
+if ! [[ "$live_sha" =~ ^[0-9a-f]{7,40}$ && "$head_sha" == "$live_sha"* ]]; then
+  echo "ABORT: $version_url reports '${live_sha:-nothing}', but HEAD is ${head_sha:0:9}. Tag the commit production is serving." >&2
+  exit 1
+fi
+
 # The "release tags" ruleset requires a successful GitHub Deployment against
 # `production` before it accepts the tag push below. Nothing else in the
 # deploy chain records one, so do it here, once, before any push attempt.

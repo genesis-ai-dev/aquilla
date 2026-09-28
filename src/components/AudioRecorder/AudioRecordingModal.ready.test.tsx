@@ -102,6 +102,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -178,6 +179,39 @@ describe("the selected take, before recording", () => {
     render(modalEl())
     expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 3 · 3.0s")
     expect(screen.getByText("0:03.0")).toBeInTheDocument()
+  })
+
+  // Sam, 2026-09-28: the room went to the takes drawer, so on a line with no
+  // timed window the note is a tooltip on an icon beside the take, not a line.
+  it("says a line has no timed window on hover, beside the take, compact", async () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-3.wav",
+      attachments: { "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }) },
+    })
+    const untimed = { ...cell, startTime: undefined, endTime: undefined } as unknown as CellData
+    renderWithTooltips(
+      <AudioRecordingModal
+        open project={project} cells={[untimed]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    const icon = screen.getByTestId("rec-no-window")
+    expect(screen.getByTestId("rec-ready-take").contains(icon)).toBe(true)
+    await expectTooltip(icon, "This line has no timed window.")
+    expect(screen.queryByText("This line has no timed window.", { selector: "p" })).toBeNull()
+    expect(screen.getByTestId("rec-ready-waveform").style.height).toBe("40px")
+  })
+
+  it("keeps the note as a line where there is no take to hang it on", () => {
+    const untimed = { ...cell, startTime: undefined, endTime: undefined } as unknown as CellData
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[untimed]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("rec-no-window")).toBeNull()
+    expect(screen.getByText("This line has no timed window.")).toBeInTheDocument()
   })
 
   it("shows today's empty window on a line with no take", () => {

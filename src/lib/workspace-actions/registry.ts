@@ -133,11 +133,39 @@ export const workspaceActions: WorkspaceAction[] = [
             : ""
         return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
       },
-      // Same imperative as the selection-toolbar Validate button — reuse it
-      // rather than mint a duplicate "Validate" string in this namespace.
-      confirmLabelKey: "editor.selection.validate",
+      // Same imperative as the selection toolbar's button — reuse it rather
+      // than mint a duplicate string in this namespace. It names its half now
+      // ("Validate text"), which is what this dialog is about. The bare
+      // "Validate" key stays for the agent card, whose per-row button is not
+      // text-specific and whose accessible name already carries the reference.
+      confirmLabelKey: "editor.selection.validateText",
     },
     run: (_c, args) => args.runBatchValidate(),
+  },
+  {
+    // AQU-490. BESIDE the text action, never merged into it: Sam's ruling is
+    // that combining them would be "really dumb" — signing off a translation
+    // says nothing about whether anyone has listened to its recording.
+    id: "batch-validate-audio",
+    labelKey: "nav.workspaceActions.batchValidateAudio.label",
+    icon: Mic,
+    group: "primary",
+    // Only where there is audio to validate at all, so a text-only project
+    // never grows a menu item it can do nothing with.
+    isAvailable: (c) =>
+      c.activeFileId != null
+      && roleAllows(c, "cell.audio.validate")
+      && (c.audioCounts?.validatableTakes ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.batchValidateAudio.title",
+      description: (c, t) => {
+        if (!c.activeFileId) return ""
+        const takes = c.audioCounts?.validatableTakes ?? 0
+        return t("nav.workspaceActions.batchValidateAudio.description", { takes })
+      },
+      confirmLabelKey: "nav.workspaceActions.batchValidateAudio.label",
+    },
+    run: (_c, args) => args.runBatchValidateAudio(),
   },
   {
     id: "export", labelKey: "nav.workspaceActions.export", icon: Download, group: "primary",

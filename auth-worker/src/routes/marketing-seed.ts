@@ -21,6 +21,7 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { ROLE } from "../types"
+import { ensureProjectLanes } from "../../../db/shared/lanes"
 
 const M_USERNAME = "demo"
 const M_EMAIL = "demo@aquilla.demo"
@@ -121,6 +122,13 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .bind(M_PROJECT_ID, userId, ROLE.OWNER, userId)
     .run()
 
+  // AQU-1240 slice 8: first-class lanes must exist before cell writes so the
+  // inserts below resolve a non-NULL lane_id (source lane + '' default target
+  // lane). Idempotent upsert; safe on every reseed.
+  await ensureProjectLanes(db, M_PROJECT_ID, {
+    settings: { sourceLanguage: SOURCE_LANG, targetLanguage: TARGET_LANG },
+  })
+
   // Idempotent content reseed: drop any prior demo file/cells/events first.
   // Order matters: cells.event_id FKs events(id), so cells before events.
   await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
@@ -168,10 +176,11 @@ async function seedMarketing(db: AquillaDb): Promise<{
     await insertEvent({ id: srcEventId, cellId, kind: "source.cell.commit", payload: { value: source, ref } })
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash)
-         VALUES (?, ?, ?, 'source', ?, NULL, 'verse', ?, ?, ?, NULL, ?, ?, 0, ?, NULL)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
+         VALUES (?, ?, ?, 'source', ?, NULL, 'verse', ?, ?, ?, NULL, ?, ?, 0, ?, NULL,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'source'))`,
       )
-      .bind(M_PROJECT_ID, M_FILE_ID, cellId, source, ref, prevCellId, srcEventId, M_USERNAME, now, words(source))
+      .bind(M_PROJECT_ID, M_FILE_ID, cellId, source, ref, prevCellId, srcEventId, M_USERNAME, now, words(source), M_PROJECT_ID)
       .run()
 
     const hasTarget = target.trim().length > 0
@@ -179,10 +188,11 @@ async function seedMarketing(db: AquillaDb): Promise<{
     await insertEvent({ id: tgtEventId, cellId, kind: "target.cell.commit", payload: { value: target, ref } })
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash)
-         VALUES (?, ?, ?, 'target', ?, NULL, 'verse', ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
+         VALUES (?, ?, ?, 'target', ?, NULL, 'verse', ?, ?, ?, ?, ?, ?, ?, ?, NULL,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ''))`,
       )
-      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, hasTarget ? 1 : 0, words(target))
+      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, hasTarget ? 1 : 0, words(target), M_PROJECT_ID)
       .run()
 
     totalWords += words(source) + words(target)

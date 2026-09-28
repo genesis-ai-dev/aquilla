@@ -394,7 +394,12 @@ describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
 // editor. The hand-built fixture above has no role at all and only ever
 // exercised the fail-open path, which is how that shipped.
 describe("GlossaryEditor role gating (AQU-208)", () => {
-  const TERMBASE_CONTROLS = ["Suggest terms", "Import", "Export CSV", "Export TBX", "Add term"]
+  // AQU-872 split these in two: everything that binds the project asks the
+  // org's termbase floor, while Add term asks only whether the caller may
+  // SUGGEST (contributor). `TERMBASE_CONTROLS` is still the full row, used by
+  // the cases where the caller is at or above the floor and so gets all of it.
+  const MANAGEMENT_CONTROLS = ["Suggest terms", "Import", "Export CSV", "Export TBX"]
+  const TERMBASE_CONTROLS = [...MANAGEMENT_CONTROLS, "Add term"]
 
   function hydrated(level: number, name: string, termbaseEditMinRole?: number): ProjectRecord {
     return {
@@ -450,20 +455,61 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   it.each([
     [100, "viewer", /Viewers cannot perform this action — you need at least Project lead access/],
     [400, "contributor", /Contributors cannot perform this action — you need at least Project lead access/],
-  ])("keeps the termbase controls visible but disabled for level %i, with the role tooltip", async (level, name, tip) => {
+  ])("keeps the MANAGEMENT controls visible but disabled for level %i, with the role tooltip", async (level, name, tip) => {
     renderAs(hydrated(level, name))
 
-    for (const control of TERMBASE_CONTROLS) {
+    for (const control of MANAGEMENT_CONTROLS) {
       expect(screen.getByRole("button", { name: control })).toBeDisabled()
     }
-    await expectTooltip(screen.getByRole("button", { name: "Add term" }), tip)
+    await expectTooltip(screen.getByRole("button", { name: "Import" }), tip)
 
-    // Disabled is not merely cosmetic: the create dialog cannot be opened.
-    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // Disabled is not merely cosmetic: the import picker cannot be opened.
+    fireEvent.click(screen.getByRole("button", { name: "Suggest terms" }))
+    expect(emitTermCreate).not.toHaveBeenCalled()
     // The read-only surfaces stay reachable for every role.
     expect(screen.getByRole("button", { name: "Violations" })).toBeEnabled()
     expect(screen.getByText("grace")).toBeInTheDocument()
+  })
+
+  // AQU-872: Add term is the one control that does NOT ride the management
+  // floor. A translator building a glossary as they work may propose a term;
+  // what they cannot do is put it into force.
+  it("refuses even a suggestion below contributor, naming the contributor bar", async () => {
+    renderAs(hydrated(100, "viewer"))
+
+    const add = screen.getByRole("button", { name: "Add term" })
+    expect(add).toBeDisabled()
+    await expectTooltip(
+      add,
+      /Viewers cannot perform this action — you need at least Contributor access/,
+    )
+    fireEvent.click(add)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("lets a contributor add a term, and files it as a draft rather than an active one", async () => {
+    renderAs(hydrated(400, "contributor"))
+
+    const add = screen.getByRole("button", { name: "Add term" })
+    expect(add).toBeEnabled()
+    fireEvent.click(add)
+    const dialog = screen.getByRole("dialog")
+    // The form says which of the two things it is about to do.
+    expect(within(dialog).getByText(/Saved as a suggestion for review/i)).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText(/new source term/i), {
+      target: { value: "mercy" },
+    })
+    fireEvent.change(within(dialog).getByPlaceholderText(/^rendering$/i), {
+      target: { value: "misericordia" },
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", sourceTerm: "mercy", status: "draft" }),
+    )
+    // A draft is never an approval: no term.approve rides along with it.
+    expect(emitTermApprove).not.toHaveBeenCalled()
   })
 
   it("enables the termbase controls for a project lead", () => {
@@ -531,5 +577,64 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
 
     expect(screen.getByTestId("inline-cell-editor")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /remove rendering favor/i })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-684: the import button is the only place a partner's FLEx dictionary
+// reaches the termbase, and it used to branch on a `.tbx` extension alone —
+// so a LIFT export was read as delimited text and imported as nothing at all.
+// These drive the real input element, so the file → format detection → parser
+// → event chain is exercised as one path rather than three mocked halves.
+describe("GlossaryEditor — term-base file import (AQU-684)", () => {
+  const FLEX_EXPORT = `<?xml version="1.0" encoding="UTF-8"?>
+<lift producer="SIL.FLEx 9.1.19" version="0.13">
+  <entry guid="g1"><lexical-unit><form lang="pmy"><text>trang</text></form></lexical-unit>
+    <sense><gloss lang="en"><text>light</text></gloss></sense></entry>
+</lift>`
+
+  function pickFile(container: HTMLElement, name: string, body: string) {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("import file input not rendered")
+    fireEvent.change(input, { target: { files: [new File([body], name, { type: "text/plain" })] } })
+    return input
+  }
+
+  it("imports a FLEx LIFT export picked from the import button", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+
+    // Gloss became the source term, vernacular headword the rendering.
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({
+      sourceTerm: "light",
+      renderings: [{ rendering: "trang", status: "preferred" }],
+    })
+  })
+
+  it("still routes a LIFT export whose extension was lost in transit", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.xml", FLEX_EXPORT)
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ sourceTerm: "light" })
+  })
+
+  it("offers LIFT to the file picker alongside the formats it already took", () => {
+    const { container } = renderEditor()
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input?.accept).toContain(".lift")
+    expect(input?.accept).toContain(".tbx")
+    expect(input?.accept).toContain(".csv")
+  })
+
+  it("reports a file that yields no terms instead of looking like it worked", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "empty.lift", `<lift version="0.13"></lift>`)
+
+    expect(await screen.findByText("Import failed")).toBeInTheDocument()
+    expect(emitTermCreate).not.toHaveBeenCalled()
   })
 })

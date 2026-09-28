@@ -218,11 +218,10 @@ describe("MembersTab", () => {
     expect(screen.getByText("carol")).toBeInTheDocument()
   })
 
-  it("shows org badge for org-sourced members", () => {
-    renderPage()
-    // bob is via org, carol has a secondary org source
-    const orgBadges = screen.getAllByText("via org")
-    expect(orgBadges.length).toBeGreaterThanOrEqual(1)
+  it("shows an inherited origin badge for org-sourced members", () => {
+    const { container } = renderPage()
+    // bob reaches the project via the org (AQU-1352 §3.7 rule 1).
+    expect(container.querySelectorAll('[data-origin="inherited"]').length).toBeGreaterThanOrEqual(1)
   })
 
   // AQU-488: a first-time PM must be able to tell this list is scoped to
@@ -240,20 +239,21 @@ describe("MembersTab", () => {
 
   // AQU-488: every row must indicate how that person has access — direct
   // project invite, org membership, or team — not just org-sourced ones.
-  it("labels each row with its access path (direct invite / org / team)", () => {
-    renderPage()
+  it("labels each row with its access path (direct / inherited)", () => {
+    const { container } = renderPage()
     // alice + carol are direct (override) grants
-    expect(screen.getAllByText("direct invite").length).toBeGreaterThanOrEqual(2)
-    // bob is org-sourced
-    expect(screen.getAllByText("via org").length).toBeGreaterThanOrEqual(1)
-    // erin has access via a team (group) grant
-    expect(screen.getByText("via team")).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-origin="direct"]').length).toBeGreaterThanOrEqual(2)
+    // bob (org) and erin (team) reach the project from above
+    expect(container.querySelectorAll('[data-origin="inherited"]').length).toBeGreaterThanOrEqual(2)
   })
 
-  it("shows secondary sources for members with multiple paths", () => {
+  // AQU-1352: GrantOriginBadge is the only origin vocabulary on the roster.
+  // The legacy SourceBadge ("direct invite") and "+ org:viewer" line said the
+  // same thing twice in different words.
+  it("does not render the legacy source badge or secondary-sources line", () => {
     renderPage()
-    // carol has a secondary org:viewer source
-    expect(screen.getByText(/org:viewer/)).toBeInTheDocument()
+    expect(screen.queryByText("direct invite")).not.toBeInTheDocument()
+    expect(screen.queryByText(/org:viewer/)).not.toBeInTheDocument()
   })
 
   it("shows 'Revoke all' button for members the caller can manage", () => {

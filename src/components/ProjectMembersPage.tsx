@@ -213,10 +213,6 @@ export function MembersTab({
         >
           <UsernameWithAvatar username={m.username} />
         </MemberInspectorTrigger>
-        {/* SWARM-TODO(AQU-1352): SourceBadge/secondary-sources line are legacy
-            and now duplicate GrantOriginBadge; drop once the access
-            primitives are the only roster vocabulary. */}
-        <SourceBadge source={m.role.source} />
         <GrantOriginBadge origin={origin} />
         <EffectiveRoleCell
           className="text-xs text-muted-foreground"
@@ -224,13 +220,6 @@ export function MembersTab({
           effectiveRoleLevel={m.effective?.roleLevel ?? m.role.level}
           effectiveOrigin={origin}
         />
-
-        {/* Secondary sources */}
-        {m.secondarySources && m.secondarySources.length > 0 && (
-          <span className="text-[10px] text-muted-foreground">
-            + {m.secondarySources.map((s) => `${s.source}:${s.name}`).join(", ")}
-          </span>
-        )}
 
         <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
@@ -845,28 +834,6 @@ export function InviteLinkTab({
 // ──────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────
-
-// AQU-488: human-readable access-path labels. auth-worker's resolveProjectRole
-// (AD-12) returns one of these four `source` values per member — see
-// ProjectMemberRole in src/lib/frontier/members.ts. Labeling every row (not
-// just org-sourced ones) is what makes project-specific vs. org-wide
-// membership visually distinct, per the AQU-488 acceptance criteria.
-const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
-  override: "org.membersPage.sourceDirectInvite",
-  group: "org.membersPage.sourceViaTeam",
-  org: "org.membersPage.sourceViaOrg",
-  creator: "org.membersPage.sourceProjectCreator",
-}
-
-function SourceBadge({ source }: { source: string }) {
-  const t = useT()
-  const key = SOURCE_LABEL_KEYS[source]
-  return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-      {key ? t(key) : source}
-    </span>
-  )
-}
 
 function GrantPathRow({
   source, level, removable,

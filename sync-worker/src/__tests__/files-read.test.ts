@@ -347,3 +347,47 @@ describe("the audio-cue timebase a file was imported with", () => {
   })
 })
 
+describe("GET /files with the lane read wall", () => {
+  it("replaces the default-lane counters when that lane was not granted", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 80, filled_count: 20, approved_count: 9,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", total_count: 70, filled_count: 20, validator_histogram: { "1": 9 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", total_count: 10, filled_count: 3, validator_histogram: { "1": 2 },
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [{ lane: "eslane01", level: 400 }],
+    })
+    const req = new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleFilesReadRequest(req, {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: SECRET,
+      LANE_READ_WALL: "1",
+    }))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number; approvedCount: number }> }
+    expect(body.files[0]).toMatchObject({ cellCount: 10, filledCount: 3, approvedCount: 2 })
+  })
+})
+

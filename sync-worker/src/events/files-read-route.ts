@@ -16,12 +16,17 @@
 // claim must match the path's :projectId. Token role is implicitly the
 // project-membership check (identity mints tokens only for members).
 
-import { verifyTokenForProject } from "../auth"
+import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
+import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
+import { visibleLanesForRead } from "./lane-read-wall"
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730. Unset locally and in e2e. */
+  LANE_READ_WALL?: string
 }
 
 interface FileRowRaw {
@@ -283,6 +288,7 @@ export async function handleFilesReadRequest(
       .bind(projectId, projectId, fileId)
       .first<FileRowRaw>()
     if (!row) return new Response("file not found", { status: 404 })
+    await hideUngrantedDefaultLaneCounts(env, projectId, auth.claims, [row])
     return Response.json({ file: mapRow(row) })
   }
 
@@ -327,6 +333,7 @@ export async function handleFilesReadRequest(
     .all<FileRowRaw>()
   const rows = result.results
   const page = limit !== null && rows.length > limit ? rows.slice(0, limit) : rows
+  await hideUngrantedDefaultLaneCounts(env, projectId, auth.claims, page)
   const last = page[page.length - 1]
   const nextCursor =
     limit !== null && rows.length > limit && last
@@ -340,6 +347,86 @@ export async function handleFilesReadRequest(
 }
 
 export const FILES_MAX_PAGE = 500
+
+/**
+ * The files list is pinned to the default lane (`target_lang ''`) so a project
+ * with several lanes does not fan out into one row per lane. That pin is the
+ * default lane's counts. When the wall is on and this caller was not granted
+ * that lane, replace the three text counters with the sum of the lanes they
+ * were granted. A grant of the default lane leaves the pin alone: it is one
+ * lane they can see, not a sum of the others.
+ */
+async function hideUngrantedDefaultLaneCounts(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  rows: FileRowRaw[],
+): Promise<void> {
+  if (!env.AQUILLA_PG || rows.length === 0) return
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (visible === null) return
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const tags = legacyTagsForVisibleLanes(identities, visible) ?? new Set<string>()
+  if (tags.has("")) return
+
+  if (tags.size === 0) {
+    for (const row of rows) {
+      row.cell_count = 0
+      row.filled_count = 0
+      row.approved_count = 0
+    }
+    return
+  }
+
+  const fileIds = rows.map((row) => row.id)
+  const tagList = [...tags]
+  const filePlaceholders = fileIds.map(() => "?").join(", ")
+  const tagPlaceholders = tagList.map(() => "?").join(", ")
+  const less = (amount: string) =>
+    `CASE WHEN COALESCE(thr.exclude_structural, false) THEN ${amount} ELSE 0 END`
+  const { results } = await env.AQUILLA_PG.prepare(
+    `WITH thr AS (
+       SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$'
+              THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n,
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural
+         FROM (SELECT ?::text AS id) q
+         LEFT JOIN project_settings ps ON ps.project_id = q.id
+         LEFT JOIN projects pr ON pr.id = q.id
+         LEFT JOIN org_settings os ON os.org_id = pr.org_id
+     )
+     SELECT p.file_id AS file_id,
+            SUM(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
+            SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
+            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
+       FROM file_section_progress p
+       CROSS JOIN thr
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.n, 1)
+       ) a ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.structural_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.n, 1)
+       ) sa ON true
+      WHERE p.project_id = ?
+        AND p.scope = 'file' AND p.section_key = ''
+        AND p.file_id IN (${filePlaceholders})
+        AND p.target_lang IN (${tagPlaceholders})
+      GROUP BY p.file_id`,
+  )
+    .bind(projectId, projectId, ...fileIds, ...tagList)
+    .all<{ file_id: string; cell_count: number; filled_count: number; approved_count: number }>()
+
+  const byFile = new Map((results ?? []).map((row) => [row.file_id, row]))
+  for (const row of rows) {
+    const counts = byFile.get(row.id)
+    row.cell_count = counts ? Number(counts.cell_count) || 0 : 0
+    row.filled_count = counts ? Number(counts.filled_count) || 0 : 0
+    row.approved_count = counts ? Number(counts.approved_count) || 0 : 0
+  }
+}
 
 interface FilesCursor {
   lastEditAt: number | null

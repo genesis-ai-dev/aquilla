@@ -1,12 +1,13 @@
--- 0113_lane_id_primary_keys.sql — AQU-1420
+-- 0114_lane_id_primary_keys.sql — AQU-1420
 --
 -- Row identity moves from target_lang to lane_id on the three tables whose
 -- primary key still treated the legacy tag as the lane. The target_lang
 -- column stays: source rows are still '', and target rows still store the
 -- lane's legacy tag. This migration does not rewrite any stored ''.
 --
--- Numbered 0113 so it sorts after 0112 (the grant foreign key, AQU-1416)
--- when both land on the same database.
+-- Numbered 0114: the next free number after dev's 0113 (api_credential
+-- access scope, AQU-1242). It does not depend on the AQU-1416 lane-grant
+-- foreign key (a different table), so their relative order does not matter.
 --
 -- Aborts if two live rows already share the new key. That is a content
 -- collision, not something to drop with ON CONFLICT DO NOTHING.

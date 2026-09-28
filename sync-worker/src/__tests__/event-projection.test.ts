@@ -104,7 +104,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang)')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
     // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
     // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
     // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
@@ -163,7 +163,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
     // bind order (mirrors the INSERT column list):
@@ -906,6 +906,10 @@ describe('isChainMutatingKind', () => {
     // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
     // would lose the genesis slot to the cell's own create on rebuild).
     'source.cell.reanchor': false,
+    // AQU-1422: hide/show moves only cells.hidden_at on the shared source
+    // row and never advances the source head (a hide must not make every
+    // lane's translation go stale under AD-9) — non-chain-mutating by design.
+    'source.cell.visibility.set': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,
@@ -947,6 +951,10 @@ describe('isChainMutatingKind', () => {
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,
+    // AQU-777: an attachment hangs off the cell as reference context; it
+    // never touches the cell's own text chain.
+    'cell.attachment.add': false,
+    'cell.attachment.remove': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,

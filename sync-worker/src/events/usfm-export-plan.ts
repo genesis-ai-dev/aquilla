@@ -10,10 +10,13 @@
 //   - ADDITIONS: content somebody added in the app. It has no verse number of
 //     its own — Ryder's rule is that nothing renumbers — so it rides the verse
 //     it follows, appended to that verse's text.
-//   - REMOVALS: verses somebody deleted. Without these every removal is
-//     silently undone at export, because a removed cell and an untranslated one
-//     look identical from here: both simply have no translation, and the
-//     serializer's job is to leave the client's original words alone.
+//   - REMOVALS: verses somebody deleted, and (AQU-1423) verses somebody HID.
+//     Without these every removal is silently undone at export, because a
+//     removed cell and an untranslated one look identical from here: both simply
+//     have no translation, and the serializer's job is to leave the client's
+//     original words alone. A hidden cell is the same story with a row still in
+//     the table — see `hidden-cells.ts` for why it joins the removals rather
+//     than getting a fourth part of its own.
 //
 // ORDER OF QUERIES IS LOAD-BEARING FOR THE TESTS. `export-route.test.ts` stubs
 // the database and used to route by prepare-call ORDINAL. That stub now routes
@@ -21,6 +24,7 @@
 // stays reviewable against the old shape.
 
 import { removedCellsForFile } from './removed-cells'
+import { hiddenCellsForFile } from './hidden-cells'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import type { UsfmEdits } from '../lib/usfm-lossless'
 
@@ -103,11 +107,20 @@ export async function buildUsfmExportPlan(
 
   const edits: UsfmEdits = {}
 
+  // AQU-1423: read the parked cells ONCE, before the two steps that both need
+  // them. A hidden cell with a verse address joins the removals below; a hidden
+  // cell WITHOUT one was added in the app, and is kept out of the additions
+  // instead — nothing else would stop its text being written into the verse it
+  // follows. Fails soft to an empty list, so an older database (or any error
+  // here) leaves the export exactly as it is today.
+  const hiddenCells = await hiddenCellsForFile(db, projectId, fileId)
+
   // 2. Additions. Everything beyond this point is best-effort: a failure must
   //    degrade to today's behaviour (a correct file missing the new content)
   //    rather than lose the whole download.
   try {
-    const appendAfter = await resolveAdditions(db, projectId, fileId, lane, options)
+    const hiddenIds = new Set(hiddenCells.map((c) => c.cellId))
+    const appendAfter = await resolveAdditions(db, projectId, fileId, lane, options, hiddenIds)
     if (appendAfter.size > 0) edits.appendAfter = appendAfter
   } catch {
     // leave additions out
@@ -116,9 +129,18 @@ export async function buildUsfmExportPlan(
   // 3. Removals. Only a cell that HAD a verse address can be dropped from the
   //    file — one added in the app was never in it, so there is nothing to
   //    remove, which is why the null refs fall away here.
+  //
+  //    Deleted and hidden cells share this set because they mean the same thing
+  //    to the serializer: the span leaves the file, marker included. `remove` is
+  //    tested BEFORE the override lookup there, so a hidden verse that carries a
+  //    translation is dropped rather than emitted — the one ordering this relies
+  //    on, and the reason nothing has to prune `overrides` above.
   const removedRefs = new Set<string>()
   for (const removed of await removedCellsForFile(db, projectId, fileId)) {
     if (removed.canonicalRef) removedRefs.add(removed.canonicalRef)
+  }
+  for (const hidden of hiddenCells) {
+    if (hidden.canonicalRef) removedRefs.add(hidden.canonicalRef)
   }
   if (removedRefs.size > 0) edits.remove = removedRefs
 
@@ -139,6 +161,10 @@ async function resolveAdditions(
   fileId: string,
   lane: string,
   options: UsfmExportPlanOptions = {},
+  /** AQU-1423: cell ids that are hidden. An added cell that is parked
+   *  contributes nothing, exactly as one with no translation does — the caller
+   *  resolves the set so the hidden read happens once per plan. */
+  hiddenIds: ReadonlySet<string> = new Set(),
 ): Promise<Map<string, readonly string[]>> {
   // AQU-1148: on the LEFT JOIN, so a non-validated addition comes back with a
   // null value and falls out of the `.trim() !== ''` filter below — the same
@@ -164,7 +190,9 @@ async function resolveAdditions(
     .bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId)
     .all<AddedCellRow>()
 
-  const rows = (added.results ?? []).filter((r) => (r.value ?? '').trim() !== '')
+  const rows = (added.results ?? []).filter(
+    (r) => (r.value ?? '').trim() !== '' && !hiddenIds.has(r.cell_id),
+  )
   if (rows.length === 0) return new Map()
 
   // Resolve each addition's anchor to a verse. One hop is the common case, but

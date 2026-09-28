@@ -611,6 +611,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.additionalLanesDescription":
       "Extra target-language lanes for this project — e.g. dialect variants or " +
       "parallel drafts of the same source.",
+    "projectSettings.languages.laneNameLabel": "Lane name",
+    "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    "projectSettings.languages.duplicateNameError":
+      "Another lane already has this name. Change one of them.",
+    "projectSettings.languages.nameTooLongError": "That name is too long.",
     "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +

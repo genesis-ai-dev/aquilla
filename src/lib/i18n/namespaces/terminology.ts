@@ -66,6 +66,12 @@ export const terminology = defineNamespace({
     "terminology.editor.addTerm": "Add term",
     "terminology.editor.addTermDescription":
       "Create a source term and its preferred rendering for this project terminology.",
+    // AQU-872: the same form, seen by someone who may suggest a term but not
+    // approve one. Mirrors `terminology.addConcept.approveNoPermissionHint` on
+    // the in-editor popover, which has said this since AQU-1006.
+    "terminology.editor.addTermSuggestionDescription":
+      "Saved as a suggestion for review. Suggestions are not checked against " +
+      "translations until someone with termbase permission approves them.",
     "terminology.editor.sourceTermLabel": "Source term",
     "terminology.editor.sourceTermPlaceholder": "New source term…",
     "terminology.editor.renderingLabel": "Rendering",

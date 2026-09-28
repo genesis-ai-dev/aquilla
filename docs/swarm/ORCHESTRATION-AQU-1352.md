@@ -37,6 +37,14 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 - i18n: add strings to namespaces; orchestrator reconciles `source-hashes.json` via `pnpm i18n:check` at merge.
 
 ## §2 Waves
+- W1 (2026-09-28, workflow wf_e8e4233e-75a): grants-view, characterization, create-targets, access-ui
+- W2 (planned): resolver swap behind flag (reruns characterization matrix), teams-as-containers + teamIds create, access payload endpoint + inspector wiring
+- W3 (planned): badges/read-only inherited rows/remove dialog/denial copy, jev adversarial suite, review panel
 ## §3 Workstreams
 | ID | Title | Status |
+|---|---|---|
+| grants-view | 0130 view + pure resolver | W1 running |
+| characterization | pinned role matrix | W1 running |
+| create-targets | P0 picker + me/create-targets | W1 running |
+| access-ui | types, breadcrumb, badges, inspector UI | W1 running |
 ## §4 Merge log

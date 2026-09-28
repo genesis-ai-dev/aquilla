@@ -52,7 +52,7 @@ const mockAddMany = vi.fn(
 const mockRemove = vi.fn().mockResolvedValue(undefined)
 
 const mockUseProjectMembers = vi.fn(() => ({
-  members: mockMembers,
+  members: mockMembers as ProjectMember[],
   isLoading: false,
   error: null,
   rosterHidden: false,
@@ -678,5 +678,106 @@ describe("MembersTab multi-select add — AQU-672 suggestions + AQU-734 batch", 
     expect(
       screen.queryByText(/all org members are already on this project/i),
     ).not.toBeInTheDocument()
+  })
+})
+
+// ─── AQU-1352 §3.7 rules 1–5: roster rows explain where access comes from ──
+
+describe("MembersTab — AQU-1352 grant origins", () => {
+  const orgRef = { type: "org" as const, id: "9", name: "Biblica ETT" }
+  const teamRef = { type: "team" as const, id: "5", name: "BSB" }
+  // dana: direct Contributor, but team BSB makes her Project lead — removing
+  // the direct grant must NOT read as "she loses access" (rule 4).
+  // finn: reaches the project only via team BSB — read-only here (rule 2).
+  const originMembers: ProjectMember[] = [
+    {
+      userId: 11, username: "dana",
+      role: { level: 500, name: "project_lead", source: "group" },
+      secondarySources: [{ source: "override", level: 400, name: "contributor" }],
+      effective: { roleLevel: 500, source: "group" },
+      direct: 400,
+      inheritedFrom: [orgRef, teamRef],
+      afterDirectRemoval: { roleLevel: 500, source: "group", from: [orgRef, teamRef] },
+    },
+    {
+      userId: 12, username: "finn",
+      role: { level: 400, name: "contributor", source: "group" },
+      secondarySources: [],
+      effective: { roleLevel: 400, source: "group" },
+      direct: null,
+      inheritedFrom: [orgRef, teamRef],
+      afterDirectRemoval: null,
+    },
+    {
+      userId: 13, username: "gail",
+      role: { level: 400, name: "contributor", source: "override" },
+      secondarySources: [],
+      effective: { roleLevel: 400, source: "override" },
+      direct: 400,
+      inheritedFrom: null,
+      afterDirectRemoval: null,
+    },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseProjectMembers.mockImplementation(() => ({
+      members: originMembers,
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: mockRefresh,
+      add: mockAdd,
+      addMany: mockAddMany,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    }))
+  })
+
+  const rowOf = (name: string) => screen.getByText(name).closest("li") as HTMLElement
+
+  it("rule 1: badges each row with its server-derived origin", () => {
+    renderPage()
+    expect(within(rowOf("finn")).getByText("Inherited · Biblica ETT › BSB")).toBeInTheDocument()
+    expect(within(rowOf("gail")).getByText("Direct")).toBeInTheDocument()
+  })
+
+  it("rule 3: shows direct and effective roles together when they differ", () => {
+    renderPage()
+    expect(rowOf("dana").textContent).toContain("Contributor (direct) → Project lead (via Biblica ETT › BSB)")
+  })
+
+  it("rule 2: an inherited-only row's role control is disabled with a link to the team", () => {
+    renderPage()
+    const finn = rowOf("finn")
+    const control = within(finn).getByTestId("inherited-role-control")
+    expect(within(control).getByRole("combobox")).toBeDisabled()
+    expect(within(finn).getByRole("link", { name: "Change at Biblica ETT › BSB" }))
+      .toHaveAttribute("href", "/orgs/9/teams/5")
+    // Direct rows stay editable in place.
+    expect(within(rowOf("gail")).queryByTestId("inherited-role-control")).toBeNull()
+  })
+
+  it("rule 4: removing a direct grant says access survives through the team and links there", async () => {
+    renderPage()
+    fireEvent.click(within(rowOf("dana")).getByRole("button", { name: /^remove$/i }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByTestId("remove-surviving-access").textContent)
+      .toContain("They will still have Project lead access through Biblica ETT › BSB.")
+    expect(within(dialog).getByRole("link", { name: "Remove at Biblica ETT › BSB" }))
+      .toHaveAttribute("href", "/orgs/9/teams/5")
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it("rule 4: a direct-only member's remove dialog has no surviving-access line", async () => {
+    renderPage()
+    fireEvent.click(within(rowOf("gail")).getByRole("button", { name: /^remove$/i }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).queryByTestId("remove-surviving-access")).toBeNull()
+  })
+
+  it("rule 5: the header splits the total into direct and inherited", () => {
+    renderPage()
+    expect(screen.getByTestId("members-count").textContent).toBe("3 (2 direct · 1 inherited)")
   })
 })

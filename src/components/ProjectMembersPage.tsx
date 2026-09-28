@@ -41,10 +41,15 @@ import {
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
   humanRoleName,
-  roleDisplayText,
 } from "@/lib/frontier/roles"
-import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
-import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
+import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
+import { roleLabel } from "@/components/access/labels"
+import {
+  RemoveDirectGrantDialog, countBreakdown, isInheritedOnly, memberDirectLevel, memberOrigin, scopeHref,
+} from "@/components/project-members/roster-origin"
+import { RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -186,13 +191,14 @@ export function MembersTab({
 
   const renderMemberRow = (m: ProjectMember) => {
     const isSelf = callerUserId !== null && m.userId === callerUserId
-    const isLocked = m.role.source === "org" || m.role.source === "creator"
-    const lockedHint =
-      m.role.source === "org"
-        ? t("org.membersPage.lockedHintOrgAccess")
-        : m.role.source === "creator"
-          ? t("projectSettings.share.lockedHintCreator")
-          : undefined
+    // AQU-1352 §3.7: origin comes from the server; inherited-only rows keep
+    // their role control but render it read-only in place (rule 2).
+    const origin = memberOrigin(m)
+    const directLevel = memberDirectLevel(m)
+    const inheritedOnly = isInheritedOnly(m)
+    const isLocked = m.role.source === "creator" && directLevel == null
+    const lockedHint = isLocked ? t("projectSettings.share.lockedHintCreator") : undefined
+    const roleSelectLevel = directLevel ?? m.role.level
 
     return (
       <li
@@ -207,8 +213,17 @@ export function MembersTab({
         >
           <UsernameWithAvatar username={m.username} />
         </MemberInspectorTrigger>
+        {/* SWARM-TODO(AQU-1352): SourceBadge/secondary-sources line are legacy
+            and now duplicate GrantOriginBadge; drop once the access
+            primitives are the only roster vocabulary. */}
         <SourceBadge source={m.role.source} />
-        <RoleLabel name={m.role.name} />
+        <GrantOriginBadge origin={origin} />
+        <EffectiveRoleCell
+          className="text-xs text-muted-foreground"
+          directRoleLevel={directLevel}
+          effectiveRoleLevel={m.effective?.roleLevel ?? m.role.level}
+          effectiveOrigin={origin}
+        />
 
         {/* Secondary sources */}
         {m.secondarySources && m.secondarySources.length > 0 && (
@@ -220,24 +235,29 @@ export function MembersTab({
         <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
-            <RoleSelect
-              options={grantableRoles}
-              currentOption={
-                grantableRoles.some((r) => r.level === m.role.level)
-                  ? null
-                  : { level: m.role.level, name: m.role.name }
-              }
-              value={m.role.level}
-              onValueChange={(level) => {
-                void add(m.username, level)
-              }}
-              size="sm"
-              aria-label={t("org.membersPage.changeRoleAria")}
-            />
+            <InheritedRoleControl
+              origin={inheritedOnly ? origin : { kind: "direct" }}
+              hrefFor={(scope) => scopeHref(scope, m.inheritedFrom?.[0]?.id ?? null)}
+            >
+              <RoleSelect
+                options={grantableRoles}
+                currentOption={
+                  grantableRoles.some((r) => r.level === roleSelectLevel)
+                    ? null
+                    : { level: roleSelectLevel, name: m.role.name }
+                }
+                value={roleSelectLevel}
+                onValueChange={(level) => {
+                  void add(m.username, level)
+                }}
+                size="sm"
+                aria-label={t("org.membersPage.changeRoleAria")}
+              />
+            </InheritedRoleControl>
           )}
 
           {/* Remove button for direct grants */}
-          {!isLocked && !isSelf && m.role.source === "override" ? (
+          {!isLocked && !isSelf && directLevel != null ? (
             <AppTooltip content={t("org.membersPage.removeDirectAccessTooltip", { username: m.username })}>
               <Button
                 variant="ghost"
@@ -313,6 +333,12 @@ export function MembersTab({
             {orgAccessMembers.length > 0
               ? t("editor.navTitle.projectMembers")
               : t("org.membersPage.currentMembersHeading")}
+            {members.length > 0 && (
+              <span className="ms-2 font-normal text-muted-foreground" data-testid="members-count">
+                {members.length}{" "}
+                {t("org.roster.countBreakdown", countBreakdown(members))}
+              </span>
+            )}
           </h2>
           <Button
             variant="ghost"
@@ -402,23 +428,17 @@ export function MembersTab({
         )}
       </div>
 
-      {/* Remove-direct-grant confirmation (FRO-368) */}
-      <ConfirmActionDialog
-        open={removeTarget !== null}
-        onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title={t("org.membersPage.removeMemberTitle")}
-        description={
+      {/* Remove-direct-grant confirmation (FRO-368; AQU-1352 §3.7 rule 4) */}
+      <RemoveDirectGrantDialog
+        member={removeTarget}
+        roleText={
           removeTarget
-            ? t("org.membersPage.removeMemberDescription", {
-                username: removeTarget.username,
-                role: roleDisplayText(removeTarget.role.name),
-              })
+            ? roleLabel(t, memberDirectLevel(removeTarget) ?? removeTarget.role.level)
             : ""
         }
-        confirmLabel={t("org.membersPage.remove")}
-        variant="destructive"
-        onConfirm={() => {
-          if (removeTarget) void remove(removeTarget.userId)
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={(target) => {
+          void remove(target.userId)
           setRemoveTarget(null)
         }}
       />

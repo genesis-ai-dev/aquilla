@@ -16,6 +16,12 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the lane row. Absent on older servers. */
+  name?: string | null
+  /** Opaque lane id. Deep links may use this instead of the tag. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
 }
 
 export interface PortfolioProject {

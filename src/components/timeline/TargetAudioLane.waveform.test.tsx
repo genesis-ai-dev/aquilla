@@ -40,6 +40,9 @@ function item(
 }
 
 const base = {
+  // AQU-490: required on the lane, so a missing threshold can never silently
+  // read as one again.
+  validationRequirementAudio: 1,
   pxPerSec: 40,
   viewStartSec: 0,
   viewEndSec: 100,

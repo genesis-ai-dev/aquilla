@@ -72,6 +72,56 @@ describe("AssignWork", () => {
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
   })
 
+  it("passes the active lane as targetLang when assigning", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-lane")
+    render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        targetLang="es"
+        onAssigned={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ targetLang: "es" }),
+      ),
+    )
+  })
+
+  it("omits targetLang for the default lane", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-default")
+    render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        targetLang=""
+        onAssigned={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.not.objectContaining({ targetLang: expect.anything() }),
+      ),
+    )
+  })
+
   it("opens, loads members, and emits a book-scope assignment.create", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-new")

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
+import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
 
 const SCHEMA = readFileSync(
@@ -120,9 +121,13 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
   resetChainCacheForTests()
   const pg = new PGlite()
   await pg.exec(SCHEMA)
-  for (const [table, rows] of Object.entries(seed)) {
-    if (!rows || table === "cells_fts") continue // FTS is a generated column in PG
-    await seedRows(pg, table, rows)
+  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
+  await installTestLaneFill((sql) => pg.exec(sql))
+  // Lanes before content rows, so an explicit seed lane wins over a minted one.
+  const seeded = Object.entries(seed).filter(([table, rows]) => rows && table !== "cells_fts")
+  seeded.sort((a, b) => Number(b[0] === "lanes") - Number(a[0] === "lanes"))
+  for (const [table, rows] of seeded) {
+    await seedRows(pg, table, rows!)
   }
   const db = new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb
   return {
@@ -146,6 +151,7 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
         FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
           EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
         END LOOP; END $$;`)
+      await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
     },
     close: () => pg.close(),
   }

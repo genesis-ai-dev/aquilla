@@ -24,7 +24,10 @@ if [ -z "${GITHUB_TOKEN:-}" ]; then
   echo "ABORT: GITHUB_TOKEN is required (and 'gh auth token' found none) to record the production deployment." >&2
   exit 1
 fi
-node "$script_dir/record-github-deployment.mjs" "$(git rev-parse HEAD)" production
+# Tests point TAG_RELEASE_RECORD_DEPLOYMENT at a stub so they never write to
+# the real repo. The ruleset still checks GitHub, so a stub can't fake a tag.
+record_deployment="${TAG_RELEASE_RECORD_DEPLOYMENT:-$script_dir/record-github-deployment.mjs}"
+node "$record_deployment" "$(git rev-parse HEAD)" production
 
 for attempt in 1 2 3; do
   # Fetch tags only: a full fetch can trip over unrelated broken remote refs.

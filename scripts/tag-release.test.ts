@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -12,14 +12,22 @@ describe("tag-release.sh", () => {
   let root: string
   let origin: string
   let work: string
+  let recorded: string
 
   const git = (cwd: string, ...args: string[]) => {
     const r = spawnSync("git", args, { cwd, encoding: "utf8" })
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`)
     return r.stdout.trim()
   }
+  // The real recorder writes to genesis-ai-dev/aquilla with the caller's gh
+  // token. The stub only notes which sha it was asked to record.
+  const env = () => ({
+    ...process.env,
+    GITHUB_TOKEN: "test-token",
+    TAG_RELEASE_RECORD_DEPLOYMENT: path.join(root, "record-stub.mjs"),
+  })
   const run = (cwd = work) =>
-    spawnSync("bash", [SCRIPT], { cwd, encoding: "utf8", env: { ...process.env } })
+    spawnSync("bash", [SCRIPT], { cwd, encoding: "utf8", env: env() })
   const commit = (msg: string) => git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-qm", msg)
   const originTags = () => git(origin, "tag", "--list").split("\n").filter(Boolean).sort()
 
@@ -27,6 +35,11 @@ describe("tag-release.sh", () => {
     root = mkdtempSync(path.join(tmpdir(), "aquilla-tag-release-"))
     origin = path.join(root, "origin.git")
     work = path.join(root, "work")
+    recorded = path.join(root, "recorded.txt")
+    writeFileSync(
+      path.join(root, "record-stub.mjs"),
+      `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(recorded)}, process.argv.slice(2).join(" ") + "\\n")\n`,
+    )
     git(root, "init", "-q", "--bare", origin)
     git(root, "init", "-q", "-b", "release/2026/09/23", work)
     git(work, "remote", "add", "origin", origin)
@@ -39,6 +52,11 @@ describe("tag-release.sh", () => {
   it("starts a new series at 00 and pushes it", () => {
     expect(run().status).toBe(0)
     expect(originTags()).toEqual(["2026.09.23.00"])
+  })
+
+  it("records the production deployment for HEAD before pushing", () => {
+    expect(run().status).toBe(0)
+    expect(readFileSync(recorded, "utf8")).toBe(`${git(work, "rev-parse", "HEAD")} production\n`)
   })
 
   it("increments for each newly deployed commit, including hotfixes", () => {

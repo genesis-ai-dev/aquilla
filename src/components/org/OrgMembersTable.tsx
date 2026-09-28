@@ -7,6 +7,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -225,21 +226,26 @@ export function OrgMembersTable({
         id: "role",
         accessorFn: (m) => m.role.level,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
-        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        meta: { className: "w-[11rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
           const label = <RoleLabel name={m.role.level} />
-          if (isOwner) return label
+          // AQU-1352 §3.7 rule 1: org is the top scope, so org rows are always direct.
+          const badge = <GrantOriginBadge origin={{ kind: "direct" }} />
+          if (isOwner) return <span className="inline-flex items-center gap-2">{label}{badge}</span>
           return (
-            <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
-              <span
-                tabIndex={0}
-                className="inline-flex cursor-help"
-                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
-              >
-                {label}
-              </span>
-            </AppTooltip>
+            <span className="inline-flex items-center gap-2">
+              <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
+                <span
+                  tabIndex={0}
+                  className="inline-flex cursor-help"
+                  aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
+                >
+                  {label}
+                </span>
+              </AppTooltip>
+              {badge}
+            </span>
           )
         },
       },

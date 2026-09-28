@@ -5,11 +5,6 @@
  * origin here comes from the server (`effective`/`direct`/`inheritedFrom`/
  * `afterDirectRemoval`), falling back to legacy `role.source` only when an
  * older payload lacks them.
- *
- * SWARM-TODO(AQU-1352): TeamDetail and OrgMembersTable rows do not yet render
- * GrantOriginBadge/InheritedRoleControl (team rows with NULL role_level
- * inherit from the org; org rows are always direct). Needs an origin field
- * on the team members payload first.
  */
 import { useState } from "react"
 

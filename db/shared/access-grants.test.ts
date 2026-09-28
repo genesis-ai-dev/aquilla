@@ -183,3 +183,59 @@ describe("AQU-1352 resolveFromGrants equals resolveProjectRoleShared", () => {
     ).toBeNull()
   })
 })
+
+// AQU-1352 P2 (spec §3.1, §3.5): team-scope roles (group_members.role_level).
+describe("AQU-1352 P2 team-scope grants", () => {
+  const teamRole = (teamId: string, roleLevel: number): AccessGrant => ({
+    ...g("project", "direct", roleLevel),
+    scopeType: "team",
+    scopeId: teamId,
+  })
+  const ctx = (projectId: string, attachedTeamIds: string[]) => ({
+    projectId,
+    orgId: ORG,
+    archivedAt: null,
+    isPlatformAdmin: false,
+    attachedTeamIds,
+  })
+
+  it("all role_level NULL (existing data): attached teams change nothing", () => {
+    // Every existing member has NULL, so no team-scope row exists. Passing the
+    // attached-team list must give the same answer as the P1 scenarios above.
+    for (const s of scenarios.filter((x) => !x.email && !x.archived)) {
+      const r = resolveFromGrants(s.grants, ctx(P, ["7", "8"]))
+      expect(r && { level: r.level, source: r.source }).toEqual(s.expected)
+    }
+  })
+
+  it("Tim: org 100 + team role 700 on a team with no projects -> no project access", () => {
+    // Tim may create into the team (route gate), but owning an empty team opens
+    // no project: the grant only flows to attached projects.
+    const grants = [g("org", "direct", 100), teamRole("7", 700)]
+    expect(resolveFromGrants(grants, ctx(P, []))).toBeNull()
+  })
+
+  it("team lead 500 on a team with 3 projects -> 500 on those 3, null elsewhere", () => {
+    const grants = [teamRole("7", 500)]
+    for (const pid of ["a", "b", "c"]) {
+      const r = resolveFromGrants(grants, ctx(pid, ["7"]))
+      expect(r?.level).toBe(500)
+      expect(r?.source).toBe("group")
+      expect(r?.chain[0].grant?.viaTeamId).toBe("7")
+    }
+    expect(resolveFromGrants(grants, ctx("elsewhere", ["9"]))).toBeNull()
+  })
+
+  it("team-scope role and per-project attachment: max wins", () => {
+    // A Contributor attachment (400) must not cap a Project Lead team role (500).
+    const grants = [{ ...g("project", "team", 400, "7") }, teamRole("7", 500)]
+    expect(resolveFromGrants(grants, ctx(P, ["7"]))?.level).toBe(500)
+  })
+
+  it("a team-scope grant opens the project for the AQU-1274 org path", () => {
+    // Same as a team path: org 500 lifts a team Viewer (100) to 500.
+    const grants = [g("org", "direct", 500), teamRole("7", 100)]
+    const r = resolveFromGrants(grants, ctx(P, ["7"]))
+    expect(r && { level: r.level, source: r.source }).toEqual({ level: 500, source: "org" })
+  })
+})

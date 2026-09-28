@@ -12,6 +12,7 @@ import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { ROLE } from "../types"
+import { listCreatableTeams } from "../services/team-roles"
 
 export interface CreateTarget {
   kind: "org" | "personal"
@@ -20,6 +21,11 @@ export interface CreateTarget {
   name: string
   path: string[]
   role: number
+  /**
+   * AQU-1352 P2: teams the caller may create into. For an org where the
+   * caller is below maintainer, POST /projects requires picking one of these.
+   */
+  teams: Array<{ teamId: number; name: string; role: number | null }>
 }
 
 const me = new Hono<AuthHonoEnv>()
@@ -49,14 +55,26 @@ me.get("/create-targets", authMiddleware, async (c) => {
         .bind(user.id)
         .all<{ id: number; name: string | null; role: number }>()
     : await env.AQUILLA_PG.prepare(
-        `SELECT o.id AS id, o.name AS name, om.role_level AS role
-         FROM org_members om
-         INNER JOIN organizations o ON o.id = om.org_id
-         WHERE om.user_id = ? AND om.role_level >= ?
+        // AQU-1352 P2: also orgs where the caller leads a team (Tim) — POST
+        // /projects accepts those when a led team is selected.
+        `SELECT o.id AS id, o.name AS name, COALESCE(om.role_level, 0) AS role
+         FROM organizations o
+         LEFT JOIN org_members om ON om.org_id = o.id AND om.user_id = ?
+         WHERE om.role_level >= ?
+            OR o.id IN (SELECT g.org_id FROM groups g
+                          JOIN group_members gm ON gm.group_id = g.id
+                         WHERE gm.user_id = ? AND gm.role_level >= ?)
          ORDER BY o.name ASC, o.id ASC`,
       )
-        .bind(user.id, ROLE.MAINTAINER)
+        .bind(user.id, ROLE.MAINTAINER, user.id, ROLE.PROJECT_LEAD)
         .all<{ id: number; name: string | null; role: number }>()
+
+  const orgRoles = new Map((rows.results ?? []).map((r) => [Number(r.id), Number(r.role)] as const))
+  const teams = await listCreatableTeams(env, user.id, orgRoles)
+  const teamsFor = (orgId: number | null) =>
+    teams
+      .filter((t) => t.orgId === orgId)
+      .map((t) => ({ teamId: t.teamId, name: t.name, role: t.role }))
 
   const personalId = personal ? Number(personal.id) : null
   const personalName = personal?.name ?? `${user.username}'s workspace`
@@ -67,6 +85,7 @@ me.get("/create-targets", authMiddleware, async (c) => {
       name: personalName,
       path: [personalName],
       role: 700,
+      teams: teamsFor(personalId),
     },
   ]
   for (const r of rows.results ?? []) {
@@ -74,7 +93,7 @@ me.get("/create-targets", authMiddleware, async (c) => {
     if (id === personalId) continue
     const name = r.name ?? `Organization ${id}`
     // SWARM-TODO(AQU-1352): path is flat until org > team nesting lands.
-    targets.push({ kind: "org", orgId: id, name, path: [name], role: Number(r.role) })
+    targets.push({ kind: "org", orgId: id, name, path: [name], role: Number(r.role), teams: teamsFor(id) })
   }
   return c.json(targets)
 })

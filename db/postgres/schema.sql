@@ -103,6 +103,11 @@ CREATE TABLE group_members (
     user_id  BIGINT NOT NULL,
     added_by BIGINT,
     added_at TIMESTAMPTZ DEFAULT now(),
+    -- AQU-1352 (0131): NULL = legacy member (per-project grants only);
+    -- non-NULL = team-scope role flowing to every attached project.
+    role_level INTEGER NULL
+        CONSTRAINT group_members_role_level_check
+        CHECK (role_level IS NULL OR role_level IN (100, 200, 300, 400, 500, 600, 700)),
     PRIMARY KEY (group_id, user_id)
 );
 
@@ -2081,7 +2086,8 @@ ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_l
 
 -- AQU-1352 P1 (migration 0130): one read shape for every org/project grant.
 -- Lane and file scopes are not included. Platform admin is env-driven, not a row.
-CREATE OR REPLACE VIEW access_grants AS
+-- 0132: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,
          om.org_id::TEXT               AS scope_id,
@@ -2107,4 +2113,10 @@ CREATE OR REPLACE VIEW access_grants AS
          700::INT, 'creator'::TEXT, NULL::BIGINT,
          NULL::BIGINT, p.created_at
     FROM projects p
-   WHERE p.created_by IS NOT NULL;
+   WHERE p.created_by IS NOT NULL
+  UNION ALL
+  SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
+         gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
+         gm.added_by::BIGINT, gm.added_at
+    FROM group_members gm
+   WHERE gm.role_level IS NOT NULL;

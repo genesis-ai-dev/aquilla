@@ -24,7 +24,8 @@ export interface UserOrg {
 }
 
 /**
- * Return the user's owned organization, lazy-creating one if absent.
+ * Return the user's personal organization, lazy-creating one if absent.
+ * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
  */
@@ -33,7 +34,7 @@ export async function getOrCreateUserOrg(
   user: AuthUser,
 ): Promise<UserOrg> {
   const existing = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
+    "SELECT id, name FROM organizations WHERE owner_user_id = ? AND billing_scope = 'personal' LIMIT 1",
   )
     .bind(user.id)
     .first<{ id: number; name: string | null }>()

@@ -92,4 +92,22 @@ describe("POST /api/v2/projects org gating", () => {
     const org = await env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE owner_user_id = 5").first<{ id: number }>()
     expect(proj?.org_id).toBe(org?.id)
   })
+
+  // AQU-1352: owning a TEAM org is not having a personal one. Matching on
+  // owner_user_id alone dropped a no-orgId create into the owner's team org,
+  // where every team member could then see it.
+  it("creates into a new personal org, not an owned team org, when orgId omitted", async () => {
+    await seedUser(6, "teamowner")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (60, 'Team Org', 6, 'team')",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (60, 6, 700, 6)").run()
+    const res = await create("teamowner", { id: "p-mine", name: "Mine" })
+    expect(res.status).toBe(200)
+    const proj = await env.AQUILLA_PG.prepare(
+      "SELECT o.id, o.billing_scope FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id = 'p-mine'",
+    ).first<{ id: number; billing_scope: string }>()
+    expect(proj?.id).not.toBe(60)
+    expect(proj?.billing_scope).toBe("personal")
+  })
 })

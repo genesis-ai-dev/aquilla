@@ -114,6 +114,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
@@ -412,6 +413,8 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // AQU-1352 P1: resolveProjectRoleShared (internal AI routes) reads the mode off this handle.
+  setAccessGrantsMode(shim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
   // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their

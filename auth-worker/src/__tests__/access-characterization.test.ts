@@ -34,29 +34,44 @@ import {
   type FixtureUser,
 } from "./helpers/access-fixture"
 import { resolveProjectRole } from "../services/project-permissions"
-import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
+import {
+  resolveProjectRoleShared,
+  type AccessGrantsMode,
+} from "../../../db/shared/project-roles"
 import type { AuthUser, Env } from "../types"
 
-/** The one seam the next wave swaps: (user, project) → effective role. */
+/** The one seam the resolver swap turns: (user, project) → effective role. */
 type AccessResolver = (user: AuthUser, projectId: string) => Promise<ExpectedRole>
 
-const authWorkerResolver: AccessResolver = async (user, projectId) => {
-  const role = await resolveProjectRole(env as unknown as Env, user, projectId)
-  return role ? { level: role.level, source: role.source } : null
-}
+/**
+ * AQU-1352 P1: the matrix runs under both ACCESS_GRANTS_RESOLVER modes. `off`
+ * is today's per-table resolver; `on` answers from the access_grants view. The
+ * flag may only flip in production if every cell is identical in both.
+ */
+const MODES = ["off", "on"] as const satisfies readonly AccessGrantsMode[]
 
-const sharedResolver: AccessResolver = async (user, projectId) => {
-  const role = await resolveProjectRoleShared(
-    env.AQUILLA_PG,
-    { id: String(user.id), email: user.email },
-    projectId,
-    env.ADMIN_EMAILS,
-  )
-  return role ? { level: role.level, source: role.source as NonNullable<ExpectedRole>["source"] } : null
-}
+const authWorkerResolverFor =
+  (mode: AccessGrantsMode): AccessResolver =>
+  async (user, projectId) => {
+    const modeEnv = { ...(env as unknown as Env), ACCESS_GRANTS_RESOLVER: mode }
+    const role = await resolveProjectRole(modeEnv, user, projectId)
+    return role ? { level: role.level, source: role.source } : null
+  }
 
-// SWARM-TODO(AQU-1352): the P2 resolver swap points this at the new resolver.
-const resolverUnderTest: AccessResolver = authWorkerResolver
+const sharedResolverFor =
+  (mode: AccessGrantsMode): AccessResolver =>
+  async (user, projectId) => {
+    const role = await resolveProjectRoleShared(
+      env.AQUILLA_PG,
+      { id: String(user.id), email: user.email },
+      projectId,
+      env.ADMIN_EMAILS,
+      mode,
+    )
+    return role ? { level: role.level, source: role.source as NonNullable<ExpectedRole>["source"] } : null
+  }
+
+const authWorkerResolver = authWorkerResolverFor("off")
 
 const USERS = Object.keys(FIXTURE_USERS) as FixtureUser[]
 const ORGS = [FIXTURE_ORG_ID, PERSONAL_ORG_ID]
@@ -81,12 +96,20 @@ beforeEach(async () => {
   await seedAccessFixture()
 })
 
-describe("AQU-1352 characterization — resolver answers per (user × project)", () => {
+describe.each(MODES)("AQU-1352 characterization — resolver answers per (user × project), ACCESS_GRANTS_RESOLVER=%s", (mode) => {
+  const resolverUnderTest = authWorkerResolverFor(mode)
+  const sharedUnderTest = sharedResolverFor(mode)
   it.each(USERS)("%s resolves to the pinned level + source on every project", async (name) => {
     const user = await loadUser(name)
     const actual: Record<string, ExpectedRole> = {}
-    for (const p of FIXTURE_PROJECTS) actual[p] = await resolverUnderTest(user, p)
+    const shared: Record<string, ExpectedRole> = {}
+    for (const p of FIXTURE_PROJECTS) {
+      actual[p] = await resolverUnderTest(user, p)
+      shared[p] = await sharedUnderTest(user, p)
+    }
     expect(actual).toEqual(EXPECTED_ROLES[name])
+    // The Agent-API port answers the same table in the same mode.
+    expect(shared).toEqual(EXPECTED_ROLES[name])
   })
 })
 
@@ -156,7 +179,7 @@ describe("AQU-1352 characterization — Agent-API port agrees with auth-worker r
       const user = await loadUser(name)
       for (const p of FIXTURE_PROJECTS) {
         const a = await authWorkerResolver(user, p)
-        const s = await sharedResolver(user, p)
+        const s = await sharedResolverFor("off")(user, p)
         if (JSON.stringify(a) !== JSON.stringify(s)) {
           disagreements.push(`${name} × ${p}: auth=${JSON.stringify(a)} shared=${JSON.stringify(s)}`)
         }

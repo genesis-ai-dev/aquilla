@@ -96,6 +96,8 @@ export function dispatchEvent(
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
     case 'cell.link.set':
+    case 'cell.attachment.add':
+    case 'cell.attachment.remove':
       return {
         ok: true,
         result: handleCellEvent(

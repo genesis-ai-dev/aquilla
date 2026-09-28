@@ -12,6 +12,7 @@ import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
+import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -101,6 +102,51 @@ function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boo
   if (raw.kind !== 'assignment.create') return false
   const payload = raw.payload as { assigneeUserId?: unknown } | undefined
   return typeof payload?.assigneeUserId === 'number' && payload.assigneeUserId === callerUserId
+}
+
+/**
+ * AQU-581: true when `raw` is an `assignment.create` that falls entirely
+ * inside the caller's OWN lane/file scopes — the shape the lane-delegate
+ * carve-out below permits a mentor/coordinator to emit for other people.
+ *
+ * The caller must actually be scoped: an UNSCOPED member is refused here even
+ * with the org setting on, because "who may assign in the Spanish lane" is
+ * expressed by granting that person the `es` lane scope. Without that guard,
+ * flipping the setting would hand blanket assignment rights to every
+ * contributor in the org — the opposite of what the setting is for.
+ *
+ * Composition matches `enforceScopes`: lane scopes must contain the
+ * assignment's lane (`payload.targetLang`, '' for the default lane — an
+ * absent targetLang is the DEFAULT lane, never a wildcard), and if the caller
+ * also carries file scopes, EVERY file the assignment covers must be among
+ * them.
+ */
+function isInScopeLaneAssignCreate(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
+  raw: RawEvent<EventKind>,
+): boolean {
+  if (raw.kind !== 'assignment.create') return false
+  if (!Array.isArray(scopes) || scopes.length === 0) return false
+
+  const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
+  if (laneScopes.length === 0) return false
+
+  const payload = raw.payload as { targetLang?: unknown; scope?: unknown } | undefined
+  const lane = typeof payload?.targetLang === 'string' ? payload.targetLang : ''
+  if (!laneScopes.includes(lane)) return false
+
+  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length > 0) {
+    const entries = Array.isArray(payload?.scope) ? payload.scope : []
+    if (entries.length === 0) return false
+    const everyFileInScope = entries.every((entry) => {
+      const fileId = (entry as { fileId?: unknown } | null)?.fileId
+      return typeof fileId === 'string' && fileScopes.includes(fileId)
+    })
+    if (!everyFileInScope) return false
+  }
+
+  return true
 }
 
 function isAssignmentKind(kind: EventKind): boolean {
@@ -290,7 +336,59 @@ export async function authorize<K extends EventKind>(
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
       isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
       assignmentAuthority?.allowSelfAssignment === true
-    if (!selfAssignOk) {
+
+    // AQU-581: the lane-delegate carve-out. Unlike AQU-496's, this one admits
+    // assigning ANOTHER person — that is the whole point (a mentor hands out
+    // chapters) — but only within the lanes the org scoped this member to,
+    // and only while the org has opted into `allowScopedLaneAssignment`. It is
+    // evaluated SECOND so a self-assign under the older setting short-circuits
+    // first, and so an org running only AQU-496 behaves exactly as it did
+    // before.
+    //
+    // The ASSIGNEE is checked too (AQU-581 review): they must be able to do
+    // the work — CONTRIBUTOR+ and, if scoped, scoped to this lane and files.
+    // A lead is trusted to pick; a delegate's choice is what the grant is for.
+    //
+    // A delegate may also `assignment.unassign` work they handed out
+    // themselves, in a lane they still hold — otherwise their mistakes could
+    // only be undone by a lead. Reassign keeps the floor: nothing emits it.
+    const delegateCandidate =
+      !selfAssignOk &&
+      db != null &&
+      tokenClaims.role >= ROLE.CONTRIBUTOR &&
+      assignmentAuthority?.allowScopedLaneAssignment === true &&
+      Array.isArray(tokenClaims.scopes) &&
+      tokenClaims.scopes.some((s) => s.kind === 'lane')
+    let laneDelegateOk = false
+    if (delegateCandidate && isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>)) {
+      const payload = raw.payload as RawEvent<'assignment.create'>['payload']
+      const lane = typeof payload.targetLang === 'string' ? payload.targetLang : ''
+      const eligible = await isEligibleLaneAssignee(
+        db,
+        raw.projectId,
+        payload.assigneeUserId,
+        lane,
+        payload.scope.map((entry) => entry.fileId),
+      )
+      // The assign dialog recognises "cannot take work in" and shows its own
+      // translated message; anything else showing this sees plain words.
+      if (!eligible) {
+        const language = lane === '' ? 'the main language' : lane
+        return {
+          ok: false,
+          status: 403,
+          reason: `this person cannot take work in ${language}: they need to be a Contributor or above and be allowed to work in ${language}`,
+        }
+      }
+      laneDelegateOk = true
+    } else if (delegateCandidate && raw.kind === 'assignment.unassign') {
+      const payload = raw.payload as RawEvent<'assignment.unassign'>['payload']
+      laneDelegateOk =
+        typeof payload?.assignmentId === 'string' &&
+        (await isOwnLaneAssignment(db, raw.projectId, payload.assignmentId, tokenClaims.userId, tokenClaims.scopes ?? []))
+    }
+
+    if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
   }

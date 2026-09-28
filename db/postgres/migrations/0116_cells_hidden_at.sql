@@ -1,4 +1,4 @@
--- Migration 0112: cells.hidden_at — AQU-1422 "Hide cell / Show cell".
+-- Migration 0116: cells.hidden_at — AQU-1422 "Hide cell / Show cell".
 --
 -- A reversible per-cell park flag. `source.cell.visibility.set` stamps it with
 -- the event's serverTs on hide and clears it to NULL on show; nothing is ever
@@ -25,7 +25,7 @@
 -- Apply by hand against Neon (same convention as prior migrations here —
 -- NOT applied automatically):
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0112_cells_hidden_at.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0116_cells_hidden_at.sql
 -- Verify: `hidden_at` appears on `cells`; the partial index exists.
 
 ALTER TABLE cells ADD COLUMN IF NOT EXISTS hidden_at BIGINT;

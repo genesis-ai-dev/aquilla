@@ -376,14 +376,15 @@ projects.post(
     if (body.orgId != null) {
       // Creating into a specific org is an org-level function: require the
       // caller's org role >= maintainer (see spec Risk 3) OR, AQU-1352 D4,
-      // a team role >= project lead on at least one selected team.
+      // a team role >= project lead on EVERY selected team (at least one).
       const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
       const teamRoles = await loadTeamsInOrg(c.env, body.orgId, teamIds, user.id)
       if (teamRoles.size !== teamIds.length) {
         return c.json({ error: "every team must belong to this org" }, 400)
       }
-      const leadsATeam = [...teamRoles.values()].some((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
-      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsATeam) {
+      const leadsEveryTeam = teamRoles.size > 0 &&
+        [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
+      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsEveryTeam) {
         // Name the org only for a member: a non-member must not learn it (spec §3.9 rule 4).
         const org = orgRole == null
           ? null
@@ -392,7 +393,7 @@ projects.post(
             .first<{ name: string | null }>()
         return c.json(
           roleRequiredBody(
-            "org role >= maintainer, or team role >= project lead on a selected team, required to create a project here",
+            "org role >= maintainer, or team role >= project lead on every selected team, required to create a project here",
             ROLE.MAINTAINER,
             orgRole == null ? null : { level: orgRole, source: "org" },
             org?.name ? [org.name] : undefined,

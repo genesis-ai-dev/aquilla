@@ -77,6 +77,8 @@ describe.each(RESOLVER_MODES)("AQU-1352 attack #3 inheritance demotion (resolver
   // direct 300 row suppresses the org path, so the user drops to 400 and loses
   // Project Lead actions (invites, member adds). Spec: lower grants never
   // remove capability; max-wins across all paths.
+  // Deferred policy switch (pure max-over-ancestors), see ORCHESTRATION-AQU-1352 §1;
+  // today's AQU-1274 rule lets an explicit direct row restrict the org path.
   it.fails("org 500 + team 400: adding a direct 300 row does not drop the user below 500", async () => {
     await sql("UPDATE org_members SET role_level = 500 WHERE org_id = 1 AND user_id = 5") // team_only
     const before = await effective(mode, FIXTURE_USERS.team_only, "p1")
@@ -116,7 +118,7 @@ describe("AQU-1352 attack #4 multi-team ambiguity", () => {
   // the four attached teams appear in the chain (they sit in `elsewhere`). The
   // user has no project_members row at all, so the UI would tell an admin to
   // "remove the direct grant" that does not exist.
-  it.fails("resolver 'on': inspector chain lists every contributing team", async () => {
+  it("resolver 'on': inspector chain lists every contributing team", async () => {
     const res = await req("on", "owner", `/api/v2/users/20/access?from=project:p2`)
     expect(res.status).toBe(200)
     const body = res.json as { effectiveHere: { roleLevel: number; chain: unknown[] } }

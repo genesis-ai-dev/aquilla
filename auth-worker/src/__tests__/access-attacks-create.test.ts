@@ -76,7 +76,6 @@ describe.each(RESOLVER_MODES)("AQU-1352 attack #5 create-target fuzz (resolver %
       let n = 0
       for (const org of ORGS) {
         for (const team of TEAMS) {
-          if (caller === TEAM_LEAD.name && org.orgId === 1 && team.label === "led + not led") continue // see it.fails below
           const id = `fz-${caller}-${n++}`
           const body: Record<string, unknown> = { id, name: "Fuzz" }
           if (org.orgId !== undefined) body.orgId = org.orgId
@@ -109,13 +108,14 @@ describe.each(RESOLVER_MODES)("AQU-1352 attack #5 create-target fuzz (resolver %
   // attached to team 1 ("fixture/translators", led by someone else) — a
   // selection create-targets never offers, and an attach the attach route
   // (org >= 600) would refuse. Should be `every`, not `some`.
-  it.fails("team_lead cannot attach a new project to a team it does not lead by bundling it with its own", async () => {
+  it("team_lead cannot attach a new project to a team it does not lead by bundling it with its own", async () => {
     const res = await req(mode, TEAM_LEAD.name, "/api/v2/projects", {
       method: "POST",
       body: { id: "fz-mixed", name: "Mixed", orgId: 1, teamIds: [3, 1] },
     })
     expect(res.status).toBe(403)
     expect(await count("SELECT count(*) AS n FROM group_project_grants WHERE group_id = 1 AND project_id = 'fz-mixed'")).toBe(0)
+    expect(await count("SELECT count(*) AS n FROM projects WHERE id = 'fz-mixed'")).toBe(0)
   })
 
   it("create-targets never offers a team outside the org it is listed under", async () => {

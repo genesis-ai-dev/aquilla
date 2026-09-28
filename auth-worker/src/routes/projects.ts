@@ -92,6 +92,7 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { createProjectShared } from "../../../db/shared/projects"
+import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -1261,8 +1262,19 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 
+  // AQU-1352 §3.7: additive per-row origin data. Best-effort so a missing
+  // access_grants view never takes the roster down; rows then fall back to
+  // the legacy `role.source` rendering.
+  let origins = new Map<number, RosterOrigin>()
+  try {
+    origins = await loadRosterOrigins(c.env, projectId, project.org_id)
+  } catch (err) {
+    console.warn("[AQU-1352] roster origins unavailable", err)
+  }
+
   return c.json({
     members: members.map((m) => ({
+      ...origins.get(m.userId),
       userId: m.userId,
       username: m.username,
       email: m.email,

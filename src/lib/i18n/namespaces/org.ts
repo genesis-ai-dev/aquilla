@@ -43,6 +43,10 @@ export const org = defineNamespace({
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
     "org.access.scope.lane": "lane",
+    // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
+    "org.roster.stillHasAccess": "They will still have {role} access through {path}.",
+    "org.roster.removeThere": "Remove at {path}",
+    "org.roster.countBreakdown": "({direct} direct · {inherited} inherited)",
 
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
@@ -1553,6 +1557,18 @@ export const org = defineNamespace({
       "org.access.inherited.tooltip": {
         description: "Tooltip on a disabled role control for an inherited grant.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.roster.stillHasAccess": {
+        description: "Remove-member dialog: after removing the direct project grant, the person keeps access through a team or org grant.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
+      },
+      "org.roster.removeThere": {
+        description: "Link in the remove-member dialog to the team or org page where the surviving grant can be removed.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
+      },
+      "org.roster.countBreakdown": {
+        description: "Suffix after the project members heading splitting the total into direct and inherited members.",
+        placeholders: { direct: "Number of members with a grant on this project.", inherited: "Number of members whose access comes from a team or org." },
       },
       "org.access.inherited.link": {
         description: "Link beside a disabled inherited role control; goes to the scope where the grant lives.",

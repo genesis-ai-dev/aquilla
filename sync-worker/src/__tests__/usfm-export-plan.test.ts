@@ -18,13 +18,6 @@ let t: TestDb
 
 beforeAll(async () => {
   t = await makeTestDb()
-  // AQU-1423 / AQU-1422: `cells.hidden_at` is migration 0112, which lands with
-  // AQU-1422. This branch is cut from dev without it (one issue = one branch),
-  // so the suite adds the column it reads rather than skipping the cases that
-  // matter — these tests exercise the real query against real Postgres either
-  // way. `IF NOT EXISTS` makes the statement a no-op once 0112 is in
-  // schema.sql, at which point these four lines can go.
-  await t.pg.query(`ALTER TABLE cells ADD COLUMN IF NOT EXISTS hidden_at BIGINT`)
 })
 afterAll(async () => { await t.close() })
 beforeEach(async () => { await t.reset() })

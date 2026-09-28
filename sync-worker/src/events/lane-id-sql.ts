@@ -3,7 +3,7 @@
  *
  * Qualify `public.lanes` so these can be inlined into statements whose WITH
  * list already names a CTE `lanes` (progress-projection groups by tag under
- * that name). PK lookups stay on `target_lang` until slice 8.
+ * that name). Row identity is `lane_id`. `target_lang` remains the legacy tag.
  */
 
 /**
@@ -74,21 +74,17 @@ export function laneIdResolveBindingBinds(
 }
 
 /**
- * Dual-read match for a target-lane tag: prefer opaque `lane_id` once
- * backfill has populated it; fall back to `target_lang` while `lane_id` is
- * still NULL.
- *
- * Binds, in order: projectId, tag, tag. See {@link targetLaneDualReadBinds}.
+ * Match a target-lane tag to `lane_id`. `lane_id` is NOT NULL, so there is
+ * no `target_lang` fallback. Binds: projectId, tag.
  */
 export function targetLaneDualReadSql(alias = ''): string {
   const col = alias ? `${alias}.` : ''
-  return `(${col}lane_id = (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?)
-    OR (${col}lane_id IS NULL AND ${col}target_lang = ?))`
+  return `(${col}lane_id = (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))`
 }
 
 /** Binds for {@link targetLaneDualReadSql}. */
 export function targetLaneDualReadBinds(projectId: string, tag: string): unknown[] {
-  return [projectId, tag, tag]
+  return [projectId, tag]
 }
 
 /**

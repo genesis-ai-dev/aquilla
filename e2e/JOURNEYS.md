@@ -175,6 +175,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- Chapter audio stitch (AQU-1201): concatenate a chapter's verse recordings into one continuous WAV. A checkbox includes chapter-heading takes in that file; the choice is remembered in export-dialog localStorage — RTL in `audio-chapter.group.test.ts`, `audio-chapter.export.test.ts`, `ExportDialog.audio-chapter.test.tsx`, `export-dialog-memory.test.ts`. Existing by-character / by-line exports stay on their own tests.
 - New-voice leftover Kokoro project defaults remap to Inworld; picker offers Inworld / Gemini / MMS (`NewVoiceModal.test.tsx`)
 - Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
@@ -182,6 +183,19 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
+  Project Lead, including on a DCS-pinned project where a refusal reason exists),
+  the DCS-pinned disabled reason, the IDML row that is parkable although its text
+  is not editable, the Show-cell wording flip, and the dimmed eye-off row —
+  covered in RTL (`EditorTable.hiddenCells.test.tsx`). The display-list rule that
+  drops a parked cell from the text table, the media lens and the chapter counts
+  together, and the list-version bumps a live hide/show depends on, are in
+  `useActiveCellStore.hiddenCells.test.ts`. The durable contract is a worker unit
+  test, not a smoke: `sync-worker/src/__tests__/hidden-cells-projection.test.ts`
+  drives the real projection against real Postgres and reads it back out through
+  the real cells read route, which is the producer/consumer seam that would
+  otherwise fail silently. The emit contract (non-chain-mutating, PROJECT_LEAD
+  floor) is in `src/lib/sync/events-emit.hiddenCells.test.ts`.
 - Hidden cells leave every export (AQU-1423). The existing export smoke
   (`e2e/specs/editor/export.smoke.spec.ts`, row 38 above) already crosses the
   layers this touches, and hiding adds no new cross-layer contract — it adds a

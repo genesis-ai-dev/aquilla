@@ -154,6 +154,11 @@ export interface CellData {
    *  continuation cells — drives paragraph grouping (`deriveParagraphs`) and
    *  the paragraph-draft UI affordance. Never derived from the target row. */
   paragraphStart?: boolean
+  /** AQU-1422: true while this cell is parked with "Hide cell". Read from the
+   *  SOURCE row's `hidden` flag and NEVER from the target row — hiding is per
+   *  cell, not per lane, and a target row created after the hide carries no flag
+   *  of its own. Absent on a visible cell. */
+  hidden?: boolean
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -373,6 +378,8 @@ export function buildCellData(
     cameraState,
     metadata,
     paragraphStart: paragraphStart || undefined,
+    // AQU-1422: source row only, deliberately — see the field's doc comment.
+    hidden: source?.hidden === true ? true : undefined,
   }
 }
 

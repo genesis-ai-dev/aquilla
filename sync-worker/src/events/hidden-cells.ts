@@ -18,7 +18,7 @@
 // WHY THIS IS SIMPLER THAN `removed-cells.ts`, WHICH IT SITS BESIDE. A removal
 // hard-deletes the projection row, so its only durable record is the events log
 // and the two-condition reconstruction that module documents. A hide is a
-// COLUMN on a row that is still there: `cells.hidden_at` (migration 0112), on
+// COLUMN on a row that is still there: `cells.hidden_at` (migration 0116), on
 // the shared source row, NULL when visible. One query over live rows, and no
 // chain arbitration to redo — `source.cell.visibility.set` is not
 // chain-mutating, so the projection is already the authority.
@@ -48,10 +48,10 @@ export interface HiddenCell {
  * list is today's behaviour, where a parked line keeps the client's original
  * text, while a thrown error would take a whole download with it.
  *
- * That fail-soft path also covers a database that predates migration 0112 — the
+ * That fail-soft path also covers a database that predates migration 0116 — the
  * column is simply absent, the query errors, and the export is unchanged.
  *
- * Cost: one indexed lookup. The partial index migration 0112 adds
+ * Cost: one indexed lookup. The partial index migration 0116 adds
  * (`idx_cells_hidden ... WHERE hidden_at IS NOT NULL`) covers exactly this
  * predicate, so a 30k-row Bible file with three parked cells reads three rows.
  */

@@ -21,6 +21,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
+import { roleRequiredBody } from "../lib/role-denial"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
@@ -68,7 +69,10 @@ projectMembers.post(
     const callerRole = await resolveProjectRole(c.env, user, projectId)
     if (!callerRole) return c.json({ error: "no access to project" }, 403)
     if (callerRole.level < ROLE.MAINTAINER) {
-      return c.json({ error: "maintainer+ required to revoke access" }, 403)
+      return c.json(
+        roleRequiredBody("maintainer+ required to revoke access", ROLE.MAINTAINER, callerRole),
+        403,
+      )
     }
 
     // AQU-285 (F-B6) target-level cap, mirrored from the sibling

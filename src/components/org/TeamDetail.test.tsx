@@ -256,7 +256,7 @@ describe("TeamDetail admin management", () => {
 
   it("links admins to team settings", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     const settings = screen.getByRole("link", { name: /team settings/i })
     expect(settings).toHaveAttribute("href", "/orgs/1/teams/10/settings")
   })
@@ -270,8 +270,8 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     expect(title.nextElementSibling).toBeNull()
   })
 
@@ -284,14 +284,14 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
 
   it("keeps the avatar in flow and pads body content to the title on wide screens", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     const well = screen.getByTestId("team-detail-well")
     expect(well).toHaveClass("max-w-6xl")
     expect(well.className).toContain("@6xl/team-detail:max-w-[calc(72rem+2.75rem)]")

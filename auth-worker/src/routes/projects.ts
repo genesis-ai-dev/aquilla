@@ -23,6 +23,7 @@
 // `c.env.AQUILLA_PG` no-op gracefully if the binding is absent (test envs).
 
 import { Hono } from "hono"
+import { roleRequiredBody } from "../lib/role-denial"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
@@ -383,10 +384,11 @@ projects.post(
       const leadsATeam = [...teamRoles.values()].some((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
       if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsATeam) {
         return c.json(
-          {
-            error:
-              "org role >= maintainer, or team role >= project lead on a selected team, required to create a project here",
-          },
+          roleRequiredBody(
+            "org role >= maintainer, or team role >= project lead on a selected team, required to create a project here",
+            ROLE.MAINTAINER,
+            orgRole == null ? null : { level: orgRole, source: "org" },
+          ),
           403,
         )
       }
@@ -819,7 +821,10 @@ projects.patch(
     const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
     if (!role) return c.json({ error: "not found or no access" }, 403)
     if (role.level < ROLE.MAINTAINER) {
-      return c.json({ error: "maintainer or higher required to rename a project" }, 403)
+      return c.json(
+        roleRequiredBody("maintainer or higher required to rename a project", ROLE.MAINTAINER, role),
+        403,
+      )
     }
 
     const { name } = c.req.valid("json")
@@ -932,7 +937,9 @@ projects.patch("/:projectId/lifecycle", authMiddleware, zValidator("json", lifec
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 500) return c.json({ error: "project_lead+ required to change lifecycle" }, 403)
+  if (role.level < 500) {
+    return c.json(roleRequiredBody("project_lead+ required to change lifecycle", 500, role), 403)
+  }
   const { isActive } = c.req.valid("json")
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -952,7 +959,9 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
   const { deadline } = c.req.valid("json")
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET deadline_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -975,7 +984,9 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
   if (!role) return c.json({ error: "not found or no access" }, 403)
   // AQU-507: naming who is responsible for a project is an administrative act
   // (mirrors the deadline gate), so it sits above PROJECT_LEAD.
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
   const { pmUserId } = c.req.valid("json")
 
   const project = await c.env.AQUILLA_PG.prepare(
@@ -1054,7 +1065,9 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })

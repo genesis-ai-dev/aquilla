@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
+import { isReleaseBranch } from "./release-plan.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -67,7 +68,7 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["workflow_dispatch", "main", "production", "production", "api.aquilla.app"],
+    ["workflow_dispatch", "release/2026/09/23", "production", "production", "api.aquilla.app"],
     ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
     ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
   ])(
@@ -86,7 +87,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["feature/example", "development", "staging", "", "release"])(
+  it.each(["feature/example", "development", "staging", "", "release", "main", "release/2026/9/23", "release/2026/09/23/hotfix"])(
     "rejects unauthorized live deployment ref %j",
     (refName) => {
       const result = spawnSync(
@@ -100,26 +101,29 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["main", "dev"])(
-    "enforces the expected %s branch for explicit live deployments",
-    (expectedBranch) => {
+  it.each([
+    ["release/2026/09/23", "release"],
+    ["dev", "dev"],
+  ])(
+    "allows %s for the %s deploy guard",
+    (branch, guardArg) => {
       const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
       const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
 
       try {
-        expect(spawnSync("git", ["init", "-b", expectedBranch], { cwd: tempRepo }).status).toBe(0)
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
 
-        const allowed = spawnSync("bash", [guard, expectedBranch], {
+        const allowed = spawnSync("bash", [guard, guardArg], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(allowed.status).toBe(0)
 
         const rejected = spawnSync("bash", [guard, "feature/example"], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(rejected.status).not.toBe(0)
         expect(rejected.stderr).toContain("requires branch 'feature/example'")
@@ -128,6 +132,87 @@ describe("worker deployment environment contract", () => {
       }
     },
   )
+
+  // Production must only ship from a dated release branch so every live version maps to a calver tag.
+  it.each(["main", "dev", "release/2026/9/23", "release/latest"])(
+    "refuses a production deploy from %s",
+    (branch) => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync("bash", [guard, "release"], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
+        })
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("release/YYYY/MM/DD")
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    },
+  )
+
+  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // day. Four checkers each decide whether a branch name counts as a release
+  // branch: the three shell scripts here, plus isReleaseBranch in
+  // release-plan.mjs. One shared table is what keeps their four regexes in
+  // step; a shared helper alone doesn't catch a script that forgot to call it.
+  describe.each([
+    ["release/2026/09/24", true],
+    ["release/2026/09/24-01", true],
+    ["release/2026/9/23", false],
+    ["release/2026/09/24-1", false],
+    ["release/2026/09/24-001", false],
+    ["release/latest", false],
+  ])("release branch name %j", (branch, accepted) => {
+    it(`isReleaseBranch returns ${accepted}`, () => {
+      expect(isReleaseBranch(branch)).toBe(accepted)
+    })
+
+    it(`verify-deploy-branch.sh ${accepted ? "accepts" : "rejects"} it as "release"`, () => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync(
+          "bash",
+          [path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh"), "release"],
+          { cwd: tempRepo, encoding: "utf8", env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch } },
+        )
+        expect(result.status === 0).toBe(accepted)
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    })
+
+    it(`tag-release.sh ${accepted ? "accepts" : "rejects"} it as the current branch`, () => {
+      // Run outside any git repo so `git symbolic-ref` fails and the script
+      // falls back to GITHUB_REF_NAME instead of this repo's real branch.
+      const result = spawnSync("bash", [path.join(REPO_ROOT, "scripts", "tag-release.sh")], {
+        cwd: tmpdir(),
+        encoding: "utf8",
+        env: { GITHUB_REF_NAME: branch, GITHUB_ACTIONS: "true" },
+      })
+      if (accepted) {
+        expect(result.stderr).not.toContain("requires a release/YYYY/MM/DD branch")
+      } else {
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("requires a release/YYYY/MM/DD branch")
+      }
+    })
+
+    it(`resolve-deployment-target.sh ${accepted ? "accepts" : "rejects"} it as a live ref`, () => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", branch],
+        { encoding: "utf8", env: {} },
+      )
+      expect(result.status === 0).toBe(accepted)
+      if (accepted) expect(result.stdout).toContain("wrangler_environment=production")
+    })
+  })
 
   it("keeps account_id above the first TOML table", () => {
     const config = readRepoFile("sync-worker", "wrangler.toml")
@@ -139,11 +224,11 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh main"],
-    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh release"],
+    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh release"],
   ])(
     "keeps the unnamed profile in %s away from production",
     (file, localName, productionName, guardCommand) => {
@@ -316,7 +401,7 @@ describe("worker deployment environment contract", () => {
     const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
-    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
+    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh release")
     expect(agentPackage.scripts?.deploy).toContain("--env=production")
     expect(agentPackage.scripts?.["deploy:staging"]).toBeUndefined()
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
@@ -379,13 +464,13 @@ describe("worker deployment environment contract", () => {
     const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
 
     for (const row of [
-      "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
+      "| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
       "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
     ]) {
       expect(matrix).toContain(row)
     }
 
-    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`release/YYYY/MM/DD` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
@@ -451,7 +536,7 @@ describe("worker deployment environment contract", () => {
     const scripts = rootPackage.scripts ?? {}
 
     for (const [target, environment, branch] of [
-      ["aquilla", "production", "main"],
+      ["aquilla", "production", "release"],
       ["aquilla:dev", "development", "dev"],
     ] as const) {
       for (const [surface, manifestSurface] of [

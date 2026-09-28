@@ -24,6 +24,7 @@ import {
 } from './chain-claims'
 import { allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
+import { laneIdResolveFromColSql } from './lane-id-sql'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { ROLE } from './role-policy'
 import type { EventPayloads } from './types'
@@ -502,13 +503,15 @@ function buildGatedSourceUpsert(
        project_id, file_id, cell_id, side, target_lang, value, value_html, type,
        canonical_ref, anchor_cell_id, event_id, source_event_id,
        last_editor, last_edit_at, validated, word_count, content_hash,
-       start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata
+       start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
+       lane_id
      )
      SELECT v.project_id, v.file_id, v.cell_id, 'source', '', v.value, v.value_html, v.type,
        v.canonical_ref, v.anchor_cell_id, v.event_id, NULL,
        v.author, v.server_ts::bigint, 0, v.word_count::integer, v.content_hash,
        v.start_ms::bigint, v.end_ms::bigint, v.medium, v.sequence_index::double precision,
-       v.transcription, v.camera_state, v.metadata::jsonb
+       v.transcription, v.camera_state, v.metadata::jsonb,
+       ${laneIdResolveFromColSql('source', 'v.project_id')}
      FROM (VALUES ${values}) AS v(
        project_id, file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
        event_id, author, server_ts, word_count, content_hash, start_ms, end_ms, medium,
@@ -530,7 +533,8 @@ function buildGatedSourceUpsert(
        word_count = excluded.word_count, content_hash = excluded.content_hash,
        start_ms = excluded.start_ms, end_ms = excluded.end_ms, medium = excluded.medium,
        sequence_index = excluded.sequence_index, transcription = excluded.transcription,
-       camera_state = excluded.camera_state, metadata = excluded.metadata`,
+       camera_state = excluded.camera_state, metadata = excluded.metadata,
+       lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
   ).bind(...binds)
 }
 
@@ -601,11 +605,13 @@ function buildGatedTargetInsert(
     `INSERT INTO cells (
        project_id, file_id, cell_id, side, target_lang, value, value_html, type,
        canonical_ref, anchor_cell_id, event_id, source_event_id,
-       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted
+       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted,
+       lane_id
      )
      SELECT v.project_id, v.file_id, v.cell_id, 'target', v.target_lang, v.value,
        v.value_html, NULL, NULL, NULL, v.event_id, v.source_event_id,
-       v.author, v.server_ts::bigint, 0, v.word_count::integer, v.content_hash, 0
+       v.author, v.server_ts::bigint, 0, v.word_count::integer, v.content_hash, 0,
+       ${laneIdResolveFromColSql('target', 'v.project_id', 'v.target_lang')}
      FROM (VALUES ${values}) AS v(
        project_id, file_id, cell_id, target_lang, value, value_html, event_id,
        source_event_id, author, server_ts, word_count, content_hash

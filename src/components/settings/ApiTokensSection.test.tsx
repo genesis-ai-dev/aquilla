@@ -24,7 +24,9 @@ vi.mock("@/lib/sync/credentials", () => ({
   revokeCredential: vi.fn(),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn() }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(),
   projectsResultError: vi.fn((result: { reason: string }) =>
     result.reason === "unreachable"

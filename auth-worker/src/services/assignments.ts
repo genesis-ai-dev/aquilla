@@ -24,6 +24,7 @@
 import type { Env } from "../types"
 import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
+import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -268,12 +269,29 @@ const MAX_VALIDATION_LEVEL = 15
  * the `validation_count` generated column so we never parse the settings blob.
  */
 async function readValidationCount(env: Env, projectId: string): Promise<number> {
+  return readThreshold(env, projectId, "validation_count")
+}
+
+/**
+ * AQU-490: the audio twin, read through its own generated column (0096) for
+ * the same reason — the settings blob runs to megabytes and this panel is on
+ * the plan inspector's hot path.
+ */
+async function readValidationCountAudio(env: Env, projectId: string): Promise<number> {
+  return readThreshold(env, projectId, "validation_count_audio")
+}
+
+async function readThreshold(
+  env: Env,
+  projectId: string,
+  column: "validation_count" | "validation_count_audio",
+): Promise<number> {
   const row = await env.AQUILLA_PG.prepare(
-    "SELECT validation_count FROM project_settings WHERE project_id = ?",
+    `SELECT ${column} AS threshold FROM project_settings WHERE project_id = ?`,
   )
     .bind(projectId)
-    .first<{ validation_count: string | number | null }>()
-  const value = Math.floor(Number(row?.validation_count))
+    .first<{ threshold: string | number | null }>()
+  const value = Math.floor(Number(row?.threshold))
   return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
 }
 
@@ -303,7 +321,10 @@ export async function getUnitAssignments(
   sectionKey: string,
   lane: string,
 ): Promise<UnitAssignment[]> {
-  const validationCount = await readValidationCount(env, projectId)
+  const [validationCount, validationCountAudio] = await Promise.all([
+    readValidationCount(env, projectId),
+    readValidationCountAudio(env, projectId),
+  ])
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
   // all. Built as a fragment so the bind only exists when the predicate does.
@@ -341,11 +362,10 @@ export async function getUnitAssignments(
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id = ?
      ), audio AS (
-       SELECT ca.cell_id,
-              MAX(CASE WHEN ca.selected = 1 AND ca.approved = 1 THEN 1 ELSE 0 END) AS validated
-         FROM cell_audio ca
-        WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
-        GROUP BY ca.cell_id
+       -- AQU-490: the shared definition, not a fourth hand-copy of it. This
+       -- panel sits directly under the unit's own audio bar, so the two must
+       -- count the same cells by construction rather than by agreement.
+       ${AUDIO_CTE_SQL}
      )
      SELECT a.assignment_id    AS assignment_id,
             a.assignee_user_id AS assignee_user_id,
@@ -362,8 +382,12 @@ export async function getUnitAssignments(
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
-            COUNT(*) FILTER (WHERE au.cell_id IS NOT NULL)::integer AS recorded,
-            COUNT(*) FILTER (WHERE COALESCE(au.validated, 0) = 1)::integer AS audio_validated
+            COUNT(*) FILTER (WHERE COALESCE(au.has_dub, 0) = 1)::integer AS recorded,
+            -- Against the project's CURRENT audio threshold, for the same
+            -- reason the text count above it is: a stored verdict would disagree
+            -- with the bar drawn above this panel the moment somebody changed
+            -- the required number.
+            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated
        FROM assignments a
        JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
@@ -396,8 +420,8 @@ export async function getUnitAssignments(
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
-    // policy CTE's project, the audio CTE's (project, file), the validation
-    // threshold in the SELECT list, the lane on the target join, then the
+    // policy CTE's project, the audio CTE's (project, file), the text then
+    // audio thresholds in the SELECT list, the lane on the target join, then the
     // WHERE — and the section key last, only when the fragment above put a
     // placeholder there. Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
@@ -406,6 +430,7 @@ export async function getUnitAssignments(
       projectId,
       fileId,
       validationCount,
+      validationCountAudio,
       lane,
       projectId,
       fileId,
@@ -559,6 +584,66 @@ export async function getMyAssignments(
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
+  }))
+}
+
+/** An open assignment the caller handed out, with who it went to. */
+export interface GivenAssignment {
+  assignmentId: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+}
+
+/**
+ * AQU-581: the open assignments `userId` created in one project, newest
+ * first — the list a lane coordinator removes their own mistakes from.
+ */
+export async function getAssignmentsGivenBy(
+  env: Env,
+  projectId: string,
+  userId: number,
+): Promise<GivenAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id, a.assignee_user_id AS assignee_user_id,
+            u.username AS username, a.scope_label AS scope_label,
+            a.target_lang AS target_lang,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+      WHERE a.project_id = ? AND a.created_by = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number | string
+      username: string | null
+      scope_label: string
+      target_lang: string | null
+      cells_total: number
+      cells_done: number
+      file_id: string | null
+    }>()
+
+  return (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    fileId: r.file_id,
+    assigneeUserId: Number(r.assignee_user_id),
+    username: r.username,
+    scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
+    cellsTotal: Number(r.cells_total),
+    cellsDone: Number(r.cells_done),
   }))
 }
 

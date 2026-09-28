@@ -201,7 +201,7 @@ routes = [
 ]
 
 [env.production.build]
-command = "bash ../scripts/verify-deploy-branch.sh main"
+command = "bash ../scripts/verify-deploy-branch.sh release"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.production.placement]

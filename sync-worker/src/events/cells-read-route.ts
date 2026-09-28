@@ -12,11 +12,14 @@
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
-//                         filtered to `target_lang = <tag>`; source rows are
-//                         ALWAYS included regardless. Applies to the full
-//                         read, the delta (`?since=`) read, and the cellIds
-//                         fast path alike. Absent = all lanes (unchanged).
-//                         Max 64 chars; longer values are rejected with 400.
+//                         dual-read to the lane whose legacy_tag is <tag>
+//                         (prefer lane_id once backfill has populated it;
+//                         fall back to target_lang while lane_id is NULL);
+//                         source rows are ALWAYS included regardless. Applies
+//                         to the full read, the delta (`?since=`) read, and
+//                         the cellIds fast path alike. Absent = all lanes
+//                         (unchanged). Max 64 chars; longer values are
+//                         rejected with 400.
 //   since=<serverSeq>   — delta read (audit M2-1). Returns only the cells
 //                         touched by events with `server_seq > since`,
 //                         unpaginated, as `{ delta: true, changedCellIds,
@@ -70,6 +73,7 @@
 import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
+import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -104,6 +108,8 @@ interface CellRowRaw {
   /** JSONB — the driver hands back a parsed object, but a text executor may
    *  surface it as a string (parsed defensively in mapRow). */
   metadata: Record<string, unknown> | string | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
+  lane_id: string | null
 }
 
 interface CellRowOut {
@@ -132,6 +138,8 @@ interface CellRowOut {
   transcription: string | null
   cameraState: string | null
   metadata: Record<string, unknown> | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
+  laneId?: string | null
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -191,6 +199,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     transcription: row.transcription,
     cameraState: row.camera_state,
     metadata: parseMetadata(row.metadata),
+    laneId: row.lane_id ?? null,
   }
 }
 
@@ -708,7 +717,7 @@ export async function handleCellsReadRequest(
     "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state, metadata"
+    "medium, sequence_index, transcription, camera_state, metadata, lane_id"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell
@@ -823,8 +832,8 @@ export async function handleCellsReadRequest(
           deltaBinds.push(sideFilter)
         }
         if (laneFilter !== null) {
-          deltaParts.push("AND (side = 'source' OR target_lang = ?)")
-          deltaBinds.push(laneFilter)
+          deltaParts.push(sourceOrTargetLaneSql())
+          deltaBinds.push(...targetLaneDualReadBinds(projectId, laneFilter))
         }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
@@ -902,8 +911,8 @@ export async function handleCellsReadRequest(
     binds.push(...cellIdsFilter)
   }
   if (laneFilter !== null) {
-    parts.push("AND (side = 'source' OR target_lang = ?)")
-    binds.push(laneFilter)
+    parts.push(sourceOrTargetLaneSql())
+    binds.push(...targetLaneDualReadBinds(projectId, laneFilter))
   }
   const sql = parts.join(" ")
 

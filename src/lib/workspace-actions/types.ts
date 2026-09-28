@@ -23,6 +23,8 @@ export interface WorkspaceActionContext {
     untranscribed: number
     /** Cells with translated text but no recording yet. */
     unsynthesized: number
+    /** AQU-490: takes this viewer could still validate, policy applied. */
+    validatableTakes?: number
   }
 }
 
@@ -32,6 +34,9 @@ export interface WorkspaceActionRunArgs {
   runCompleteAll: () => void
   runExport: () => void
   runBatchValidate: () => void
+  /** AQU-490: bulk AUDIO validation. Separate from the text one on purpose —
+   *  a reviewer signing off translations has not listened to the takes. */
+  runBatchValidateAudio: () => void
   /** File-scoped target import — populate the open file's translations. */
   runImportIntoFile: () => void
   runTranscribeAll: () => void

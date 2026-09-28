@@ -176,6 +176,18 @@ export const audioAttachEventId = (
   audioId: string,
 ): string => u5(`audio-attach:${projectId}:${fileId}:${cellId}:${audioId}`)
 
+/** AQU-490: event id for a `cell.audio.validate`, keyed by (cell, take,
+ *  validator). Keyed on the VALIDATOR and not on the attach event, for the
+ *  reason validateEventId gives above: a re-sync must converge on the same id
+ *  even though the take's attach event id moves. */
+export const audioValidateEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  audioId: string,
+  validator: string,
+): string => u5(`audio-validate:${projectId}:${fileId}:${cellId}:${audioId}:${validator}`)
+
 /** event id for a `cell.audio.select`, keyed by (cell, audioId). The all-takes
  *  import emits one of these to pin the legacy active take after attaching every
  *  take in the cell (each attach auto-selects, so an explicit final select wins).

@@ -21,6 +21,7 @@
 // stays reviewable against the old shape.
 
 import { removedCellsForFile } from './removed-cells'
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import type { UsfmEdits } from '../lib/usfm-lossless'
 
 /** How far an added cell may sit from a verse before we give up walking. Two
@@ -90,11 +91,11 @@ export async function buildUsfmExportPlan(
         WHERE t.project_id = ?
           AND t.file_id    = ?
           AND t.side       = 'target'
-          AND t.target_lang = ?
+          AND ${targetLaneDualReadSql('t')}
           AND s.canonical_ref IS NOT NULL
           AND t.value <> ''${validatedPredicate}`,
     )
-    .bind(projectId, fileId, lane)
+    .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
     .all<{ canonical_ref: string; value: string }>()
 
   const overrides = new Map<string, string>()
@@ -152,7 +153,7 @@ async function resolveAdditions(
           AND t.file_id    = s.file_id
           AND t.cell_id    = s.cell_id
           AND t.side       = 'target'
-          AND t.target_lang = ?${validatedPredicate}
+          AND ${targetLaneDualReadSql('t')}${validatedPredicate}
         WHERE s.project_id = ?
           AND s.file_id    = ?
           AND s.side       = 'source'
@@ -160,7 +161,7 @@ async function resolveAdditions(
           AND s.canonical_ref IS NULL
           AND (s.metadata::jsonb)->'aquillaOrigin'->>'kind' = 'user-insert'`,
     )
-    .bind(lane, projectId, fileId)
+    .bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId)
     .all<AddedCellRow>()
 
   const rows = (added.results ?? []).filter((r) => (r.value ?? '').trim() !== '')

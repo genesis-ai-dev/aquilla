@@ -533,3 +533,62 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     expect(screen.queryByRole("button", { name: /remove rendering favor/i })).not.toBeInTheDocument()
   })
 })
+
+// AQU-684: the import button is the only place a partner's FLEx dictionary
+// reaches the termbase, and it used to branch on a `.tbx` extension alone —
+// so a LIFT export was read as delimited text and imported as nothing at all.
+// These drive the real input element, so the file → format detection → parser
+// → event chain is exercised as one path rather than three mocked halves.
+describe("GlossaryEditor — term-base file import (AQU-684)", () => {
+  const FLEX_EXPORT = `<?xml version="1.0" encoding="UTF-8"?>
+<lift producer="SIL.FLEx 9.1.19" version="0.13">
+  <entry guid="g1"><lexical-unit><form lang="pmy"><text>trang</text></form></lexical-unit>
+    <sense><gloss lang="en"><text>light</text></gloss></sense></entry>
+</lift>`
+
+  function pickFile(container: HTMLElement, name: string, body: string) {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("import file input not rendered")
+    fireEvent.change(input, { target: { files: [new File([body], name, { type: "text/plain" })] } })
+    return input
+  }
+
+  it("imports a FLEx LIFT export picked from the import button", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+
+    // Gloss became the source term, vernacular headword the rendering.
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({
+      sourceTerm: "light",
+      renderings: [{ rendering: "trang", status: "preferred" }],
+    })
+  })
+
+  it("still routes a LIFT export whose extension was lost in transit", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.xml", FLEX_EXPORT)
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ sourceTerm: "light" })
+  })
+
+  it("offers LIFT to the file picker alongside the formats it already took", () => {
+    const { container } = renderEditor()
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input?.accept).toContain(".lift")
+    expect(input?.accept).toContain(".tbx")
+    expect(input?.accept).toContain(".csv")
+  })
+
+  it("reports a file that yields no terms instead of looking like it worked", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "empty.lift", `<lift version="0.13"></lift>`)
+
+    expect(await screen.findByText("Import failed")).toBeInTheDocument()
+    expect(emitTermCreate).not.toHaveBeenCalled()
+  })
+})

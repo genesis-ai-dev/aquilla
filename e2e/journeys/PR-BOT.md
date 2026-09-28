@@ -5,8 +5,9 @@ agent-browser, Grokbot, Codex with Astra) can follow it. The stories in this
 folder are its briefs; the replays are the checks it can run without
 thinking.
 
-A human still decides. The comment is evidence, not a verdict. Never approve
+The walking bot never decides. The comment is evidence, not a verdict. Never approve
 the PR, never request changes as a GitHub review, never merge, never push.
+Who may merge on that evidence is set by [QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md).
 
 ## Input
 

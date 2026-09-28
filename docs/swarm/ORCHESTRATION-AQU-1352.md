@@ -48,6 +48,7 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 | create-targets | P0 picker + me/create-targets | W1 running |
 | access-ui | types, breadcrumb, badges, inspector UI | W1 running |
 ## §4 Merge log
+- 2026-09-28 · W3 fix-access-ui, fix-create, roster-wiring, denials-crumbs, people-page → 3dffbaf42 · tsc 0 · auth tsc 0 · lint clean · auth 4 fail (billing baseline) · root 8 fail, all baseline · conflicts: org.ts i18n union + one duplicate context entry
 - 2026-09-28 · W2 resolver-swap, teams, access-api → swarm/aqu-1352 · tsc 0 · auth tsc 0 · sync tsc 24 = baseline 24 · lint 0 errors · auth 4 fail (billing baseline) · root 13 fail, all in baseline set · W1 review panel: sql-security 0 findings; create-contract 2 major + 1 minor; spec-ui 1 major + 3 minor → W3 fixers
 - 2026-09-28 · W1 grants-view, characterization, create-targets, access-ui → swarm/aqu-1352 a7f5cdde6 · tsc 0 · auth-worker tsc 0 · lint 0 errors · auth vitest 4 fail (billing baseline) · view DDL loads in PGlite for all 210 auth files · root vitest 36 fail vs 14 baseline: +1 ours (i18n duplicate Creator/Direct, fixed c76f6367c by reusing accessModelLegend keys); outbox-flush ×21 + ProjectOverview ×1 are load timeouts, pass in isolation
 - Root baseline (2ecb7967f): 14 failed / 14433 passed. Known flaky under full-suite load: outbox-flush, ProjectOverview, AssignedToMe

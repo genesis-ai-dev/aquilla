@@ -200,6 +200,10 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /** AQU-1418: the project's lane rows from the last settings response.
+   *  Null before the first response that carries them, and on a server
+   *  that predates lane rows. */
+  lanes: ProjectLaneView[] | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason

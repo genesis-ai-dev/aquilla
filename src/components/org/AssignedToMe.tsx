@@ -70,9 +70,12 @@ export function AssignedToMe() {
     setError(null)
     void (async () => {
       try {
+        // AQU-729: lane labels are display-only. A portfolio miss must not
+        // hide the assignments themselves — that is the bug this list is
+        // here to avoid.
         const [all, portfolio] = await Promise.all([
           getMyAssignmentsForOrg(jwt, activeOrgId),
-          getPortfolio(jwt, activeOrgId),
+          getPortfolio(jwt, activeOrgId).catch(() => []),
         ])
         if (cancelled) return
         const labels = new Map(

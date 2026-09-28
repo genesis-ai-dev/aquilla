@@ -183,7 +183,7 @@ describe('get_capabilities — commands index (§6)', () => {
   it('publishes kind/title/tier/minRoleLevel for every agent-reachable command', async () => {
     const cred = {
       credentialId: 'cred-1', userId: '1', username: 'alice',
-      mode: 'act' as const, orgId: null, projectId: null,
+      mode: 'act' as const, access: 'write' as const, orgId: null, projectId: null,
     }
     const result = await callTool('get_capabilities', {}, { AQUILLA_PG: undefined }, cred, 'tok')
     expect(result).not.toBe(Symbol.for('unknown-tool'))

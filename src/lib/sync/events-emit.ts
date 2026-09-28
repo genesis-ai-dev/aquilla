@@ -1235,6 +1235,48 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
+export interface SourceCellVisibilityInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** true parks the cell, false brings it back. */
+  hidden: boolean
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1422: park (or un-park) one cell — the three-dot menu's "Hide cell" /
+ * "Show cell".
+ *
+ * NO `parentId`, and that is the point: this kind is NOT chain-mutating. It
+ * moves only `cells.hidden_at` on the shared source row, so
+ *
+ *   - nothing is deleted (unlike `source.cell.delete`, which drops the
+ *     projection row) — the source text, every lane's translation, recordings,
+ *     comments and validations survive and come back on show; and
+ *   - `cells.event_id` does not advance, so no lane's translation goes stale.
+ *     Hiding a cell says nothing about whether its text changed, and AD-9
+ *     compares a target's pin against the source head.
+ *
+ * One event covers every language: hiding is per CELL, not per lane.
+ */
+export async function emitSourceCellVisibilitySet(
+  input: SourceCellVisibilityInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.visibility.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { hidden: input.hidden },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellCommitInput {
   projectId: string
   fileId: string
@@ -1677,6 +1719,75 @@ export async function emitTermReject(input: TermRejectInput): Promise<string> {
     parentId: null,
     author: input.author,
     payload: { conceptId: input.conceptId, mode: input.mode },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Cell attachments (AQU-777) ────────────────────────────────────────────
+
+export interface CellAttachmentAddInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Client-generated uuidv7 — the projection's key within the project. */
+  attachmentId: string
+  /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+  objectName: string
+  /** The user-visible file name, as picked. */
+  name: string
+  mimeType?: string
+  sizeBytes?: number
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.attachment.add`. The bytes must already be in R2 — the caller
+ * (src/lib/attachments/attach-file.ts) PUTs first and cleans the object up if
+ * this emit throws, so a projected row never points at nothing.
+ */
+export async function emitCellAttachmentAdd(input: CellAttachmentAddInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.add",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      attachmentId: input.attachmentId,
+      objectName: input.objectName,
+      name: input.name,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAttachmentRemoveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  attachmentId: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.attachment.remove` — soft-deletes the projection row. */
+export async function emitCellAttachmentRemove(
+  input: CellAttachmentRemoveInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { attachmentId: input.attachmentId },
     clientTs: input.clientTs,
   })
   return eventId

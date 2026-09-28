@@ -61,7 +61,7 @@ import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
-import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
@@ -165,6 +165,17 @@ export async function commitChangesetCore(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
   const { cred, channel } = caller
+
+  // AQU-1242: a read-only credential cannot apply a plan. Unreachable in the
+  // normal course — prepare refused the staging too — but a changeset can also
+  // be committed by a DIFFERENT caller than the one that staged it (the
+  // session/delegated-approval path), so the access ceiling is asserted against
+  // whoever is committing, not only against whoever staged.
+  try {
+    assertCredentialMayWrite(cred, 'commit a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
 
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)

@@ -98,4 +98,26 @@ describe("lane read wall", () => {
     expect(named.settings.targetLanguage).toBe("")
     expect(named.settings.targetLanes).toEqual(["Yoruba Team"])
   })
+
+  it("keeps only the granted target lane rows, and every source lane row (AQU-1418)", () => {
+    const lanes = [
+      { id: "es", name: "Spanish", legacyTag: "es" },
+      { id: "fr", name: "French", legacyTag: "fr" },
+    ]
+    const rows = [
+      { id: "src", role: "source" },
+      { id: "es", role: "target" },
+      { id: "fr", role: "target" },
+    ]
+    const filtered = filterSettingsToVisibleLanes(
+      { settings: { targetLanes: ["Spanish", "French"] }, lanes: rows },
+      new Set(["es"]),
+      lanes,
+    )
+    expect(filtered.lanes?.map((lane) => lane.id)).toEqual(["src", "es"])
+    expect(filtered.settings.targetLanes).toEqual(["Spanish"])
+    // A response without rows, and an unrestricted caller, are left alone.
+    expect(filterSettingsToVisibleLanes({ settings: {}, lanes: undefined }, new Set(["es"]), lanes).lanes).toBeUndefined()
+    expect(filterSettingsToVisibleLanes({ settings: {}, lanes: rows }, null, lanes).lanes).toBe(rows)
+  })
 })

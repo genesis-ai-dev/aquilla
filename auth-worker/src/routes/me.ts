@@ -34,10 +34,17 @@ me.get("/create-targets", authMiddleware, async (c) => {
   const user = c.get("user")
   const env = c.env
 
-  // Same lookup as getOrCreateUserOrg, minus the lazy insert: a GET must not
-  // create an org as a side effect.
+  // The personal org is the one getOrCreateUserOrg inserts: billing_scope
+  // 'personal' (unique per owner). Owning a TEAM org (createOrgForUser, scope
+  // 'team') does not make it personal — matching on owner alone mislabeled a
+  // user's first team org as Personal and dropped it from the org list.
+  // No lazy insert here: a GET must not create an org as a side effect.
+  // SWARM-TODO(AQU-1352): getOrCreateUserOrg's SELECT (org-permissions.ts)
+  // still matches owner_user_id alone, so POST /projects with no orgId from a
+  // user who owns a team org but no personal org lands in the team org. Add
+  // `AND billing_scope = 'personal'` there too (outside this change's files).
   const personal = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
+    "SELECT id, name FROM organizations WHERE owner_user_id = ? AND billing_scope = 'personal' LIMIT 1",
   )
     .bind(user.id)
     .first<{ id: number; name: string | null }>()

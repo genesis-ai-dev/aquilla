@@ -36,6 +36,7 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
+import { toast } from "@/components/ui/toast"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
@@ -224,13 +225,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
-  // AQU-1352: null until create-targets loads; the prop orgId is the fallback.
+  // AQU-1352: null until create-targets loads (and again on every reload,
+  // close, or page-org change). Submit is disabled while it is null, so a
+  // stale or unresolved choice can never pick the org (review finding).
   const [destination, setDestination] = useState<Destination | null>(null)
   // AQU-1352 P2: teams to create into; reset whenever the destination changes.
   const [teamIds, setTeamIds] = useState<number[]>([])
   const [teamsError, setTeamsError] = useState(false)
   const needTeams = teamsRequired(destination?.role, destination?.orgId)
-  const onDestination = (next: Destination) => {
+  const onDestination = (next: Destination | null) => {
     setDestination(next)
     setTeamIds([])
     setTeamsError(false)
@@ -272,6 +275,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         members: [{ userId: session.username, role: "owner" }],
       }
 
+      if (!destination) return
       if (needTeams && teamIds.length === 0) {
         setTeamsError(true)
         setSubmitError(t("projectSettings.create.teamsRequiredError"))
@@ -291,8 +295,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         await createCloudProject(jwt, {
           id: project.id,
           name: project.name,
-          orgId: destination ? destination.orgId : orgId,
-          teamIds: destination?.orgId != null ? teamIds : undefined,
+          orgId: destination.orgId,
+          teamIds: destination.orgId != null ? teamIds : undefined,
         })
 
         // One atomic settings write at version 0. The HTTP PATCH handler
@@ -344,6 +348,16 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           : {}),
       })
       onCreated(project)
+      toast.add({
+        type: "success",
+        title: t("projectSettings.create.createdToast", {
+          name: project.name,
+          destination:
+            destination.orgId == null
+              ? t("projectSettings.create.destinationPersonal")
+              : destination.name,
+        }),
+      })
       form.reset()
       clearSubmitError()
 
@@ -363,6 +377,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
   useEffect(() => {
     if (open) return
+    setDestination(null)
+    setTeamIds([])
+    setTeamsError(false)
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
@@ -371,6 +388,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     // project created in a previous session).
     draftProjectId.current = uuid()
   }, [open, form, clearSubmitError])
+
+  // The page org changed under an open dialog: the old choice is void.
+  useEffect(() => {
+    setDestination(null)
+    setTeamIds([])
+    setTeamsError(false)
+  }, [orgId])
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
@@ -785,7 +809,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 <Button
                   type="submit"
                   form="project-create-form"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !destination}
                   className="h-9 w-full shrink-0"
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}

@@ -27,12 +27,15 @@ import { fetchCreateTargets, type CreateTarget } from "@/lib/sync/create-targets
  */
 export type Destination = {
   orgId: number | undefined
+  /** Display name of the destination, for the success toast. */
+  name: string
   role?: number
   teams?: CreateTarget["teams"]
 }
 
 const destinationOf = (target: CreateTarget): Destination => ({
   orgId: target.kind === "personal" ? undefined : (target.orgId ?? undefined),
+  name: target.name,
   role: target.role,
   teams: target.teams ?? [],
 })
@@ -44,8 +47,12 @@ interface ProjectDestinationPickerProps {
   jwt: string | undefined
   /** The org the page is scoped to (the dialog's `orgId` prop). */
   pageOrgId?: number
-  /** Fires once targets load (with the default) and on every change. */
-  onChange: (destination: Destination) => void
+  /**
+   * Fires once targets load (with the default) and on every change. Fires
+   * null when a (re)load starts or fails, so the dialog can never submit a
+   * choice made against a previous page org or a previous open.
+   */
+  onChange: (destination: Destination | null) => void
 }
 
 export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDestinationPickerProps) {
@@ -53,8 +60,13 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
   const orgCtx = useActiveOrgOptional()
   const [targets, setTargets] = useState<CreateTarget[] | null>(null)
   const [selected, setSelected] = useState<string>(PERSONAL)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
+    // AQU-1352 review: drop any previous choice before (re)loading.
+    setTargets(null)
+    setLoadFailed(false)
+    onChange(null)
     if (!jwt) return
     let cancelled = false
     fetchCreateTargets(jwt)
@@ -68,7 +80,10 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
         onChange(destinationOf(initial))
       })
       .catch((err: unknown) => {
-        // Non-fatal: the dialog keeps its pre-AQU-1352 behavior (page orgId).
+        if (cancelled) return
+        // No silent fallback to the page org: submit stays disabled.
+        setLoadFailed(true)
+        onChange(null)
         console.warn("[project-create] create-targets fetch failed:", err)
       })
     return () => {
@@ -79,6 +94,13 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jwt, pageOrgId])
 
+  if (loadFailed) {
+    return (
+      <p role="alert" className="text-xs text-destructive" data-testid="project-create-destination-error">
+        {t("projectSettings.create.destinationLoadError")}
+      </p>
+    )
+  }
   if (!targets || targets.length === 0) return null
 
   const labelOf = (x: CreateTarget) =>
@@ -86,13 +108,10 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
 
   const pageOrgInvalid =
     pageOrgId != null && !targets.some((x) => x.orgId === pageOrgId)
-  let pageRoleLabel: string | null = null
-  if (pageOrgInvalid) {
-    const membership = orgCtx?.orgs.find((o) => o.id === pageOrgId)
-    pageRoleLabel = membership
-      ? resolveRoleName(t, membership.role.level)
-      : t("org.switcher.guestRole")
-  }
+  // The page org is absent from create-targets, so the response carries no
+  // role for it; use the org context when it knows one, else a generic line.
+  const membership = pageOrgInvalid ? orgCtx?.orgs.find((o) => o.id === pageOrgId) : undefined
+  const pageRoleLabel = membership ? resolveRoleName(t, membership.role.level) : null
   const pageOrgName =
     orgCtx?.orgs.find((o) => o.id === pageOrgId)?.name ??
     orgCtx?.guestOrgs.find((o) => o.id === pageOrgId)?.name ??
@@ -127,12 +146,16 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
           </SelectGroup>
         </SelectContent>
       </Select>
-      {pageOrgInvalid && pageRoleLabel && (
+      {pageOrgInvalid && (
         <FieldDescription data-testid="project-create-destination-hint">
-          {t("projectSettings.create.destinationRoleHint", {
-            role: pageRoleLabel,
-            org: pageOrgName ?? t("projectSettings.create.destinationThisOrg"),
-          })}
+          {pageRoleLabel
+            ? t("projectSettings.create.destinationRoleHint", {
+                role: pageRoleLabel,
+                org: pageOrgName ?? t("projectSettings.create.destinationThisOrg"),
+              })
+            : t("projectSettings.create.destinationNotAllowedHint", {
+                org: pageOrgName ?? t("projectSettings.create.destinationThisOrg"),
+              })}
         </FieldDescription>
       )}
     </Field>

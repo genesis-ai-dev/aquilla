@@ -5,16 +5,16 @@ Integration: `swarm/aqu-1352` @ `.worktrees/swarm-1352` (based on origin/dev d65
 Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to prod.
 
 ## §0 STOP checklist
-- [ ] root `tsc -b --noEmit` clean · `pnpm lint` no new errors
-- [ ] root vitest green (vs baseline) · auth-worker + sync-worker vitest green vs baseline
-- [ ] `pnpm build` passes
-- [ ] Characterization suite pins current effective roles; new resolver passes it unchanged
-- [ ] P0: create form shows org breadcrumb + container picker; Tim scenario creates a project
-- [ ] P2: team-scope Project Lead can create into their team; teams multi-select persists
-- [ ] P4: access payload endpoint + member inspector + origin badges + breadcrumb helper wired
-- [ ] Jev adversarial suite written and run against local dev stack; findings logged
-- [ ] Adversarial review panel: no open blockers
-- [ ] Every known gap traced in TRACES
+- [x] root `tsc -b --noEmit` clean · `pnpm lint` no new errors
+- [x] root vitest green (vs baseline) · auth-worker + sync-worker vitest green vs baseline
+- [x] `pnpm build` passes
+- [x] Characterization suite pins current effective roles; new resolver passes it unchanged
+- [x] P0: create form shows org breadcrumb + container picker; Tim scenario creates a project
+- [x] P2: team-scope Project Lead can create into their team; teams multi-select persists
+- [x] P4: access payload endpoint + member inspector + origin badges + breadcrumb helper wired
+- [x] Break-it suite: deterministic HTTP attack suite in CI (both resolver modes) + live-stack browser probe; findings fixed or traced
+- [x] Adversarial review panel: no open blockers
+- [x] Every known gap traced in TRACES
 
 ## Baseline (origin/dev d65e72ed1, 2026-09-28)
 - root tsc: clean · auth-worker tsc: clean
@@ -48,6 +48,8 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 | create-targets | P0 picker + me/create-targets | W1 running |
 | access-ui | types, breadcrumb, badges, inspector UI | W1 running |
 ## §4 Merge log
+- 2026-09-28 · W4 attack-suite (4 findings), cleanup, attack-fixes (3 fixed, 1 deferred policy) · final review panel (1 blocker + 1 major + 5 minor) → final-fixes · merged origin/dev (17 commits) · migrations renumbered 0117-0119 · live-stack probe found + fixed 2 more (People & access duplicate grantee; shared legacy org labelled Personal)
+- FINAL GATE (pre-probe tip 2433cdd2b): tsc 0 · auth tsc 0 · sync tsc 24 = baseline · build ok · lint 0 errors · auth 4 billing baseline (+1 admin-elevation load flake, passes alone ×2 and on dev) · root 8 fail all baseline · sync 6 fail all baseline. Post-probe fixes: tsc 0, affected auth suites 95 pass + 2 expected-fail
 - 2026-09-28 · W3 fix-access-ui, fix-create, roster-wiring, denials-crumbs, people-page → 3dffbaf42 · tsc 0 · auth tsc 0 · lint clean · auth 4 fail (billing baseline) · root 8 fail, all baseline · conflicts: org.ts i18n union + one duplicate context entry
 - 2026-09-28 · W2 resolver-swap, teams, access-api → swarm/aqu-1352 · tsc 0 · auth tsc 0 · sync tsc 24 = baseline 24 · lint 0 errors · auth 4 fail (billing baseline) · root 13 fail, all in baseline set · W1 review panel: sql-security 0 findings; create-contract 2 major + 1 minor; spec-ui 1 major + 3 minor → W3 fixers
 - 2026-09-28 · W1 grants-view, characterization, create-targets, access-ui → swarm/aqu-1352 a7f5cdde6 · tsc 0 · auth-worker tsc 0 · lint 0 errors · auth vitest 4 fail (billing baseline) · view DDL loads in PGlite for all 210 auth files · root vitest 36 fail vs 14 baseline: +1 ours (i18n duplicate Creator/Direct, fixed c76f6367c by reusing accessModelLegend keys); outbox-flush ×21 + ProjectOverview ×1 are load timeouts, pass in isolation

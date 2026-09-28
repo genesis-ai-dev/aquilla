@@ -18,7 +18,7 @@ Nine project-scoped tables have RLS enabled:
 | `comments` | `rls_comments_project_access` | 0034 |
 | `cell_validators` | `rls_cell_validators_project_access` | 0034 |
 | `cell_audio` | `rls_cell_audio_project_access` | 0034 |
-| `cell_attachments` | `rls_cell_attachments_project_access` | 0099 (AQU-777) |
+| `cell_attachments` | `rls_cell_attachments_project_access` | 0112 (AQU-777) |
 | `project_settings` | `rls_project_settings_project_access` | 0034 |
 | `snapshots` | `rls_snapshots_project_access` | 0034 |
 

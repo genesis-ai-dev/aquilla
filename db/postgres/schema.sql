@@ -861,7 +861,7 @@ CREATE TABLE comments (
 -- ─────────────────────────── cell attachments ──────────────────────────
 -- AQU-777. Projection of `cell.attachment.*`; the bytes live in the same R2
 -- bucket as audio, under projects/{pid}/files/{fid}/attachments/{objectName}.
--- See db/postgres/migrations/0099_cell_attachments.sql for the rationale.
+-- See db/postgres/migrations/0112_cell_attachments.sql for the rationale.
 
 CREATE TABLE cell_attachments (
     project_id    TEXT   NOT NULL,

@@ -74,6 +74,7 @@ import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
 import meRoutes from "./routes/me"
+import accessRoutes from "./routes/access"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
@@ -253,6 +254,7 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/users", accessRoutes)
 app.route("/api/v2/me", meRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes

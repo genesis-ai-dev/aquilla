@@ -84,6 +84,19 @@ describe("POST /api/v2/projects org gating", () => {
     expect(res.status).toBe(403)
   })
 
+  // AQU-1352 §3.9 rule 2: the denial names the scope so the client can say
+  // "you are a Contributor in Come and See" instead of a bare 403.
+  it("names the org in the denial for a member, never for a non-member", async () => {
+    await seedOrg()
+    await seedUser(7, "outsider")
+    const member = (await (await create("tom", { id: "p-y", name: "Y", orgId: 1 })).json()) as { actual: { scopePath?: string[] } }
+    expect(member.actual.scopePath).toEqual(["Come and See"])
+    const outsider = await create("outsider", { id: "p-z", name: "Z", orgId: 1 })
+    expect(outsider.status).toBe(403)
+    const body = (await outsider.json()) as { actual: { scopePath?: string[] } }
+    expect(body.actual.scopePath).toBeUndefined()
+  })
+
   it("falls back to the personal org when orgId omitted", async () => {
     await seedUser(5, "solo")
     const res = await create("solo", { id: "p-solo", name: "Solo" })

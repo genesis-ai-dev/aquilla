@@ -129,7 +129,7 @@ export function buildBulkTargetCellCommitStmt(
       canonical_ref, anchor_cell_id, event_id, source_event_id,
       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
-    ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+    ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
       value = excluded.value,
       value_html = excluded.value_html,
       event_id = excluded.event_id,
@@ -443,7 +443,7 @@ export function buildBulkSourceCellCreateStmt(
         medium, sequence_index, transcription, camera_state, metadata,
         lane_id
       ) VALUES ${placeholders}
-      ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+      ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
         side           = excluded.side,
         value          = excluded.value,
         value_html     = excluded.value_html,
@@ -469,7 +469,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -677,7 +677,7 @@ export function buildEventProjectionStmts(
               medium, sequence_index, transcription, camera_state, metadata,
               lane_id
             ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
-            ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
               value_html     = excluded.value_html,
@@ -855,7 +855,7 @@ export function buildEventProjectionStmts(
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
               ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
-              ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
                 event_id          = excluded.event_id,
@@ -1289,9 +1289,9 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
-      // AQU-538: the lane this validation addresses. Absent/'' = default lane
-      // (byte-identical for N=1). A user's standing validation is per-lane —
-      // the cell_validators PK carries target_lang — so validating a cell in
+      // AQU-538 / AQU-1420: the lane this validation addresses. Absent/'' is the
+      // default lane's legacy tag. A user's standing validation is per lane —
+      // the cell_validators primary key is lane_id — so validating a cell in
       // lane A leaves lane B's validators (and validated flag) untouched.
       const lane =
         typeof (p as { targetLang?: unknown }).targetLang === 'string'
@@ -1310,7 +1310,7 @@ export function buildEventProjectionStmts(
               `INSERT INTO cell_validators (
                 project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
               ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
+              ON CONFLICT(project_id, file_id, cell_id, lane_id, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
                 decided_ts = excluded.decided_ts,
@@ -1844,6 +1844,70 @@ case 'cell.audio.attach': {
           .bind(event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.attachment.add': {
+      // AQU-777. The R2 object is already written by the time this lands (the
+      // client PUTs the bytes, then emits), so the row it inserts always points
+      // at something readable.
+      const p = event.payload as EventPayloads['cell.attachment.add']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            // PROJECT-SCOPED conflict target, per the AQU-1296 lesson on
+            // `comments`: a per-project id conflicted on globally means the
+            // first project to claim it owns the only row that can exist.
+            // Same-project replay stays a no-op, which is what makes a
+            // re-delivered outbox event harmless.
+            `INSERT INTO cell_attachments (
+              project_id, attachment_id, file_id, cell_id, object_name, name,
+              mime_type, size_bytes, author_id, author_label, created_at,
+              deleted_at, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(project_id, attachment_id) DO NOTHING`,
+          )
+          .bind(
+            event.projectId,
+            p.attachmentId,
+            event.fileId,
+            event.cellId,
+            p.objectName,
+            p.name,
+            p.mimeType ?? null,
+            p.sizeBytes ?? null,
+            event.author,
+            event.author,
+            event.serverTs,
+            event.id,
+          ),
+      )
+      return ['cell_attachments']
+    }
+
+    case 'cell.attachment.remove': {
+      // Soft-delete, matching `comment.delete` and `cell.audio.remove`: the row
+      // survives so the removal replays from the log and the R2 key stays
+      // discoverable for a later orphan sweep.
+      //
+      // NO author gate, deliberately — unlike comment.delete, which pairs a
+      // self floor with a higher foreign one. An attachment is shared working
+      // context for the cell, not someone's utterance: AQU-777 asks for it to
+      // be removable by "a user with edit access to the project", and a
+      // contributor who cannot clear a teammate's wrong screenshot off a cell
+      // is stuck. CONTRIBUTOR (role-policy.ts) is the whole bar.
+      const p = event.payload as EventPayloads['cell.attachment.remove']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_attachments SET deleted_at = ?
+              WHERE project_id = ? AND attachment_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.projectId, p.attachmentId),
+      )
+      return ['cell_attachments']
     }
 
     case 'cell.audio.validate':
@@ -2616,7 +2680,7 @@ case 'cell.audio.attach': {
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 upstream_event_id, upstream_seq, tombstoned_at, lane_id
               ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
-              ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
@@ -2664,7 +2728,7 @@ case 'cell.audio.attach': {
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, NULL, ${laneIdResolveSql('source')}
             )
-            ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),

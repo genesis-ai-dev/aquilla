@@ -314,9 +314,6 @@ export const audio = defineNamespace({
       "Saved recordings jump to the next line. Uploaded files stay here.",
     "audio.recordingModal.autoAdvanceOffDescription":
       "Saved recordings stay on this line, and so do uploaded files.",
-    "audio.recordingModal.filmFollowTitle": "Film plays along",
-    "audio.recordingModal.filmFollowOnDescription": "Playing a take plays the film with it",
-    "audio.recordingModal.filmFollowOffDescription": "The film stays still while you listen",
     "audio.recordingModal.countdownTitle": "Countdown",
     "audio.recordingModal.countdownFastDescription": "3-2-1, half a second each",
     "audio.recordingModal.countdownNormalDescription": "3-2-1, one second each",
@@ -1875,26 +1872,6 @@ export const audio = defineNamespace({
           "whether a 3-2-1 countdown runs before each take. The noun for the " +
           "count-in itself, not an instruction.",
         maxLength: 24,
-      },
-      "audio.recordingModal.filmFollowTitle": {
-        description:
-          "Name of a preference in the recorder's gear menu, shown only on lines " +
-          "that have a film: whether playing a take back (after Stop, or the saved " +
-          "take on the ready screen) also plays the film in sync with it, so the " +
-          "take can be judged against the picture. A short label, not an instruction.",
-        maxLength: 24,
-      },
-      "audio.recordingModal.filmFollowOnDescription": {
-        description:
-          "One-line description under that preference while it is ON: pressing " +
-          "play on a take also plays the film from the matching moment.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.filmFollowOffDescription": {
-        description:
-          "One-line description under that preference while it is OFF: the film " +
-          "does not move when a take is played back.",
-        maxLength: 40,
       },
       "audio.recordingModal.countdownFastDescription": {
         description:

@@ -101,7 +101,6 @@ import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingFilmAudibleCacheForTests } from "@/lib/store/recording-film-audible-pref"
 import { resetRecordingCountdownCacheForTests } from "@/lib/store/recording-countdown-pref"
 import { resetCountdownBeepContextForTests } from "./useCountdown"
-import { resetRecordingFilmFollowCacheForTests } from "@/lib/store/recording-film-follow-pref"
 
 const FILM = "https://cdn.example.com/ep.mp4"
 
@@ -412,7 +411,6 @@ describe("AudioRecordingModal — the film plays along", () => {
     localStorage.clear()
     resetRecordingFilmAudibleCacheForTests()
     resetRecordingCountdownCacheForTests()
-    resetRecordingFilmFollowCacheForTests()
     readyPlayer.isPlaying = false
     readyPlayer.currentTime = 0
     withTake()
@@ -436,21 +434,11 @@ describe("AudioRecordingModal — the film plays along", () => {
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).currentTime).toBeCloseTo(5.3, 2)
   })
 
-  it("with the setting off the film stays still", () => {
-    const { rerender } = render(modal(projectWithFilm))
+  // Sam, 2026-09-28: no switch for it — the film is muted by default, and
+  // nobody would want it standing still.
+  it("has no setting to turn it off", () => {
+    render(modal(projectWithFilm))
     fireEvent.click(screen.getByTestId("rec-settings"))
-    fireEvent.click(screen.getByTestId("rec-film-follow"))
-    expect(screen.getByTestId("rec-film-follow")).toHaveAttribute("aria-checked", "false")
-    expect(localStorage.getItem("aq.recording-film-follow.v1")).toBe("off")
-    readyPlayer.isPlaying = true
-    readyPlayer.currentTime = 1.5
-    rerender(modal(projectWithFilm))
-    expect(play).not.toHaveBeenCalled()
-  })
-
-  it("is only offered on a line with a film", () => {
-    render(modal(projectNoFilesKey))
-    fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.queryByTestId("rec-film-follow")).not.toBeInTheDocument()
+    expect(screen.queryByText(/play.?along|plays along/i)).not.toBeInTheDocument()
   })
 })

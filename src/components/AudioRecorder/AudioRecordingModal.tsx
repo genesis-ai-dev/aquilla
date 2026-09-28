@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, Clapperboard, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,6 @@ import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
-import { setRecordingFilmFollow, useRecordingFilmFollow } from "@/lib/store/recording-film-follow-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
@@ -245,7 +244,7 @@ function SettingSwitch({
           onCheckedChange(!checked)
         }}
         className={cn(
-          "flex w-full cursor-pointer items-center gap-2.5 rounded-md p-2 hover:bg-muted",
+          "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted",
           disabled && "cursor-default opacity-50 hover:bg-transparent",
         )}
       >
@@ -376,7 +375,6 @@ export function AudioRecordingModal({
   // wrong when working one line over and over. Persisted per device.
   const autoAdvance = useRecordingAutoAdvance()
   // AQU-1210: playing a take back plays the film along with it (a setting).
-  const filmFollow = useRecordingFilmFollow()
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // SUB-52 + the button-focus rule below need each other: Space on a focused
   // button activates THAT button, so the dialog must not OPEN with a button
@@ -1675,13 +1673,15 @@ export function AudioRecordingModal({
   const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
 
   // ── AQU-1210: FILM PLAY-ALONG ─────────────────────────────────────────────
+  // Always on (Sam, 2026-09-28: the switch for it is gone — the film is muted
+  // unless someone chose otherwise, so playing along costs nothing).
   // Where the take being played back belongs in the film: where its sample
   // zero will sit on the timeline, plus how far into it the player is. For the
   // preview that is where Save WILL put it (the same composed window Save
   // sends, so a moved head plays against the picture it will land on); for the
   // ready screen's take it is where the timeline puts it now.
   const previewAnchorSec = (() => {
-    if (!filmFollow || !stoppedTake || !previewDefaults || activeCell.startTime == null) return null
+    if (!stoppedTake || !previewDefaults || activeCell.startTime == null) return null
     const { laneOffsetMs } = composeTakeWindow({
       cue: { startTime: activeCell.startTime },
       defaults: previewDefaults,
@@ -1697,7 +1697,7 @@ export function AudioRecordingModal({
       ? activeCell.startTime + laneOffsetMs / 1000
       : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
   })()
-  const readyAnchorSec = filmFollow && readyAtt
+  const readyAnchorSec = readyAtt
     ? targetChipGeom(activeCell, readyAtt as unknown as ChipAtt)?.anchor ?? null
     : null
   const filmFollowTarget =
@@ -2611,7 +2611,7 @@ export function AudioRecordingModal({
                     </Button>
                   }
                 />
-                <PopoverContent align="end" side="top" className="w-72 p-1.5">
+                <PopoverContent align="end" side="top" className="w-72 gap-0 p-1">
                   {/* The countdown first, its speed at the very top (Sam,
                       2026-09-28), then the beep it governs. */}
                   {/* AQU-1209. Sits ABOVE the beep because it governs it: with
@@ -2619,7 +2619,7 @@ export function AudioRecordingModal({
                       the disabled state below says. AQU-1210 (Sam, 25 Sep):
                       one four-way choice — Off, Fast, Normal, Slow — where the
                       on/off switch was. */}
-                  <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1.5 rounded-md p-2">
+                  <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1 rounded-md px-2 pb-1 pt-1.5">
                     <AppTooltip
                       content={countdownSpeed === "off"
                         ? t("audio.recordingModal.countdownOffDescription")
@@ -2682,20 +2682,6 @@ export function AudioRecordingModal({
                     checked={autoAdvance}
                     onCheckedChange={setRecordingAutoAdvance}
                   />
-                  {/* AQU-1210: play-along. Only offered on a line with a film —
-                      everywhere else there is nothing for it to do. */}
-                  {filmUrl != null && (
-                    <SettingSwitch
-                      testId="rec-film-follow"
-                      icon={<Clapperboard />}
-                      title={t("audio.recordingModal.filmFollowTitle")}
-                      tip={filmFollow
-                        ? t("audio.recordingModal.filmFollowOnDescription")
-                        : t("audio.recordingModal.filmFollowOffDescription")}
-                      checked={filmFollow}
-                      onCheckedChange={setRecordingFilmFollow}
-                    />
-                  )}
                 </PopoverContent>
               </Popover>
             </div>

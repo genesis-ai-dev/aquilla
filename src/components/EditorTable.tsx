@@ -22,8 +22,6 @@ import {
   VolumeX,
   Eye,
   EyeOff,
-  AudioLines,
-  Type,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -162,6 +160,7 @@ import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-hi
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
+import { CheckMarks, GutterMarks } from "./table-header-marks"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -2010,6 +2009,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       })
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
+  // A file of chapters numbers its lines by verse; anything else counts them.
+  const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
+    item.kind === "chapter"
+    || item.kind === "chapter-range"
+    || item.kind === "preface"
+  )), [milestoneNavigationItems])
 
   // Numbering and paragraph groups depend on structure/validation, not save
   // timestamps or ordinary text edits. One version scan serves both caches;
@@ -2524,11 +2529,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
-          scriptureNumbering={milestoneNavigationItems.every((item) => (
-            item.kind === "chapter"
-            || item.kind === "chapter-range"
-            || item.kind === "preface"
-          ))}
+          scriptureNumbering={scriptureNumbering}
           cellLabelsEnabled={cellLabelsEnabled}
           sourceDirectionMode={sourceDirectionMode}
           targetDirectionMode={targetDirectionMode}
@@ -2629,6 +2630,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionConfigured,
     isTimeOrdered,
     milestoneNavigationItems,
+    scriptureNumbering,
     sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
@@ -2763,8 +2765,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
-              gutter-width away from the side; otherwise the track is
-              unlabeled (select + badges + number). */}
+              gutter-width away from the side; otherwise small marks name its
+              three narrow columns — select, notices, number (Sam, 2026-09-28). */}
           {castGutter ? (
             <div data-testid="table-source-header" className="hidden items-center gap-2 md:flex">
               {t("editor.column.source")}
@@ -2775,7 +2777,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               )}
             </div>
           ) : (
-            <div aria-hidden="true" className="hidden md:block" />
+            <GutterMarks numbers={lineNumbersEnabled ? (scriptureNumbering ? "verse" : "line") : null} />
           )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
@@ -2795,20 +2797,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
-            {/* Audio mode (Sam, 2026-09-28): the two validation columns under
-                this heading are told apart here — text, then audio — since a
-                validated line shows the same green check in both. */}
-            {audioLens && (
-              // -ms-3: the rows' two checks start 12px before this heading's text.
-              <span data-testid="audio-view-check-marks" className="hidden items-center gap-1.5 md:-ms-3 md:flex">
-                <AppTooltip content={t("editor.audioLens.textChecks")}>
-                  <span aria-label={t("editor.audioLens.textChecks")} className="flex w-6 justify-center"><Type className="h-3 w-3" /></span>
-                </AppTooltip>
-                <AppTooltip content={t("editor.audioLens.audioChecks")}>
-                  <span aria-label={t("editor.audioLens.audioChecks")} className="flex w-6 justify-center"><AudioLines className="h-3 w-3" /></span>
-                </AppTooltip>
-              </span>
-            )}
+            {/* The two validation columns under this heading, told apart —
+                text, then audio — since a validated line shows the same green
+                check in both (Sam, 2026-09-28; the Text and Audio views). */}
+            {(audioLens || !castGutter) && <CheckMarks />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.

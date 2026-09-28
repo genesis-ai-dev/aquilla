@@ -1375,8 +1375,13 @@ export const editor = defineNamespace({
     "editor.voice.takeVoiceRemoved": "This take was voiced by a voice no longer in the project. The line’s voice is now {lineVoice}.",
     "editor.voice.noAudioYet": "No audio yet",
     "editor.voice.record": "Record",
-    "editor.audioLens.textChecks": "Text validation",
-    "editor.audioLens.audioChecks": "Audio validation",
+    // Sam, 2026-09-28: marks in the table header naming its narrow columns.
+    "editor.gutter.select": "Select lines for batch actions. Drag up or down the column to select a range.",
+    "editor.gutter.notices": "Notices: open comments, a changed source, lost formatting, a voice that failed",
+    "editor.gutter.verseNumber": "Verse number",
+    "editor.gutter.lineNumber": "Line number",
+    "editor.gutter.textChecks": "Text validation",
+    "editor.gutter.audioChecks": "Audio validation",
 
     // — Rich-text editor: formatting bubble, conflict banner, IDML guards ——
     "editor.format.bold": "Bold",
@@ -5042,15 +5047,42 @@ export const editor = defineNamespace({
           "line. Imperative verb.",
         maxLength: 14,
       },
-      "editor.audioLens.textChecks": {
+      "editor.gutter.select": {
         description:
-          "Tooltip on a small mark above the text-validation column in the audio lens; " +
-          "the column beside it is audio validation.",
+          "Tooltip on a small mark in the editing table's header, above the narrow " +
+          "column of per-line select boxes at the far left. Selected lines get batch " +
+          "actions (such as voicing several lines together); dragging along the " +
+          "column selects several at once.",
+      },
+      "editor.gutter.notices": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above a narrow " +
+          "column that is usually empty and shows an icon when a line has one of " +
+          "these: an open comment, source text that changed since translation, " +
+          "formatting lost on import, or a synthetic voice that failed to generate.",
+      },
+      "editor.gutter.verseNumber": {
+        description:
+          "Tooltip on a small mark (#) in the editing table's header, above the column " +
+          "of numbers, when those numbers are Bible verse numbers.",
         maxLength: 24,
       },
-      "editor.audioLens.audioChecks": {
+      "editor.gutter.lineNumber": {
         description:
-          "Tooltip on a small mark above the audio-validation column in the audio lens.",
+          "Tooltip on the same mark when the numbers simply count the lines (not " +
+          "Bible verses).",
+        maxLength: 24,
+      },
+      "editor.gutter.textChecks": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above the " +
+          "text-validation column; the column beside it is audio validation.",
+        maxLength: 24,
+      },
+      "editor.gutter.audioChecks": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above the " +
+          "audio-validation column, beside text validation.",
         maxLength: 24,
       },
       "editor.voice.choose": {

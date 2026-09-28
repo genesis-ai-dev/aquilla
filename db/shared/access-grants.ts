@@ -7,8 +7,8 @@
 // org-path rule, creator, platform admin). It also returns the `chain` of
 // contributing grants for the future member inspector.
 //
-// SWARM-TODO(AQU-1352): no caller uses resolveProjectRoleViaGrants yet. A later
-// phase switches callers and deletes the per-table resolver queries.
+// Callers reach resolveProjectRoleViaGrants through ACCESS_GRANTS_RESOLVER
+// (shadow/on); the per-table resolver queries go when `on` is the default.
 
 import type { AquillaDb } from "../shim/postgres"
 import { orgPathContribution } from "./project-roles"

@@ -2,7 +2,7 @@
  * AQU-1352 P4 (spec §3.8 rules 1–6): the one member-access payload behind
  * GET /api/v2/users/:userId/access?from=<scopeType>:<scopeId>.
  *
- * Every grant comes from the `access_grants` view (migration 0130); the
+ * Every grant comes from the `access_grants` view (migration 0117); the
  * "effective here" chain for a project comes from resolveProjectRoleViaGrants,
  * so the inspector explains the same answer the resolver computes. Rows the
  * VIEWER may not know about are dropped here, server-side (rule 4) — the

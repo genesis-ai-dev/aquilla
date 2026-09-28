@@ -113,7 +113,7 @@ describe("AQU-1352 attack #4 multi-team ambiguity", () => {
 
   // AQU-1352 finding: with team-scope roles, the inspector's effectiveHere
   // chain for p2 is [{scopePath: [], roleLevel: 600, origin: {kind: "direct"}},
-  // org 300]. The 600 comes from the mt/maint TEAM role (0131 team-scope row),
+  // org 300]. The 600 comes from the mt/maint TEAM role (0118 team-scope row),
   // but it is shipped as a DIRECT grant with an empty scope path, and none of
   // the four attached teams appear in the chain (they sit in `elsewhere`). The
   // user has no project_members row at all, so the UI would tell an admin to

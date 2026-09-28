@@ -10,12 +10,12 @@
 - [OPEN] P3 lane permissions — Luke, AQU-1389, PRs #805/#831/#853
 - [OPEN] P5 drop mirrored tables; access_grants view → table cutover
 - [OPEN] D5 role rename (Manager/Translator) — Ryder decision
-- [OPEN] Prod: apply migrations 0130+ — Ryder
+- [OPEN] Prod: apply migrations 0117–0119 — Ryder
 ## Quality
 - [OPEN] (fr-3..5) team-only PATCH peer demotion; org-access 404/403 enumeration; OrgAccessPage stale data on org switch. Fixer dispatched
 - [OPEN] Shadow mode doubles role-lookup queries in dev/local (acceptable for a time-boxed shadow period)
-- [OPEN] Preview stacks share dev Hyperdrive without the neon:status gate: apply 0130-0132 to dev Neon before preview QA, or team routes 500 on missing group_members.role_level
-- [OPEN] Migrations numbered 0130-0132 while dev is at 0115; renumber against dev at PR time if another branch claims 013x
+- [OPEN] Preview stacks share dev Hyperdrive without the neon:status gate: apply 0117-0119 to dev Neon before preview QA, or team routes 500 on missing group_members.role_level
+- [DONE] Renumbered 0130-0132 → 0117-0119 after merging dev (which reached 0116)
 - [OPEN] People & access: viewer below roster floor sees org name in tree[0] but hidden org crumb in people[].grants (safe, inconsistent)
 - [DONE d3c9e1960] (atk-3) Inspector chain labels team-scope grants as direct with empty path — access-payload.ts — fixer dispatched
 - [DONE d3c9e1960] (atk-4) People & access leaks team names below roster floor — org-access.ts — fixer dispatched

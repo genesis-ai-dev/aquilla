@@ -1,12 +1,20 @@
--- 0132_access_grants_view_v2.sql — AQU-1352 P2 (spec §3, §5).
+-- 0117_access_grants_view.sql — AQU-1352 P1 (spec §3, §5).
 --
--- Replaces the 0130 view:
---   1. WITH (security_invoker = true). 0130 ran with the owner's rights, which
---      bypasses the AQU-289 RLS backstop on the underlying tables.
---   2. Adds team-scope rows (scope_type 'team', scope_id = group id) for
---      group_members with a non-NULL role_level (migration 0131).
--- Existing rows and columns are unchanged.
-CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
+-- One read shape for every project/org grant. Behavior-preserving: no table
+-- changes, no caller switched yet. db/shared/access-grants.ts reads this view
+-- and resolveFromGrants reproduces resolveProjectRoleShared exactly.
+--
+-- Rows:
+--   org_members                        -> scope 'org',     source 'direct'
+--   project_members                    -> scope 'project', source 'direct'
+--   group_members x group_project_grants -> scope 'project', source 'team'
+--   projects.created_by                -> scope 'project', source 'creator', 700
+--
+-- Lane and file scopes are NOT here (owned by the lane-permissions work).
+-- Archived projects stay in the view; the resolver applies archived_at the
+-- same way the current resolver does. Platform admin is env-driven
+-- (ADMIN_EMAILS), so it is not a row.
+CREATE OR REPLACE VIEW access_grants AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,
          om.org_id::TEXT               AS scope_id,
@@ -32,12 +40,6 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          700::INT, 'creator'::TEXT, NULL::BIGINT,
          NULL::BIGINT, p.created_at
     FROM projects p
-   WHERE p.created_by IS NOT NULL
-  UNION ALL
-  SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
-         gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
-         gm.added_by::BIGINT, gm.added_at
-    FROM group_members gm
-   WHERE gm.role_level IS NOT NULL;
+   WHERE p.created_by IS NOT NULL;
 
 GRANT SELECT ON access_grants TO app_runtime;

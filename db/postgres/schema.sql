@@ -103,7 +103,7 @@ CREATE TABLE group_members (
     user_id  BIGINT NOT NULL,
     added_by BIGINT,
     added_at TIMESTAMPTZ DEFAULT now(),
-    -- AQU-1352 (0131): NULL = legacy member (per-project grants only);
+    -- AQU-1352 (0118): NULL = legacy member (per-project grants only);
     -- non-NULL = team-scope role flowing to every attached project.
     role_level INTEGER NULL
         CONSTRAINT group_members_role_level_check
@@ -2104,9 +2104,9 @@ ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey   
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
 
--- AQU-1352 P1 (migration 0130): one read shape for every org/project grant.
+-- AQU-1352 P1 (migration 0117): one read shape for every org/project grant.
 -- Lane and file scopes are not included. Platform admin is env-driven, not a row.
--- 0132: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+-- 0119: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
 CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,

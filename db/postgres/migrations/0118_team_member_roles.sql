@@ -1,4 +1,4 @@
--- 0131_team_member_roles.sql — AQU-1352 P2 (spec §3.1, §3.4, §3.5).
+-- 0118_team_member_roles.sql — AQU-1352 P2 (spec §3.1, §3.4, §3.5).
 --
 -- Teams become containers with a team-scope role.
 --   role_level NULL     = legacy member: access comes only from the per-project

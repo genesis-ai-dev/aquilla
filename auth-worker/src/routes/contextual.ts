@@ -692,9 +692,14 @@ contextual.post(
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
     if (body.scope === "project") {
+      // AQU-935: discovery and conflict detection both read the lane the start
+      // request named. Without it a multi-lane project's second language sees
+      // the default lane's finished work and its in-flight runs, so a start
+      // there either finds nothing to do or skips every file as "already
+      // running". `lane` is `''` for a single-language project — unchanged.
       const [candidates, activeFiles] = await Promise.all([
-        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId),
-        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId),
+        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId, lane),
+        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId, lane),
       ])
       if (candidates.length === 0) {
         const { body: err, status } = errorJson(

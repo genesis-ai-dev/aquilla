@@ -138,6 +138,37 @@ describe("external read surface", () => {
       expect(body.updatedAt).not.toBeNull()
     })
 
+    it("cuts the lane registry to the caller's grants when the wall is on", async () => {
+      await seedSettings({ targetLanguage: "fr", targetLanes: ["fr", "es"], archivedLanes: ["fr"] }, 4)
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+          ('frlane01', 'proj-a', 'target', 'French', 'fr'),
+          ('eslane01', 'proj-a', 'target', 'Spanish', 'es')`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+         VALUES ('proj-a', 2, 'eslane01', 400)`,
+      )
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const walled = { ...env(testDb), LANE_READ_WALL: "1" }
+      const settingsRes = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        walled,
+      )
+      const settings = (await settingsRes!.json()) as { settings: Record<string, unknown>; version: number }
+      expect(settings.version).toBe(4)
+      expect(settings.settings.targetLanes).toEqual(["es"])
+      expect(settings.settings.archivedLanes).toEqual([])
+      expect(settings.settings.targetLanguage).toBe("")
+
+      const detailRes = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a", token),
+        walled,
+      )
+      const detail = (await detailRes!.json()) as { settings: Record<string, unknown> }
+      expect(detail.settings.targetLanes).toEqual(["es"])
+    })
+
     it("a project with no settings row reads as {} at version 0", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(

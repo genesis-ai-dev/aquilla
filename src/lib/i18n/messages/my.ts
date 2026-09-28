@@ -2170,7 +2170,6 @@ export const my: Catalog = {
   "org.teamDetail.deletingButton": "ဖျက်နေသည်…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "ဝင်ရောက်ခွင့်အဆင့် အဓိပ္ပာယ်ဖွင့်ဆိုချက်များ",
   "org.teamDetail.addMemberButton": "အဖွဲ့ဝင် ထည့်ရန်",
-  "org.teamDetail.addMembersDialogTitle": "'{name}' သို့ အဖွဲ့ဝင်များ ထည့်ရန်",
   "org.teamDetail.removeAriaLabel": "{name} ဖယ်ရှားရန်",
   "org.teamDetail.allMembersAddedNotice": "အဖွဲ့အစည်းအဖွဲ့ဝင် အားလုံးသည် ဤအဖွဲ့တွင် ရှိပြီးသားဖြစ်သည်။",
   "org.teamDetail.addErrorPrefix": "ထည့်၍ မရပါ- {error}",

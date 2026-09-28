@@ -2170,7 +2170,6 @@ export const th: Catalog = {
   "org.teamDetail.deletingButton": "กำลังลบ…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "คำอธิบายระดับการเข้าถึง",
   "org.teamDetail.addMemberButton": "เพิ่มสมาชิก",
-  "org.teamDetail.addMembersDialogTitle": "เพิ่มสมาชิกเข้า '{name}'",
   "org.teamDetail.removeAriaLabel": "นำ {name} ออก",
   "org.teamDetail.allMembersAddedNotice": "สมาชิกองค์กรทั้งหมดอยู่ในทีมนี้แล้ว",
   "org.teamDetail.addErrorPrefix": "ไม่สามารถเพิ่มได้: {error}",

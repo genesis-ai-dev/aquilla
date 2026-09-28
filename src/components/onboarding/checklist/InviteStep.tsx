@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectScopePath } from "@/hooks/useProjectScopePath"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface InviteStepProps {
@@ -23,6 +24,9 @@ export function InviteStep({
   const t = useT()
   const [open, setOpen] = useState(false)
   const { members, addMany } = useProjectMembers(projectId)
+  // AQU-1352 §3.9: the dialog header names the scope ("Add people to Org › Project")
+  // once it is known; the dialog falls back to its generic title until then.
+  const scopePath = useProjectScopePath(projectId)
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
@@ -43,6 +47,7 @@ export function InviteStep({
         onOpenChange={handleOpenChange}
         members={members}
         addMany={addMany}
+        scopePath={scopePath}
         onAdded={onSharesChanged}
       />
     </div>

@@ -2179,7 +2179,6 @@ export const ms: Catalog = {
   "org.teamDetail.deletingButton": "Memadam…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "Takrifan tahap akses",
   "org.teamDetail.addMemberButton": "Tambah ahli",
-  "org.teamDetail.addMembersDialogTitle": "Tambah ahli ke '{name}'",
   "org.teamDetail.removeAriaLabel": "Keluarkan {name}",
   "org.teamDetail.allMembersAddedNotice": "Semua ahli organisasi sudah berada dalam pasukan ini.",
   "org.teamDetail.addErrorPrefix": "Tidak dapat tambah: {error}",

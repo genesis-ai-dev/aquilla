@@ -2170,7 +2170,6 @@ export const ar: Catalog = {
   "org.teamDetail.deletingButton": "جارٍ الحذف…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "تعريفات مستويات الوصول",
   "org.teamDetail.addMemberButton": "إضافة عضو",
-  "org.teamDetail.addMembersDialogTitle": "إضافة أعضاء إلى '{name}'",
   "org.teamDetail.removeAriaLabel": "إزالة {name}",
   "org.teamDetail.allMembersAddedNotice": "جميع أعضاء المؤسسة موجودون بالفعل في هذا الفريق.",
   "org.teamDetail.addErrorPrefix": "تعذّرت الإضافة: {error}",

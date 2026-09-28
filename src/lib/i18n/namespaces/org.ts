@@ -371,7 +371,6 @@ export const org = defineNamespace({
     "org.teamDetail.deletingButton": "Deleting…",
     "org.teamDetail.accessLevelDefinitionsAriaLabel": "Access level definitions",
     "org.teamDetail.addMemberButton": "Add member",
-    "org.teamDetail.addMembersDialogTitle": "Add members to '{name}'",
     "org.teamDetail.removeAriaLabel": "Remove {name}",
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
@@ -1890,10 +1889,6 @@ export const org = defineNamespace({
       "org.teamDetail.accessLevelDefinitionsAriaLabel": {
         description:
           "Accessible name for the small '?' help affordance next to the Members heading on TeamDetail, whose tooltip lists every access-level description.",
-      },
-      "org.teamDetail.addMembersDialogTitle": {
-        description: "Title of the add-members dialog on TeamDetail, naming the team members are being added to.",
-        placeholders: { name: "The team's name — not translated." },
       },
       "org.teamDetail.removeAriaLabel": {
         description:

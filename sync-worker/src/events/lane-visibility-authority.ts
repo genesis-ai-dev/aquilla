@@ -1,7 +1,8 @@
 // AQU-730 slice 3: pure lane-visibility authority + branded read type.
 //
 // Grant-driven metadata/read isolation: below Maintainer (600), a member sees
-// only lanes explicitly granted on the sync token. No grant ⇒ empty set (not
+// only lanes explicitly granted on the sync token. The set members are
+// lane ids (`lanes.id`), not language names. No grant ⇒ empty set (not
 // null — the inversion from the old scopes model where absence meant all).
 // Platform operators and 600+ cascade to null (all lanes).
 //
@@ -40,10 +41,10 @@ export function resolveVisibleLanes(
   return new Set()
 }
 
-/** Source rows (side='source') are ALWAYS visible; callers pass side. */
+/** Source rows (side='source') are ALWAYS visible; callers pass side. `laneId` is `lanes.id`. */
 export function isLaneVisible(
   visible: VisibleLanes,
-  targetLang: string,
+  laneId: string,
   side: 'source' | 'target',
 ): boolean {
   if (side === 'source') {
@@ -52,7 +53,7 @@ export function isLaneVisible(
   if (visible === null) {
     return true
   }
-  return visible.has(targetLang)
+  return visible.has(laneId)
 }
 
 export type LaneScopedRead = {

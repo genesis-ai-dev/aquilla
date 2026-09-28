@@ -710,6 +710,11 @@ interface EditorTableProps {
    *  project/file's default target-language name. Non-default lanes label
    *  themselves with their own tag string. */
   defaultLaneLabel?: string
+  /**
+   * AQU-1418: display name for a lane tag, including `''` for the default lane.
+   * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
+   */
+  laneLabels?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -940,7 +945,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, onClearCellErrors,
@@ -982,6 +987,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
 }, ref) {
   const t = useT()
+  // The switcher trigger and the closed pill name the lane the same way.
+  // A renamed lane wins; otherwise the tag. The default lane falls back to
+  // the project's target language, then to the "set a language" prompt.
+  const activeLaneLabel =
+    (laneLabels?.[activeLane]
+      ?? (activeLane ? activeLane : project.targetLanguage))
+    || t("editor.lane.setTargetLanguage")
   // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
   // lane-limited member over their own lanes only (`scopedLanesFor`).
   const switchableLanes = canSwitchLanes(project.syncRole?.level) ? lanes : scopedLanes
@@ -2689,8 +2701,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 • with neither handler → the original static pill (byte-identical
                   to the pre-AQU-583 header for callers that pass no handlers).
                 AQU-608: lane switching is a maintainer-and-above affordance —
-                below maintainer the tag stays a static pill so translators keep
-                to their assigned lane. */}
+                below maintainer the control stays a static pill so translators
+                keep to their assigned lane (a lane-limited member switches among
+                their own lanes only). The pill uses the same lane name as the
+                switcher. */}
             {switchableLanes &&
             switchableLanes.length > 1 &&
             onLaneChange ? (
@@ -2703,7 +2717,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <LaneCombobox
                 options={switchableLanes.map((lane) => ({
                   value: lane,
-                  label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
+                  label: laneLabels?.[lane]
+                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
                   archived: isLaneArchived(lane, archivedLanes),
                   testId: lane,
                 }))}
@@ -2724,11 +2739,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       "max-w-full min-w-0 gap-1 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
                     )}
                   >
-                    {/* AQU-583: on the default lane with no project target set,
-                        `project.targetLanguage` is empty — prompt to set one
-                        rather than showing a blank pill. A named lane always
-                        has a tag. */}
-                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    {activeLaneLabel}
                     <ChevronDown className="h-2.5 w-2.5" />
                   </button>
                 }
@@ -2758,17 +2769,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 type="button"
                 data-testid="edit-target-language"
                 onClick={onEditTargetLanguage}
-                aria-label={project.targetLanguage ? t("editor.lane.changeTargetLanguage") : t("editor.lane.setTargetLanguage")}
+                aria-label={activeLaneLabel === t("editor.lane.setTargetLanguage") ? t("editor.lane.setTargetLanguage") : t("editor.lane.changeTargetLanguage")}
                 className="flex max-w-full min-w-0 items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground whitespace-normal break-words transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                {activeLaneLabel}
                 <Languages className="h-2.5 w-2.5" />
               </button>
-            ) : project.targetLanguage ? (
+            ) : (
               <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
-                {project.targetLanguage}
+                {activeLaneLabel}
               </Badge>
-            ) : null}
+            )}
           </div>
         </div>
       </div>

@@ -196,6 +196,19 @@ UI chrome that used to be one smoke file per click is covered under
   the real cells read route, which is the producer/consumer seam that would
   otherwise fail silently. The emit contract (non-chain-mutating, PROJECT_LEAD
   floor) is in `src/lib/sync/events-emit.hiddenCells.test.ts`.
+- Hidden cells leave every export (AQU-1423). The existing export smoke
+  (`e2e/specs/editor/export.smoke.spec.ts`, row 38 above) already crosses the
+  layers this touches, and hiding adds no new cross-layer contract — it adds a
+  predicate to a scoping step that journey already exercises. So the coverage is
+  narrower and closer to the failure: `src/lib/export/validation-scope.test.ts`
+  for the predicate, `src/lib/export/hidden-cells-export.test.ts` for the
+  producer/consumer seam (real cells through the real scoping step into the REAL
+  text exporters, asserting the parked line is absent in BOTH languages — the
+  failure here is not a missing line but a present one in the source language),
+  `src/components/ExportDialog.hiddenCells.test.tsx` for the round-trip formats
+  and the dialog's per-format note, and
+  `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
+  plan against real Postgres.
 - In-app feedback (AQU-1028): the shell's Feedback button opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL

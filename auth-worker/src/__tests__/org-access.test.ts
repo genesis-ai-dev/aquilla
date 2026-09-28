@@ -66,4 +66,13 @@ describe("AQU-1352 §3.6 org People & access", () => {
   it("an outsider gets 403", async () => {
     expect((await orgAccess("personal")).status).toBe(403)
   })
+
+  // Review finding: 404-for-missing vs 403-for-existing let any user probe
+  // which org ids exist. Both must be indistinguishable.
+  it("a missing org and an invisible org return the identical 403 (no id enumeration)", async () => {
+    const hidden = await orgAccess("personal")
+    const missing = await orgAccess("personal", 999999)
+    expect(missing.status).toBe(403)
+    expect(await missing.json()).toEqual(await hidden.json())
+  })
 })

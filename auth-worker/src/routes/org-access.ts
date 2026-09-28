@@ -60,10 +60,11 @@ export async function buildOrgAccess(
   env: Env,
   vs: ViewerScope,
   orgId: number,
-): Promise<{ ok: true; payload: OrgAccessPayload } | { ok: false; status: 403 | 404; error: string }> {
+): Promise<{ ok: true; payload: OrgAccessPayload } | { ok: false; status: 403; error: string }> {
   const org = await env.AQUILLA_PG.prepare("SELECT id, name FROM organizations WHERE id = ?")
     .bind(orgId).first<{ id: number; name: string }>()
-  if (!org) return { ok: false, status: 404, error: "org not found" }
+  // Same 403 as "exists but not visible" so org ids cannot be enumerated.
+  if (!org) return { ok: false, status: 403, error: "no access to this roster" }
 
   const [teamsRes, projectsRes, attachRes, grants] = await Promise.all([
     env.AQUILLA_PG.prepare("SELECT id, name FROM groups WHERE org_id = ? ORDER BY name")

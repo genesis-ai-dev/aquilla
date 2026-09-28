@@ -90,15 +90,26 @@ export async function buildOrgAccess(
 
   const grantee = (g: (typeof grants)[number]): DirectGrantee => ({ userId: g.userId, displayName: g.userName, roleLevel: g.roleLevel })
   const byName = (a: DirectGrantee, b: DirectGrantee) => a.displayName.localeCompare(b.displayName)
+  // One entry per person per node: a creator usually also holds a direct row on
+  // the same project, and both are project-scope grants. Keep the highest role;
+  // the person view still lists every grant with its origin.
+  const onePerPerson = (list: DirectGrantee[]): DirectGrantee[] => {
+    const best = new Map<string, DirectGrantee>()
+    for (const g of list) {
+      const prev = best.get(g.userId)
+      if (!prev || g.roleLevel > prev.roleLevel) best.set(g.userId, g)
+    }
+    return [...best.values()].sort(byName)
+  }
   const orgRef: ScopeRef = { type: "org", id: String(org.id), name: org.name }
 
   const projectNode = (p: { id: string; name: string }): AccessTreeNode => ({
     scope: { type: "project", id: p.id, name: p.name },
     children: [],
     // Direct = the row lives on the project (direct or creator), not via a team.
-    directGrantees: visible
+    directGrantees: onePerPerson(visible
       .filter((g) => g.scopeType === "project" && g.scopeId === p.id && g.source !== "team")
-      .map(grantee).sort(byName),
+      .map(grantee)),
   })
   const projects = (projectsRes.results ?? []).filter((p) => visibleProjects.has(p.id))
   const attached = new Map<string, string[]>()
@@ -114,9 +125,9 @@ export async function buildOrgAccess(
       return {
         scope: { type: "team", id: String(t.id), name: t.name },
         children: projects.filter((p) => ids.has(p.id)).map(projectNode),
-        directGrantees: visible
+        directGrantees: onePerPerson(visible
           .filter((g) => (g.scopeType === "team" && g.scopeId === String(t.id)))
-          .map(grantee).sort(byName),
+          .map(grantee)),
       }
     })
     const inTeam = new Set([...attached.values()].flat())
@@ -128,7 +139,7 @@ export async function buildOrgAccess(
   const tree: AccessTreeNode[] = [{
     scope: orgRef,
     children,
-    directGrantees: visible.filter((g) => g.scopeType === "org").map(grantee).sort(byName),
+    directGrantees: onePerPerson(visible.filter((g) => g.scopeType === "org").map(grantee)),
   }]
 
   const people = new Map<string, OrgAccessPerson>()

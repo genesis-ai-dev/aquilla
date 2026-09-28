@@ -63,6 +63,23 @@ describe("AQU-1352 §3.6 org People & access", () => {
     expect(text).not.toContain('"tim"')
   })
 
+  it("lists a person once per node even when they hold two grants there (creator + direct row)", async () => {
+    // Found driving the page on a live stack: a project's creator who also has a
+    // direct project_members row rendered twice under that project (React
+    // duplicate-key warning). The tree shows who holds access at a node; the
+    // person view is where every separate grant is itemised.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('p1', 1, 700)",
+    ).run()
+    const body = (await (await orgAccess("owner")).json()) as Payload
+    const p1 = body.tree.flatMap(flatten).filter((n) => n.scope.type === "project" && n.scope.id === "p1")
+    for (const node of p1) {
+      const names = node.directGrantees.map((g) => g.displayName)
+      expect(names).toEqual([...new Set(names)])
+    }
+    expect(p1.some((n) => n.directGrantees.some((g) => g.displayName === "owner"))).toBe(true)
+  })
+
   it("an outsider gets 403", async () => {
     expect((await orgAccess("personal")).status).toBe(403)
   })

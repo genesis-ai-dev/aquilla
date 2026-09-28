@@ -719,6 +719,41 @@ export function applyDisconnect(
 }
 
 /**
+ * AQU-1374: reconcile the presence roster against the DO's live sockets.
+ *
+ * Presence rows are created at handshake and removed by applyDisconnect, which
+ * only runs when the socket's `close`/`error` event fires. A connection that
+ * dies without one — a sleeping laptop, a dropped mobile network, a tunnel
+ * killed mid-flight — leaves its row behind forever, because nothing else ever
+ * revisits the map. The client reconnects under a FRESH connId (see
+ * ws-reconciler's `?connId=`, generated per socket session), so each silent
+ * drop adds a row rather than replacing one: one person in one tab was showing
+ * up as six "viewing" peers to everyone else on the project.
+ *
+ * Every row is keyed by the connId of the socket that created it, so a row
+ * whose connId no longer has a live connection is definitively orphaned. That
+ * makes this exact rather than heuristic — unlike a `ts`-based TTL, which would
+ * evict a live but idle user, since the client sends `presence.update` only on
+ * change and has no heartbeat.
+ *
+ * Emits `presence.left` per dropped row, the same frame applyDisconnect sends,
+ * so `PresenceStore.applyPresenceLeft` removes the peer with no client change.
+ */
+export function sweepOrphanedPresence(
+  presence: ReadonlyMap<string, PresenceState>,
+  liveConnIds: ReadonlySet<string>,
+): { presence: Map<string, PresenceState>; emit: ProjectDoServerMessage[] } {
+  const nextPresence = clone(presence)
+  const emit: ProjectDoServerMessage[] = []
+  for (const [connId, cur] of nextPresence) {
+    if (liveConnIds.has(connId)) continue
+    nextPresence.delete(connId)
+    emit.push({ t: "presence.left", userId: cur.userId, connId })
+  }
+  return { presence: nextPresence, emit }
+}
+
+/**
  * Sweep expired leases. Emits `lock.released` per dropped lease plus a
  * `presence.diff` for each user whose focused cell was cleared by it.
  */

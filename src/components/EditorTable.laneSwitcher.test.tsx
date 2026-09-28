@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -103,7 +103,11 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(level: number, targetLanguage = "fr") {
+function renderTable(
+  level: number,
+  targetLanguage = "fr",
+  { lanes = ["", "es"], scopedLanes = null as string[] | null } = {},
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -113,7 +117,8 @@ function renderTable(level: number, targetLanguage = "fr") {
           cellStore={makeStore()}
           username="tester"
           activeLane=""
-          lanes={["", "es"]}
+          lanes={lanes}
+          scopedLanes={scopedLanes}
           onLaneChange={() => {}}
           defaultLaneLabel="fr"
           isCompletionConfigured={false}
@@ -158,5 +163,29 @@ describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
     const switcher = await screen.findByTestId("lane-switcher")
     expect(switcher).toBeInTheDocument()
     expect(switcher).toHaveTextContent("Set target language")
+  })
+})
+
+// A member the org limited to certain lanes (AQU-553) is below MAINTAINER, so
+// AQU-608 alone would leave them on the default lane with no way to their own —
+// a lane coordinator (AQU-581) couldn't open the lane they hand work out in.
+describe("EditorTable — a lane-limited member switches among their own lanes", () => {
+  it("offers a contributor limited to two lanes a switcher with only those lanes", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es", "de"] })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent)
+    expect(options).toEqual(["es", "de"])
+  })
+
+  it("gives a contributor limited to one lane no switcher — there is nothing to switch to", async () => {
+    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"] })
+    await screen.findByText("bonjour")
+    expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+  })
+
+  it("keeps every lane for a maintainer, whatever the scopes say", async () => {
+    renderTable(ROLE.MAINTAINER, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"] })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["fr", "es", "de"])
   })
 })

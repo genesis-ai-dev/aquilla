@@ -202,6 +202,7 @@ describe('handleHealthRollupRequest (AQU-181)', () => {
 // has no aud=sync claim) is rejected with 401 "wrong audience".
 
 import { makeTestToken } from './helpers/auth'
+import { makeTestDb } from './helpers/pg-test-db'
 import { sign } from 'hono/jwt'
 
 describe('handleHealthRollupRequest — token auth (AQU-190)', () => {
@@ -277,6 +278,48 @@ describe('handleHealthRollupRequest — token auth (AQU-190)', () => {
     const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
     const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
     expect(res!.status).toBe(403)
+  })
+
+  it('does not let a hidden lane change the score', async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: 'deflane1', project_id: FAKE_PROJECT_ID, role: 'target', name: 'Spanish', legacy_tag: '' },
+        { id: 'frlane01', project_id: FAKE_PROJECT_ID, role: 'target', name: 'French', legacy_tag: 'fr' },
+      ],
+      cells: [
+        {
+          project_id: FAKE_PROJECT_ID, file_id: 'file-gen', cell_id: 'c1',
+          side: 'source', value: 'In the beginning', target_lang: '',
+          event_id: 'src', last_editor: 'x', last_edit_at: 1, validated: 0, word_count: 3,
+        },
+        {
+          project_id: FAKE_PROJECT_ID, file_id: 'file-gen', cell_id: 'c1',
+          side: 'target', value: 'Au commencement', target_lang: 'fr',
+          event_id: 'fr', last_editor: 'x', last_edit_at: 2, validated: 1, word_count: 2,
+        },
+      ],
+    })
+    const token = await makeTestToken(FAKE_SECRET, {
+      projectId: FAKE_PROJECT_ID,
+      fileId: '__project__',
+      role: 400,
+      laneGrants: [{ lane: 'deflane1', level: 400 }],
+    })
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = await handleHealthRollupRequest(req, {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: FAKE_SECRET,
+      LANE_READ_WALL: '1',
+    })
+    expect(res!.status).toBe(200)
+    const body = await res!.json() as { projectHealth: number; totalCells: number }
+    // French is translated and validated. This caller was granted only the
+    // default lane, which has no translation, so the ring stays empty.
+    expect(body.totalCells).toBe(0)
+    expect(body.projectHealth).toBe(0)
   })
 
   it('rejects a token with insufficient role (role < 100) with 403', async () => {

@@ -68,7 +68,7 @@ function apiMap(): Record<string, unknown> {
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
-      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, scope. Start here. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
+      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, access (read | write), scope. Start here — a read-only token learns it here rather than from a 403 on a plan it already built. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
       'GET /api/v1/external/orgs': 'List the organizations this credential covers (up to 100): { id, name, role, role_source }. See "orgScopedReads".',
       'GET /api/v1/external/orgs/:orgId/projects': 'List one org’s projects. An org outside the credential’s scope returns scope_denied.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100). Optional ?orgId= narrows to one org.',
@@ -125,6 +125,14 @@ function apiMap(): Record<string, unknown> {
       endpoint: `GET ${EXTERNAL_ROOT}/skills/:name`,
       note:
         'A skill sequences EXISTING commands and routes; it adds no capability and stages nothing on its own. project-setup: intake template → one ProjectSetup command → one approval → verification receipt.',
+    },
+    accessCeiling: {
+      note:
+        'AQU-1242: every token carries an access ceiling alongside its autonomy mode. `write` is the original grant. `read` makes the whole API read-only: GET /me reports access: "read", and changeset prepare, changeset commit and artifact upload all answer 403 scope_denied, while reads, search, history and export work normally. It is a CEILING, never a grant — the owner’s live project role is still resolved on every call, so a read-only token can only narrow what its owner could already do.',
+      whyNotMode:
+        'Do not read `mode` as whether you may write. `mode` is the autonomy dial for writes that are already permitted (ask parks them at a human approval, act applies them); `access` is whether writing is possible at all. An ask-mode token still writes — with a human in the loop. A read-only token never does, in either mode.',
+      minting:
+        'Access is fixed when a human mints the token (Preferences → Account → "API tokens") and cannot be raised by any API call. An agent that needs to write must ask its human for a read-write token.',
     },
     orgScopedReads: {
       note:
@@ -227,7 +235,7 @@ function apiMap(): Record<string, unknown> {
       shape: '{ "error": { "code", "message", "details?" } }',
       codes: {
         permission_denied: '401/403 — bad token, or your live project role is below the operation’s minimum. Do not retry unchanged.',
-        scope_denied: '403 — credential’s org/project scope does not cover this resource.',
+        scope_denied: '403 — credential’s scope does not cover this: either its org/project scope excludes the resource, or it is a READ-ONLY credential (access: "read") and the call writes. Re-reading GET /me tells you which. Neither is retryable and neither is about your project role — a read-only refusal cannot be fixed by anything the agent does, only by a human minting a read-write token.',
         validation_failed: '400 — malformed request; fix per message, do not retry unchanged.',
         not_found: '404 — no such resource (or not visible to you).',
         plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset. details.status distinguishes "stale" (the plan no longer describes reality) from "superseded" (its end-state already exists — a human did the work; nothing to re-prepare).',

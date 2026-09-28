@@ -107,11 +107,16 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
+    // AQU-1242: the write ceiling, published beside the autonomy mode so an MCP
+    // agent plans against it instead of discovering it as a 403 on work it has
+    // already done. Read it as the gate on whether the write tools exist for
+    // you at all; credentialMode only governs writes you are permitted.
+    credentialAccess: cred.access,
     // The numbered golden path, so a weak agent doesn't have to reconstruct
     // the workflow from per-tool descriptions.
     quickstart: [
       '0. Setting up a partner project? get_skill { name: "project-setup" } and follow it (one ProjectSetup command, one approval).',
-      '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
+      '1. get_identity_and_scope — confirm who you are, your access (read|write), your mode (ask|act), and your org/project scope. access "read" means steps 4 and 5 will be refused: report that and stop rather than retrying.',
       '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
       '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
@@ -356,6 +361,12 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       maxArtifactBytes: MAX_ARTIFACT_BYTES,
     },
     errorCodes: ERROR_CODES,
+    accessCeiling:
+      'access "read" is a read-only credential: prepare_translations, confirm_changeset and ' +
+      'artifact upload all fail with scope_denied, while every read, search and export tool ' +
+      'works normally. It is not retryable and not about your project role — only the human ' +
+      'who owns the token can lift it by minting a read-write one. access "write" is the ' +
+      'normal grant, and askModeFlow below then describes how a commit lands.',
     askModeFlow:
       'In ask mode you can prepare_translations but cannot commit directly. prepare returns ' +
       'an approvalUrl; surface it to a human who opens it in an authenticated Aquilla browser ' +
@@ -373,6 +384,10 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
     // never disagree about what a token is allowed to learn.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: same reason as the pii parity above — this tool is the MCP twin
+    // of REST GET /me, and the two must not disagree about what a token may do
+    // any more than about what it may learn.
+    access: cred.access,
     orgId: cred.orgId,
     projectId: cred.projectId,
     credentialId: cred.credentialId,

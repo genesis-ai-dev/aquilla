@@ -806,6 +806,48 @@ export function buildEventProjectionStmts(
       return ['cells']
     }
 
+    case 'source.cell.visibility.set': {
+      const p = event.payload as EventPayloads['source.cell.visibility.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (typeof p.hidden !== 'boolean') {
+        throw new Error(`${event.kind} event ${event.id} requires a boolean payload.hidden`)
+      }
+      // AQU-1422: park (or un-park) ONE cell. Like source.cell.reanchor this is
+      // non-chain-mutating by design — it moves only `hidden_at` and never
+      // advances `cells.event_id`, because hiding a cell changes nothing about
+      // its text and must NOT make every lane's translation go stale (AD-9
+      // compares the target's pin against the source head). It also replays
+      // unconditionally on rebuild in seq order, so the last hide/show wins.
+      //
+      // Written to the SHARED SOURCE ROW ONLY. Hiding is per cell, not per lane:
+      // every consumer resolves a cell's visibility from this one row. Writing
+      // it per row would leave a target row created AFTER the hide — the
+      // collaborator's in-flight translation the AC insists must survive — with
+      // the flag unset, and that is exactly the row that must not reappear.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET hidden_at = ?
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(
+            p.hidden ? event.serverTs : null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      // A hidden cell stops being work (AQU-1424 builds on this), so the file's
+      // counters have to recompute even though no text changed. Reported as a
+      // `files` touch so the caller's coalesced recompute picks the file up.
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']

@@ -38,7 +38,7 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 
 ## §2 Waves
 - W1 (2026-09-28, workflow wf_e8e4233e-75a): grants-view, characterization, create-targets, access-ui
-- W2 (planned): resolver swap behind flag (reruns characterization matrix), teams-as-containers + teamIds create, access payload endpoint + inspector wiring
+- W2 (2026-09-28, wf_4bed448f-c46): resolver-swap (ACCESS_GRANTS_RESOLVER off|shadow|on, fallback to legacy on view error), teams (0131 group_members.role_level, 0132 view v2 security_invoker + team rows, PATCH team role, create teamIds, teams multi-select), access-api (GET users/:id/access + inspector popover on rosters); plus 3-lens review panel on W1 diff
 - W3 (planned): badges/read-only inherited rows/remove dialog/denial copy, jev adversarial suite, review panel
 ## §3 Workstreams
 | ID | Title | Status |
@@ -48,3 +48,4 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 | create-targets | P0 picker + me/create-targets | W1 running |
 | access-ui | types, breadcrumb, badges, inspector UI | W1 running |
 ## §4 Merge log
+- 2026-09-28 · W1 grants-view, characterization, create-targets, access-ui → swarm/aqu-1352 a7f5cdde6 · tsc 0 · auth-worker tsc 0 · lint 0 errors · auth vitest 4 fail (billing baseline) · view DDL loads in PGlite for all 210 auth files · root vitest 36 fail, baseline diff pending

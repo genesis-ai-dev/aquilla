@@ -14,7 +14,7 @@ import type { AquillaDb } from "../shim/postgres"
 import { orgPathContribution } from "./project-roles"
 
 export type GrantSource = "direct" | "team" | "creator"
-export type GrantScope = "org" | "project"
+export type GrantScope = "org" | "project" | "team"
 
 /** One row of the access_grants view. Ids are strings (BIGINT over the shim). */
 export interface AccessGrant {
@@ -51,6 +51,11 @@ export interface ResolveContext {
   archivedAt: string | null
   includeArchived?: boolean
   isPlatformAdmin: boolean
+  /**
+   * AQU-1352 P2: teams attached to this project (group_project_grants). A
+   * team-scope grant (scopeType 'team') contributes only when its team is here.
+   */
+  attachedTeamIds?: readonly string[]
 }
 
 // Declaration order override > group > org > creator > platform wins ties.
@@ -76,8 +81,14 @@ export function resolveFromGrants(
     (g) => g.scopeType === "project" && g.scopeId === ctx.projectId,
   )
   const direct = onProject.find((g) => g.source === "direct") ?? null
-  const bestTeam = onProject
-    .filter((g) => g.source === "team")
+  // AQU-1352 P2 (spec §3.1): a team-scope role flows to every attached project
+  // and joins max-wins exactly like a per-project team path. viaTeamId carries
+  // the team so the chain names it.
+  const attached = new Set(ctx.attachedTeamIds ?? [])
+  const teamScope = grants
+    .filter((g) => g.scopeType === "team" && attached.has(g.scopeId))
+    .map((g): AccessGrant => ({ ...g, viaTeamId: g.scopeId }))
+  const bestTeam = [...onProject.filter((g) => g.source === "team"), ...teamScope]
     .reduce<AccessGrant | null>(
       (best, g) => (best == null || g.roleLevel > best.roleLevel ? g : best),
       null,
@@ -132,6 +143,7 @@ const toId = (v: number | string | null): string | null => (v == null ? null : S
 
 export interface ProjectGrants {
   grants: AccessGrant[]
+  attachedTeamIds: string[]
   orgId: string | null
   archivedAt: string | null
 }
@@ -149,6 +161,12 @@ export async function loadProjectGrants(
   if (!project) return null
   const orgId = toId(project.org_id)
 
+  const attachedRows = await db
+    .prepare(`SELECT DISTINCT group_id FROM group_project_grants WHERE project_id = ?`)
+    .bind(projectId)
+    .all<{ group_id: number | string }>()
+  const attachedTeamIds = (attachedRows.results ?? []).map((r) => String(r.group_id))
+
   const { results } = await db
     .prepare(
       `SELECT user_id, scope_type, scope_id, role_level, source,
@@ -156,9 +174,11 @@ export async function loadProjectGrants(
          FROM access_grants
         WHERE user_id = ?
           AND ((scope_type = 'project' AND scope_id = ?)
-               OR (scope_type = 'org' AND scope_id = ?))`,
+               OR (scope_type = 'org' AND scope_id = ?)
+               OR (scope_type = 'team' AND scope_id IN (
+                     SELECT group_id::TEXT FROM group_project_grants WHERE project_id = ?)))`,
     )
-    .bind(userId, projectId, orgId ?? "")
+    .bind(userId, projectId, orgId ?? "", projectId)
     .all<GrantRow>()
 
   const grants = (results ?? []).map((r): AccessGrant => ({
@@ -173,6 +193,7 @@ export async function loadProjectGrants(
   }))
   return {
     grants,
+    attachedTeamIds,
     orgId,
     archivedAt: project.archived_at == null ? null : String(project.archived_at),
   }
@@ -198,6 +219,7 @@ export async function resolveProjectRoleViaGrants(
     orgId: loaded.orgId,
     archivedAt: loaded.archivedAt,
     includeArchived,
+    attachedTeamIds: loaded.attachedTeamIds,
     isPlatformAdmin: !!email && adminEmailSet(adminEmails).has(email),
   })
 }

@@ -64,6 +64,7 @@ import {
   DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
   encodeProjectDirectoryCursor,
   getCommentFloors,
+  attachGroupProject,
   getEffectiveOrgRole,
   getMemberProgressViewMinRole,
   DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
@@ -75,6 +76,7 @@ import {
   getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
+import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
@@ -352,6 +354,8 @@ const createProjectSchema = z.object({
   id: z.string().min(1).max(256),
   name: z.string().min(1).max(256),
   orgId: z.number().int().optional(),
+  // AQU-1352 P2 (spec §3.5, D4): teams in orgId to create the project into.
+  teamIds: z.array(z.number().int()).max(50).optional(),
 })
 
 projects.post(
@@ -363,12 +367,28 @@ projects.post(
     const body = c.req.valid("json")
 
     let orgId: number | null = null
+    const teamIds = [...new Set(body.teamIds ?? [])]
+    if (teamIds.length > 0 && body.orgId == null) {
+      return c.json({ error: "teamIds requires orgId" }, 400)
+    }
     if (body.orgId != null) {
       // Creating into a specific org is an org-level function: require the
-      // caller's org role >= maintainer (see spec Risk 3).
+      // caller's org role >= maintainer (see spec Risk 3) OR, AQU-1352 D4,
+      // a team role >= project lead on at least one selected team.
       const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
-      if (orgRole == null || orgRole < ROLE.MAINTAINER) {
-        return c.json({ error: "org role >= maintainer required to create a project here" }, 403)
+      const teamRoles = await loadTeamsInOrg(c.env, body.orgId, teamIds, user.id)
+      if (teamRoles.size !== teamIds.length) {
+        return c.json({ error: "every team must belong to this org" }, 400)
+      }
+      const leadsATeam = [...teamRoles.values()].some((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
+      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsATeam) {
+        return c.json(
+          {
+            error:
+              "org role >= maintainer, or team role >= project lead on a selected team, required to create a project here",
+          },
+          403,
+        )
       }
       orgId = body.orgId
     } else {
@@ -394,6 +414,15 @@ projects.post(
     } catch (err) {
       console.error("project create failed:", err)
       return c.json({ error: "create failed" }, 500)
+    }
+
+    // AQU-1352 P2: attach the selected teams at the attach dialog's default.
+    // SWARM-TODO(AQU-1352): not transactional with the create; a failure here
+    // leaves the project without its team and the caller as creator only.
+    if (orgId != null) {
+      for (const teamId of teamIds) {
+        await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
+      }
     }
 
     return c.json({

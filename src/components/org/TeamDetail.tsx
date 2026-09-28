@@ -5,6 +5,7 @@ import { AlertTriangle, FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Use
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { TeamRoleSelect } from "./TeamRoleSelect"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
@@ -36,6 +37,7 @@ import {
   attachProject,
   changeProjectRole,
   detachProject,
+  setTeamMemberRole,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
@@ -125,6 +127,11 @@ export function TeamDetail() {
   const isOwner = (activeOrg?.role.level ?? 0) >= 700
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
+  // AQU-1352 P2: org maintainer+, or a team maintainer on this team, may set
+  // team roles, capped at their own level (server enforces the same gate).
+  const myTeamRole = team?.members.find((m) => m.username === session?.username)?.teamRoleLevel ?? 0
+  const teamRoleCap = Math.max(activeOrg?.role.level ?? 0, myTeamRole)
+  const canEditTeamRoles = teamRoleCap >= 600
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const teamRequestRef = useRef(0)
@@ -480,6 +487,37 @@ export function TeamDetail() {
         },
       },
       {
+        id: "teamRole",
+        accessorFn: (m) => m.teamRoleLevel ?? 0,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.teamDetail.teamRoleColumn")} />,
+        meta: { className: "w-[9rem] whitespace-nowrap" },
+        cell: ({ row }) => {
+          const m = row.original
+          const current = m.teamRoleLevel ?? null
+          return (
+            <TeamRoleSelect
+              username={m.username}
+              value={current}
+              canEdit={canEditTeamRoles && (current ?? 0) <= teamRoleCap}
+              maxLevel={teamRoleCap}
+              onChange={async (level) => {
+                if (!jwt || activeOrgId == null || groupIdNum == null) return
+                try {
+                  await setTeamMemberRole(jwt, activeOrgId, groupIdNum, m.userId, level)
+                  await refetch()
+                } catch (error) {
+                  toast.add({
+                    type: "error",
+                    title: t("org.teamDetail.teamRoleUpdateFailed"),
+                    description: toUserFacingError(error, "team").message,
+                  })
+                }
+              }}
+            />
+          )
+        },
+      },
+      {
         id: "added",
         accessorFn: (m) => {
           const ts = m.addedAt != null ? Date.parse(m.addedAt) : Number.NaN
@@ -511,7 +549,7 @@ export function TeamDetail() {
         ),
       },
     ],
-    [isOwner, t],
+    [isOwner, t, canEditTeamRoles, teamRoleCap, jwt, activeOrgId, groupIdNum, refetch],
   )
 
   const teamDescription = team?.description?.trim() || null

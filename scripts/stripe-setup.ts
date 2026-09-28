@@ -1,59 +1,71 @@
-/**
- * Create (or reprint) the Aquilla Field Plan Stripe catalog in test mode.
- *
- *   STRIPE_SECRET_KEY=sk_test_... npx tsx scripts/stripe-setup.ts
- *
- * Prints product + price ids. Put the price ids in wrangler [vars]
- * (STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON). Never commit the secret.
- */
+import process from "node:process"
+import { pathToFileURL } from "node:url"
 
-const SECRET = process.env.STRIPE_SECRET_KEY?.trim()
-if (!SECRET) {
-  console.error("Set STRIPE_SECRET_KEY")
-  process.exit(1)
+export async function provisionFieldCatalog(
+  secret = process.env.STRIPE_SECRET_KEY?.trim(),
+  existingProductId = process.env.STRIPE_FIELD_PRODUCT_ID?.trim(),
+) {
+/** Provision the current Field catalog in a Stripe sandbox; never enable checkout. */
+if (!secret?.startsWith("sk_test_")) {
+  throw new Error("Use a Stripe test secret. Live provisioning requires an operator.")
 }
 
-async function stripe(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-  const body = new URLSearchParams(params)
-  const res = await fetch(`https://api.stripe.com/v1${path}`, {
-    method: "POST",
+async function stripe(path: string, params?: Record<string, string>, key?: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: params ? "POST" : "GET",
     headers: {
-      Authorization: `Bearer ${SECRET}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Bearer ${secret}`,
+      ...(params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+      ...(key ? { "Idempotency-Key": key } : {}),
     },
-    body,
+    body: params ? new URLSearchParams(params) : undefined,
   })
-  const json = (await res.json()) as Record<string, unknown>
-  if (!res.ok) {
-    throw new Error(JSON.stringify(json))
-  }
-  return json
+  const body = await response.json() as Record<string, unknown>
+  if (!response.ok) throw new Error(`Stripe request failed (${response.status}); inspect the request in Stripe.`)
+  return body
 }
 
-const field = await stripe("/products", {
-  name: "Aquilla Field Plan",
-  description: "Self-serve Field Plan: $500 / 4 weeks, includes 100,000 AI words.",
-  "metadata[aquilla_plan]": "field",
+const productId = existingProductId || "aquilla_field_2026_09"
+// A stable product ID and lookup keys prevent duplicate catalog entries on reruns.
+const productResponse = await fetch(`https://api.stripe.com/v1/products/${productId}`, {
+  headers: { Authorization: `Bearer ${secret}` },
 })
-const fieldPrice = await stripe("/prices", {
-  product: String(field.id),
-  currency: "usd",
-  unit_amount: "50000",
-  "recurring[interval]": "week",
-  "recurring[interval_count]": "4",
-  "metadata[aquilla_plan]": "field",
-})
-const addon = await stripe("/products", {
-  name: "Aquilla word add-on",
-  description: "100,000 additional AI words for the current Field Plan period.",
-  "metadata[aquilla_plan]": "addon",
-})
-const addonPrice = await stripe("/prices", {
-  product: String(addon.id),
-  currency: "usd",
-  unit_amount: "20000",
-  "metadata[aquilla_plan]": "addon",
-})
+if (productResponse.status === 404) {
+  if (existingProductId) throw new Error("The supplied Field product does not exist in this Stripe account.")
+  await stripe("/products", {
+    id: productId,
+    name: "Aquilla Field",
+    description: "Ongoing team translation and review. Includes up to 20 collaborators and shared organization AI usage limits.",
+    "metadata[aquilla_plan]": "field",
+  }, "aquilla-field-product-2026-09")
+} else if (!productResponse.ok) {
+  throw new Error(`Cannot inspect Field product (${productResponse.status})`)
+}
 
-console.log("STRIPE_PRICE_FIELD=" + String(fieldPrice.id))
-console.log("STRIPE_PRICE_ADDON=" + String(addonPrice.id))
+for (const [interval, amount, variable] of [
+  ["month", "60000", "STRIPE_PRICE_FIELD_MONTHLY"],
+  ["year", "600000", "STRIPE_PRICE_FIELD_ANNUAL"],
+]) {
+  const lookup = `aquilla_field_usd_${interval}_${amount}_2026_09`
+  const result = await stripe(`/prices?lookup_keys[]=${encodeURIComponent(lookup)}&limit=1`)
+  const existing = (result.data as Array<Record<string, unknown>>)[0]
+  const price = existing ?? await stripe("/prices", {
+    product: productId, currency: "usd", unit_amount: amount,
+    "recurring[interval]": interval,
+    lookup_key: lookup, "metadata[aquilla_plan]": "field",
+  }, lookup)
+  if (price.product !== productId || price.unit_amount !== Number(amount) || price.currency !== "usd" ||
+      (price.recurring as { interval?: string; interval_count?: number })?.interval !== interval ||
+      (price.recurring as { interval_count?: number })?.interval_count !== 1 || price.active !== true) {
+    throw new Error(`Existing price does not match ${variable}; review it in Stripe.`)
+  }
+  console.log(`${variable}=${String(price.id)}`)
+}
+console.log("Checkout remains disabled. No subscriptions, add-ons, or charges created.")
+
+
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  throw new Error("Legacy Field setup is retired. Use scripts/stripe-pricing-baseline.ts with the documented Team overrides.")
+}

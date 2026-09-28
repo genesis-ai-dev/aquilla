@@ -155,6 +155,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface TimelineEditorProps {
@@ -3453,6 +3454,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
           />
         )
@@ -3506,6 +3512,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
           />

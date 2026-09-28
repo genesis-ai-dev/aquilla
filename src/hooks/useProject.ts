@@ -59,6 +59,13 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("algorithmicChecks", settings.algorithmicChecks)
   assign("terminology", settings.terminology)
   assign("termMatching", settings.termMatching)
+  assign("fileGenres", settings.fileGenres)
+  // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
+  // workspace or the glosser and the alignment panel both read an empty list:
+  // a confirmation then persisted server-side but never fed the BT, never
+  // rendered as decided, and the next PATCH replaced the array instead of
+  // extending it (the panel's dedupe reads this same field).
+  assign("alignmentSeeds", settings.alignmentSeeds)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
   assign("validationCount", settings.validationCount)
@@ -66,6 +73,12 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
+  // AQU-490: the audio policy. Must reach the workspace or the gutter control
+  // would apply the TEXT project's rules to recordings — the one thing Sam's
+  // "separate settings" ruling exists to prevent.
+  assign("validationRoleFloorAudio", settings.validationRoleFloorAudio)
+  assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
+  assign("allowSelfValidationAudio", settings.allowSelfValidationAudio)
   assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,

@@ -309,7 +309,16 @@ export async function exportDocx(
   // Write modified XML back — only word/document.xml changes; all other parts untouched.
   zip.file("word/document.xml", rebuilt)
 
-  const blob = await zip.generateAsync({ type: "blob", mimeType: DOCX_MIME })
+  // AQU-889: DEFLATE, not JSZip's default STORE. A re-zipped package that
+  // stores every part uncompressed balloons an ~10KB Word document to ~200KB
+  // for a two-line edit — the delta was never the problem, the packaging was.
+  // Level 6 matches the convention in `src/lib/import/file-entries.ts`.
+  const blob = await zip.generateAsync({
+    type: "blob",
+    mimeType: DOCX_MIME,
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  })
   return { blob, injected, untouched, removed, inserted, warnings }
 }
 

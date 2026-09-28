@@ -245,7 +245,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
    */
   async function openRailOverflow(row?: HTMLElement) {
     const scope = row ? within(row) : screen
-    fireEvent.click(await scope.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await scope.findByRole("button", { name: /^More actions · Translation for/ }))
   }
 
   // ── AQU-200 regression guard ───────────────────────────────────────────────
@@ -268,7 +268,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       .map((b) => b.getAttribute("aria-label") ?? "")
 
     // ONE overflow trigger for the whole rail — not one per action group.
-    expect(directLabels.filter((l) => l === "More actions")).toHaveLength(1)
+    expect(directLabels.filter((l) => l.startsWith("More actions · Translation for"))).toHaveLength(1)
 
     // The lower-frequency actions are NOT direct buttons any more. This is the
     // half that regresses if someone promotes "just one" back onto the rail.

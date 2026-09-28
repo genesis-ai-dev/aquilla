@@ -144,6 +144,51 @@ describe("createChapterHealthBuilder", () => {
   })
 })
 
+// AQU-1083. The chapter map is one of two places that count cells in the
+// browser rather than reading a number the server resolved, so it is one of
+// two places the policy has to be applied by hand.
+describe("headings a project does not count (AQU-1083)", () => {
+  it("marks them excluded rather than untranslated, and scores them not at all", () => {
+    // An untypeset heading and an untranslated verse look identical to
+    // getSummary — both empty. Only the exclusion tells them apart, and
+    // getting it wrong leaves a chapter title looking like outstanding work,
+    // which is the confusion this whole setting exists to remove.
+    const h = harness()
+    h.summaries.set("c", { status: "empty", translated: "" })
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "c",
+    })[0].cells!
+    expect(cells.map((cell) => cell.stage)).toEqual(["validated", "automatic", "excluded"])
+    expect(cells[2].health).toBeUndefined()
+  })
+
+  it("keeps a square for every cell — the map still shows the whole file", () => {
+    const h = harness()
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "c",
+    })[0].cells!
+    expect(cells).toHaveLength(3)
+  })
+
+  it("never scores an excluded cell even when it has been translated", () => {
+    // A team can translate its headings and still not want them counted.
+    const h = harness()
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "a",
+    })[0].cells!
+    expect(cells[0]).toMatchObject({ id: "a", stage: "excluded", health: undefined })
+  })
+
+  it("behaves exactly as before when the reader is absent", () => {
+    const h = harness()
+    expect(h.builder.build(h.chapters, h.readers))
+      .toEqual(createChapterHealthBuilder().build(h.chapters, { ...h.readers, isExcluded: () => false }))
+  })
+})
+
 describe("chapterHealthBuilderFor", () => {
   it("returns one builder per store and a different builder for another store", () => {
     const storeA = {}

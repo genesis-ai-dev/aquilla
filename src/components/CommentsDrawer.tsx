@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useId, useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -68,6 +68,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
 export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
+  const newThreadHeadingId = useId()
   const permissions = useProjectPermissions(project)
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
   const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
@@ -192,11 +193,15 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
 
       {canComment ? (
         <div className="border-t p-3 space-y-1.5">
-          <p className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
+          <p id={newThreadHeadingId} className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
           <Textarea
             value={newThreadText}
             onChange={(e) => setNewThreadText(e.target.value)}
             onKeyDown={handleNewThreadKeyDown}
+            // A placeholder is not an accessible name: it disappears on the
+            // first keystroke and screen readers may never announce it. Point
+            // at the heading that is already on screen.
+            aria-labelledby={newThreadHeadingId}
             placeholder={t("comments.drawer.newThreadPlaceholder")}
             rows={2}
             className="resize-none"

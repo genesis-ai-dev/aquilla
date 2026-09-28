@@ -1,6 +1,11 @@
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it } from "vitest"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
+import {
+  __resetCellDisplayFieldsCache,
+  getCellDisplayFields,
+  setCellDisplayField,
+} from "@/lib/store/cell-display-fields"
 
 describe("CellMetadataTab", () => {
   it("renders string/number metadata as key/value pairs so DCS TSV columns stay inspectable", () => {
@@ -70,6 +75,60 @@ describe("CellMetadataTab", () => {
     // value is more honest than a column of near-empty rows.
     render(<CellMetadataTab metadata={{ a: { b: { c: { d: { e: 1 } } } } }} />)
     expect(screen.getByText('{"e":1}')).toBeInTheDocument()
+  })
+
+  describe("show-on-cells toggle (AQU-1369)", () => {
+    beforeEach(() => {
+      localStorage.clear()
+      __resetCellDisplayFieldsCache()
+    })
+
+    it("offers no toggle without a project to scope it to", () => {
+      render(<CellMetadataTab metadata={{ Field: "glosses" }} />)
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    })
+
+    it("toggles a key on for the whole project, and off again from any cell", () => {
+      // The SDBH importer writes `Field: glosses`; checking it here is what
+      // turns the label on for every cell in the project that has `Field`.
+      const { unmount } = render(
+        <CellMetadataTab metadata={{ Field: "glosses" }} projectId="p1" />,
+      )
+      const box = screen.getByRole("checkbox", { name: "Show Field on cells" })
+      expect(box).not.toBeChecked()
+      fireEvent.click(box)
+      expect(getCellDisplayFields("p1")).toEqual(["Field"])
+      unmount()
+
+      // A different cell of the same project reflects the setting and can
+      // clear it.
+      render(<CellMetadataTab metadata={{ Field: "definitions" }} projectId="p1" />)
+      const other = screen.getByRole("checkbox", { name: "Show Field on cells" })
+      expect(other).toBeChecked()
+      fireEvent.click(other)
+      expect(getCellDisplayFields("p1")).toEqual([])
+    })
+
+    it("offers no toggle for values with no one-line label", () => {
+      // Attachments and nested objects would label nothing — a checkbox there
+      // would be a dead control.
+      render(
+        <CellMetadataTab
+          metadata={{
+            attachments: [{ type: "image", url: "https://cdn.example.org/a.jpg" }],
+            source: { book: "GEN" },
+          }}
+          projectId="p1"
+        />,
+      )
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    })
+
+    it("reads a key already on from storage as checked", () => {
+      setCellDisplayField("p1", "Field", true)
+      render(<CellMetadataTab metadata={{ Field: "glosses" }} projectId="p1" />)
+      expect(screen.getByRole("checkbox", { name: "Show Field on cells" })).toBeChecked()
+    })
   })
 
   describe("hasCellMetadata (the EditorTable tab gate)", () => {

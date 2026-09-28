@@ -45,7 +45,7 @@ const unitSchema = z.object({
   end: z.number().finite().positive().optional(),
   speaker: z.string().max(500).optional(),
   paragraphStart: z.boolean().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 }).superRefine((unit, ctx) => {
   if ((unit.start === undefined) !== (unit.end === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["start"], message: "start and end must be supplied together" })

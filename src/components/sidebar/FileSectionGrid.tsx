@@ -8,6 +8,9 @@ interface Props {
   projectId: string
   fileId: string
   validationCount: number
+  /** AQU-1083: the project's effective structural-cell policy. Flipping it
+   *  changes every number below, so the snapshot has to be revalidated. */
+  countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSectionClick: (sectionLabel: string) => void
   /** Read the active file’s current health only while this grid is mounted. */
@@ -23,7 +26,7 @@ interface Props {
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick, getChapters, deferFetch }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch }: Props) {
   const t = useT()
   const chapters = useMemo(() => getChapters?.(), [getChapters])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
@@ -33,6 +36,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
     deferFetch ? null : fileId,
     validationCount,
     getTokenForFile,
+    countStructural,
   )
 
   if (!chapters && sections === null) {

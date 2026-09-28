@@ -498,12 +498,40 @@ export interface ProjectSetupVerification {
   /** The plan's usernames with their LIVE effective roles. */
   members: { username: string; role: number }[]
   files: { fileId: string; name: string; cellCount: number; cellsWithMarkup: number }[]
-  /** prompt-preview's `parts.brief` is non-empty on the first source cell of
-   *  the first created file (no files: the brief's L1 summary is non-empty). */
+  /** Does the brief this plan wrote actually reach the copilot?
+   *
+   *  AQU-1323: this is a FRESHNESS claim, not an emptiness one. When the plan
+   *  carried a `brief` block it is true only if the L1 summary was re-rendered
+   *  inside this commit — a plan that wrote sections but left yesterday's L1
+   *  standing reports `false`, because the copilot is still reading the old
+   *  brief. prompt-preview's `parts.brief` is then run for real on the first
+   *  source cell of the first created file (no files: the L1 must be non-empty)
+   *  to confirm the fresh summary is actually injected. */
   briefReachesCopilot: boolean
+  /** The evidence behind `briefReachesCopilot` (AQU-1323) — always present on a
+   *  fully applied plan, and always carrying a `reason` when the answer is false. */
+  briefDetails?: ProjectSetupBriefDetails
   /** Policy keys the plan asked for that the server refused at commit because
    *  they would have LOOSENED against the live blob. */
   policyKeysNotApplied: string[]
+}
+
+/**
+ * AQU-1323 — the evidence behind `briefReachesCopilot`, so an agent reading the
+ * receipt can act on a `false` instead of guessing, and is warned about the one
+ * failure mode a `true` can still hide (a capped L1).
+ */
+export interface ProjectSetupBriefDetails {
+  /** Plain-language cause when `briefReachesCopilot` is false — the render code
+   *  and message, a failed L1 write, or a stale summary. Absent on a clean true. */
+  reason?: string
+  /** The L1 render hit the 1600-char cap, so some committed sections are NOT in
+   *  what the copilot reads. Reported even alongside `true`: the summary IS
+   *  fresh, it is just incomplete, and only the operator can judge that. */
+  truncated?: boolean
+  /** The live `translationBrief.l1GeneratedAt` after the plan — compare it with
+   *  the receipt's `appliedAt` to see the render land without a second query. */
+  l1GeneratedAt?: string | null
 }
 
 /** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a

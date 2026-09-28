@@ -67,9 +67,15 @@ the new projectId.
 
 5. After commit, report the verification receipt (receipt.verification):
    settingsVersion, members with their live roles, files with cellCount and
-   cellsWithMarkup, briefReachesCopilot, policyKeysNotApplied. If
+   cellsWithMarkup, briefReachesCopilot, briefDetails, policyKeysNotApplied. If
    briefReachesCopilot is false, SAY SO — the brief is not reaching the
-   copilot and the operator has to act on it. If cellsWithMarkup is non-zero,
+   copilot and the operator has to act on it: quote briefDetails.reason and
+   stage a RegenerateBriefSummary changeset. briefReachesCopilot is a
+   freshness claim: it is true only when the L1 summary was re-rendered inside
+   this commit, so a true means the sections you just wrote are what the AI
+   reads. Report briefDetails.truncated when it is set — the summary was
+   clipped at 1600 characters and some committed sections are missing from it,
+   even though the rest reached the copilot. If cellsWithMarkup is non-zero,
    report it as a parser problem, as in step 3.
 
 THE HUMAN GATE: this skill STAGES one changeset. Nothing is written until a

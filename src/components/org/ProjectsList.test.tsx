@@ -26,7 +26,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => mockUse
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 const fetchAccessibleProjectsResultMock = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: (...a: unknown[]) => fetchAccessibleProjectsResultMock(...a),
   fetchAccessibleProjects: vi.fn(async () => []),
   createCloudProject: vi.fn(),

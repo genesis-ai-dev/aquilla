@@ -17,6 +17,13 @@
  *
  * AQU-240: confirm/reject buttons carry descriptive aria-labels and app tooltips that
  * explain how the action feeds the interlinear training loop.
+ *
+ * AQU-207: a decision stays on screen. The parent rebuilds the model with the
+ * new seed, and an invalidation can push the link below the display floor (or
+ * hand that source token to a different target), so the row the user just
+ * clicked would otherwise vanish — indistinguishable from the click having
+ * done nothing. Decided pairs present in this cell that the model no longer
+ * proposes are synthesized back into the list, in place, with their state.
  */
 
 import { useMemo } from "react"
@@ -28,6 +35,7 @@ import {
   alignCell,
   confirmAlignment,
   invalidateAlignment,
+  tokenize,
   CONFIDENCE_HIGH,
   CONFIDENCE_AMBER,
   MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT,
@@ -35,6 +43,8 @@ import {
   type AlignmentLink,
   type AlignmentSeed,
 } from "@/lib/completion/interlinear"
+import { alignOriginalWords, type OriginalWordAlignment } from "@/lib/completion/macula-align"
+import type { MorphWord } from "@/lib/sync/morph-read"
 import { cn } from "@/lib/utils"
 
 export interface InterlinearAlignmentPanelProps {
@@ -46,9 +56,23 @@ export interface InterlinearAlignmentPanelProps {
   alignmentModel: AlignmentModel | null
   /** Already-persisted seeds so the panel can reflect prior confirmed/invalidated state. */
   confirmedSeeds: AlignmentSeed[]
+  /** AQU-462: original-language morphology for this cell (Macula Hebrew/Greek
+   *  source files). Absent for every other kind of source — the panel then
+   *  renders exactly as it did before. */
+  originalWords?: readonly MorphWord[]
   /** Called when the user confirms or invalidates an alignment.
    *  Parent is responsible for persisting and passing a refreshed model. */
   onSeedChange: (seed: AlignmentSeed) => void
+}
+
+/**
+ * React key for a row. A decision is about the token PAIR (so the decided
+ * sets key on `src|tgt`), but a sentence that repeats a word yields one link
+ * per position with the same pair — keyed on the pair alone React logged
+ * "two children with the same key" for every "you → you" in a verse.
+ */
+function rowKey(link: AlignmentLink): string {
+  return `${link.srcIndex}:${link.srcToken}|${link.tgtIndex}:${link.tgtToken}`
 }
 
 function confidenceLabel(confidence: number): string {
@@ -64,17 +88,21 @@ function AlignmentRow({
   link,
   confirmed,
   invalidated,
+  modelled = true,
   onConfirm,
   onInvalidate,
 }: {
   link: AlignmentLink
   confirmed: boolean
   invalidated: boolean
+  /** False for a decided pair the model no longer proposes: there is no
+   *  confidence to show, only the decision. */
+  modelled?: boolean
   onConfirm: () => void
   onInvalidate: () => void
 }) {
   const t = useT()
-  const band = confidenceLabel(link.confidence)
+  const band = confirmed ? "high" : confidenceLabel(link.confidence)
   const pct = Math.round(link.confidence * 100)
 
   return (
@@ -117,19 +145,21 @@ function AlignmentRow({
         </span>
       </AppTooltip>
 
-      {/* Confidence pill */}
-      <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
-        <span
-          className={cn(
-            "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
-            band === "high"
-              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-              : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-          )}
-        >
-          {pct}%
-        </span>
-      </AppTooltip>
+      {/* Confidence pill — only for a link the model currently proposes */}
+      {modelled && (
+        <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
+          <span
+            className={cn(
+              "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
+              band === "high"
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+            )}
+          >
+            {pct}%
+          </span>
+        </AppTooltip>
+      )}
 
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && (
@@ -182,12 +212,104 @@ function AlignmentRow({
   )
 }
 
+/**
+ * AQU-462: one original-language word — its surface form, the morphology the
+ * Macula import stored for it, and the target word it maps to.
+ *
+ * Every word of the verse gets a row, including the ones the model cannot
+ * place: an interlinear that silently omits words misrepresents the verse, and
+ * the lemma/Strong's/morphology is useful on its own.
+ */
+function OriginalWordRow({ word }: { word: OriginalWordAlignment }) {
+  const t = useT()
+  const details = [word.lemma, word.strongs, word.morphCode].filter(Boolean).join(" · ")
+  const pct = Math.round(word.confidence * 100)
+
+  return (
+    <div className="flex items-baseline gap-2 rounded-md bg-muted/40 px-2 py-1 text-xs">
+      <span className="min-w-0 flex-1 truncate">
+        <span className="text-sm font-semibold" dir="auto">{word.surface}</span>
+        {details && (
+          <span className="ml-1.5 text-[10px] text-muted-foreground" dir="auto">{details}</span>
+        )}
+      </span>
+
+      <span className="shrink-0 text-muted-foreground">→</span>
+
+      <span className="min-w-0 flex-1 truncate">
+        {word.tgtToken ? (
+          <>
+            <span
+              className={cn(
+                "font-mono",
+                word.basis === "surface" ? "font-semibold" : "italic",
+              )}
+            >
+              {word.tgtToken}
+            </span>
+            {/* i18n-exempt "lemma" is an AlignmentBasis tag, not copy */}
+            {word.basis === "lemma" && (
+              <AppTooltip
+                content={t("workspace.alignment.originalViaLemmaTooltip", {
+                  lemma: word.lemma ?? word.surface,
+                })}
+                className="max-w-xs"
+              >
+                <span className="ml-1.5 rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                  {t("workspace.alignment.originalViaLemma")}
+                </span>
+              </AppTooltip>
+            )}
+          </>
+        ) : (
+          <span className="text-[10px] italic text-muted-foreground/70">
+            {t("workspace.alignment.originalNoMatch")}
+          </span>
+        )}
+      </span>
+
+      {word.tgtToken && (
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+          {pct}%
+        </span>
+      )}
+    </div>
+  )
+}
+
+function OriginalLanguageSection({ words }: { words: OriginalWordAlignment[] }) {
+  const t = useT()
+  return (
+    <div className="flex flex-col gap-1.5" data-aquilla-original-alignment>
+      <div className="flex items-center gap-1">
+        <span className="text-xs font-medium text-muted-foreground">
+          {t("workspace.alignment.originalHeading")}
+        </span>
+        <span className="text-[11px] text-muted-foreground/60">
+          {t("workspace.alignment.originalSub")}
+        </span>
+        <AppTooltip content={t("workspace.alignment.originalHelpTooltip")} className="max-w-xs">
+          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+            <HelpCircle className="h-3 w-3" />
+          </span>
+        </AppTooltip>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {words.map((word) => (
+          <OriginalWordRow key={word.wordSeq} word={word} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function InterlinearAlignmentPanel({
   sourceText,
   targetText,
   alignmentModel,
   confirmedSeeds,
   onSeedChange,
+  originalWords,
 }: InterlinearAlignmentPanelProps) {
   const t = useT()
   // AQU-241: derive whether the model has enough pairs for non-random results.
@@ -223,6 +345,20 @@ export function InterlinearAlignmentPanel({
     return allAmber.filter((l) => !highKeys.has(`${l.srcToken}|${l.tgtToken}`))
   }, [hasSufficientData, alignmentModel, sourceText, targetText, links])
 
+  // AQU-462: the original-language strip. It does NOT depend on the corpus —
+  // lemma, Strong's and morphology come from the import — so it renders even in
+  // the insufficient-data state. The target links do depend on it, so below the
+  // meaningful-alignment floor the words are shown without them rather than
+  // with guesses the rest of this panel would refuse to make.
+  const originalAlignments: OriginalWordAlignment[] = useMemo(() => {
+    if (!originalWords || originalWords.length === 0) return []
+    return alignOriginalWords(
+      originalWords,
+      targetText,
+      hasSufficientData ? alignmentModel : null,
+    )
+  }, [originalWords, targetText, hasSufficientData, alignmentModel])
+
   const confirmedSet = useMemo(() => {
     const s = new Set<string>()
     for (const seed of confirmedSeeds) {
@@ -238,6 +374,43 @@ export function InterlinearAlignmentPanel({
     }
     return s
   }, [confirmedSeeds])
+
+  // AQU-207: decided pairs in this cell that neither band proposes any more.
+  // Synthesized on the same token boundaries `alignCell` uses so the row lands
+  // where the proposal sat; no confidence — the model has none to report.
+  const decidedOnlyLinks: AlignmentLink[] = useMemo(() => {
+    if (!hasSufficientData || confirmedSeeds.length === 0) return []
+    if (!sourceText.trim() || !targetText.trim()) return []
+    const srcTokens = tokenize(sourceText)
+    const tgtTokens = tokenize(targetText)
+    const proposed = new Set<string>()
+    for (const l of links) proposed.add(`${l.srcToken}|${l.tgtToken}`)
+    for (const l of amberLinks) proposed.add(`${l.srcToken}|${l.tgtToken}`)
+    const out: AlignmentLink[] = []
+    for (const seed of confirmedSeeds) {
+      if (seed.weight === 0) continue
+      const srcToken = seed.srcToken.toLowerCase()
+      const tgtToken = seed.tgtToken.toLowerCase()
+      const key = `${srcToken}|${tgtToken}`
+      if (proposed.has(key)) continue
+      const srcIndex = srcTokens.indexOf(srcToken)
+      const tgtIndex = tgtTokens.indexOf(tgtToken)
+      if (srcIndex < 0 || tgtIndex < 0) continue
+      proposed.add(key)
+      out.push({ srcIndex, srcToken, tgtIndex, tgtToken, confidence: 0 })
+    }
+    return out
+  }, [hasSufficientData, confirmedSeeds, sourceText, targetText, links, amberLinks])
+
+  // The main list: proposals plus decided-only rows, in sentence order, so a
+  // pair keeps its place after the model stops proposing it.
+  const mainRows = useMemo(() => {
+    const rows = [
+      ...links.map((link) => ({ link, modelled: true })),
+      ...decidedOnlyLinks.map((link) => ({ link, modelled: false })),
+    ]
+    return rows.sort((a, b) => a.link.srcIndex - b.link.srcIndex || a.link.tgtIndex - b.link.tgtIndex)
+  }, [links, decidedOnlyLinks])
 
   if (!alignmentModel) return null
 
@@ -273,38 +446,52 @@ export function InterlinearAlignmentPanel({
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
           {t("workspace.alignment.insufficientData")}
         </p>
+        {originalAlignments.length > 0 && (
+          <OriginalLanguageSection words={originalAlignments} />
+        )}
       </div>
     )
   }
 
-  // With sufficient data but no links in either band: hide the section entirely.
-  if (links.length === 0 && amberLinks.length === 0) return null
+  // With sufficient data but nothing to show in either band (proposed or
+  // decided rows): hide the section entirely — unless there is an
+  // original-language strip, which stands on its own.
+  if (mainRows.length === 0 && amberLinks.length === 0 && originalAlignments.length === 0) return null
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1">
-        {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("editor.bt.alignment")}
-        </span>
-        <AppTooltip
-          content={t("workspace.alignment.helpTooltipFull")}
-          className="max-w-xs"
-        >
-          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-            <HelpCircle className="h-3 w-3" />
-          </span>
-        </AppTooltip>
-      </div>
+      {/* AQU-462: the original-language words lead, because they are the verse
+          itself; the statistical link list below is a view over them. */}
+      {originalAlignments.length > 0 && (
+        <OriginalLanguageSection words={originalAlignments} />
+      )}
 
-      {links.length > 0 && (
+      {(mainRows.length > 0 || amberLinks.length > 0) && (
+        <div className="flex items-center gap-1">
+          {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("editor.bt.alignment")}
+          </span>
+          <AppTooltip
+            content={t("workspace.alignment.helpTooltipFull")}
+            className="max-w-xs"
+          >
+            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
+              <HelpCircle className="h-3 w-3" />
+            </span>
+          </AppTooltip>
+        </div>
+      )}
+
+      {mainRows.length > 0 && (
         <div className="flex flex-col gap-0.5">
-          {links.map((link) => {
+          {mainRows.map(({ link, modelled }) => {
             const key = `${link.srcToken}|${link.tgtToken}`
             return (
               <AlignmentRow
-                key={key}
+                key={rowKey(link)}
                 link={link}
+                modelled={modelled}
                 confirmed={confirmedSet.has(key)}
                 invalidated={invalidatedSet.has(key)}
                 onConfirm={() => handleConfirm(link)}
@@ -333,7 +520,7 @@ export function InterlinearAlignmentPanel({
               const key = `${link.srcToken}|${link.tgtToken}`
               return (
                 <AlignmentRow
-                  key={key}
+                  key={rowKey(link)}
                   link={link}
                   confirmed={confirmedSet.has(key)}
                   invalidated={invalidatedSet.has(key)}

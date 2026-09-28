@@ -478,3 +478,96 @@ describe("applyDelta — routes to the injected emitters, idempotent event ids",
     for (const id of seenA) expect(seenB).not.toContain(id)
   })
 })
+
+// AQU-686 — the front-matter opt-out must survive every RE-parse.
+//
+// `importDcsResource` parses the genesis import under the project's persisted
+// `importExcludeFrontMatter`, but computeDelta/computeRepairDelta used to call
+// `route.parse()` with no options at all. Because classification is "absent
+// from currentCells ⇒ create", the option silently reversed itself on the next
+// Door43 sync: the re-parse produced book-name/header/TOC/title/intro cells the
+// adapter deliberately never imported, none of them in currentCells, so every
+// one of them came back as a create — and the repair SCAN reported a held file
+// as diverging when it was in fact exactly in sync.
+describe("front-matter opt-out survives re-parse (AQU-686)", () => {
+  // Front matter (\h, \toc1, \mt1, \ip) plus one verse. Parsed with the opt-out
+  // ON this yields ONLY the verse; with it OFF it also yields a paratext cell.
+  const FRONT_MATTER_TIT_USFM = `\\id TIT
+\\h Titus
+\\toc1 The Letter to Titus
+\\mt1 Titus
+\\ip This letter was written by Paul.
+\\c 1
+\\p
+\\v 1 Paul, a servant of God.`
+
+  const FM_CELL = dcsCellId(`${REPO}|TIT`) // the paratext/front-matter cell
+
+  /** An adapter imported WITH the opt-out on: it holds the verse and nothing else. */
+  function optedOutCurrentCells(): Map<string, CurrentCell> {
+    return new Map<string, CurrentCell>([
+      [
+        V1,
+        {
+          eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1),
+          contentHash: contentHash("Paul, a servant of God."),
+          fileId: TIT_FILE_ID,
+        },
+      ],
+    ])
+  }
+
+  function fmClient() {
+    return {
+      getCatalogEntry: vi.fn(),
+      searchCatalog: vi.fn(),
+      compareRefs: vi.fn(async () => ({ totalCommits: 1, changedFiles: [TIT_PATH] })),
+      getTree: vi.fn(async () => ["manifest.yaml", TIT_PATH]),
+      fetchRaw: vi.fn(async (_o: string, _r: string, _ref: string, path: string) =>
+        path === "manifest.yaml" ? MANIFEST_YAML : FRONT_MATTER_TIT_USFM,
+      ),
+    }
+  }
+
+  it("computeDelta does not re-create excluded front matter when the project opted out", async () => {
+    const delta = await computeDelta({
+      client: fmClient() as never,
+      cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: optedOutCurrentCells(),
+      excludeFrontMatter: true,
+    })
+    // The whole point: nothing at all to do. The verse is hash-equal and the
+    // front-matter cell is never parsed, so it can never become a create.
+    expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
+  })
+
+  it("computeDelta still imports front matter when the project did NOT opt out", async () => {
+    // Guards the AQU-634 default: the opt-out is off, the adapter never held the
+    // front-matter cell, so it is a legitimate create.
+    const delta = await computeDelta({
+      client: fmClient() as never,
+      cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: optedOutCurrentCells(),
+    })
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([FM_CELL])
+    expect(delta.commits).toEqual([])
+    expect(delta.deletes).toEqual([])
+  })
+
+  it("computeRepairDelta reports an opted-out adapter as in sync, not diverging", async () => {
+    const delta = await computeRepairDelta({
+      client: fmClient() as never,
+      entry: OLD_ENTRY,
+      currentCells: optedOutCurrentCells(),
+      excludeFrontMatter: true,
+    })
+    // Without the option this scan reported a create for every front-matter
+    // cell, so "Re-sync content" offered to re-add content the project had
+    // deliberately excluded.
+    expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
+  })
+})

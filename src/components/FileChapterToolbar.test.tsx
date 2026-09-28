@@ -12,6 +12,24 @@ beforeEach(() => {
 })
 
 describe("FileChapterToolbar draft as you read", () => {
+  it("omits Agent when the workspace does not offer its workbench", () => {
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={vi.fn()}
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[]}
+      />,
+    )
+
+    expect(screen.getByRole("tab", { name: "Text" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Audio" })).toBeVisible()
+    expect(screen.queryByRole("tab", { name: "Agent" })).toBeNull()
+  })
+
   it("offers Agent beside the Text and Audio editor modes", async () => {
     const onAgentSelect = vi.fn()
     render(

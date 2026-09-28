@@ -2,7 +2,13 @@ import type { ComponentType, HTMLAttributes } from "react"
 
 export type BrandLogoProps = HTMLAttributes<HTMLElement> & { className?: string }
 
-export type BrandId = "aquilla" | "codex" | "honeycomb" | "context"
+export type BrandId =
+  | "aquilla"
+  | "codex"
+  | "honeycomb"
+  | "context"
+  | "example-honeycomb"
+  | "example-context"
 
 export interface ThemeTokens {
   background: string

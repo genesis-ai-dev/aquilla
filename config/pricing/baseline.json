@@ -1,0 +1,19 @@
+{
+  "version": "2026-09-baseline",
+  "entitlementVersion": "2026-09-weekly",
+  "currency": "usd",
+  "experiment": null,
+  "selfServeMaxBlocks": null,
+  "products": [
+    {"key": "pro", "name": "Aquilla Pro"},
+    {"key": "max", "name": "Aquilla Max"},
+    {"key": "team", "name": "Aquilla Team"}
+  ],
+  "components": [
+    {"key": "pro", "product": "pro", "monthlyCents": 2000, "annualCents": 20000},
+    {"key": "max_5x", "product": "max", "monthlyCents": 6000, "annualCents": 60000},
+    {"key": "max_20x", "product": "max", "monthlyCents": 12000, "annualCents": 120000},
+    {"key": "team", "product": "team", "monthlyCents": 60000, "annualCents": 600000},
+    {"key": "team_20x", "product": "team", "monthlyCents": 12000, "annualCents": 120000}
+  ]
+}

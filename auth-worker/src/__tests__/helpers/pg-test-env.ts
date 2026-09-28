@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
+import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -37,11 +38,45 @@ function pgliteExecutor(db: PGlite): PgExecutor {
   return wrap(db)
 }
 
+// Minimal in-memory stand-in for the `aquilla-snapshots` R2 bucket. The PGlite
+// env has no real R2 binding, and routes that read it (admin migration-status)
+// need one to exercise anything past their "bucket unbound → 503" guard.
+// Implements only what those routes touch; suites that assert the unbound
+// branch pass `SNAPSHOTS: undefined` in their own per-request env override.
+const snapshotObjects = new Map<string, Uint8Array>()
+
+export const snapshotsBucket = {
+  async put(key: string, value: ArrayBuffer | ArrayBufferView | string): Promise<void> {
+    snapshotObjects.set(
+      key,
+      typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : ArrayBuffer.isView(value)
+          ? new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
+          : new Uint8Array(value),
+    )
+  },
+  async get(key: string) {
+    const bytes = snapshotObjects.get(key)
+    if (!bytes) return null
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    return {
+      arrayBuffer: async () => buffer as ArrayBuffer,
+      text: async () => new TextDecoder().decode(bytes),
+      json: async <T>() => JSON.parse(new TextDecoder().decode(bytes)) as T,
+    }
+  },
+  async delete(keys: string | string[]): Promise<void> {
+    for (const key of Array.isArray(keys) ? keys : [keys]) snapshotObjects.delete(key)
+  },
+}
+
 // The worker reads these off c.env. Mirrors auth-worker/wrangler.toml [vars].
 // Platform-admin identity is by email — the seeded "root" user gets
 // root@example.com (see seedUser), so that's the test allowlist.
 export const env = {
   AQUILLA_PG: new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb,
+  SNAPSHOTS: snapshotsBucket as unknown as R2Bucket,
   SECRET_KEY: "frontier-test-secret",
   SYNC_SECRET_KEY: "sync-secret",
   ALGORITHM: "HS256",
@@ -79,14 +114,18 @@ export const env = {
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */
 export async function initTestSchema(): Promise<void> {
   await pg.exec(SCHEMA)
+  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
+  await installTestLaneFill((sql) => pg.exec(sql))
 }
 
-/** Truncate every app table + reset identities between tests. */
+/** Truncate every app table + reset identities, and empty the R2 stub, between tests. */
 export async function resetTestDb(): Promise<void> {
+  snapshotObjects.clear()
   await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
     FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
       EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
     END LOOP; END $$;`)
+  await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
 }
 
 /** No-op: D1 migrations are replaced by the Postgres schema load (initTestSchema). */

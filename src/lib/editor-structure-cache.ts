@@ -1,6 +1,7 @@
 import type { CellData } from "@/hooks/useCells"
 import { deriveParagraphs } from "./parsers/paragraphs"
 import { importDisplayLabel } from "./scripture-reference"
+import { isStructuralCell } from "./cells/structural"
 
 type StructuralCell = Pick<CellData, "fileId" | "type" | "metadata" | "paragraphStart" | "status">
 interface Entry {
@@ -40,7 +41,7 @@ export function createEditorStructureCache() {
         }
         const next: Entry = {
           version,
-          numbered: view.type !== "paratext" && view.type !== "heading" && importDisplayLabel(view.metadata) !== null,
+          numbered: !isStructuralCell(view.type) && importDisplayLabel(view.metadata) !== null,
           fileId: view.fileId,
           paragraphStart: view.paragraphStart === true,
           validated: view.status === "validated",

@@ -1,0 +1,204 @@
+{
+  "personal": {
+    "id": "bpc_1UFaLs7SR91OrWMSnutbMG9O",
+    "object": "billing_portal.configuration",
+    "active": true,
+    "application": null,
+    "business_profile": {
+      "headline": null,
+      "privacy_policy_url": null,
+      "terms_of_service_url": null
+    },
+    "created": 1789394120,
+    "default_return_url": null,
+    "features": {
+      "customer_update": {
+        "allowed_updates": [],
+        "enabled": false
+      },
+      "invoice_history": {
+        "enabled": true
+      },
+      "payment_method_update": {
+        "enabled": true,
+        "payment_method_configuration": null
+      },
+      "subscription_cancel": {
+        "cancellation_reason": {
+          "enabled": false,
+          "feedback_options": [],
+          "options": [
+            "too_expensive",
+            "missing_features",
+            "switched_service",
+            "unused",
+            "other"
+          ]
+        },
+        "enabled": true,
+        "mode": "at_period_end",
+        "proration_behavior": "none"
+      },
+      "subscription_pause": {
+        "enabled": false
+      },
+      "subscription_update": {
+        "billing_cycle_anchor": "unchanged",
+        "default_allowed_updates": [
+          "price"
+        ],
+        "enabled": true,
+        "products": [
+          {
+            "adjustable_quantity": {
+              "enabled": false,
+              "maximum": null,
+              "minimum": 1
+            },
+            "prices": [
+              "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "price_1UFaJO7SR91OrWMS80302i9S"
+            ],
+            "product": "prod_VG6WxGbN40ZhVl"
+          },
+          {
+            "adjustable_quantity": {
+              "enabled": false,
+              "maximum": null,
+              "minimum": 1
+            },
+            "prices": [
+              "price_1UFaJO7SR91OrWMS4wUWfNLB",
+              "price_1UFaJP7SR91OrWMSn9Z6QvkP"
+            ],
+            "product": "prod_VG6W6C2JBJgl1g"
+          },
+          {
+            "adjustable_quantity": {
+              "enabled": false,
+              "maximum": null,
+              "minimum": 1
+            },
+            "prices": [
+              "price_1UFaJQ7SR91OrWMST7tsJqAi",
+              "price_1UFaJQ7SR91OrWMSUd3NJrvb"
+            ],
+            "product": "prod_VG6WVL0lYU8DnM"
+          }
+        ],
+        "proration_behavior": "always_invoice",
+        "schedule_at_period_end": {
+          "conditions": []
+        },
+        "trial_update_behavior": "end_trial"
+      }
+    },
+    "is_default": false,
+    "livemode": false,
+    "login_page": {
+      "enabled": false,
+      "url": null
+    },
+    "metadata": {
+      "purpose": "native-plan-change-probe",
+      "ticket": "AQU-837"
+    },
+    "name": "Aquilla personal native plan-change probe",
+    "updated": 1789394607
+  },
+  "team": {
+    "id": "bpc_1UFaLs7SR91OrWMSCZXi6WlL",
+    "object": "billing_portal.configuration",
+    "active": true,
+    "application": null,
+    "business_profile": {
+      "headline": null,
+      "privacy_policy_url": null,
+      "terms_of_service_url": null
+    },
+    "created": 1789394120,
+    "default_return_url": null,
+    "features": {
+      "customer_update": {
+        "allowed_updates": [],
+        "enabled": false
+      },
+      "invoice_history": {
+        "enabled": true
+      },
+      "payment_method_update": {
+        "enabled": true,
+        "payment_method_configuration": null
+      },
+      "subscription_cancel": {
+        "cancellation_reason": {
+          "enabled": false,
+          "feedback_options": [],
+          "options": [
+            "too_expensive",
+            "missing_features",
+            "switched_service",
+            "unused",
+            "other"
+          ]
+        },
+        "enabled": true,
+        "mode": "at_period_end",
+        "proration_behavior": "none"
+      },
+      "subscription_pause": {
+        "enabled": false
+      },
+      "subscription_update": {
+        "billing_cycle_anchor": "unchanged",
+        "default_allowed_updates": [
+          "price"
+        ],
+        "enabled": true,
+        "products": [
+          {
+            "adjustable_quantity": {
+              "enabled": false,
+              "maximum": null,
+              "minimum": 1
+            },
+            "prices": [
+              "price_1UFaJR7SR91OrWMSYtkfZa4M",
+              "price_1UFaJR7SR91OrWMSIjsC1gbR"
+            ],
+            "product": "prod_VG6WUXf1fimEq2"
+          },
+          {
+            "adjustable_quantity": {
+              "enabled": false,
+              "maximum": null,
+              "minimum": 1
+            },
+            "prices": [
+              "price_1UFaJS7SR91OrWMSmeb6WWVV",
+              "price_1UFaJS7SR91OrWMSyuIbTSMx"
+            ],
+            "product": "prod_VG6WUgEcQ6SPqd"
+          }
+        ],
+        "proration_behavior": "always_invoice",
+        "schedule_at_period_end": {
+          "conditions": []
+        },
+        "trial_update_behavior": "end_trial"
+      }
+    },
+    "is_default": false,
+    "livemode": false,
+    "login_page": {
+      "enabled": false,
+      "url": null
+    },
+    "metadata": {
+      "purpose": "native-plan-change-probe",
+      "ticket": "AQU-837"
+    },
+    "name": "Aquilla team native plan-change probe",
+    "updated": 1789394608
+  }
+}

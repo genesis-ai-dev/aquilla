@@ -12,11 +12,37 @@ import {
 } from "@/lib/richtext/idml-style-display"
 import {
   segmentUsfmForDisplay,
+  type UsfmInlineMark,
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
 import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
 import type { Concept } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+/**
+ * Renders a USFM display segment with the inline styling its character
+ * markers carried (AQU-578). `segmentUsfmForDisplay` unwraps `\bd`/`\it`/
+ * `\bdit`/`\em`/`\add`/`\sc`/`\nd`/`\sup` and reports them as `marks`; without
+ * this wrapper the source column showed bold and italic source text as plain.
+ *
+ * Nesting order is fixed (strong → em → small-caps → sup) so the same marks
+ * always produce the same DOM regardless of the order the markers opened in.
+ */
+export function UsfmMarkedText({
+  marks,
+  children,
+}: {
+  marks: readonly UsfmInlineMark[]
+  children: ReactNode
+}) {
+  if (marks.length === 0) return <>{children}</>
+  let node: ReactNode = children
+  if (marks.includes("superscript")) node = <sup>{node}</sup>
+  if (marks.includes("small-caps")) node = <span style={{ fontVariantCaps: "small-caps" }}>{node}</span>
+  if (marks.includes("italic")) node = <em>{node}</em>
+  if (marks.includes("bold")) node = <strong>{node}</strong>
+  return <>{node}</>
+}
 
 export function UsfmNoteChip({
   note,
@@ -202,7 +228,11 @@ export function EditorPlainReadText({
       )
       return
     }
-    parts.push(<span key={`text-${index}`}>{segment.text}</span>)
+    parts.push(
+      <UsfmMarkedText key={`text-${index}`} marks={segment.marks}>
+        <span>{segment.text}</span>
+      </UsfmMarkedText>,
+    )
   })
 
   return <div>{parts}</div>

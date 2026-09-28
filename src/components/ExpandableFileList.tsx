@@ -33,6 +33,9 @@ interface Props {
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
   validationCount: number
+  /** AQU-1083: the project's effective structural-cell policy, forwarded to
+   *  each expanded file's section grid so a flip revalidates its snapshot. */
+  countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
   /** Storage lane used when exporting translated source files. */
   targetLang?: string
@@ -70,7 +73,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -319,6 +322,7 @@ export function ExpandableFileList({
                               projectId={projectId}
                               fileId={file.id}
                               validationCount={validationCount}
+                              countStructural={countStructural}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}

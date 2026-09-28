@@ -63,16 +63,23 @@ const TOOL_LABEL_KEY: Record<ToolKind, MessageKey> = {
   draft: "agent.run.tool.draft",
 }
 
-function ToolChip({ item }: { item: ToolItem }) {
+function ToolChip({
+  item,
+  open,
+  onToggle,
+}: {
+  item: ToolItem
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useT()
-  const [open, setOpen] = useState(false)
   const Icon = TOOL_ICON[item.tool] ?? Database
   const labelKey = TOOL_LABEL_KEY[item.tool]
   return (
     <div className="rounded-md border bg-muted/30">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         aria-expanded={open}
         className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
@@ -95,6 +102,27 @@ function ToolChip({ item }: { item: ToolItem }) {
           {item.resultSummary}
         </pre>
       )}
+    </div>
+  )
+}
+
+/**
+ * One tool step in the timeline: the chip, plus the rich card the registry
+ * renders for it (e.g. PassageCard's row table).
+ *
+ * AQU-842: the card is COLLAPSED with the chip. Tool result tables used to
+ * render expanded on every step, which buried the agent's prose under
+ * screenfuls of rows; one click on the chip now reveals an individual card.
+ * The card stays MOUNTED while hidden so its own view state (side toggle,
+ * chapter navigation, the file's fetched rows) survives a collapse — and so
+ * the activity note it already reported still matches what re-expanding shows.
+ */
+function ToolTimelineItem({ item, card }: { item: ToolItem; card: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col gap-1">
+      <ToolChip item={item} open={open} onToggle={() => setOpen((v) => !v)} />
+      {card ? <div hidden={!open}>{card}</div> : null}
     </div>
   )
 }
@@ -154,15 +182,8 @@ export function AgentRunView({
                 </MessageContent>
               </Message>
             ) : null
-          case "tool": {
-            const card = renderToolCard?.(item)
-            return (
-              <div key={item.id} className="flex flex-col gap-1">
-                <ToolChip item={item} />
-                {card}
-              </div>
-            )
-          }
+          case "tool":
+            return <ToolTimelineItem key={item.id} item={item} card={renderToolCard?.(item)} />
           case "proposal":
             return renderProposal ? (
               <div key={item.id}>{renderProposal(item.proposal)}</div>

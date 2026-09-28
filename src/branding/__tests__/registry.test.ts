@@ -13,11 +13,25 @@ const TOKEN_KEYS: Array<keyof ThemeTokens> = [
 ]
 
 describe("brand registry", () => {
-  it("exposes exactly the four expected brands", () => {
-    expect(BRAND_IDS.sort()).toEqual(["aquilla", "codex", "context", "honeycomb"])
+  it("exposes product brands and generic white-label examples", () => {
+    expect(BRAND_IDS.sort()).toEqual([
+      "aquilla",
+      "codex",
+      "context",
+      "example-context",
+      "example-honeycomb",
+      "honeycomb",
+    ])
   })
 
-  for (const id of ["aquilla", "codex", "honeycomb", "context"] as const) {
+  for (const id of [
+    "aquilla",
+    "codex",
+    "honeycomb",
+    "context",
+    "example-honeycomb",
+    "example-context",
+  ] as const) {
     it(`${id} has complete copy, logo, and theme tokens`, () => {
       const b = BRANDS[id]
       expect(b.id).toBe(id)

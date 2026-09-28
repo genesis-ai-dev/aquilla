@@ -208,10 +208,15 @@ Live ai_drafted state (not yet human-touched): cells.ai_drafted = 1.`
 
 const ASSIGNMENTS = `# Assignments cookbook — who is working on what
 
+The \`users\` table is not readable through this tool (every account on the
+platform, not just this project's — see sql-guard.ts BANNED_TABLES). Use
+assignee_user_id / user_id as opaque numeric ids; resolve a name only if the
+conversation already gave you one, or ask the user.
+
 Active assignments:
-SELECT a.assignment_id, u.username, a.scope_label, a.cells_total,
+SELECT a.assignment_id, a.assignee_user_id, a.scope_label, a.cells_total,
        a.deadline, a.note, a.completed_at
-FROM assignments a JOIN users u ON u.id = a.assignee_user_id
+FROM assignments a
 WHERE a.project_id = :project AND a.unassigned_at IS NULL
 ORDER BY a.created_at DESC LIMIT 50
 
@@ -226,8 +231,8 @@ WHERE ac.assignment_id = '#e1'
 (assignment_id values come back from the first query; aliases work.)
 
 Members you can assign to:
-SELECT u.id, u.username, pm.role_level
-FROM project_members pm JOIN users u ON u.id = pm.user_id
+SELECT pm.user_id, pm.role_level
+FROM project_members pm
 WHERE pm.project_id = :project ORDER BY pm.role_level DESC
 
 Creating one (PROJECT_LEAD+). scopeKind 'books' = whole file(s);

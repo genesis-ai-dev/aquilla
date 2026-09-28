@@ -600,4 +600,52 @@ describe("vttToTargetRows", () => {
   it("returns an empty array for a header-only file so the panel can show its no-cues error", () => {
     expect(vttToTargetRows("WEBVTT\n")).toEqual([])
   })
+  it("keeps a short-form cue instead of losing it with its words", () => {
+    const vtt = [
+      "WEBVTT",
+      "",
+      "1",
+      "01:03.209 --> 01:03.667",
+      "Abba?",
+      "",
+      "2",
+      "00:01:06.626 --> 00:01:07.751",
+      "You should be sleeping, little one.",
+    ].join("\n")
+    expect(vttToTargetRows(vtt)).toEqual([
+      { ref: "00:01:03.209 --> 00:01:03.667", text: "Abba?" },
+      { ref: "00:01:06.626 --> 00:01:07.751", text: "You should be sleeping, little one." },
+    ])
+  })
+
+  it("a short-form cue mid-file leaves every later cue on its own cell", () => {
+    // The alignment consequence, which is what actually bites: a cue the
+    // parser refuses is not a blank row, it is one FEWER row — so every later
+    // translation slides up one cell, and on a 500-row review screen the only
+    // tell is mismatched source text.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:02.000",
+      "first",
+      "",
+      "1:03.209 --> 1:03.667",
+      "second",
+      "",
+      "00:02:00.000 --> 00:02:01.000",
+      "third",
+    ].join("\n")
+    const result = matchTargetRowsByOrder(vttToTargetRows(vtt), [
+      cell({ cellId: "c1" }),
+      cell({ cellId: "c2" }),
+      cell({ cellId: "c3" }),
+    ])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "first"],
+      ["c2", "second"],
+      ["c3", "third"],
+    ])
+    expect(result.unmatchedSourceCount).toBe(0)
+  })
+
 })

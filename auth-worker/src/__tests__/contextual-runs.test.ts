@@ -597,6 +597,149 @@ describe("staged drafts", () => {
     expect(overview.files.find((row) => row.runId === spanishOwner.id)?.proposedDrafts).toBe(1)
   })
 
+  // AQU-1301: the overview must say WHERE to start, not just how far behind the
+  // reviewer is. These pin the parked-passage split the header leads with.
+  describe("parked-passage split (AQU-1301)", () => {
+    async function stageSpan(
+      runId: string,
+      fileId: string,
+      spanId: string,
+      spanLabel: string,
+      cellIds: string[],
+    ) {
+      await insertDrafts(db, {
+        runId,
+        projectId: PROJECT,
+        fileId,
+        drafts: cellIds.map((cellId) => ({
+          cellId,
+          text: `draft ${cellId}`,
+          provenance: { spanId },
+        })),
+      })
+      await appendContextualRunEvent(db, {
+        runId,
+        projectId: PROJECT,
+        fileId,
+        kind: "drafts_staged",
+        spanId,
+        spanLabel,
+      })
+    }
+
+    it("reports the last span staged as the current passage, with the rest as backlog", async () => {
+      const run = await newRun({ fileId: "file-split-a" })
+      await stageSpan(run.id, "file-split-a", "span-1", "MRK 1:1–1:4", ["a1", "a2", "a3"])
+      await stageSpan(run.id, "file-split-a", "span-2", "MRK 2:1–2:2", ["a4", "a5"])
+
+      const overview = await getProjectAutopilotSummary(db, PROJECT)
+      const row = overview.files.find((f) => f.runId === run.id)
+      expect(row?.currentSpanId).toBe("span-2")
+      expect(row?.currentSpanLabel).toBe("MRK 2:1–2:2")
+      expect(row?.currentSpanDrafts).toBe(2)
+      // The other three are backlog, reachable but not in the reviewer's face.
+      expect(row?.proposedDrafts).toBe(5)
+    })
+
+    it("counts only the current span even when a later span staged fewer drafts", async () => {
+      const run = await newRun({ fileId: "file-split-b" })
+      await stageSpan(run.id, "file-split-b", "span-1", "LUK 1:1–1:10",
+        Array.from({ length: 10 }, (_, i) => `b${i}`))
+      await stageSpan(run.id, "file-split-b", "span-2", "LUK 2:1", ["b-last"])
+
+      const row = (await getProjectAutopilotSummary(db, PROJECT)).files
+        .find((f) => f.runId === run.id)
+      expect(row?.currentSpanDrafts).toBe(1)
+      expect(row?.proposedDrafts).toBe(11)
+    })
+
+    it("reports no current passage once every draft is reviewed", async () => {
+      const run = await newRun({ fileId: "file-split-c" })
+      await stageSpan(run.id, "file-split-c", "span-1", "JHN 1:1", ["c1"])
+      const [staged] = await listDraftsByRun(db, PROJECT, run.id)
+      await reviewDraft(db, { id: staged.id, action: "rejected", reviewedBy: "tester" })
+
+      const row = (await getProjectAutopilotSummary(db, PROJECT)).files
+        .find((f) => f.runId === run.id)
+      expect(row?.currentSpanId).toBeNull()
+      expect(row?.currentSpanDrafts).toBe(0)
+    })
+
+    it("still reports the passage count when the run logged no label for it", async () => {
+      const run = await newRun({ fileId: "file-split-d" })
+      await insertDrafts(db, {
+        runId: run.id,
+        projectId: PROJECT,
+        fileId: "file-split-d",
+        drafts: [{ cellId: "d1", text: "draft d1", provenance: { spanId: "span-x" } }],
+      })
+
+      const row = (await getProjectAutopilotSummary(db, PROJECT)).files
+        .find((f) => f.runId === run.id)
+      expect(row?.currentSpanId).toBe("span-x")
+      // A missing label degrades to "this passage" in the UI — it must never
+      // take the draft count down with it.
+      expect(row?.currentSpanLabel).toBeNull()
+      expect(row?.currentSpanDrafts).toBe(1)
+    })
+
+    it("buckets provenance-less drafts as one unlabelled passage, not as a span", async () => {
+      const run = await newRun({ fileId: "file-split-e" })
+      await insertDrafts(db, {
+        runId: run.id,
+        projectId: PROJECT,
+        fileId: "file-split-e",
+        drafts: [
+          { cellId: "e1", text: "draft e1" },
+          { cellId: "e2", text: "draft e2" },
+        ],
+      })
+
+      const row = (await getProjectAutopilotSummary(db, PROJECT)).files
+        .find((f) => f.runId === run.id)
+      expect(row?.currentSpanId).toBeNull()
+      expect(row?.currentSpanDrafts).toBe(2)
+    })
+
+    it("sums the per-run current passages into the project rollup", async () => {
+      const first = await newRun({ fileId: "file-split-f" })
+      const second = await newRun({ fileId: "file-split-g" })
+      await stageSpan(first.id, "file-split-f", "span-f1", "ACT 1:1–1:3", ["f1", "f2", "f3"])
+      await stageSpan(first.id, "file-split-f", "span-f2", "ACT 2:1", ["f4"])
+      await stageSpan(second.id, "file-split-g", "span-g1", "ROM 1:1–1:2", ["g1", "g2"])
+
+      const overview = await getProjectAutopilotSummary(db, PROJECT)
+      const rows = overview.files.filter((f) => f.runId === first.id || f.runId === second.id)
+      const expected = rows.reduce((n, f) => n + f.currentSpanDrafts, 0)
+      expect(expected).toBe(3) // 1 from the first run's current span + 2 from the second's
+      expect(overview.currentSpanDrafts).toBeGreaterThanOrEqual(expected)
+    })
+
+    it("does not let another run's event supply this run's passage label", async () => {
+      const mine = await newRun({ fileId: "file-split-h" })
+      const other = await newRun({ fileId: "file-split-i" })
+      // Same span id, different run — the label join must be run-scoped.
+      await appendContextualRunEvent(db, {
+        runId: other.id,
+        projectId: PROJECT,
+        fileId: "file-split-i",
+        kind: "drafts_staged",
+        spanId: "span-shared",
+        spanLabel: "WRONG 9:9",
+      })
+      await insertDrafts(db, {
+        runId: mine.id,
+        projectId: PROJECT,
+        fileId: "file-split-h",
+        drafts: [{ cellId: "h1", text: "draft h1", provenance: { spanId: "span-shared" } }],
+      })
+
+      const row = (await getProjectAutopilotSummary(db, PROJECT)).files
+        .find((f) => f.runId === mine.id)
+      expect(row?.currentSpanLabel).toBeNull()
+    })
+  })
+
   it("a re-propose supersedes the old proposed row in the same batch (partial UNIQUE holds)", async () => {
     const run = await newRun()
     const first = await insertDrafts(db, {

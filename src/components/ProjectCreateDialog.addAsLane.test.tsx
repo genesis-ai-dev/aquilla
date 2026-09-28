@@ -86,6 +86,14 @@ const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
+async function pickCorpusSource() {
+  fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
+}
+
+async function pickCorpusTarget() {
+  fireEvent.click(screen.getByRole("radio", { name: /^One of its Targets/i }))
+}
+
 async function openLinkedTargetWithUpstream(optionName: RegExp) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
@@ -132,7 +140,10 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
   it("renders the recommendation for linked-target + consumes=source with an upstream chosen", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
 
-    // Defaults to consumes="source" — no need to click the radio.
+    // Corpus choice is not prefilled — pick Its Source to reveal the panel.
+    expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
+    pickCorpusSource()
+
     const panel = screen.getByTestId("add-as-lane-panel")
     expect(panel).toBeTruthy()
     expect(screen.getByTestId("add-as-lane-btn")).toBeTruthy()
@@ -142,10 +153,39 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(within(panel).getAllByText(/English Source/i).length).toBeGreaterThan(0)
   })
 
+  it("scrolls the recommendation into view when it appears", async () => {
+    const scrollIntoView = vi.fn()
+    const previous = Element.prototype.scrollIntoView
+    // happy-dom does not implement Element.scrollIntoView; stub it so we can
+    // assert the mount-time nudge that keeps the panel from landing below
+    // the DialogBody fold.
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+      writable: true,
+    })
+
+    try {
+      await openLinkedTargetWithUpstream(/English Source/i)
+      pickCorpusSource()
+      expect(screen.getByTestId("add-as-lane-panel")).toBeTruthy()
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalled()
+      })
+    } finally {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: previous,
+        writable: true,
+      })
+    }
+  })
+
   it("never shows the recommendation for the chain case (consumes=target)", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
 
-    fireEvent.click(screen.getByText(/Its translations/i))
+    pickCorpusTarget()
 
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
     expect(screen.queryByTestId("add-as-lane-btn")).toBeNull()
@@ -162,8 +202,29 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(screen.queryByTestId("add-as-lane-btn")).toBeNull()
   })
 
+  it("does not show the recommendation on self-contained clone + Its Source", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+      target: { value: "French Episode 1" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
+      target: { value: "English" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), {
+      target: { value: "French" },
+    })
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    // Self Contained is already checked — pick an upstream to reveal corpus choice.
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+    pickCorpusSource()
+
+    expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
+  })
+
   it("clicking 'Add as lane' PATCHes the UPSTREAM project's targetLanes and does NOT create a project", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
+    pickCorpusSource()
 
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
@@ -201,12 +262,49 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     mockPatchProjectSettings.mockResolvedValueOnce({ kind: "forbidden", required: 600, role: 400 })
 
     await openLinkedTargetWithUpstream(/English Source/i)
+    pickCorpusSource()
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
       expect(screen.getByText(/need maintainer access/i)).toBeTruthy()
     })
     expect(mockCreateCloudProject).not.toHaveBeenCalled()
+  })
+
+  it("allows adding the upstream's primary language when it is not yet a registered lane", async () => {
+    mockFetchProjectSettings.mockResolvedValueOnce({
+      version: 3,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: { targetLanguage: "English", targetLanes: ["es"] },
+    })
+
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+      target: { value: "English Episode 1" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
+      target: { value: "English" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), {
+      target: { value: "English" },
+    })
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+    pickCorpusSource()
+    fireEvent.click(screen.getByTestId("add-as-lane-btn"))
+
+    await waitFor(() => {
+      expect(mockPatchProjectSettings).toHaveBeenCalledWith(
+        "tok",
+        "upstream-1",
+        { targetLanes: ["es", "English"] },
+        3,
+      )
+    })
+    expect(screen.queryByText(/already .* default target language/i)).toBeNull()
   })
 
   it("rejects a duplicate/case-insensitive lane before PATCHing", async () => {
@@ -218,6 +316,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     })
 
     await openLinkedTargetWithUpstream(/English Source/i)
+    pickCorpusSource()
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
@@ -228,6 +327,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
   it("disables the button below maintainer when the upstream's role is known", async () => {
     await openLinkedTargetWithUpstream(/Low Role Upstream/i)
+    pickCorpusSource()
 
     const btn = screen.getByTestId("add-as-lane-btn") as HTMLButtonElement
     expect(btn.disabled).toBe(true)

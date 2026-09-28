@@ -35,7 +35,52 @@ export interface SectionProgressDetailResponse {
   sectionKey: string
   revision: number
   validationCount: number
-  verses: Array<{ ref: string; filled: boolean; validated: boolean }>
+  /**
+   * AQU-1278: `cellId` is the SOURCE cell's id, which the plan board turns into
+   * an editor deep link (?cellId=<id>) at the first outstanding cell.
+   *
+   * OPTIONAL, because a CACHE is not the only way to meet an older shape. The
+   * section ETag's marker does stop a stale body being revalidated into a new
+   * client — but the client and the workers deploy separately, and
+   * `deploy:aquilla` ships the SPA first, so for the length of a deploy a new
+   * client talks to a worker that never sent this field at all. Typed as
+   * required, every chip in that window carried `undefined`: React saw one
+   * repeated key across the strip, and a click promised a verse and opened the
+   * file. `shortVerses` drops a verse that has no cell id, so the strip is
+   * empty rather than dishonest, and the card's header still says how many
+   * cells are short.
+   */
+  verses: Array<{
+    cellId?: string
+    ref: string
+    filled: boolean
+    validated: boolean
+    /**
+     * AQU-1278, round 5: the verse's own takes, so the chapter card can list
+     * unrecorded verses. Optional on the wire — a worker from before the
+     * `s3` section shape sends neither, and an absent flag must read as
+     * "unknown", never as "outstanding".
+     */
+    recorded?: boolean
+    audioValidated?: boolean
+  }>
+}
+
+/** The queue a plan link lands in. Mirrors the sync worker's `PLAN_OPEN_KINDS`. */
+export type PlanOpenKind = "untranslated" | "unvalidated" | "unrecorded" | "unsigned"
+/**
+ * Everywhere a plan link can land: a queue, or `first` — the unit's first cell
+ * in document order whatever its state, which is how a BOOK inside a Scripture
+ * file is opened (the editor deep-links to cells and nothing else). Mirrors
+ * the sync worker's `PLAN_LANDING_KINDS`.
+ */
+export type PlanLandingKind = PlanOpenKind | "first"
+
+export interface PlanFirstOpenResponse {
+  fileId: string
+  unit: string
+  kind: PlanLandingKind
+  cellId: string | null
 }
 
 interface ProgressCacheEntry {
@@ -382,6 +427,13 @@ export function useFileProgressResource(
   )
   useEffect(() => {
     if (!projectId || !fileId || !getTokenForFile) return
+    // AQU-350: the sidebar row this hook backs is unmounted and remounted on
+    // every dock-tab switch, so without a freshness gate each switch fires one
+    // conditional GET per expanded file. Match prefetchFileProgress's policy —
+    // the module-level record survives the unmount, so fresh progress is
+    // already on screen and the request would only ever return a 304.
+    const existing = resourceFor(projectId, fileId, lane)
+    if (existing.progress != null && Date.now() - existing.fetchedAt < PREFETCH_FRESH_MS) return
     void loadResource(projectId, fileId, () => getTokenForFile(fileId), false, lane)
   }, [fileId, getTokenForFile, projectId, lane])
   useEffect(() => {
@@ -511,6 +563,33 @@ export async function getFileSectionProgress(
   )
   if (!response.ok) throw new Error(`section progress read failed: HTTP ${response.status}`)
   return await response.json() as SectionProgressDetailResponse
+}
+
+/**
+ * AQU-1278, round 5: the first cell of a unit that is outstanding in one
+ * queue — where "Go to first …" lands — or, with `first`, the unit's first
+ * cell full stop. `unit` is the unit's section key ('' for a whole file). Null
+ * means nothing in that queue, and the caller opens the file instead. Never
+ * cached: it is asked on a click, about to be acted on.
+ */
+export async function getPlanFirstOpenCell(
+  projectId: string,
+  fileId: string,
+  unit: string,
+  kind: PlanLandingKind,
+  getTokenForFile: (fileId: string) => Promise<string | null>,
+  lane = '',
+): Promise<string | null> {
+  const token = await getTokenForFile(fileId)
+  if (!token) throw new Error('progress token unavailable')
+  const params = new URLSearchParams({ unit, kind })
+  if (lane) params.set('lane', lane)
+  const response = await fetch(
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/progress/first-open?${params}`,
+    { headers: { Authorization: `Bearer ${token}` }, signal: timeoutSignal(REQUEST_TIMEOUT_MS) },
+  )
+  if (!response.ok) throw new Error(`first-open read failed: HTTP ${response.status}`)
+  return ((await response.json()) as PlanFirstOpenResponse).cellId
 }
 
 export async function resetFileProgressResourceForTests(): Promise<void> {

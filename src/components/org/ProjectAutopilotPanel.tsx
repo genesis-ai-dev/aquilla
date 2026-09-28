@@ -171,7 +171,18 @@ function primaryLine(
     return t("autopilot.overview.queuedPassages", { count: remaining })
   }
   if (state === "idle") return t("autopilot.overview.idle")
-  if (state === "review") return t("autopilot.overview.reviewDrafts", { count: overview.proposedDrafts })
+  if (state === "review") {
+    // AQU-1301: name the passage the run is parked on rather than a total that
+    // says how far behind the reviewer is and nothing about where to start.
+    const review = reviewSplit(overview)
+    if (review.spanLabel) {
+      return t("autopilot.overview.reviewAtPassage", {
+        spanLabel: review.spanLabel,
+        count: review.actionable,
+      })
+    }
+    return t("autopilot.overview.reviewDrafts", { count: overview.proposedDrafts })
+  }
   if (state === "complete") return t("autopilot.overview.complete")
   if (state === "stopped") return t("autopilot.overview.stopped")
   return t("autopilot.overview.notStarted")
@@ -236,11 +247,14 @@ function ActionWidget({
   label,
   ariaLabel,
   count,
+  detail,
   onClick,
 }: {
   label: string
   ariaLabel: string
   count: number
+  /** Second line: the backlog behind the headline number, when there is one. */
+  detail?: string | null
   onClick: () => void
 }) {
   return (
@@ -251,10 +265,42 @@ function ActionWidget({
       aria-label={ariaLabel}
       onClick={onClick}
     >
-      <span className="min-w-0"><span className="block text-lg font-semibold tabular-nums">{count}</span><span className="block text-xs text-muted-foreground">{label}</span></span>
+      <span className="min-w-0">
+        <span className="block text-lg font-semibold tabular-nums">{count}</span>
+        <span className="block text-xs text-muted-foreground">{label}</span>
+        {detail && <span className="block text-xs text-muted-foreground">{detail}</span>}
+      </span>
       <ChevronRight data-icon="inline-end" aria-hidden />
     </Button>
   )
+}
+
+/**
+ * The review tile's two numbers (AQU-1301): what is actionable now — the
+ * drafts sitting in the passages the runs parked on — and how much is queued
+ * behind them. A server that predates the split reports no
+ * `currentSpanDrafts`, and the tile falls back to the flat total rather than
+ * claiming a passage breakdown it does not have.
+ */
+function reviewSplit(overview: ContextualOverview): {
+  actionable: number
+  backlog: number
+  /** The parked passage's reference, when exactly one run is parked. */
+  spanLabel: string | null
+} {
+  const total = overview.proposedDrafts
+  if (typeof overview.currentSpanDrafts !== "number") {
+    return { actionable: total, backlog: 0, spanLabel: null }
+  }
+  const actionable = Math.min(overview.currentSpanDrafts, total)
+  const parked = overview.files.filter((file) => (file.currentSpanDrafts ?? 0) > 0)
+  return {
+    actionable,
+    backlog: Math.max(0, total - actionable),
+    // Naming one passage is only honest when there IS one. Several parked
+    // files get the count and the per-file rows below, not a guess.
+    spanLabel: parked.length === 1 ? parked[0]?.currentSpanLabel ?? null : null,
+  }
 }
 
 /** The prerequisites the server refuses to start without (AQU-827), rendered
@@ -403,6 +449,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
     ? overview.totalSpans
     : progressFiles.reduce((total, file) => total + file.totalSpans, 0)
   const workingFileCount = new Set(progressFiles.map((file) => file.fileId)).size
+  const review = reviewSplit(overview)
   const attentionItems = countAttentionItems(overview.files)
   const suggestionCount = overview.readiness?.items.filter((item) => item.level !== "ready").length ?? 0
   const hasBlockingRun = overview.files.some((file) =>
@@ -448,8 +495,11 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <ActionWidget
               label={t("autopilot.overview.widget.reviewLabel")}
-              ariaLabel={t("autopilot.overview.widget.reviewAria", { count: overview.proposedDrafts })}
-              count={overview.proposedDrafts}
+              ariaLabel={t("autopilot.overview.widget.reviewAria", { count: review.actionable })}
+              count={review.actionable}
+              detail={review.backlog > 0
+                ? t("autopilot.overview.widget.reviewBacklog", { count: review.backlog })
+                : null}
               onClick={() => openInspector("review")}
             />
             <ActionWidget

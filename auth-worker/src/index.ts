@@ -53,6 +53,7 @@
 //   GET  /api/v2/admin/activity    (ADMIN_EMAILS only)
 //   GET  /api/v2/health
 //   POST /api/v2/contact/book-call (public — marketing homepage form)
+//   POST /api/v2/contact/newsletter (public — partner-letter request form)
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
 //   POST /__dev__/login  (WRANGLER_LOCAL only)
@@ -95,8 +96,10 @@ import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
@@ -163,7 +166,7 @@ app.use("*", async (c, next) => {
 // Hono throws on `c.executionCtx` when there is none (vitest calls
 // app.fetch without a ctx), so resolve it defensively and fall back to
 // un-awaited fire-and-forget.
-const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+const runInBackground = (c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, task: Promise<void>) => {
   try {
     c.executionCtx.waitUntil(task)
   } catch {
@@ -226,6 +229,7 @@ app.get("/", (c) =>
       "/api/v2/invites/*",
       "/api/v2/admin/*",
       "/api/v2/contact/book-call",
+      "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
@@ -290,14 +294,20 @@ app.route("/api/v2/projects", agentArtifactsRoutes)
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
 app.route("/api/v2/projects", projectKnowledge)
+// Style-rule library + applicability graph (AQU-934 phase 2). Sibling router
+// — propose CONTRIBUTOR+, review/applicability PROJECT_LEAD+, org rows
+// read-only through project routes (routes/style-rules.ts).
+app.route("/api/v2/projects", styleRulesRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
-// Public contact surface (marketing homepage "book a call" form) — no auth;
+// Public contact surface (marketing homepage "book a call" + partner-letter
+// request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
+app.route("/api/v2", billingWorkspaceRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)
@@ -338,7 +348,6 @@ app.route("/api/v1/aquifer", aquiferRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.
-// Spec: docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md §4.
 // /api/v1/usage/me (JWT-authed), /api/v1/usage/org/:orgId (maintainer-gated).
 app.route("/api/v1/usage", usageRoutes)
 

@@ -14,6 +14,13 @@ export interface ChapterHealthReaders {
   getSummary(cellId: string): { status: string; translated: string } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
+  /**
+   * AQU-1083: true for a heading in a project that excludes headings from
+   * progress. The chapter's own translated/validated/total already leave
+   * these out — the store computes them — so this only decides how the
+   * square is drawn. Absent ⇒ nothing is excluded.
+   */
+  isExcluded?(cellId: string): boolean
 }
 
 export interface ChapterHealthBuilder {
@@ -70,8 +77,11 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
         for (const cellId of source.cellIds) {
           const summary = readers.getSummary(cellId)
           if (!summary) continue
-          const stage = cellStage(summary)
-          const health = stage === "validated" ? 100 : readers.health(cellId)
+          const excluded = readers.isExcluded?.(cellId) ?? false
+          const stage = excluded ? "excluded" as const : cellStage(summary)
+          // An excluded cell carries no health score: health measures how good
+          // a translation is, and this one is not being scored at all.
+          const health = excluded ? undefined : stage === "validated" ? 100 : readers.health(cellId)
           const hasIssue = readers.hasIssue(cellId)
           const prev = cellsById.get(cellId)
           const entry = prev && prev.stage === stage && prev.health === health && prev.hasIssue === hasIssue

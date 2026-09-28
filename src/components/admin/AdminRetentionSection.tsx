@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { AdminSectionSkeleton } from "./shared"
 import {
   getAdminRetention,
   sendAdminRetentionReport,
@@ -65,11 +66,22 @@ export function AdminRetentionSection({ jwt }: { jwt: string }) {
     [jwt],
   )
 
-  if (error) return <p className="text-sm text-destructive">{error}</p>
-  if (!data) return <p className="text-sm text-muted-foreground">Loading retention…</p>
+  // AQU-942: once the numbers have resolved once, keep the shell — the Range
+  // select lives inside it, so replacing the section with a bare error line
+  // after a failed range change left the admin no control to change it back.
+  // The error rides above the (last-good) figures instead.
+  if (!data) {
+    if (error) return <p className="text-sm text-destructive">{error}</p>
+    return <AdminSectionSkeleton label="Loading retention" />
+  }
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
       <div className={STAT_TILE_GRID}>
         <StatTile label="Daily active" value={data.dau} hint={`avg ${fmt1(data.avgDau7)} over 7d`} />
         <StatTile label="Weekly active" value={data.wau} hint={`${data.newUsers7} new in 7d`} />

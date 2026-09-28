@@ -1,9 +1,12 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
 import { redactCaptureEvent } from "@/lib/analytics-redaction"
+import { resolvePosthogHost } from "@/lib/posthog-host"
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
-const HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? "https://us.i.posthog.com"
+// AQU-854: EU Cloud by default — see `posthog-host.ts` for why US is not a
+// legal fallback. Override with `VITE_POSTHOG_HOST=https://eu.i.posthog.com`.
+const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
 if (typeof window !== "undefined" && KEY) {
   posthog.init(KEY, {

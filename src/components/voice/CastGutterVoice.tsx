@@ -40,11 +40,19 @@ export interface CastGutterVoiceProps {
    *  checkbox the picker does (Sam, same day): the footer promises "all
    *  «name» lines" and must mean it for BOTH actions. */
   onClear?(opts?: { applyToSpeaker?: boolean }): void
+  /** How many lines share this line's cast name — asked when the picker
+   *  opens, so the apply-to-all box can say what it would change. */
+  countSpeakerLines?(): number
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, showLanguageBadge = false }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false }: CastGutterVoiceProps) {
   const t = useT()
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const [speakerLines, setSpeakerLines] = useState<number | null>(null)
+  const setOpen = (next: boolean) => {
+    if (next) setSpeakerLines(countSpeakerLines ? countSpeakerLines() : null)
+    setOpenState(next)
+  }
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
   // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
   // detail, the name is the answer to "who is this circle?".
@@ -124,7 +132,9 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   checked={applyToSpeaker}
                   onChange={(e) => setApplyToSpeaker(e.target.checked)}
                 />
-                {t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
+                {speakerLines != null
+                  ? t("workspace.castGutterVoice.applyToAllLinesCount", { name: castName ?? "", count: speakerLines })
+                  : t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
               </label>
             ) : undefined
           }

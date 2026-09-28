@@ -81,6 +81,12 @@ export interface EditorActionsContextValue {
     opts?: { applyToSpeaker?: boolean },
   ) => void
   /**
+   * How many lines in the file share this cast name — what the gutter
+   * picker's "Apply to all «name» lines" would change (Sam, 2026-09-28).
+   * Asked only when the picker opens, never per row per render.
+   */
+  countCastLines?: (castName: string) => number
+  /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
    * member isn't offered a guaranteed-403 validate on an out-of-scope cell.

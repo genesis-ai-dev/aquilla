@@ -50,6 +50,20 @@ describe("CastGutterVoice", () => {
     expect(onPick).toHaveBeenCalledWith("v-mary", { applyToSpeaker: true })
   })
 
+  // Sam, 2026-09-28: the box says what it would change, and starts unticked.
+  it("says how many lines share the character, and starts off", () => {
+    const countSpeakerLines = vi.fn(() => 12)
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} countSpeakerLines={countSpeakerLines} />,
+    )
+    expect(countSpeakerLines).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    expect(countSpeakerLines).toHaveBeenCalledTimes(1)
+    const box = screen.getByTestId("gutter-voice-all") as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(box.closest("label")).toHaveTextContent("Apply to all 12 «Mary» lines")
+  })
+
   it("no apply-to-speaker footer without a diarized cast name", () => {
     ui(
       <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} />,

@@ -88,6 +88,8 @@ describe('command catalog — invariants', () => {
       InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
       DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
       SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
+      HideCell: { kind: 'HideCell', fileId: 'f', cellId: 'c' },
+      ShowCell: { kind: 'ShowCell', fileId: 'f', cellId: 'c' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]

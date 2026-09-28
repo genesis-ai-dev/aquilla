@@ -293,6 +293,9 @@ export const audio = defineNamespace({
     "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
     "audio.recordingModal.trimReset": "Reset trim",
     "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
+    "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
+    "audio.recordingModal.takesDrawerOnDescription": "The takes that fit show under the recorder; the arrow beside Takes brings up the rest.",
+    "audio.recordingModal.takesDrawerOffDescription": "Only the Takes bar shows; the arrow beside it brings up the list.",
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
@@ -1321,6 +1324,23 @@ export const audio = defineNamespace({
           "recorded take's trim lines back where they started (the line's own " +
           "start and just after Stop). Nothing is deleted either way.",
         maxLength: 24,
+      },
+      "audio.recordingModal.takesDrawerTitle": {
+        description:
+          "Name of an on/off setting in the recording window's settings menu: whether " +
+          "the list of recorded takes rests open under the recorder, or closed to " +
+          "just its header bar.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.takesDrawerOnDescription": {
+        description:
+          "Hover text for that setting while it is on: some takes show under the " +
+          "recorder, and the small arrow beside 'Takes' shows the rest.",
+      },
+      "audio.recordingModal.takesDrawerOffDescription": {
+        description:
+          "Hover text for that setting while it is off: only the 'Takes' bar shows, " +
+          "and the small arrow beside it shows the list.",
       },
       "audio.recordingModal.takesExpand": {
         description:

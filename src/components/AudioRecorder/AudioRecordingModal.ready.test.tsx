@@ -103,6 +103,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -398,5 +399,50 @@ describe("the takes drawer, pulled up", () => {
     )
     expect(screen.queryByTestId("rec-takes-toggle")).toBeNull()
     expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 2")
+  })
+})
+
+// Sam, 2026-09-28: the drawer works the same with or without the film, and
+// where it rests is a setting — open (the takes that fit show) or closed
+// (only the "Takes" bar).
+describe("the takes drawer, resting closed", () => {
+  afterEach(() => setRecordingTakesDrawerOpen(true))
+  const twoTakes = () => entry({
+    selectedAudioId: "audio-c1-3.wav",
+    attachments: {
+      "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 2" }),
+      "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }),
+    },
+  })
+  const draw = () => render(
+    <AudioRecordingModal
+      open project={project} cells={[cell]} activeCellId="c1" username="sam"
+      onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+    />,
+  )
+
+  it("shows only the Takes bar, always with its chevron, and raises the list from it", () => {
+    setRecordingTakesDrawerOpen(false)
+    attachmentsState.byCellId = twoTakes()
+    draw()
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+    const toggle = screen.getByTestId("rec-takes-toggle")
+    fireEvent.click(toggle)
+    expect(screen.getByTestId("rec-takes-group")).toHaveAttribute("data-sheet", "up")
+    expect(screen.getByTestId("take-row-audio-c1-2.wav")).toBeInTheDocument()
+    fireEvent.keyDown(toggle, { key: "Escape" })
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+  })
+
+  it("is chosen with a switch in the recorder's settings", () => {
+    attachmentsState.byCellId = twoTakes()
+    draw()
+    expect(screen.getByTestId("rec-takes-drawer")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    const sw = screen.getByTestId("rec-takes-drawer-open")
+    expect(sw).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(sw)
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+    expect(screen.getByTestId("rec-takes-drawer-open")).toHaveAttribute("aria-checked", "false")
   })
 })

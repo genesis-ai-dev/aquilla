@@ -9,7 +9,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { setRecordingTakesDrawerOpen, useRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
@@ -240,7 +241,10 @@ function SettingSwitch({
   onCheckedChange: (next: boolean) => void
 }) {
   return (
-    <AppTooltip content={tip}>
+    // To the LEFT: the menu opens at the recorder's right edge, and below a
+    // row the tip would cover the next row's switch — the first row's tip
+    // opens on its own as the menu takes focus.
+    <AppTooltip content={tip} side="left">
       {/* Not a <label>: the switch keeps a hidden checkbox, and a label passes
           a click on the switch to it as well — two toggles, no change. The
           row toggles itself for a click anywhere but the switch. */}
@@ -468,15 +472,14 @@ export function AudioRecordingModal({
   // collapse, so a control for it would be a lie.
   const videoCollapsed = useRecordingVideoCollapsed()
   const showFilm = filmUrl != null && !videoCollapsed
-  // Expanded, the takes list is a disclosure over the column rather than a
-  // permanent shelf: the 16:9 column is short, and the instruments are what you
-  // are looking at while recording. Collapsed, the drawer is always open
-  // because the portrait column has the room and nothing else wants it — and
-  // it can also be pulled up over the line and the instruments, as far as its
-  // takes need, to see every one at once (Sam, 2026-09-28). `takesOpen` is
-  // that in both layouts.
+  // THE TAKES DRAWER works the same in both layouts (Sam, 2026-09-28), and
+  // where it rests is a setting: OPEN, the takes that fit show under the
+  // recorder; CLOSED, only the "Takes" bar shows. Either way its chevron raises
+  // the whole list over the line and the instruments — `takesOpen` — as far as
+  // the takes need and no further than the header.
+  const takesDrawerOpen = useRecordingTakesDrawerOpen()
   const [takesOpen, setTakesOpen] = useState(false)
-  const takesSheet = !showFilm && takesOpen
+  const takesSheet = takesOpen
 
   // THE READ-ALOUD BLOCK NEVER SCROLLS AND NEVER CLIPS (Sam, 2026-08-13). It
   // owns the height of five line boxes; a line too long for that gets a smaller
@@ -506,7 +509,7 @@ export function AudioRecordingModal({
   // Five line boxes — or, without the film, whatever the column has left once
   // the takes drawer has its floor (measured below, on the ready screen).
   const [fitBudget, setFitBudget] = useState<number | null>(null)
-  const readAloudBudget = showFilm || fitBudget == null
+  const readAloudBudget = !takesDrawerOpen || fitBudget == null
     ? READ_ALOUD_LINES * READ_ALOUD_LINE_PX
     : Math.min(READ_ALOUD_LINES * READ_ALOUD_LINE_PX, fitBudget)
   const [readAloudPx, setReadAloudPx] = useState(readAloudBase)
@@ -740,7 +743,7 @@ export function AudioRecordingModal({
   // themselves arrive a moment after the dialog opens, and a measurement taken
   // before them left the line sized for a column that no longer existed.
   useLayoutEffect(() => {
-    if (!open || showFilm || takesSheet) return
+    if (!open || !takesDrawerOpen || takesSheet) return
     if (phase !== "idle" && phase !== "error") return
     const upper = upperEl
     const drawer = drawerEl
@@ -771,13 +774,13 @@ export function AudioRecordingModal({
     ro.observe(upper)
     ro.observe(drawer)
     return () => ro.disconnect()
-  }, [open, showFilm, takesSheet, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
+  }, [open, showFilm, takesDrawerOpen, takesSheet, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
 
   // Whether every take already shows in the drawer. If so there is nothing to
   // pull up, and the handle's chevron goes (Sam, 2026-09-28).
   const [takesFit, setTakesFit] = useState(true)
   useLayoutEffect(() => {
-    if (!open || showFilm || takesSheet || !drawerEl) return
+    if (!open || !takesDrawerOpen || takesSheet || !drawerEl) return
     const drawer = drawerEl
     const check = () => setTakesFit(drawer.scrollHeight <= drawer.clientHeight + 1)
     check()
@@ -786,7 +789,7 @@ export function AudioRecordingModal({
     ro.observe(drawer)
     if (drawer.firstElementChild) ro.observe(drawer.firstElementChild)
     return () => ro.disconnect()
-  }, [open, showFilm, takesSheet, drawerEl, listedTakeCount])
+  }, [open, takesDrawerOpen, takesSheet, drawerEl, listedTakeCount])
   // One sound at a time: playing the waveform silences a Takes-row audition
   // (which in turn silences the waveform — see TakesStrip).
   // Countdown, recording, preview and upload own the instrument area: the
@@ -1012,7 +1015,7 @@ export function AudioRecordingModal({
     stayOnThisLine()
     // The takes sheet covers the line and the instruments: a take never
     // starts under it.
-    if (!showFilm) setTakesOpen(false)
+    setTakesOpen(false)
     // Offline gates FIRST — when both fail it is the truer cause ("sign in"
     // is unactionable without a connection anyway).
     if (!online) {
@@ -1082,7 +1085,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdownStep, countdown, recorder, session?.jwt, online, stayOnThisLine, showFilm])
+  }, [beepEnabled, countdownStep, countdown, recorder, session?.jwt, online, stayOnThisLine])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -1587,7 +1590,8 @@ export function AudioRecordingModal({
       // and OPEN the takes list, which is where the new take is circled as the
       // keeper and can be auditioned. In the plain layout that drawer is always
       // rendered, so the sheet stays down: pulling it up would hide Record.
-      if (showFilm) setTakesOpen(true)
+      // Resting closed there is nothing showing it, so the list rises.
+      if (!takesDrawerOpen) setTakesOpen(true)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
@@ -1599,7 +1603,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, showFilm])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, takesDrawerOpen])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -2028,9 +2032,9 @@ export function AudioRecordingModal({
             inert={takesSheet || undefined}
             className={cn(
               "flex min-h-0 flex-col overflow-y-auto",
-              // Expanded it also GROWS, so the spacer below can push the
-              // instruments to the bottom of the column.
-              showFilm && "flex-1",
+              // With the drawer resting closed it also GROWS, so the spacer
+              // below can push the instruments to the bottom of the column.
+              !takesDrawerOpen && "flex-1",
             )}
           >
           {/* THE ANCHORED SOURCE (AQU-1407) — the thing being translated, and
@@ -2186,11 +2190,11 @@ export function AudioRecordingModal({
             )}
           </div>
 
-          {/* Beside a picture the instruments sit at the BOTTOM of the column,
-              so the eye runs from the line down to the meter and the button.
-              Collapsed there is nothing to push them with — the takes drawer
-              below is what absorbs the leftover height. */}
-          {showFilm && <div className="min-h-[8px] flex-1" />}
+          {/* With the drawer resting closed the instruments sit at the BOTTOM
+              of the column, so the eye runs from the line down to the meter and
+              the button. Resting open the drawer below absorbs the leftover
+              height instead. */}
+          {!takesDrawerOpen && <div className="min-h-[8px] flex-1" />}
 
           {/* INSTRUMENTS + ANCHOR — the same skeleton in every phase: what the
               take looks like, then the one button that acts on it, then the
@@ -2653,46 +2657,15 @@ export function AudioRecordingModal({
               the column; collapsed it is the header of a drawer that fills the
               rest of the panel. `relative` so the raised list can anchor to it. */}
           <div className="relative shrink-0 border-t bg-muted/20">
-            {/* The raised list, expanded only. `bottom-full` puts it directly
-                above this strip; capped so it can never cover the line being
-                read, and scrolling inside that cap. */}
-            {showFilm && takesOpen && listedTakeCount > 0 && activeCell && (
-              <div className="absolute inset-x-0 bottom-full z-20 max-h-[260px] overflow-y-auto border-t bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]">
-                <GroupedTakes
-                  groups={takeGroups}
-                  project={project}
-                  cell={activeCell}
-                  entry={audioEntry}
-                  sourceClip={sourceClip}
-                  username={username}
-                  session={session ?? null}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  laneTag={laneTag}
-                />
-              </div>
-            )}
             <div className="flex items-center gap-2 px-4 py-2">
-              {showFilm ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  data-testid="rec-takes-toggle"
-                  aria-expanded={takesOpen}
-                  disabled={listedTakeCount === 0}
-                  onClick={() => setTakesOpen((v) => !v)}
-                  className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
-                >
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
-                  <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
-                </Button>
-              ) : takesFit && !takesOpen ? (
-                // Every take already shows: nothing to pull up.
+              {takesDrawerOpen && takesFit && !takesOpen ? (
+                // Resting open with every take already showing: nothing to
+                // pull up.
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
                   {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
                 </span>
               ) : (
-                // Without the film: the drawer's handle. Up pulls the takes over
+                // The drawer's handle, in both layouts. Up raises the takes over
                 // the line and the instruments; down puts them back.
                 <Button
                   type="button"
@@ -2774,6 +2747,7 @@ export function AudioRecordingModal({
                       on/off switch was. */}
                   <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1 rounded-md px-2 pb-1 pt-1.5">
                     <AppTooltip
+                      side="left"
                       content={countdownSpeed === "off"
                         ? t("audio.recordingModal.countdownOffDescription")
                         : countdownSpeed === "fast"
@@ -2835,17 +2809,27 @@ export function AudioRecordingModal({
                     checked={autoAdvance}
                     onCheckedChange={setRecordingAutoAdvance}
                   />
+                  <SettingSwitch
+                    testId="rec-takes-drawer-open"
+                    icon={<PanelBottom />}
+                    title={t("audio.recordingModal.takesDrawerTitle")}
+                    tip={takesDrawerOpen
+                      ? t("audio.recordingModal.takesDrawerOnDescription")
+                      : t("audio.recordingModal.takesDrawerOffDescription")}
+                    checked={takesDrawerOpen}
+                    onCheckedChange={(next) => { setTakesOpen(false); setRecordingTakesDrawerOpen(next) }}
+                  />
                 </PopoverContent>
               </Popover>
             </div>
           </div>
 
-          {/* THE DRAWER, collapsed only — takes every pixel the panel has left,
-              and is ALWAYS rendered even with nothing in it. A conditional
-              drawer left the strip above floating mid-dialog with dead space
-              beneath it, and made the whole bottom of the panel jump as takes
-              came and went between phases. */}
-          {!showFilm && (
+          {/* THE DRAWER — resting open it takes every pixel the panel has left,
+              and is ALWAYS rendered then, even with nothing in it: a conditional
+              drawer left the strip above floating with dead space beneath it,
+              and made the whole bottom jump as takes came and went between
+              phases. Resting closed it exists only while raised. */}
+          {(takesDrawerOpen || takesSheet) && (
             <div ref={setDrawerEl} data-testid="rec-takes-drawer" className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
               {listedTakeCount > 0 && activeCell ? (
                 <GroupedTakes

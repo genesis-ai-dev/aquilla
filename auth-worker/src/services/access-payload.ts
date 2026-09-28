@@ -329,11 +329,16 @@ function countDescendants(targets: AccessChainEntry[], visible: AccessChainEntry
  * and their real names are replaced with "" — the name never leaves the
  * server. Covers both the grant's own path and its inherited-from path.
  */
+/** Blank out org/team crumbs (name "" + hidden) — for a viewer who cannot see the org. */
+export function redactOrgCrumbs(path: ScopePath): ScopePath {
+  return path.map((r) => (r.type === "org" || r.type === "team" ? { type: r.type, id: r.id, name: "", hidden: true } : r))
+}
+
 export async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainEntry[]): Promise<void> {
   const redact = async (path: ScopePath): Promise<ScopePath> => {
     const orgId = path[0]?.type === "org" ? Number(path[0].id) : null
     if (orgId == null || (await vs.canSeeOrg(orgId))) return path
-    return path.map((r) => (r.type === "org" || r.type === "team" ? { type: r.type, id: r.id, name: "", hidden: true } : r))
+    return redactOrgCrumbs(path)
   }
   for (const e of entries) {
     e.scopePath = await redact(e.scopePath)

@@ -2,7 +2,7 @@
 // waveform, its length, a play button — and the target bar judges it, so the
 // operator can see and hear what they are about to record over.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -307,6 +307,21 @@ describe("the selected take, before recording", () => {
 // and the instruments to see every take at once — as the film layout raises
 // its list.
 describe("the takes drawer, pulled up", () => {
+  // happy-dom lays nothing out, so every drawer "fits". These tests stand in a
+  // drawer whose takes run past its bottom — the case the handle is for.
+  let sizes: Array<{ mockRestore: () => void }> = []
+  const overfull = () => {
+    const drawerOnly = (big: number) => function (this: HTMLElement) {
+      return this.getAttribute?.("data-testid") === "rec-takes-drawer" ? big : 0
+    }
+    sizes = [
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(drawerOnly(400)),
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(drawerOnly(100)),
+    ]
+  }
+  beforeEach(() => overfull())
+  afterEach(() => { for (const s of sizes) s.mockRestore(); sizes = [] })
+
   const twoTakes = () => entry({
     selectedAudioId: "audio-c1-3.wav",
     attachments: {
@@ -368,5 +383,20 @@ describe("the takes drawer, pulled up", () => {
   it("has nothing to pull up on a line with no takes", () => {
     const { toggle } = draw()
     expect(toggle).toBeDisabled()
+  })
+
+  // Sam, 2026-09-28: when every take already shows, there is no chevron.
+  it("has no chevron when every take already shows", () => {
+    for (const s of sizes) s.mockRestore()
+    sizes = []
+    attachmentsState.byCellId = twoTakes()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cell]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("rec-takes-toggle")).toBeNull()
+    expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 2")
   })
 })

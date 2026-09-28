@@ -772,6 +772,21 @@ export function AudioRecordingModal({
     ro.observe(drawer)
     return () => ro.disconnect()
   }, [open, showFilm, takesSheet, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
+
+  // Whether every take already shows in the drawer. If so there is nothing to
+  // pull up, and the handle's chevron goes (Sam, 2026-09-28).
+  const [takesFit, setTakesFit] = useState(true)
+  useLayoutEffect(() => {
+    if (!open || showFilm || takesSheet || !drawerEl) return
+    const drawer = drawerEl
+    const check = () => setTakesFit(drawer.scrollHeight <= drawer.clientHeight + 1)
+    check()
+    if (typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(check)
+    ro.observe(drawer)
+    if (drawer.firstElementChild) ro.observe(drawer.firstElementChild)
+    return () => ro.disconnect()
+  }, [open, showFilm, takesSheet, drawerEl, listedTakeCount])
   // One sound at a time: playing the waveform silences a Takes-row audition
   // (which in turn silences the waveform — see TakesStrip).
   // Countdown, recording, preview and upload own the instrument area: the
@@ -2624,10 +2639,12 @@ export function AudioRecordingModal({
             data-testid="rec-takes-group"
             data-sheet={takesSheet ? "up" : "down"}
             className={cn(
-              "flex flex-col",
-              // Down: the drawer takes whatever the column leaves.
-              !showFilm && !takesSheet && "flex-1",
-              takesSheet && "absolute inset-x-0 bottom-0 z-20 max-h-full bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]",
+              // Down it is no box at all: the strip and the drawer lay out as
+              // the body's own children — the strip rigid, the drawer taking
+              // what the column leaves. A real flex box here refused to shrink
+              // below every take it held, and squeezed Record out of the column.
+              !takesSheet && "contents",
+              takesSheet && "absolute inset-x-0 bottom-0 z-20 flex max-h-full flex-col bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]",
             )}
           >
           {/* THE UTILITY STRIP — takes, the format the takes are in, and the
@@ -2669,6 +2686,11 @@ export function AudioRecordingModal({
                   {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
                   <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
                 </Button>
+              ) : takesFit && !takesOpen ? (
+                // Every take already shows: nothing to pull up.
+                <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
+                </span>
               ) : (
                 // Without the film: the drawer's handle. Up pulls the takes over
                 // the line and the instruments; down puts them back.

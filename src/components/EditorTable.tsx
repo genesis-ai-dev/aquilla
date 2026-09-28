@@ -7140,7 +7140,10 @@ function EditorRow({
           // this huge row let the React Compiler serve a stale voice, so a
           // freshly-picked voice didn't stick in the trigger).
           <div
-            className={cn("col-start-2 flex flex-col transition-opacity md:col-auto", isSynthBusy && "opacity-70")}
+            // md:pe-3: the card keeps 20px from the health line beside it,
+            // not 8 (Sam, 2026-09-28) — a little more than the 12px the
+            // checks keep on the line's other side.
+            className={cn("col-start-2 flex flex-col transition-opacity md:col-auto md:pe-3", isSynthBusy && "opacity-70")}
             dir="ltr"
           >
             <CellVoicePanel

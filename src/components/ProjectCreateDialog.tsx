@@ -37,6 +37,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
+import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
   fetchProjectSettings,
   patchProjectSettings,
@@ -225,6 +226,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
   // AQU-1352: null until create-targets loads; the prop orgId is the fallback.
   const [destination, setDestination] = useState<Destination | null>(null)
+  // AQU-1352 P2: teams to create into; reset whenever the destination changes.
+  const [teamIds, setTeamIds] = useState<number[]>([])
+  const [teamsError, setTeamsError] = useState(false)
+  const needTeams = teamsRequired(destination?.role, destination?.orgId)
+  const onDestination = (next: Destination) => {
+    setDestination(next)
+    setTeamIds([])
+    setTeamsError(false)
+  }
 
   const upstreamOptions = useMemo(
     () => linkableProjects.filter((p) => !p.archivedAt),
@@ -262,6 +272,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         members: [{ userId: session.username, role: "owner" }],
       }
 
+      if (needTeams && teamIds.length === 0) {
+        setTeamsError(true)
+        setSubmitError(t("projectSettings.create.teamsRequiredError"))
+        return
+      }
+
       let extraLanguagesFailed = false
       const extrasToApply = value.extraLanguages
       const upstreamId = value.upstreamProjectId.trim()
@@ -276,6 +292,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           id: project.id,
           name: project.name,
           orgId: destination ? destination.orgId : orgId,
+          teamIds: destination?.orgId != null ? teamIds : undefined,
         })
 
         // One atomic settings write at version 0. The HTTP PATCH handler
@@ -390,10 +407,21 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               <ProjectDestinationPicker
                 jwt={session?.jwt}
                 pageOrgId={orgId}
-                onChange={setDestination}
+                onChange={onDestination}
               />
             )}
-            {/* SWARM-TODO(AQU-1352): teams multi-select (next wave adds teamIds). */}
+            {open && destination?.orgId != null && (
+              <ProjectTeamsPicker
+                teams={destination.teams ?? []}
+                required={needTeams}
+                value={teamIds}
+                onValueChange={(next) => {
+                  setTeamIds(next)
+                  setTeamsError(false)
+                }}
+                showRequiredError={teamsError}
+              />
+            )}
             <FieldGroup>
               <form.Field
                 name="name"

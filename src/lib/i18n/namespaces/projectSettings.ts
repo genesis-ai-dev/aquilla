@@ -38,6 +38,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.destinationThisOrg": "this organization",
     "projectSettings.create.destinationRoleHint":
       "You're a {role} in {org}, so you can't create projects there. You can create one in Personal.",
+    // AQU-1352 P2: teams multi-select under the destination picker.
+    "projectSettings.create.teamsLabel": "Teams",
+    "projectSettings.create.teamsPlaceholder": "Choose teams",
+    "projectSettings.create.teamsSearch": "Search teams",
+    "projectSettings.create.teamsEmpty": "No teams found.",
+    "projectSettings.create.teamsRequiredHint": "Pick a team you lead. The project will belong to that team.",
+    "projectSettings.create.teamsRequiredError": "Choose at least one team to create this project in.",
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
@@ -870,6 +877,26 @@ export const projectSettings = defineNamespace({
           role: "Singular localized role name, e.g. 'Contributor' or 'Guest'.",
           org: "Organization name, e.g. 'Biblica ETT'.",
         },
+      },
+      "projectSettings.create.teamsLabel": {
+        description: "Field label above the teams multi-select in the create-project dialog.",
+      },
+      "projectSettings.create.teamsPlaceholder": {
+        description: "Placeholder in the teams multi-select trigger when no team is chosen.",
+      },
+      "projectSettings.create.teamsSearch": {
+        description: "Placeholder and accessible name for the search box inside the teams multi-select.",
+      },
+      "projectSettings.create.teamsEmpty": {
+        description: "Shown in the teams multi-select when the search matches no team.",
+      },
+      "projectSettings.create.teamsRequiredHint": {
+        description:
+          "Help text under the teams multi-select when the caller may only create projects " +
+          "in this organization inside a team they lead.",
+      },
+      "projectSettings.create.teamsRequiredError": {
+        description: "Form error when the caller submits without choosing a required team.",
       },
       "projectSettings.create.trigger": {
         description: "Button that opens the create-project dialog. Short, with a leading + icon.",

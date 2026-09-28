@@ -362,6 +362,11 @@ export const org = defineNamespace({
       "Add org members to this team to grant them shared project access.",
     "org.teamDetail.roleForAriaLabel": "Role for {name}",
     "org.teamDetail.orgLevelRoleAriaLabel": "Org-level role: {role}",
+    // AQU-1352 P2: team-scope role column.
+    "org.teamDetail.teamRoleColumn": "Team role",
+    "org.teamDetail.teamRoleInherit": "Inherit",
+    "org.teamDetail.teamRoleForAriaLabel": "Team-wide role of {name}",
+    "org.teamDetail.teamRoleUpdateFailed": "Couldn't update the team role.",
     "org.teamDetail.removeMaintainersOnlyAriaLabel": "Remove {username} — maintainers only",
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
@@ -1859,6 +1864,20 @@ export const org = defineNamespace({
         description:
           "Accessible name for a role-picker select trigger on TeamDetail — used both for a team member's org-role picker and a team's per-project role picker. {name} names whichever person or project the picker is for.",
         placeholders: { name: "Username (member picker) or project name (project picker) — not translated." },
+      },
+      "org.teamDetail.teamRoleColumn": {
+        description: "Column header on TeamDetail's members table for the member's role within this team.",
+      },
+      "org.teamDetail.teamRoleInherit": {
+        description:
+          "Team-role option meaning the member has no team-wide role and gets access only from each attached project's team grant.",
+      },
+      "org.teamDetail.teamRoleForAriaLabel": {
+        description: "Accessible name for a member's team-role picker on TeamDetail.",
+        placeholders: { name: "Username of the team member — not translated." },
+      },
+      "org.teamDetail.teamRoleUpdateFailed": {
+        description: "Toast title when saving a member's team role fails.",
       },
       "org.teamDetail.orgLevelRoleAriaLabel": {
         description:

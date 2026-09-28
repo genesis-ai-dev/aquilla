@@ -1,10 +1,9 @@
-// AQU-1352 P0 (spec 3.5 / 3.9 rule 5) — the create dialog's destination picker.
+// AQU-1352 P2 (spec §3.5, D4) — create into a team.
 //
-// Tim is org Guest + team Owner on "Biblica ETT". Before this, the dialog
-// silently POSTed the page's orgId and the server 403'd (org role < maintainer),
-// leaving him no way to create anything. The picker must: default to the page
-// org only when the caller may create there, otherwise default to Personal and
-// say why; and the submit must send the chosen destination.
+// Tim is an org Guest who leads the "Pattani Malay" team. The server accepts
+// his create into the org only with a team he leads in teamIds, so the dialog
+// must require a team for him and send the chosen ids; an org maintainer may
+// create without one.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -46,46 +45,50 @@ import { fetchCreateTargets } from "@/lib/sync/create-targets"
 const mockCreate = vi.mocked(createCloudProject)
 const mockTargets = vi.mocked(fetchCreateTargets)
 
-const PERSONAL: CreateTarget = { kind: "personal", orgId: null, name: "tim's workspace", path: ["tim's workspace"], role: 700, teams: [] }
-const BIBLICA: CreateTarget = { kind: "org", orgId: 10, name: "Biblica ETT", path: ["Biblica ETT"], role: 600, teams: [] }
+const TEAM = { teamId: 1, name: "Pattani Malay", role: 500 }
+const TIM_ORG: CreateTarget = { kind: "org", orgId: 10, name: "Biblica ETT", path: ["Biblica ETT"], role: 100, teams: [TEAM] }
+const MAINT_ORG: CreateTarget = { ...TIM_ORG, role: 600, teams: [TEAM, { teamId: 2, name: "Thai", role: null }] }
 
-async function openAndFill(orgId?: number) {
-  render(<ProjectCreateDialog onCreated={vi.fn()} orgId={orgId} />)
+async function openAndFill() {
+  render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
   fireEvent.click(screen.getByRole("button", { name: "New Project" }))
-  await screen.findByTestId("project-create-destination")
+  await screen.findByTestId("project-create-teams")
   fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Pattani" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
   fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "Malay" } })
 }
 
-describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
+describe("ProjectCreateDialog — teams multi-select (AQU-1352 P2)", () => {
   beforeEach(() => {
     mockCreate.mockClear()
     mockTargets.mockReset()
   })
 
-  it("defaults to the page org when the caller may create there, and submits that orgId", async () => {
-    mockTargets.mockResolvedValue([PERSONAL, BIBLICA])
-    await openAndFill(10)
-    expect(screen.getByTestId("project-create-destination")).toHaveTextContent("Biblica ETT")
-    expect(screen.queryByTestId("project-create-destination-hint")).toBeNull()
+  it("Tim must pick a team he leads; submitting without one does not POST", async () => {
+    mockTargets.mockResolvedValue([TIM_ORG])
+    await openAndFill()
+    expect(screen.getByTestId("project-create-teams-hint")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
-    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10 })
+    expect(await screen.findByText(/Choose at least one team/)).toBeTruthy()
+    expect(mockCreate).not.toHaveBeenCalled()
   })
 
-  it("Tim's case: page org not a valid target → defaults to Personal, names his role, and omits orgId", async () => {
-    mockTargets.mockResolvedValue([PERSONAL])
-    await openAndFill(10)
-    expect(screen.getByTestId("project-create-destination")).toHaveTextContent("Personal")
-    const hint = screen.getByTestId("project-create-destination-hint")
-    expect(hint).toHaveTextContent(/Contributor/)
-    expect(hint).toHaveTextContent(/Biblica ETT/)
-    expect(hint).toHaveTextContent(/Personal/)
+  it("Tim's chosen team travels as teamIds", async () => {
+    mockTargets.mockResolvedValue([TIM_ORG])
+    await openAndFill()
+    fireEvent.click(screen.getByTestId("project-create-teams"))
+    fireEvent.click(await screen.findByRole("option", { name: "Pattani Malay" }))
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    // Omitted orgId → server creates in (and lazily creates) the personal org
-    // instead of 403ing on the org Tim can't create in.
-    expect(mockCreate.mock.calls[0][1].orgId).toBeUndefined()
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10, teamIds: [1] })
+  })
+
+  it("an org maintainer may create without a team (no requirement hint)", async () => {
+    mockTargets.mockResolvedValue([MAINT_ORG])
+    await openAndFill()
+    expect(screen.queryByTestId("project-create-teams-hint")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10, teamIds: [] })
   })
 })

@@ -21,8 +21,21 @@ import { useActiveOrgOptional } from "@/context/OrgContext"
 import { resolveRoleName } from "@/lib/frontier/roles"
 import { fetchCreateTargets, type CreateTarget } from "@/lib/sync/create-targets"
 
-/** The orgId to POST (undefined = personal; server lazy-creates it). */
-export type Destination = { orgId: number | undefined }
+/**
+ * The orgId to POST (undefined = personal; server lazy-creates it), plus the
+ * caller's org role and creatable teams there (AQU-1352 P2).
+ */
+export type Destination = {
+  orgId: number | undefined
+  role?: number
+  teams?: CreateTarget["teams"]
+}
+
+const destinationOf = (target: CreateTarget): Destination => ({
+  orgId: target.kind === "personal" ? undefined : (target.orgId ?? undefined),
+  role: target.role,
+  teams: target.teams ?? [],
+})
 
 const PERSONAL = "personal"
 const keyOf = (target: CreateTarget) => (target.kind === "personal" ? PERSONAL : `org:${target.orgId}`)
@@ -52,7 +65,7 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
         setTargets(list)
         if (!initial) return
         setSelected(keyOf(initial))
-        onChange({ orgId: initial.kind === "personal" ? undefined : (initial.orgId ?? undefined) })
+        onChange(destinationOf(initial))
       })
       .catch((err: unknown) => {
         // Non-fatal: the dialog keeps its pre-AQU-1352 behavior (page orgId).
@@ -98,7 +111,7 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
           const target = targets.find((x) => keyOf(x) === value)
           if (!target) return
           setSelected(value)
-          onChange({ orgId: target.kind === "personal" ? undefined : (target.orgId ?? undefined) })
+          onChange(destinationOf(target))
         }}
       >
         <SelectTrigger id="project-create-destination" data-testid="project-create-destination">

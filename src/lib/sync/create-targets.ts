@@ -13,6 +13,14 @@ export interface CreateTarget {
   name: string
   path: string[]
   role: number
+  /** AQU-1352 P2: teams the caller may create into (role null = via org role). */
+  teams: CreateTeamTarget[]
+}
+
+export interface CreateTeamTarget {
+  teamId: number
+  name: string
+  role: number | null
 }
 
 export async function fetchCreateTargets(

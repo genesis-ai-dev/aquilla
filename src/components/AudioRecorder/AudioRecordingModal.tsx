@@ -1609,8 +1609,14 @@ export function AudioRecordingModal({
         return
       }
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    // CAPTURE, not bubble: the dialog's popup (Base UI 1.7, AQU-1202) stops
+    // every arrow key from leaving it — so composite widgets behind it don't
+    // react — and a bubbling listener here never heard ⌥← / ⌥→ again; the
+    // line shortcuts were dead from 2026-09-09 (Sam found it, 2026-09-28).
+    // Everything the handler does is already keyed on the event's target, so
+    // hearing it first changes nothing else.
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
   }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview])
 
   if (!open || !activeCell) return null
@@ -1663,7 +1669,18 @@ export function AudioRecordingModal({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(next) => { if (!next) requestClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(next, details) => {
+        if (next) return
+        // Escape belongs to the recorder's own key handler, which hears it
+        // first (capture) and knows what it means right now: stop the take,
+        // cancel the count, or ask to close. The dialog closing on it as well
+        // would stop a take and ask to close in the same press.
+        if (details?.reason === "escape-key") return
+        requestClose()
+      }}
+    >
       {/* AQU-230: max-h constrains the dialog to the viewport (with 4vh margin)
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes

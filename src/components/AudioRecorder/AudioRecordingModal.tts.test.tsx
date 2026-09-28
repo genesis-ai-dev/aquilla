@@ -637,6 +637,15 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  // Pressed inside the recorder, where the dialog's own Escape handling sees
+  // it too (2026-09-28). The recorder's key handler owns Escape, so it closes
+  // once, not once for the handler and again for the dialog.
+  it("closes once on Escape pressed inside the recorder", () => {
+    const onClose = renderWithClose()
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   // ── …AND THE ARROWS ARE AN EXIT TOO (2026-08-27) ────────────────────────
   //
   // The guard above was wired to the X, Escape and clicking outside, and
@@ -677,6 +686,30 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     fireEvent.keyDown(window, { key: "ArrowRight", altKey: true })
     expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
     expect(onActiveCellChange).not.toHaveBeenCalled()
+  })
+
+  // Sam, 2026-09-28: ⌥← / ⌥→ were dead. The dialog's popup (Base UI 1.7)
+  // stops arrow keys leaving it, and the test above sent its key straight to
+  // the window, around the popup. These press it where focus is.
+  it("steps to the next and previous line on Alt+Arrow pressed inside the recorder", () => {
+    const onActiveCellChange = vi.fn()
+    const { rerender } = render(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c1"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    const inside = screen.getByRole("dialog")
+    fireEvent.keyDown(inside, { key: "ArrowRight", altKey: true })
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c2")
+    rerender(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c2"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowLeft", altKey: true })
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c1")
   })
 
   // Throwing it away goes WHERE THEY ASKED, not merely closing the dialog —

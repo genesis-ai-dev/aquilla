@@ -171,10 +171,7 @@ beforeEach(async () => {
 
 describe('HideCell / ShowCell — discovery', () => {
   it('the REST discovery root names both command kinds', async () => {
-    const res = (await handleExternalDiscoveryRequest(
-      new Request('https://w/api/v1/external'),
-      makeEnv(tdb.db),
-    ))!
+    const res = handleExternalDiscoveryRequest(new Request('https://w/api/v1/external'))!
     const text = JSON.stringify(await res.json())
     expect(text).toContain('HideCell')
     expect(text).toContain('ShowCell')
@@ -198,7 +195,7 @@ describe('HideCell / ShowCell — discovery', () => {
 
   it('the MCP prepare_translations schema accepts both kinds', () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'prepare_translations')!
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: { commands: { items: { oneOf: { properties: { kind: { enum: string[] } } }[] } } }
     }
     const kinds = schema.properties.commands.items.oneOf.flatMap((v) => v.properties.kind.enum)

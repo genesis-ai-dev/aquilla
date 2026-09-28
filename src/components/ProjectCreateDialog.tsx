@@ -36,6 +36,7 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
+import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import {
   fetchProjectSettings,
   patchProjectSettings,
@@ -222,6 +223,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
+  // AQU-1352: null until create-targets loads; the prop orgId is the fallback.
+  const [destination, setDestination] = useState<Destination | null>(null)
 
   const upstreamOptions = useMemo(
     () => linkableProjects.filter((p) => !p.archivedAt),
@@ -269,7 +272,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
 
       try {
-        await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
+        await createCloudProject(jwt, {
+          id: project.id,
+          name: project.name,
+          orgId: destination ? destination.orgId : orgId,
+        })
 
         // One atomic settings write at version 0. The HTTP PATCH handler
         // replaces the whole blob (no per-key merge), so languages and lanes
@@ -379,6 +386,14 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           className="contents"
         >
           <DialogBody className="flex flex-col gap-5">
+            {open && (
+              <ProjectDestinationPicker
+                jwt={session?.jwt}
+                pageOrgId={orgId}
+                onChange={setDestination}
+              />
+            )}
+            {/* SWARM-TODO(AQU-1352): teams multi-select (next wave adds teamIds). */}
             <FieldGroup>
               <form.Field
                 name="name"

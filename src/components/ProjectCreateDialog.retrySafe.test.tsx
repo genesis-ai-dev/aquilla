@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
+// AQU-1352: the destination picker fetches create-targets on open; empty keeps the prop orgId.
+vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn().mockResolvedValue([]) }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },

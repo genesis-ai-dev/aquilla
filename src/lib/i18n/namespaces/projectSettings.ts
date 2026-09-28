@@ -32,6 +32,12 @@ export const projectSettings = defineNamespace({
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
     "projectSettings.create.dialogTitle": "Create New Project",
+    // AQU-1352: destination picker at the top of the create dialog.
+    "projectSettings.create.destinationLabel": "Create in",
+    "projectSettings.create.destinationPersonal": "Personal",
+    "projectSettings.create.destinationThisOrg": "this organization",
+    "projectSettings.create.destinationRoleHint":
+      "You're a {role} in {org}, so you can't create projects there. You can create one in Personal.",
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
@@ -854,6 +860,15 @@ export const projectSettings = defineNamespace({
           "not be loaded. Short, with a period.",
         placeholders: {
           role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.create.destinationRoleHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller " +
+          "may not create projects in the org the page is showing.",
+        placeholders: {
+          role: "Singular localized role name, e.g. 'Contributor' or 'Guest'.",
+          org: "Organization name, e.g. 'Biblica ETT'.",
         },
       },
       "projectSettings.create.trigger": {

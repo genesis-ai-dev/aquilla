@@ -17,8 +17,11 @@ import {
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
+import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
 import { formatScopePath } from "@/lib/access/scope-path"
-import type { ScopePath } from "@/lib/access/types"
+import type { GrantOrigin, ScopePath } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
@@ -493,15 +496,29 @@ export function TeamDetail() {
         id: "teamRole",
         accessorFn: (m) => m.teamRoleLevel ?? 0,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.teamDetail.teamRoleColumn")} />,
-        meta: { className: "w-[9rem] whitespace-nowrap" },
+        meta: { className: "w-[16rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
           const current = m.teamRoleLevel ?? null
-          return (
+          const canEditRow = canEditTeamRoles && (current ?? 0) <= teamRoleCap
+          // AQU-1352 §3.7 rule 1: a NULL team role inherits the org role; a set
+          // one is a direct grant at this team. The effective role is the higher.
+          const orgRef = activeOrgId != null && activeOrg?.name
+            ? { type: "org" as const, id: String(activeOrgId), name: activeOrg.name }
+            : null
+          const origin: GrantOrigin = current == null
+            ? { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+            : { kind: "direct" }
+          const orgLevel = m.roleLevel ?? null
+          const effective = current == null ? orgLevel : Math.max(current, orgLevel ?? 0)
+          const effectiveOrigin: GrantOrigin = current != null && current >= (orgLevel ?? 0)
+            ? { kind: "direct" }
+            : { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+          const select = (
             <TeamRoleSelect
               username={m.username}
               value={current}
-              canEdit={canEditTeamRoles && (current ?? 0) <= teamRoleCap}
+              canEdit={canEditRow}
               maxLevel={teamRoleCap}
               onChange={async (level) => {
                 if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -517,6 +534,28 @@ export function TeamDetail() {
                 }
               }}
             />
+          )
+          return (
+            <span className="inline-flex items-center gap-2">
+              <GrantOriginBadge origin={origin} />
+              {/* Editors keep the select: choosing a team role is how a direct
+                  team grant is created. Read-only viewers get "Set at <org>". */}
+              {canEditRow ? select : (
+                <InheritedRoleControl origin={origin} hrefFor={(scope) => (scope.type === "org" ? `/orgs/${scope.id}/members` : undefined)}>
+                  {select}
+                </InheritedRoleControl>
+              )}
+              {/* Only when the org role outranks the team role; otherwise the
+                  Role column / select already say it. */}
+              {current != null && effective !== current && (
+                <EffectiveRoleCell
+                  className="text-xs text-muted-foreground"
+                  directRoleLevel={current}
+                  effectiveRoleLevel={effective}
+                  effectiveOrigin={effectiveOrigin}
+                />
+              )}
+            </span>
           )
         },
       },
@@ -552,7 +591,7 @@ export function TeamDetail() {
         ),
       },
     ],
-    [isOwner, t, canEditTeamRoles, teamRoleCap, jwt, activeOrgId, groupIdNum, refetch],
+    [isOwner, t, canEditTeamRoles, teamRoleCap, jwt, activeOrgId, activeOrg?.name, groupIdNum, refetch],
   )
 
   const teamDescription = team?.description?.trim() || null

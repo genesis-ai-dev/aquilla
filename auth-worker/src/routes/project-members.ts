@@ -89,10 +89,13 @@ projectMembers.post(
     if (existingRow) {
       const targetCurrentLevel = Number(existingRow.role_level)
       if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+        // Owner always passes the target cap, so it is the one level that is required.
         return c.json(
-          {
-            error: `cannot revoke a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
-          },
+          roleRequiredBody(
+            `cannot revoke a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+            ROLE.OWNER,
+            callerRole,
+          ),
           403,
         )
       }

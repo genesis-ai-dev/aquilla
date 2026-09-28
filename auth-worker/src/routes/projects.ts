@@ -384,11 +384,18 @@ projects.post(
       }
       const leadsATeam = [...teamRoles.values()].some((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
       if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsATeam) {
+        // Name the org only for a member: a non-member must not learn it (spec §3.9 rule 4).
+        const org = orgRole == null
+          ? null
+          : await c.env.AQUILLA_PG.prepare("SELECT name FROM organizations WHERE id = ?")
+            .bind(body.orgId)
+            .first<{ name: string | null }>()
         return c.json(
           roleRequiredBody(
             "org role >= maintainer, or team role >= project lead on a selected team, required to create a project here",
             ROLE.MAINTAINER,
             orgRole == null ? null : { level: orgRole, source: "org" },
+            org?.name ? [org.name] : undefined,
           ),
           403,
         )
@@ -858,7 +865,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
   if (role.level < 700) {
-    return c.json({ error: "only owners can archive a project" }, 403)
+    return c.json(roleRequiredBody("only owners can archive a project", ROLE.OWNER, role), 403)
   }
 
   try {
@@ -903,7 +910,7 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
   if (role.level < 700) {
-    return c.json({ error: "only owners can restore a project" }, 403)
+    return c.json(roleRequiredBody("only owners can restore a project", ROLE.OWNER, role), 403)
   }
 
   try {
@@ -1437,7 +1444,7 @@ projects.post(
     const callerRole = await resolveProjectRole(c.env, user, projectId)
     if (!callerRole) return c.json({ error: "no access to project" }, 403)
     if (callerRole.level < 500) {
-      return c.json({ error: "role >= project_lead required" }, 403)
+      return c.json(roleRequiredBody("role >= project_lead required", ROLE.PROJECT_LEAD, callerRole), 403)
     }
 
     const body = c.req.valid("json")
@@ -1508,7 +1515,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   const callerRole = await resolveProjectRole(c.env, user, projectId)
   if (!callerRole) return c.json({ error: "no access to project" }, 403)
   if (callerRole.level < 600) {
-    return c.json({ error: "role >= maintainer required" }, 403)
+    return c.json(roleRequiredBody("role >= maintainer required", ROLE.MAINTAINER, callerRole), 403)
   }
 
   const existing = await c.env.AQUILLA_PG.prepare(
@@ -1527,10 +1534,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   // row of a user whose current level is >= yours, unless you are owner (700).
   const targetCurrentLevel = Number(existing.role_level)
   if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+    // Owner always passes the target cap, so it is the one level that is required.
     return c.json(
-      {
-        error: `cannot remove a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
-      },
+      roleRequiredBody(
+        `cannot remove a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+        ROLE.OWNER,
+        callerRole,
+      ),
       403,
     )
   }
@@ -1592,7 +1602,7 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < 500) {
-    return c.json({ error: "project_lead+ required to delete a file" }, 403)
+    return c.json(roleRequiredBody("project_lead+ required to delete a file", ROLE.PROJECT_LEAD, role), 403)
   }
 
   if (c.env.AQUILLA_PG) {
@@ -1691,7 +1701,7 @@ projects.post(
     }
     if (resolved.level < INVITE_MIN_ROLE) {
       return c.json(
-        { error: "You don't have permission to share this project" },
+        roleRequiredBody("You don't have permission to share this project", INVITE_MIN_ROLE, resolved),
         403,
       )
     }
@@ -1783,7 +1793,7 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < INVITE_MIN_ROLE) {
-    return c.json({ error: "role >= project_lead required" }, 403)
+    return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, role), 403)
   }
 
   const rows = await c.env.AQUILLA_PG.prepare(
@@ -2036,7 +2046,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
 
   const callerRole = await resolveProjectRole(c.env, user, projectId)
   if (!callerRole || callerRole.level < INVITE_MIN_ROLE) {
-    return c.json({ error: "role >= project_lead required" }, 403)
+    return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, callerRole), 403)
   }
 
   const result = await c.env.AQUILLA_PG.prepare(

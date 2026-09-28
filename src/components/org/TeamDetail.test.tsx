@@ -338,6 +338,45 @@ describe("TeamDetail non-admin gating", () => {
   })
 })
 
+// AQU-1352 §3.7 rules 1–2: a team row says where its role comes from. A NULL
+// team role inherits the org role, so a viewer who cannot edit is told where
+// to change it instead of seeing a bare "Inherit".
+describe("TeamDetail team-role origin (AQU-1352)", () => {
+  it("badges inheriting rows as inherited and team-role rows as direct", async () => {
+    getTeam.mockResolvedValue({
+      id: 10, name: "WA", projects: [],
+      members: [
+        { userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null },
+        { userId: 3, username: "Ben", roleLevel: 100, teamRoleLevel: 600 },
+      ],
+    })
+    const { container } = renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("Ben")).toBeInTheDocument())
+    const origins = Array.from(container.querySelectorAll("[data-origin]")).map((el) => el.getAttribute("data-origin"))
+    expect(origins).toEqual(expect.arrayContaining(["inherited", "direct"]))
+  })
+
+  it("tells a non-editor an inherited team role is set at the org", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.getByTestId("inherited-role-control")).toBeInTheDocument()
+    expect(screen.getAllByText(/CAS/).some((el) => /set at/i.test(el.textContent ?? ""))).toBe(true)
+  })
+
+  it("keeps the team-role select usable for an editor on an inheriting row", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.queryByTestId("inherited-role-control")).toBeNull()
+    expect(screen.getByTestId("team-role-anna")).toBeInTheDocument()
+  })
+})
+
 describe("TeamDetail member role editing (AQU-139)", () => {
   beforeEach(() => {
     addOrgMember.mockResolvedValue({ userId: 2, username: "anna", role: { level: 400, name: "contributor" } })

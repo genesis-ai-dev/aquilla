@@ -109,6 +109,61 @@ describe("WaveformRect", () => {
     expect(screen.getByTestId("w-validated")).toHaveAttribute("aria-label", "Validated")
   })
 
+  // Sam, 2026-09-28: while a trim line is dragged or nudged near a button on
+  // the waveform, the button gets out of the way so the audio under it shows.
+  describe("buttons step aside for a moving line", () => {
+    const rectAt = (el: HTMLElement, left: number, width = 16) => {
+      el.getBoundingClientRect = () => ({ left, right: left + width, top: 0, bottom: 16, width, height: 16, x: left, y: 0, toJSON: () => ({}) })
+    }
+    function setup(at = 0.05, onDrag = vi.fn()) {
+      render(
+        <WaveformRect peaks={peaks} height={56} testId="w"
+          onTogglePlay={() => {}} playLabel="Play" onRecord={() => {}} recordLabel="Record"
+          edges={[{ key: "start", at, label: "Trim start", editable: true, onDrag, onNudge: vi.fn(), onCommit: vi.fn() }]} />,
+      )
+      box(screen.getByTestId("w"))
+      rectAt(screen.getByTestId("w-play"), 8)
+      rectAt(screen.getByTestId("w-record"), 376)
+      return screen.getByRole("slider", { name: "Trim start" })
+    }
+    const aside = (id: string) => screen.getByTestId(id).getAttribute("data-stepped-aside")
+
+    it("fades the button a dragged line comes close to, and only that one", () => {
+      const line = setup()
+      fireEvent.pointerDown(line, { clientX: 20, buttons: 1 })
+      expect(aside("w-play")).toBe("true")
+      expect(aside("w-record")).toBeNull()
+      expect(screen.getByTestId("w-play").className).toContain("data-[stepped-aside=true]:pointer-events-none")
+    })
+
+    it("brings it back when the line is let go", () => {
+      const line = setup()
+      fireEvent.pointerDown(line, { clientX: 20, buttons: 1 })
+      fireEvent.pointerUp(line, { clientX: 20 })
+      expect(aside("w-play")).toBeNull()
+    })
+
+    it("leaves a button alone while the line is far from it", () => {
+      const line = setup(0.5)
+      fireEvent.pointerDown(line, { clientX: 200, buttons: 1 })
+      expect(aside("w-play")).toBeNull()
+      expect(aside("w-record")).toBeNull()
+    })
+
+    it("steps aside for an arrow-key nudge too, for a moment", () => {
+      vi.useFakeTimers()
+      try {
+        const line = setup()
+        fireEvent.keyDown(line, { key: "ArrowRight" })
+        expect(aside("w-play")).toBe("true")
+        vi.advanceTimersByTime(1000)
+        expect(aside("w-play")).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
   describe("edges", () => {
     it("drags an editable line and commits on release", () => {
       const onDrag = vi.fn()

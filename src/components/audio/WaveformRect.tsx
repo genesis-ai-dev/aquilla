@@ -19,6 +19,12 @@
 //     resize arrow over it — and nothing else appears (Sam: no grips, no
 //     arrows; an earlier semi-transparent handle failed on contrast against
 //     grey audio). Read-only edges are the same line in grey.
+//   - BUTTONS THAT STEP ASIDE (Sam, 2026-09-28). While a line is dragged or
+//     nudged, anything drawn over the waveform that the line comes within
+//     STEP_ASIDE_PX of — a corner button, the running time, a card's own tools
+//     — fades out and stops taking clicks, so the audio under it can be seen
+//     and cut. Overlays opt in with `data-wave-overlay` (WAVE_OVERLAY_CLASS
+//     does the fading); a nudge keeps them aside for a moment after the key.
 //
 // SVG, not canvas, for the reasons TargetChipWaveform gives: the ink inherits
 // the body's colour, the path is rebuilt only when the peaks or the height
@@ -27,7 +33,7 @@
 // Purely presentational. The caller owns the audio (peaks, position, play) and
 // the rules for moving an edge (see lib/audio/trim-edit).
 
-import { useMemo, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from "react"
 import { Play, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -95,6 +101,13 @@ export interface WaveformRectProps {
 }
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
+
+/** How close (px) a moving line comes to an overlay before it steps aside. */
+export const STEP_ASIDE_PX = 28
+/** After an arrow-key nudge, overlays stay aside this long for the next one. */
+const NUDGE_LINGER_MS = 900
+
+type EdgeActivity = "start" | "move" | "end" | "nudge" | "blur"
 const pct = (n: number) => `${Math.round(clamp01(n) * 1e6) / 1e4}%`
 
 export function WaveformRect({
@@ -129,6 +142,57 @@ export function WaveformRect({
   const innerH = Math.max(0, height - 2)
   const bins = peaks?.length ?? 0
   const d = useMemo(() => (peaks && peaks.length > 0 ? envelopePathD(peaks, innerH) : ""), [peaks, innerH])
+
+  // ── Stepping aside for a moving line ─────────────────────────────────────
+  // Driven through the DOM rather than state: it changes on every pointer
+  // move, and re-rendering the whole rectangle for an opacity flip would be
+  // waste. The layout effect re-measures after each render, when the line has
+  // moved to the value the drag or nudge just produced.
+  const activeEdgeRef = useRef<string | null>(null)
+  const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stepAside = useCallback((at: number | null) => {
+    const box = boxRef.current
+    if (!box) return
+    const overlays = box.querySelectorAll<HTMLElement>("[data-wave-overlay]")
+    if (at == null) {
+      overlays.forEach((o) => o.removeAttribute("data-stepped-aside"))
+      return
+    }
+    const r = box.getBoundingClientRect()
+    const x = r.left + clamp01(at) * r.width
+    overlays.forEach((o) => {
+      const b = o.getBoundingClientRect()
+      const d = x < b.left ? b.left - x : x > b.right ? x - b.right : 0
+      if (d < STEP_ASIDE_PX) o.setAttribute("data-stepped-aside", "true")
+      else o.removeAttribute("data-stepped-aside")
+    })
+  }, [])
+  useLayoutEffect(() => {
+    const key = activeEdgeRef.current
+    if (key == null) return
+    const edge = edges.find((e) => e.key === key)
+    stepAside(edge ? edge.at : null)
+  })
+  useEffect(() => () => {
+    if (lingerRef.current) clearTimeout(lingerRef.current)
+  }, [])
+  const onEdgeActivity = (key: string, what: EdgeActivity, at: number) => {
+    if (lingerRef.current) { clearTimeout(lingerRef.current); lingerRef.current = null }
+    if (what === "end" || what === "blur") {
+      activeEdgeRef.current = null
+      stepAside(null)
+      return
+    }
+    activeEdgeRef.current = key
+    stepAside(at)
+    if (what === "nudge") {
+      lingerRef.current = setTimeout(() => {
+        lingerRef.current = null
+        activeEdgeRef.current = null
+        stepAside(null)
+      }, NUDGE_LINGER_MS)
+    }
+  }
 
   const showProgress = playing && progress != null && Number.isFinite(progress)
   const fracFromX = (clientX: number): number => {
@@ -224,7 +288,13 @@ export function WaveformRect({
       )}
 
       {edges.map((edge) => (
-        <EdgeLine key={edge.key} edge={edge} fracFromX={fracFromX} testId={testId ? `${testId}-edge-${edge.key}` : undefined} />
+        <EdgeLine
+          key={edge.key}
+          edge={edge}
+          fracFromX={fracFromX}
+          onActivity={(what, at) => onEdgeActivity(edge.key, what, at)}
+          testId={testId ? `${testId}-edge-${edge.key}` : undefined}
+        />
       ))}
 
       {onTogglePlay && (
@@ -265,10 +335,13 @@ export function WaveformRect({
 function EdgeLine({
   edge,
   fracFromX,
+  onActivity,
   testId,
 }: {
   edge: WaveformEdge
   fracFromX: (clientX: number) => number
+  /** The line is moving (or has stopped): the rectangle steps overlays aside. */
+  onActivity?: (what: EdgeActivity, at: number) => void
   testId?: string
 }) {
   const dragging = useRef(false)
@@ -283,18 +356,23 @@ function EdgeLine({
     // touched (Sam: "click the line, then the arrow keys").
     e.currentTarget.focus({ preventScroll: true })
     dragging.current = true
-    edge.onDrag?.(fracFromX(e.clientX))
+    const f = fracFromX(e.clientX)
+    edge.onDrag?.(f)
+    onActivity?.("start", f)
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!editable || !dragging.current || e.buttons !== 1) return
     e.stopPropagation()
-    edge.onDrag?.(fracFromX(e.clientX))
+    const f = fracFromX(e.clientX)
+    edge.onDrag?.(f)
+    onActivity?.("move", f)
   }
   const endDrag = (e: PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return
     dragging.current = false
     e.stopPropagation()
     edge.onCommit?.()
+    onActivity?.("end", edge.at)
   }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!editable) return
@@ -306,6 +384,7 @@ function EdgeLine({
     e.stopPropagation()
     edge.onNudge?.(e.key === "ArrowLeft" ? -1 : 1, e.shiftKey)
     edge.onCommit?.()
+    onActivity?.("nudge", edge.at)
   }
 
   return (
@@ -325,6 +404,7 @@ function EdgeLine({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
+      onBlur={() => onActivity?.("blur", edge.at)}
       className={cn(
         "absolute inset-y-0 z-10 w-2.5 -translate-x-1/2 touch-none outline-none",
         editable ? "cursor-ew-resize focus-visible:bg-foreground/10" : "pointer-events-none",

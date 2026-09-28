@@ -11,7 +11,7 @@
 import type { ReactNode } from "react"
 import { Check, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "./chip-classes"
+import { CHIP_VALIDATED_BADGE_CLASS, WAVE_OVERLAY_CLASS, chipCornerButtonClass } from "./chip-classes"
 
 export interface ChipCornerButtonProps {
   side: "left" | "right"
@@ -52,6 +52,7 @@ export function ChipCornerButton({
       title={label}
       aria-label={label}
       data-testid={testId}
+      data-wave-overlay=""
       onPointerDown={(e) => {
         e.stopPropagation()
         if (!disabled) onPress?.()
@@ -67,7 +68,7 @@ export function ChipCornerButton({
           if (!disabled) onActivate()
         }
       }}
-      className={cn(chipCornerButtonClass(side, reveal), disabled && "opacity-50")}
+      className={cn(chipCornerButtonClass(side, reveal), WAVE_OVERLAY_CLASS, disabled && "opacity-50")}
     >
       {children}
     </span>
@@ -86,7 +87,7 @@ export function TakeValidatedBadge({
   testId?: string
 }) {
   return (
-    <span data-testid={testId} title={label} aria-label={label} className={CHIP_VALIDATED_BADGE_CLASS}>
+    <span data-testid={testId} data-wave-overlay="" title={label} aria-label={label} className={cn(CHIP_VALIDATED_BADGE_CLASS, WAVE_OVERLAY_CLASS)}>
       {state === "full"
         ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
         : <Check className="h-2.5 w-2.5" strokeWidth={3} />}

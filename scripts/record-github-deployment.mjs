@@ -4,6 +4,8 @@
 // verify-live-environment.mjs) talks to GitHub; this is the one piece that
 // does, kept apart for the same reason release-plan-walk.mjs is separate
 // from release-plan.mjs — a network bug can't hide inside deploy logic.
+import { pathToFileURL } from "node:url"
+
 const REPO = "genesis-ai-dev/aquilla"
 
 async function githubApi(path, { repo, token, fetchImpl, method = "GET", body }) {
@@ -89,7 +91,7 @@ async function main() {
   )
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`ABORT: ${error.message}`)
     process.exit(1)

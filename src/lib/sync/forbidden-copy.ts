@@ -17,14 +17,29 @@ export function forbiddenReasonCopy(reason: string): string {
   // asserting "self-validation is off" after it was re-enabled reads as false).
   if (r.includes("not in scope")) {
     if (r.includes("file '")) return "the file was outside your assigned scope"
-    if (r.includes("lane '")) return "the language lane was outside your assigned scope"
+    // AQU-581 review: name the language. "The language lane" left people
+    // guessing which one, and whether it meant the one on screen.
+    const lane = /lane '([^']*)'/.exec(reason)?.[1]
+    if (lane !== undefined) {
+      return lane === ""
+        ? "you weren't allowed to work in the main language at the time"
+        : `you weren't allowed to work in ${lane} at the time`
+    }
     return "it was outside your assigned files or lanes"
   }
   if (r.includes("self-validation is not allowed")) {
     return "validating your own translation wasn't allowed (self-validation was off for this project at the time)"
   }
-  if (r.includes("too low to validate") || r.includes("role too low")) {
+  if (r.includes("too low to validate") || r.includes("role too low for cell.validate") || r.includes("role too low for cell.unvalidate")) {
     return "your role wasn't allowed to validate on this project"
+  }
+  // AQU-581 review: an EDIT refused on role used to say "…allowed to
+  // validate", which is not what the person was doing.
+  if (r.includes("role too low for target.")) {
+    return "your role wasn't allowed to edit translations on this project"
+  }
+  if (r.includes("role too low")) {
+    return "your role wasn't allowed to make this change on this project"
   }
   if (r.includes("validator allowlist")) {
     return "you weren't on this project's validator allowlist"

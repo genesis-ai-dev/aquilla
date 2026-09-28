@@ -11,6 +11,7 @@ import { FRONTIER_BASE } from "../frontier/auth"
 import { fetchWithTimeout } from "../frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
+import { laneTagForAssignment } from "./assignment-lane"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
@@ -40,6 +41,8 @@ export interface OrgWorkloadAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -61,6 +64,10 @@ export interface MyAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
+  /** Opaque lane id. A deep link may use this in place of the tag. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number
@@ -91,6 +98,33 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
   )
   if (!res.ok) throw new UserError(res.status, "", "project")
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
+}
+
+/** An open assignment the caller handed out (mirrors the server). */
+export interface GivenAssignment {
+  assignmentId: string
+  /** Routes the unassign event's sync token; null when the scope resolved to no cells. */
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+}
+
+/**
+ * AQU-581: the open assignments the caller handed out in one project — what a
+ * lane coordinator can take back. Any project member (only ever their own).
+ */
+export async function getAssignmentsGivenByMe(jwt: string, projectId: string): Promise<GivenAssignment[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/given`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignments: GivenAssignment[] }).assignments
 }
 
 /** An inbox assignment with its project name, from the org-wide read. */
@@ -165,6 +199,8 @@ export interface UnitAssignment {
   username: string | null
   scopeLabel: string
   targetLang: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   deadline: string | null
   cellsTotal: number
   translated: number
@@ -319,6 +355,10 @@ export interface CreateAssignmentArgs {
  */
 export async function createAssignment(args: CreateAssignmentArgs): Promise<string> {
   const assignmentId = uuidv7()
+  // AQU-538 / AQU-729: omit the lane on the wire for the default lane.
+  // '', a missing value, and the word "default" are that lane — the product
+  // cannot store a lane named "default". An explicit tag is kept.
+  const targetLang = laneTagForAssignment(args.targetLang)
   const event = buildRawEvent({
     kind: "assignment.create",
     projectId: args.projectId,
@@ -331,8 +371,7 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       scope: args.scope,
       scopeLabel: args.scopeLabel,
       assigneeUserId: args.assigneeUserId,
-      // AQU-538: omit the lane on the wire when it's the default ('').
-      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      ...(targetLang ? { targetLang } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
     },

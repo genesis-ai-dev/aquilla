@@ -12,6 +12,7 @@ import {
   type PatchResult,
   type ProjectWideSettings,
   type ProjectSettingsResponse,
+  type ProjectLaneView,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -199,6 +200,10 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /** AQU-1418: the project's lane rows from the last settings response.
+   *  Null before the first response that carries them, and on a server
+   *  that predates lane rows. */
+  lanes: ProjectLaneView[] | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
@@ -399,12 +404,14 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
     }
+    if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -887,6 +894,7 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
+    lanes,
     isOnline,
     canEdit,
     reasonCannotEdit,

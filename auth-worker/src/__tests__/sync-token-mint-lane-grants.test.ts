@@ -43,8 +43,13 @@ describe("AQU-730 — signSyncTokenWithRole laneGrants claim", () => {
   it("INCLUDES laneGrants sorted by lane when rows exist", async () => {
     await seedProjectMember()
     await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-es', 'p1', 'target', 'Spanish', 'es', 'es', 1),
+              ('lane-fr', 'p1', 'target', 'French', 'fr', 'fr', 2)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
       `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
-       VALUES ('p1', 1, 'fr', 300), ('p1', 1, 'es', 400)`,
+       VALUES ('p1', 1, 'lane-fr', 300), ('p1', 1, 'lane-es', 400)`,
     ).run()
     const signed = await signSyncTokenWithRole(
       env as unknown as Env,
@@ -57,8 +62,8 @@ describe("AQU-730 — signSyncTokenWithRole laneGrants claim", () => {
       laneGrants?: { lane: string; level: number }[]
     }
     expect(claims.laneGrants).toEqual([
-      { lane: "es", level: 400 },
-      { lane: "fr", level: 300 },
+      { lane: "lane-es", level: 400 },
+      { lane: "lane-fr", level: 300 },
     ])
   })
 })

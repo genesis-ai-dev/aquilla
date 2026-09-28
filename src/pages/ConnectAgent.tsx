@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
@@ -15,7 +16,8 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import { connectionRequest, type AgentConnectionRequest } from "@/lib/sync/agent-connect"
+import { buildApprovedMessage, connectionRequest, type AgentConnectionRequest } from "@/lib/sync/agent-connect"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 
 type Mode = "ask" | "act"
 type ScopeKind = "project" | "org"
@@ -44,6 +46,7 @@ function ConnectAgentContent() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [result, setResult] = useState<"approved" | "denied" | null>(null)
+  const [copied, setCopied] = useState(false)
   const inFlight = useRef(false)
   // Account changes invalidate the loaded consent and selected scope.
   useEffect(() => {
@@ -107,6 +110,14 @@ function ConnectAgentContent() {
       <CardContent className="flex flex-col gap-4">
         {loading ? <Spinner /> : !session ? <FrontierLoginForm onSuccess={() => {}} /> : result ? <>
           <p role="status">{t(result === "approved" ? "onboarding.connect.approved" : "onboarding.connect.denied")}</p>
+          {result === "approved" && <Field>
+            <FieldLabel htmlFor="approved-message">{t("onboarding.connect.handoff")}</FieldLabel>
+            <Textarea id="approved-message" readOnly rows={5} value={buildApprovedMessage(AUTH_BASE, code.toUpperCase().trim())} />
+            <Button variant="outline" onClick={() => {
+              void navigator.clipboard.writeText(buildApprovedMessage(AUTH_BASE, code.toUpperCase().trim()))
+                .then(() => setCopied(true), () => setCopied(false))
+            }}>{t(copied ? "onboarding.connect.handoffCopied" : "onboarding.connect.handoffCopy")}</Button>
+          </Field>}
           <Link to="/preferences/api-tokens?awaiting=1">{t("onboarding.connect.manage")}</Link>
         </> : <>
           <p>{t("onboarding.connect.account", { username: session.username })}</p>

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useContext, useEffect, useState, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { PanelLeft } from "lucide-react"
@@ -25,21 +25,9 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { useIsLgUp } from "@/hooks/useIsLgUp"
 
-/** Tailwind `lg` — below this, org chrome and the editor dock move into a sheet. */
-const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
-
-export function useIsLgUp(): boolean {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
-      mq.addEventListener("change", onStoreChange)
-      return () => mq.removeEventListener("change", onStoreChange)
-    },
-    () => window.matchMedia(LG_MIN_WIDTH_QUERY).matches,
-    () => true,
-  )
-}
+export { useIsLgUp } from "@/hooks/useIsLgUp"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits

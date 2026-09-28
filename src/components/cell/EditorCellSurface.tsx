@@ -113,8 +113,8 @@ export function EditorTargetCellColumn({
       className={cn(
         // AQU-1101: the target column is the third grid item — min-w-0 so it
         // can shrink to its track, break-words so the text inside breaks.
-        "relative flex min-w-0 flex-col break-words pl-3 transition-opacity",
-        reserveActionRail ? "pr-9" : "pr-3",
+        "relative flex min-w-0 flex-col break-words pl-2 transition-opacity md:pl-3",
+        reserveActionRail ? "pr-2 md:pr-9" : "pr-2 md:pr-3",
         busy && "opacity-70",
         className,
       )}

@@ -7,6 +7,7 @@ import { runCommand, workersBuildPreviewAlias } from "./cloudflare-pr-preview.mj
 import { parseWranglerOutput } from "./cloudflare-version-deploy.mjs"
 import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
 
+import { cleanupStalePreviews } from "./cloudflare-preview-cleanup.mjs"
 import { commentOnPreview } from "./cloudflare-preview-comment.mjs"
 
 export const PREVIEW_WORKERS = {
@@ -88,7 +89,7 @@ export function previewOrigin(entry, surface, name) {
   return url.origin
 }
 
-export async function deployStackPreview({ cwd = process.cwd(), env = process.env, run = runCommand, verify = assertSafeDeploymentArtifacts, notify = commentOnPreview } = {}) {
+export async function deployStackPreview({ cwd = process.cwd(), env = process.env, run = runCommand, verify = assertSafeDeploymentArtifacts, notify = commentOnPreview, cleanup = cleanupStalePreviews } = {}) {
   const { branch, commitSha } = workersBuildMetadata(env)
   const name = workersBuildPreviewAlias(branch)
   const temp = mkdtempSync(join(tmpdir(), "aquilla-stack-preview-"))
@@ -119,6 +120,15 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
       const required = surface === "auth" ? ["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"] : ["SYNC_SECRET_KEY", "ADMIN_SECRET"]
       const missing = required.filter((key) => !names.has(key))
       if (missing.length) throw new Error(`${PREVIEW_WORKERS[surface]} Previews Base is missing: ${missing.join(", ")}`)
+    }
+    // Release the Durable Object namespaces of previews whose branch is gone
+    // before creating this branch's own: the account hit Cloudflare's cap of 500
+    // and every deploy failed with 10067 (AQU-1396). Best-effort by design: a
+    // sweep problem must never turn a healthy deploy into a failure.
+    try {
+      await cleanup({ cwd, env, currentAlias: name, workers: [PREVIEW_WORKERS.sync, PREVIEW_WORKERS.auth, PREVIEW_WORKERS.web] })
+    } catch (error) {
+      console.warn(`[preview-cleanup] skipped: ${error instanceof Error ? error.message : String(error)}`)
     }
     // Discover real Cloudflare URLs rather than guessing beta hostname formats.
     // Cross-service callbacks fail closed until all three previews are wired.

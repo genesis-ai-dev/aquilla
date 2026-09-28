@@ -20,7 +20,7 @@ if [ "$event_name" = "pull_request" ]; then
 else
   mode="live"
   case "$ref_name" in
-    release/[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9])
+    release/[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9] | release/[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]-[0-9][0-9])
       wrangler_environment="production"
       live_environment="production"
       github_environment="production"

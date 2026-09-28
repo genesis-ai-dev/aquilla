@@ -61,6 +61,13 @@ describe("resolveDefaultLaneLabel (AQU-606)", () => {
     const p = baseProject({ targetLanguage: "French" })
     expect(laneChipLabel("es", resolveDefaultLaneLabel(p, undefined))).toBe("es")
   })
+
+  it("prefers the lane row's name over the tag", () => {
+    const p = baseProject({ targetLanguage: "French" })
+    expect(laneChipLabel("es", resolveDefaultLaneLabel(p, undefined), "Default", "Yoruba Team")).toBe(
+      "Yoruba Team",
+    )
+  })
 })
 
 describe("withOptimisticLane (AQU-605)", () => {

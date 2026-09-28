@@ -12,6 +12,8 @@ describe("neon-target hands the backfill its flags", () => {
     // AQU-1240: the lane backfill takes --apply / --project / --limit the same way.
     expect(childArgs("backfill-lanes", ["--apply", "--project", "p1", "--limit", "5"]))
       .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1", "--limit", "5"])
+    expect(childArgs("verify-lanes", ["--require-complete"]))
+      .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

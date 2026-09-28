@@ -107,7 +107,8 @@ const projectWithCast: ProjectRecord = {
 function renderTable({
   sourceText = "hello",
   targetText = "bonjour",
-}: { sourceText?: string; targetText?: string } = {}) {
+  projectOverride,
+}: { sourceText?: string; targetText?: string; projectOverride?: ProjectRecord } = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(makeRows("cell-1", sourceText, targetText), { full: true, maxServerSeq: 1 })
@@ -116,7 +117,7 @@ function renderTable({
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{}}>
         <EditorTable
-          project={projectWithCast}
+          project={projectOverride ?? projectWithCast}
           cellStore={store}
           username="tester"
           isCompletionConfigured={false}
@@ -147,6 +148,47 @@ function gridClassNames(container: HTMLElement): string[] {
 }
 
 describe("EditorTable — source/target columns stay equal in width", () => {
+  it("stacks source and target beside the gutter on narrow screens", async () => {
+    const { container } = renderTable()
+    await screen.findByText("hello")
+
+    const row = container.querySelector<HTMLElement>("[data-grid-row]")!
+    const source = row.querySelector<HTMLElement>('[data-editor-cell-surface="source"]')!
+    const target = row.querySelector<HTMLElement>('[data-editor-cell-surface="target-column"]')!
+    const rail = row.querySelector<HTMLElement>(".pointer-events-none.relative.col-start-2")!
+
+    expect(row.className).toContain("grid-cols-[48px_minmax(0,1fr)]")
+    expect(row.className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(row.querySelector<HTMLElement>(".row-span-2")?.className).toContain("flex-col")
+    expect(source.className).toContain("col-start-2")
+    expect(target.className).toContain("col-start-2")
+    expect(target.className).toContain("border-t")
+    expect(rail).not.toBeNull()
+    expect(rail.className).toContain("md:absolute")
+    const targetHeader = screen.getByTestId("table-target-header")
+    expect(targetHeader.className).toContain("col-start-2")
+    expect(targetHeader.parentElement?.className).toContain("grid-cols-2")
+    expect(targetHeader.previousElementSibling?.className).toContain("col-start-1")
+    expect(targetHeader.className).toContain("flex-wrap")
+  })
+
+  it("keeps long language names inside the two mobile header halves", async () => {
+    renderTable({
+      projectOverride: {
+        ...projectWithCast,
+        sourceLanguage: "A long source language name",
+        targetLanguage: "A long target language name",
+      },
+    })
+    await screen.findByText("hello")
+
+    const sourceBadge = screen.getByText("A long source language name")
+    const targetBadge = screen.getByText("A long target language name")
+    expect(sourceBadge.className).toContain("break-words")
+    expect(targetBadge.className).toContain("break-words")
+    expect(screen.getByTestId("table-target-header").className).toContain("flex-wrap")
+  })
+
   it("floors both text tracks at zero so content can never widen one", async () => {
     const { container } = renderTable({ targetText: UNBREAKABLE })
     await screen.findByText("hello")

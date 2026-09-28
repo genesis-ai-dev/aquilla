@@ -20,6 +20,9 @@ export const onboarding = defineNamespace({
     "onboarding.connect.title": "Connect your agent",
     "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
     "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.handoff": "Agent still waiting? Paste this message into its chat. It contains no secrets.",
+    "onboarding.connect.handoffCopy": "Copy message",
+    "onboarding.connect.handoffCopied": "Copied",
     "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
     "onboarding.connect.manage": "Manage agent access",
     "onboarding.connect.account": "Signed in as {username}",
@@ -516,6 +519,18 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenTrigger": "New token",
     "onboarding.apiTokens.newTokenDialogHeading": "New API token",
     "onboarding.apiTokens.namePlaceholder": "e.g. Import agent",
+    // AQU-1242: access is the write ceiling, asked before mode because it
+    // decides whether mode applies at all.
+    "onboarding.apiTokens.accessLabel": "Access",
+    "onboarding.apiTokens.accessReadLabel": "Read-only",
+    "onboarding.apiTokens.accessReadDescription":
+      "the agent can read, search and export, but cannot change anything.",
+    "onboarding.apiTokens.accessWriteLabel": "Read and write",
+    "onboarding.apiTokens.accessWriteDescription":
+      "the agent can also propose and apply changes, subject to the mode below.",
+    "onboarding.apiTokens.accessReadBadge": "read-only",
+    "onboarding.apiTokens.modeNotApplicable":
+      "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
     "onboarding.apiTokens.modeAskLabel": "Ask",
     "onboarding.apiTokens.modeAskDescription": "every write waits for your approval.",

@@ -10,25 +10,32 @@
 // a backfill script untouched. The migration commands keep their fixed shape:
 // `neon-migrate` takes the command word and nothing else.
 
-export type NeonTargetCommand = "status" | "apply" | "baseline" | "prepare-comments-key" | "backfill-progress" | "backfill-activity" | "backfill-lanes"
+export type NeonTargetCommand =
+  | "status"
+  | "apply"
+  | "baseline"
+  | "prepare-comments-key"
+  | "backfill-progress"
+  | "backfill-activity"
+  | "backfill-lanes"
+  | "verify-lanes"
 
 export function scriptFor(command: NeonTargetCommand): string {
-  return command === "backfill-progress"
-    ? "scripts/neon-backfill-progress.ts"
-    : command === "backfill-activity"
-      ? "scripts/neon-backfill-activity.ts"
-      : command === "backfill-lanes"
-        ? "scripts/neon-backfill-lanes.ts"
-        : "scripts/neon-migrate.ts"
+  if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
+  if (command === "backfill-activity") return "scripts/neon-backfill-activity.ts"
+  if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
+  if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
+  return "scripts/neon-migrate.ts"
 }
 
 /**
  * The child's argv, after the runtime. `passthrough` is whatever followed the
- * command on our own command line — `--missing-books`, `--missing-only` — and
- * is meaningful only to the backfill scripts, which read `process.argv`
- * themselves.
+ * command on our own command line — `--missing-books`, `--apply`,
+ * `--require-complete` — and is meaningful only to the backfill and
+ * verify-lanes scripts, which read `process.argv` themselves.
  */
 export function childArgs(command: NeonTargetCommand, passthrough: readonly string[]): string[] {
   const script = scriptFor(command)
-  return command.startsWith("backfill-") ? [script, ...passthrough] : [script, command]
+  const forwardsFlags = command.startsWith("backfill-") || command === "verify-lanes"
+  return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

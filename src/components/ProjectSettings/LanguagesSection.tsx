@@ -14,7 +14,7 @@
 // (409) and role-floor (403) handling is therefore identical to every other
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -50,6 +50,11 @@ export interface LanguagesSectionProps {
    *  offline handling all live in that hook already — this component only
    *  has to react to the returned outcome. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+  /** Lane rows from settings. When present, this section edits those rows. */
+  laneRecords?: ProjectLaneView[]
+  onRenameLane?: (laneId: string, name: string) => Promise<"ok" | "duplicate" | "invalid">
+  onCreateLane?: (input: { name: string; language: string }) => Promise<"ok" | "duplicate" | "invalid">
+  onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
 }
 
 function normalizeLane(lane: string): string {
@@ -96,14 +101,32 @@ export function LanguagesSection({
   canEdit,
   disabledTooltip,
   patch,
+  laneRecords,
+  onRenameLane,
+  onCreateLane,
+  onSetLaneArchived,
 }: LanguagesSectionProps) {
   const t = useT()
   const [newLane, setNewLane] = useState("")
+  const [laneName, setLaneName] = useState("")
+  const [nameEdited, setNameEdited] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
+
+  const targetRows = (laneRecords ?? []).filter((lane) => lane.role === "target")
+  const rowMode = targetRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
+  const defaultRow = targetRows.find((lane) => (lane.legacyTag ?? "") === "")
+  const activeRows = targetRows
+    .filter((lane) => (lane.legacyTag ?? "") !== "" && !lane.archivedAt)
+    .slice()
+    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+  const archivedRows = targetRows
+    .filter((lane) => lane.archivedAt)
+    .slice()
+    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
 
   const active = activeLanes(targetLanes, archivedLanes)
   const archived = archivedRegisteredLanes(targetLanes, archivedLanes)
@@ -118,6 +141,33 @@ export function LanguagesSection({
   // straight away — `setNewLane` has not landed in state yet at that point.
   async function handleAdd(candidate: string = newLane) {
     if (!canEdit) return
+    if (rowMode && onCreateLane) {
+      const language = normalizeLane(candidate)
+      const name = (nameEdited ? normalizeLane(laneName) : language) || language
+      if (!name) {
+        setAddError(t("projectSettings.create.extraLanguagesEmptyError"))
+        return
+      }
+      setAddError(null)
+      setAdding(true)
+      try {
+        const result = await onCreateLane({ name, language: language || name })
+        if (result === "duplicate") {
+          setAddError(t("projectSettings.languages.duplicateNameError"))
+          return
+        }
+        if (result === "invalid") {
+          setAddError(t("projectSettings.languages.nameTooLongError"))
+          return
+        }
+        setNewLane("")
+        setLaneName("")
+        setNameEdited(false)
+      } finally {
+        setAdding(false)
+      }
+      return
+    }
     const trimmed = normalizeLane(candidate)
     // Dedupe against every registered lane (active + archived) so a tag can't
     // be re-added while an archived copy still holds its cell data.
@@ -146,6 +196,12 @@ export function LanguagesSection({
     setLaneActionError(null)
     setBusyLane(lane)
     try {
+      if (rowMode && onSetLaneArchived) {
+        const ok = await onSetLaneArchived(lane, true)
+        if (!ok) setLaneActionError(t("projectSettings.languages.savingFailedGeneric"))
+        else setPendingArchive(null)
+        return
+      }
       const outcome = await patch({
         archivedLanes: [...archivedLanes, lane],
       } as ProjectWideSettings)
@@ -165,6 +221,11 @@ export function LanguagesSection({
     setLaneActionError(null)
     setBusyLane(lane)
     try {
+      if (rowMode && onSetLaneArchived) {
+        const ok = await onSetLaneArchived(lane, false)
+        if (!ok) setLaneActionError(t("projectSettings.languages.savingFailedGeneric"))
+        return
+      }
       const outcome = await patch({
         archivedLanes: archivedLanes.filter((l) => l !== lane),
       } as ProjectWideSettings)
@@ -189,6 +250,19 @@ export function LanguagesSection({
         <div>
           <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
           <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
+          {rowMode && defaultRow && onRenameLane && (
+            <div className="mt-2 max-w-sm">
+              <FieldLabel htmlFor={`lane-name-${defaultRow.id}`}>
+                {t("projectSettings.languages.laneNameLabel")}
+              </FieldLabel>
+              <LaneNameField
+                laneId={defaultRow.id}
+                name={defaultRow.name}
+                canEdit={canEdit}
+                onRename={onRenameLane}
+              />
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             {t("projectSettings.languages.defaultTargetNote")}
           </p>
@@ -199,7 +273,64 @@ export function LanguagesSection({
           <p className="mb-2 text-xs text-muted-foreground">
             {t("projectSettings.languages.additionalLanesDescription")}
           </p>
-          {active.length === 0 ? (
+          {rowMode ? (
+            activeRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
+            ) : (
+              <ul data-testid="target-lanes-list" className="flex flex-col gap-1">
+                {activeRows.map((lane) => (
+                  <li
+                    key={lane.id}
+                    className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
+                  >
+                    <LaneNameField
+                      laneId={lane.id}
+                      name={lane.name}
+                      canEdit={canEdit}
+                      onRename={onRenameLane!}
+                    />
+                    {lane.langCode && (
+                      <span className="shrink-0 text-xs text-muted-foreground">{lane.langCode}</span>
+                    )}
+                    {pendingArchive === lane.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {t("projectSettings.languages.archiveConfirm", { lane: lane.name })}
+                        </span>
+                        <Button
+                          variant="destructive"
+                          disabled={busyLane === lane.id}
+                          onClick={() => void handleConfirmArchive(lane.id)}
+                        >
+                          {busyLane === lane.id ? t("projectSettings.languages.archivingButton") : t("projectSettings.languages.confirmArchiveButton")}
+                        </Button>
+                        <Button variant="ghost" disabled={busyLane === lane.id} onClick={() => setPendingArchive(null)}>
+                          {t("common.cancel")}
+                        </Button>
+                      </div>
+                    ) : (
+                      <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          disabled={!canEdit}
+                          data-testid={`archive-lane-${lane.id}`}
+                          aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: lane.name })}
+                          onClick={() => {
+                            setLaneActionError(null)
+                            setPendingArchive(lane.id)
+                          }}
+                        >
+                          <Archive className="h-4 w-4" />
+                        </Button>
+                      </DisabledFieldTooltip>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : active.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
           ) : (
             <ul data-testid="target-lanes-list" className="flex flex-col gap-1">
@@ -258,16 +389,18 @@ export function LanguagesSection({
 
         {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
 
-        {archived.length > 0 && (
+        {(rowMode ? archivedRows.length > 0 : archived.length > 0) && (
           <div>
             <FieldLabel>{t("projectSettings.languages.archivedLanesLabel")}</FieldLabel>
             <p className="mb-2 text-xs text-muted-foreground">
               {t("projectSettings.languages.archivedLanesDescription")}
             </p>
             <ul data-testid="archived-lanes-list" className="flex flex-col gap-1">
-              {archived.map((lane) => (
+              {(rowMode ? archivedRows.map((lane) => lane.name) : archived).map((lane, index) => {
+                const key = rowMode ? archivedRows[index].id : lane
+                return (
                 <li
-                  key={lane}
+                  key={key}
                   className="flex items-center gap-2 rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm"
                 >
                   <Badge variant="secondary" className="shrink-0 text-muted-foreground">
@@ -278,17 +411,18 @@ export function LanguagesSection({
                     <Button
                       variant="ghost"
                       className="h-7 shrink-0 gap-1"
-                      disabled={!canEdit || busyLane === lane}
-                      data-testid={`restore-lane-${lane}`}
+                      disabled={!canEdit || busyLane === key}
+                      data-testid={`restore-lane-${key}`}
                       aria-label={t("projectSettings.languages.restoreLaneAriaLabel", { lane })}
-                      onClick={() => void handleRestore(lane)}
+                      onClick={() => void handleRestore(key)}
                     >
                       <ArchiveRestore className="h-4 w-4" />
-                      {busyLane === lane ? t("projectSettings.languages.restoringButton") : t("common.restore")}
+                      {busyLane === key ? t("projectSettings.languages.restoringButton") : t("common.restore")}
                     </Button>
                   </DisabledFieldTooltip>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           </div>
         )}
@@ -303,9 +437,10 @@ export function LanguagesSection({
                 value={newLane}
                 // Suggestions skip lanes that already exist, so the list can
                 // never offer a value the duplicate check would then reject.
-                exclude={excludeFromSuggestions}
+                exclude={rowMode ? [] : excludeFromSuggestions}
                 onValueChange={(next) => {
                   setNewLane(next)
+                  if (rowMode && !nameEdited) setLaneName(next)
                   setAddError(null)
                 }}
                 // AQU-1116: Enter on the highlighted match adds that lane, the
@@ -326,6 +461,24 @@ export function LanguagesSection({
                 disabled={!canEdit || adding}
               />
             </div>
+            {rowMode && (
+              <div className="flex-1">
+                <FieldLabel htmlFor="add-lane-name">{t("projectSettings.languages.laneNameLabel")}</FieldLabel>
+                <input
+                  id="add-lane-name"
+                  data-testid="add-lane-name-input"
+                  value={laneName}
+                  placeholder={t("projectSettings.languages.laneNamePlaceholder")}
+                  disabled={!canEdit || adding}
+                  className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                  onChange={(e) => {
+                    setLaneName(e.target.value)
+                    setNameEdited(true)
+                    setAddError(null)
+                  }}
+                />
+              </div>
+            )}
             <Button
               data-testid="add-target-lang-btn"
               onClick={() => void handleAdd()}
@@ -339,5 +492,64 @@ export function LanguagesSection({
         {addError && <p className="text-xs text-destructive">{addError}</p>}
       </CardContent>
     </Card>
+  )
+}
+
+function LaneNameField({
+  laneId,
+  name,
+  canEdit,
+  onRename,
+}: {
+  laneId: string
+  name: string
+  canEdit: boolean
+  onRename: (laneId: string, name: string) => Promise<"ok" | "duplicate" | "invalid">
+}) {
+  const t = useT()
+  const [draft, setDraft] = useState(name)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    setDraft(name)
+  }, [name])
+
+  async function commit() {
+    const next = draft.trim()
+    if (!next || next === name.trim()) return
+    const result = await onRename(laneId, next)
+    if (result === "ok") {
+      setError(null)
+      return
+    }
+    setError(
+      result === "duplicate"
+        ? t("projectSettings.languages.duplicateNameError")
+        : t("projectSettings.languages.nameTooLongError"),
+    )
+  }
+
+  return (
+    <div className="min-w-0 flex-1">
+      <input
+        value={draft}
+        disabled={!canEdit}
+        aria-label={t("projectSettings.languages.laneNameLabel")}
+        className="w-full rounded border bg-background px-2 py-1 text-sm"
+        onChange={(e) => {
+          setDraft(e.target.value)
+          setError(null)
+        }}
+        onBlur={() => {
+          void commit()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            void commit()
+          }
+        }}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
   )
 }

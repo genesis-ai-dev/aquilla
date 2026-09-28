@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchMemberScopes,
+  fetchMyScopeGrant,
   isInMemberScope,
   putMemberScopes,
   type MemberScope,
@@ -147,5 +148,33 @@ describe("isInMemberScope", () => {
     expect(allowed(scopes, "file-1", "fr")).toBe(true)
     expect(allowed(scopes, "file-2", "fr")).toBe(false)
     expect(allowed(scopes, "file-1", "es")).toBe(false)
+  })
+})
+
+// AQU-581 review: a guest can't read the org's settings, so the lane-assignment
+// setting reaches them with their own scopes.
+describe("fetchMyScopeGrant", () => {
+  const reply = (body: unknown, status = 200) =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    )
+
+  it("GETs `me` and returns the scopes with the org's lane-assignment setting", async () => {
+    const spy = reply({ scopes: [{ kind: "lane", value: "es" }], allowScopedLaneAssignment: true })
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toEqual({
+      scopes: [{ kind: "lane", value: "es" }],
+      allowScopedLaneAssignment: true,
+    })
+    expect(spy.mock.calls[0][0]).toBe(`${API}/api/v2/projects/p1/members/me/scopes`)
+  })
+
+  it("reports the setting as unknown (null) when an older server leaves it out", async () => {
+    reply({ scopes: [] })
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toEqual({ scopes: [], allowScopedLaneAssignment: null })
+  })
+
+  it("returns null on an error status", async () => {
+    reply({ error: "no access to project" }, 403)
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toBeNull()
   })
 })

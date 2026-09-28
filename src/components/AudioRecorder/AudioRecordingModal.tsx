@@ -2612,33 +2612,8 @@ export function AudioRecordingModal({
                   }
                 />
                 <PopoverContent align="end" side="top" className="w-72 p-1.5">
-                  {/* Sam, 2026-09-28: every setting but the countdown's speed is
-                      a real switch, and what it does is said on hover rather
-                      than in a line of its own. */}
-                  <SettingSwitch
-                    testId="rec-auto-advance"
-                    icon={<ChevronsRight />}
-                    title={t("audio.recordingModal.autoAdvanceTitle")}
-                    tip={autoAdvance
-                      ? t("audio.recordingModal.autoAdvanceOnDescription")
-                      : t("audio.recordingModal.autoAdvanceOffDescription")}
-                    checked={autoAdvance}
-                    onCheckedChange={setRecordingAutoAdvance}
-                  />
-                  {/* AQU-1210: play-along. Only offered on a line with a film —
-                      everywhere else there is nothing for it to do. */}
-                  {filmUrl != null && (
-                    <SettingSwitch
-                      testId="rec-film-follow"
-                      icon={<Clapperboard />}
-                      title={t("audio.recordingModal.filmFollowTitle")}
-                      tip={filmFollow
-                        ? t("audio.recordingModal.filmFollowOnDescription")
-                        : t("audio.recordingModal.filmFollowOffDescription")}
-                      checked={filmFollow}
-                      onCheckedChange={setRecordingFilmFollow}
-                    />
-                  )}
+                  {/* The countdown first, its speed at the very top (Sam,
+                      2026-09-28), then the beep it governs. */}
                   {/* AQU-1209. Sits ABOVE the beep because it governs it: with
                       the count off there is nothing left to beep, which is what
                       the disabled state below says. AQU-1210 (Sam, 25 Sep):
@@ -2694,6 +2669,33 @@ export function AudioRecordingModal({
                     disabled={!countdownEnabled}
                     onCheckedChange={setBeepEnabled}
                   />
+                  {/* Sam, 2026-09-28: every setting but the countdown's speed is
+                      a real switch, and what it does is said on hover rather
+                      than in a line of its own. */}
+                  <SettingSwitch
+                    testId="rec-auto-advance"
+                    icon={<ChevronsRight />}
+                    title={t("audio.recordingModal.autoAdvanceTitle")}
+                    tip={autoAdvance
+                      ? t("audio.recordingModal.autoAdvanceOnDescription")
+                      : t("audio.recordingModal.autoAdvanceOffDescription")}
+                    checked={autoAdvance}
+                    onCheckedChange={setRecordingAutoAdvance}
+                  />
+                  {/* AQU-1210: play-along. Only offered on a line with a film —
+                      everywhere else there is nothing for it to do. */}
+                  {filmUrl != null && (
+                    <SettingSwitch
+                      testId="rec-film-follow"
+                      icon={<Clapperboard />}
+                      title={t("audio.recordingModal.filmFollowTitle")}
+                      tip={filmFollow
+                        ? t("audio.recordingModal.filmFollowOnDescription")
+                        : t("audio.recordingModal.filmFollowOffDescription")}
+                      checked={filmFollow}
+                      onCheckedChange={setRecordingFilmFollow}
+                    />
+                  )}
                 </PopoverContent>
               </Popover>
             </div>

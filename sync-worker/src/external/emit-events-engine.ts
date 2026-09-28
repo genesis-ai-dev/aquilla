@@ -170,7 +170,16 @@ function collectRefs(events: readonly EmitEventInput[]) {
   const assignmentIds = new Set<string>()
   const conceptIds = new Set<string>()
   for (const e of events) {
-    if (PIN_KINDS.has(e.kind) || e.kind === 'cell.waive' || e.kind === 'cell.unwaive') {
+    if (
+      PIN_KINDS.has(e.kind) ||
+      e.kind === 'cell.waive' ||
+      e.kind === 'cell.unwaive' ||
+      // AQU-1426: HideCell/ShowCell desugar to this kind. It takes no pin (the
+      // event sets a flag and never touches the chain), but the cell has to
+      // still EXIST at commit — the projection's UPDATE would otherwise match
+      // zero rows and land an event with no effect, silently.
+      e.kind === 'source.cell.visibility.set'
+    ) {
       cellRefs.push({ fileId: e.fileId!, cellId: e.cellId!, ...(e.laneId ? { laneId: e.laneId } : {}) })
     }
     if (e.kind === 'comment.create') {
@@ -456,7 +465,14 @@ export async function prepareEmitEvents(
         label: '',
       })
   }
-  for (const entry of byKind.values()) entry.label = emitKindEffectLabel(entry.kind, entry.count)
+  for (const entry of byKind.values()) {
+    // AQU-1426: hand the label one representative payload — a kind that carries
+    // a direction (source.cell.visibility.set: hide vs show) cannot be phrased
+    // from kind + count alone. Safe because prepare refuses a plan that mixes
+    // the two directions, so the first event of a group speaks for all of them.
+    const sample = normalized.find((e) => e.kind === entry.kind)?.payload
+    entry.label = emitKindEffectLabel(entry.kind, entry.count, sample)
+  }
   // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
   // text as the server currently reads it, so the approver endorses specific
   // sentences rather than a count. Batches are capped at
@@ -601,6 +617,18 @@ export async function commitEmitEvents(
       if (e.kind === 'cell.waive' || e.kind === 'cell.unwaive' || (e.kind === 'comment.create' && e.cellId)) {
         const s = states.get(laneCellKey(e.fileId!, e.cellId!, e.kind === 'comment.create' ? undefined : e.laneId))
         if (!s || (!s.sourceExists && !s.targetExists)) {
+          return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
+        }
+      }
+      // AQU-1426 hide/show: the flag lives on the SOURCE row, so a surviving
+      // target row is not enough — a deleted source row means there is nothing
+      // left to park. Deliberately NOT re-checking the cell's current
+      // visibility: the compiled event SETS the flag rather than toggling it, so
+      // a human hiding the same cell between prepare and approval leaves commit
+      // landing exactly the state that was approved.
+      if (e.kind === 'source.cell.visibility.set') {
+        const s = states.get(laneCellKey(e.fileId!, e.cellId!))
+        if (!s?.sourceExists) {
           return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
         }
       }

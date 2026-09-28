@@ -92,6 +92,31 @@ export function canEditTermbase(
 }
 
 /**
+ * May the user SUGGEST a term — create one with `status: 'draft'`?
+ *
+ * AQU-872: terminology has TWO authority levels, not one (the split is spelled
+ * out in sync-worker/src/events/termbase-authority.ts, which is what actually
+ * enforces it). SUGGESTING is contributor work: a draft compiles to no rules
+ * (compile.ts skips non-active concepts), so it binds nobody and needs no
+ * manager. APPROVING one into force is management work and keeps the org's
+ * configured floor — that question is `canEditTermbase` above.
+ *
+ * The in-editor "Add to terminology" popover already asked the two questions
+ * separately; the Terminology page asked only the management one, so a
+ * translator building a glossary as they worked found Add term disabled on the
+ * very surface the glossary lives on.
+ *
+ * Keyed off the same role-policy mirror `canEditTermCells` uses — whose
+ * `term.create` floor is CONTRIBUTOR — so this affordance cannot drift from the
+ * table the outbox guard already applies, and it inherits the mirror's
+ * fail-open rule: an unknown role is optimistically allowed and the server
+ * stays authoritative.
+ */
+export function canSuggestTerm(syncRole?: { level: number } | null): boolean {
+  return canPerform("term.create", syncRole?.level ?? null)
+}
+
+/**
  * May the user edit target cells from the C2 drill-down (AQU-208)?
  *
  * The drill-down's inline editor commits through `emitTargetCellCommit`, the

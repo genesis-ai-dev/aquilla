@@ -154,6 +154,62 @@ const defaultFetchAudioBytes = (
 const defaultDecodeAudio: AudioAssemblyArgs["decode"] = async (bytes) =>
   (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes)
 
+/** File×lane text/audio units in flight at once. Each unit is one lane of one
+ *  file. A small cap cuts the sequential round-trips that dominate export
+ *  latency without fanning out unbounded against sync-worker. */
+const FILE_LANE_FETCH_CONCURRENCY = 4
+
+type PlannedEntry = { path: string; data: EgressZipEntry["data"] }
+type PlannedSkip = { scope: string; reason: string }
+
+interface FileLaneOutcome {
+  file: EgressFileRef
+  notes: string[]
+  textEntries: PlannedEntry[]
+  textSkips: PlannedSkip[]
+  textTransient: boolean
+  audioEntries: PlannedEntry[]
+  audioSkips: PlannedSkip[]
+  audioTransient: boolean
+}
+
+/** Run `fn` over `items` with at most `concurrency` calls in flight. Results
+ *  are returned in input order. The first rejection aborts scheduling; in-flight
+ *  calls settle, then that error is rethrown. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  let failed = false
+  let failure: unknown
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (failed) return
+      const index = cursor
+      cursor += 1
+      if (index >= items.length) return
+      try {
+        results[index] = await fn(items[index]!, index)
+      } catch (err) {
+        failed = true
+        failure ??= err
+        return
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length)
+  if (workerCount > 0) {
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  }
+  if (failed) throw failure
+  return results
+}
+
 export async function buildProjectExport(
   selection: EgressProjectSelection,
   options: EgressOptions,
@@ -255,135 +311,165 @@ export async function buildProjectExport(
   let textDone = 0
   let audioDone = 0
 
+  const units: Array<{ lane: string; file: EgressFileRef }> = []
   for (const lane of lanes) {
+    for (const file of selection.files) units.push({ lane, file })
+  }
+
+  // Fetches run FILE_LANE_FETCH_CONCURRENCY at a time. Outcomes stay in
+  // lane/file order and are committed afterwards so path dedupe and archive
+  // entry order match the sequential walk.
+  const outcomes = await mapWithConcurrency(units, FILE_LANE_FETCH_CONCURRENCY, async ({ lane, file }) => {
+    throwIfAborted()
     const laneSlug = egressSlug(lane || selection.targetLanguage, "target")
     const laneLang = lane || selection.targetLanguage || "und"
-    for (const file of selection.files) {
-      throwIfAborted()
-      const report = reportFor(file)
-      const fileBase = fileBaseSlug(file.name)
-
-      // Cells load lazily and once per (lane, file): usfm-only text runs never
-      // pay for them; text + audio share one load.
-      let cellsPromise: Promise<CellData[]> | null = null
-      const getCells = (): Promise<CellData[]> => {
-        cellsPromise ??= loadCellFiles({
-          projectId: selection.projectId,
-          projectFiles: [file],
-          getToken: deps.getToken,
-          lane,
-        }).then(([loaded]) => loaded.cells)
-        return cellsPromise
-      }
-
-      if (wantText) {
-        let plan: NativeTextPlan | undefined =
-          options.textMode === "original" ? NATIVE_TEXT_BY_FILE_TYPE[file.type] : undefined
-        if (!plan) {
-          if (options.textMode === "original") {
-            ;(report.notes ??= []).push(
-              `no native round-trip exporter for type "${file.type}" — converted to ${options.convertFormat}`,
-            )
-          }
-          plan = { kind: "structured", format: options.convertFormat, ext: options.convertFormat }
-        }
-        const path = `${laneSlug}/${fileBase}.${plan.ext}`
-        try {
-          if (plan.kind === "usfm") {
-            const text = await fetchInjectedText({
-              projectId: selection.projectId,
-              fileId: file.id,
-              getToken: deps.getToken,
-              targetLang: lane || undefined,
-            })
-            pushEntry(report, path, text)
-          } else if (plan.kind === "sidecar") {
-            const raw = await fetchSidecar({
-              projectId: selection.projectId,
-              fileId: file.id,
-              getToken: deps.getToken,
-              targetLang: lane || undefined,
-            })
-            const cells = await getCells()
-            const inject =
-              plan.format === "docx" ? exportDocxFn : plan.format === "pptx" ? exportPptxFn : exportIdmlFn
-            const result = await inject(raw, cells)
-            pushEntry(report, path, result.blob)
-          } else if (plan.kind === "vtt") {
-            pushEntry(report, path, exportVttStructured(await getCells()))
-          } else {
-            const blob = exportFileCells(
-              await getCells(),
-              plan.format,
-              selection.sourceLanguage || "und",
-              laneLang,
-            )
-            pushEntry(report, path, blob)
-          }
-        } catch (err) {
-          rethrowIfAborted(err)
-          if (isTransientFailure(err)) hadTransientFailures = true
-          report.skipped.push({
-            scope: `${file.name} (${laneSlug})`,
-            reason: sourceFetchReason(err),
-          })
-        }
-        textDone++
-        deps.onProgress?.("text", textDone, unitTotal)
-      }
-
-      if (audioMode !== null) {
-        try {
-          const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file)])
-          const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
-          const result = await assembleAudio({
-            cells,
-            settings: deps.ttsSettings,
-            projectId: selection.projectId,
-            fileSlug: fileBase,
-            langCode: laneLang,
-            mode: audioMode,
-            fetchBytes: fetchAudioBytes,
-            decode: decodeAudio,
-            signal: deps.signal,
-          })
-          for (const e of result.entries) {
-            pushEntry(report, `audio/${laneSlug}/${fileBase}/${e.name}`, e.data)
-          }
-          const allSilent =
-            result.entries.length === 0 &&
-            result.skipped.length > 0 &&
-            result.skipped.every((s) => s.reason === "no audio")
-          if (allSilent) {
-            // Collapse the per-cell "no audio" noise for audio-less files.
-            report.skipped.push({
-              scope: `${file.name} (audio, ${laneSlug})`,
-              reason: "no audio on this file",
-            })
-          } else {
-            for (const s of result.skipped) {
-              report.skipped.push({ scope: `cell ${s.cellId} (audio, ${laneSlug})`, reason: s.reason })
-            }
-          }
-          // Per-clip fetch/decode failures inside the assembler surface as
-          // "audio failed: …" skips (its failReason) — retryable, so they
-          // must poison the cache like any other transient failure.
-          if (result.skipped.some((s) => s.reason.startsWith("audio failed:"))) {
-            hadTransientFailures = true
-          }
-        } catch (err) {
-          rethrowIfAborted(err)
-          // Listing fetch / cell load / assembly crashes are all retryable.
-          hadTransientFailures = true
-          report.skipped.push({
-            scope: `${file.name} (audio, ${laneSlug})`,
-            reason: err instanceof Error ? err.message : String(err),
-          })
-        }
-        audioDone++
-        deps.onProgress?.("audio", audioDone, unitTotal)
-      }
+    const fileBase = fileBaseSlug(file.name)
+    const outcome: FileLaneOutcome = {
+      file,
+      notes: [],
+      textEntries: [],
+      textSkips: [],
+      textTransient: false,
+      audioEntries: [],
+      audioSkips: [],
+      audioTransient: false,
     }
+
+    // Cells load lazily and once per (lane, file): usfm-only text runs never
+    // pay for them; text + audio share one load.
+    let cellsPromise: Promise<CellData[]> | null = null
+    const getCells = (): Promise<CellData[]> => {
+      cellsPromise ??= loadCellFiles({
+        projectId: selection.projectId,
+        projectFiles: [file],
+        getToken: deps.getToken,
+        lane,
+      }).then(([loaded]) => loaded.cells)
+      return cellsPromise
+    }
+
+    if (wantText) {
+      let plan: NativeTextPlan | undefined =
+        options.textMode === "original" ? NATIVE_TEXT_BY_FILE_TYPE[file.type] : undefined
+      if (!plan) {
+        if (options.textMode === "original") {
+          outcome.notes.push(
+            `no native round-trip exporter for type "${file.type}" — converted to ${options.convertFormat}`,
+          )
+        }
+        plan = { kind: "structured", format: options.convertFormat, ext: options.convertFormat }
+      }
+      const path = `${laneSlug}/${fileBase}.${plan.ext}`
+      try {
+        if (plan.kind === "usfm") {
+          const text = await fetchInjectedText({
+            projectId: selection.projectId,
+            fileId: file.id,
+            getToken: deps.getToken,
+            targetLang: lane || undefined,
+          })
+          outcome.textEntries.push({ path, data: text })
+        } else if (plan.kind === "sidecar") {
+          const raw = await fetchSidecar({
+            projectId: selection.projectId,
+            fileId: file.id,
+            getToken: deps.getToken,
+            targetLang: lane || undefined,
+          })
+          const cells = await getCells()
+          const inject =
+            plan.format === "docx" ? exportDocxFn : plan.format === "pptx" ? exportPptxFn : exportIdmlFn
+          const result = await inject(raw, cells)
+          outcome.textEntries.push({ path, data: result.blob })
+        } else if (plan.kind === "vtt") {
+          outcome.textEntries.push({ path, data: exportVttStructured(await getCells()) })
+        } else {
+          const blob = exportFileCells(
+            await getCells(),
+            plan.format,
+            selection.sourceLanguage || "und",
+            laneLang,
+          )
+          outcome.textEntries.push({ path, data: blob })
+        }
+      } catch (err) {
+        rethrowIfAborted(err)
+        if (isTransientFailure(err)) outcome.textTransient = true
+        outcome.textSkips.push({
+          scope: `${file.name} (${laneSlug})`,
+          reason: sourceFetchReason(err),
+        })
+      }
+      textDone++
+      deps.onProgress?.("text", textDone, unitTotal)
+    }
+
+    if (audioMode !== null) {
+      try {
+        const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file)])
+        const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
+        const result = await assembleAudio({
+          cells,
+          settings: deps.ttsSettings,
+          projectId: selection.projectId,
+          fileSlug: fileBase,
+          langCode: laneLang,
+          mode: audioMode,
+          fetchBytes: fetchAudioBytes,
+          decode: decodeAudio,
+          signal: deps.signal,
+        })
+        for (const e of result.entries) {
+          outcome.audioEntries.push({ path: `audio/${laneSlug}/${fileBase}/${e.name}`, data: e.data })
+        }
+        const allSilent =
+          result.entries.length === 0 &&
+          result.skipped.length > 0 &&
+          result.skipped.every((s) => s.reason === "no audio")
+        if (allSilent) {
+          // Collapse the per-cell "no audio" noise for audio-less files.
+          outcome.audioSkips.push({
+            scope: `${file.name} (audio, ${laneSlug})`,
+            reason: "no audio on this file",
+          })
+        } else {
+          for (const s of result.skipped) {
+            outcome.audioSkips.push({ scope: `cell ${s.cellId} (audio, ${laneSlug})`, reason: s.reason })
+          }
+        }
+        // Per-clip fetch/decode failures inside the assembler surface as
+        // "audio failed: …" skips (its failReason) — retryable, so they
+        // must poison the cache like any other transient failure.
+        if (result.skipped.some((s) => s.reason.startsWith("audio failed:"))) {
+          outcome.audioTransient = true
+        }
+      } catch (err) {
+        rethrowIfAborted(err)
+        // Listing fetch / cell load / assembly crashes are all retryable.
+        outcome.audioTransient = true
+        outcome.audioSkips.push({
+          scope: `${file.name} (audio, ${laneSlug})`,
+          reason: err instanceof Error ? err.message : String(err),
+        })
+      }
+      audioDone++
+      deps.onProgress?.("audio", audioDone, unitTotal)
+    }
+
+    return outcome
+  })
+
+  for (const outcome of outcomes) {
+    const report = reportFor(outcome.file)
+    if (outcome.notes.length > 0) {
+      ;(report.notes ??= []).push(...outcome.notes)
+    }
+    for (const entry of outcome.textEntries) pushEntry(report, entry.path, entry.data)
+    report.skipped.push(...outcome.textSkips)
+    if (outcome.textTransient) hadTransientFailures = true
+    for (const entry of outcome.audioEntries) pushEntry(report, entry.path, entry.data)
+    report.skipped.push(...outcome.audioSkips)
+    if (outcome.audioTransient) hadTransientFailures = true
   }
 
   // Source documents once per file, not per lane — the raw upload bytes are

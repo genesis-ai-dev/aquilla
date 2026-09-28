@@ -1,5 +1,7 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
+import { visibleSourceSql } from './hidden-cells-scope'
 // AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
 // when auth-worker's per-unit assignment read started needing them. They are
 // re-exported here so every existing importer of this module keeps working and
@@ -18,6 +20,24 @@ import { AUDIO_CTE_SQL } from '../../../db/shared/audio-progress'
 export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS, AUDIO_CTE_SQL }
 
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
+
+/**
+ * AQU-1261 — why every lane join below compares the BARE column.
+ *
+ * `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
+ * fourth column of `idx_cells_file_scan(project_id, file_id, side, target_lang,
+ * cell_id)`. So `t.target_lang = lanes.lane` is an indexable equality that
+ * lands on the full five-column tuple.
+ *
+ * Wrapping it — `COALESCE(t.target_lang, '') = lanes.lane` — is a no-op on the
+ * data (the column cannot be NULL) but makes the predicate non-indexable:
+ * Postgres can only use the `(project_id, file_id, side)` prefix, so it pairs
+ * `lanes × source cells` against EVERY target row in the file and filters
+ * afterwards. On a 10k-cell file one recompute rejected 4,009,599 candidate
+ * pairs that way, and those scans ran against the same rows concurrent writers
+ * were locking. Keep the comparison bare; `progress-lane-join.test.ts` fails
+ * if a COALESCE comes back.
+ */
 
 /**
  * Whether the file is Scripture at all: does any source cell carry a
@@ -127,6 +147,7 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
        last_edit_at = excluded.last_edit_at,
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id),
        structural_audio_count = excluded.structural_audio_count,
        structural_audio_validated_count = excluded.structural_audio_validated_count,
        audio_validator_histogram = excluded.audio_validator_histogram,
@@ -138,7 +159,12 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // column inserted anywhere but the end shifts every later value one slot to the
 // left in half of them — silently, with no SQL error, because the types line up.
 // AQU-490's histogram pair is appended for the same reason. Add at the tail.
-const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+//
+// AQU-1240's `lane_id` sits beside `target_lang` instead because it is NOT a
+// summary column: no `UNION ALL` arm carries it. Each INSERT … SELECT below
+// resolves it inline (laneIdResolveFromColSql) right after the lane column, so
+// the column list and every SELECT agree on its position by construction.
+const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
        audio_count, audio_validated_count, last_edit_at,
@@ -188,6 +214,11 @@ export function fileProgressRecomputeStmt(
           AND t.target_lang = lanes.lane
          LEFT JOIN audio a ON a.cell_id = s.cell_id
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+          -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
+          -- both the numerator and the denominator in one move, for every scope this
+          -- CTE feeds (file, section, book) and every lane, so hiding the last
+          -- untranslated verse reads 100% instead of 90%.
+          AND ${visibleSourceSql('s')}
      ), buckets AS (
        SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count,
               ${STRUCTURAL_BUCKET_SQL}
@@ -218,7 +249,9 @@ export function fileProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, 'file', '', summary.lane, summary.total_count, summary.filled_count,
+     SELECT ?, ?, 'file', '', summary.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summary.lane')},
+            summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
                  FROM buckets WHERE buckets.lane = summary.lane),
@@ -246,14 +279,14 @@ export function fileProgressRecomputeStmt(
               '{}'::jsonb
             )
        FROM summary CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(
     projectId, fileId,
     projectId, fileId,
     projectId, fileId,
     projectId, fileId, projectId,
-    projectId, fileId, updatedAt,
+    projectId, fileId, projectId, updatedAt,
   )
 }
 
@@ -310,7 +343,7 @@ export function sectionsProgressRecomputeStmt(
     projectId, fileId,           // paired
   ]
   if (uniqueCellIds.length > 0) binds.push(projectId, fileId, ...uniqueCellIds)
-  binds.push(projectId, fileId, projectId, projectId, fileId, updatedAt)
+  binds.push(projectId, fileId, projectId, projectId, fileId, projectId, updatedAt)
 
   return db.prepare(
     `WITH lanes AS (
@@ -338,9 +371,14 @@ export function sectionsProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND COALESCE(t.target_lang, '') = lanes.lane
+          AND t.target_lang = lanes.lane
          LEFT JOIN audio a ON a.cell_id = s.cell_id
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+          -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
+          -- both the numerator and the denominator in one move, for every scope this
+          -- CTE feeds (file, section, book) and every lane, so hiding the last
+          -- untranslated verse reads 100% instead of 90%.
+          AND ${visibleSourceSql('s')}
      )${affectedCte}, summaries AS (
        SELECT lane, 'section'::text AS scope, section_key,
               COUNT(*)::integer AS total_count,
@@ -412,6 +450,7 @@ export function sectionsProgressRecomputeStmt(
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
      SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             summaries.structural_count, summaries.structural_filled_count,
@@ -431,7 +470,7 @@ export function sectionsProgressRecomputeStmt(
         AND audio_histograms.scope = summaries.scope
         AND audio_histograms.section_key = summaries.section_key
        CROSS JOIN watermark
-     ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+     ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(...binds)
 }
@@ -479,9 +518,12 @@ export function fullProgressRecomputeStmts(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND COALESCE(t.target_lang, '') = lanes.lane
+            AND t.target_lang = lanes.lane
            LEFT JOIN audio a ON a.cell_id = s.cell_id
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+            -- AQU-1424: see the note on the other paired CTEs — parked cells leave
+            -- progress entirely, numerator and denominator together.
+            AND ${visibleSourceSql('s')}
        ), summaries AS (
          SELECT lane,
                 'file'::text AS scope,
@@ -585,6 +627,7 @@ export function fullProgressRecomputeStmts(
          ${PROGRESS_INSERT_COLUMNS_SQL}
        )
        SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+              ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               summaries.structural_count, summaries.structural_filled_count,
@@ -604,7 +647,7 @@ export function fullProgressRecomputeStmts(
           AND audio_histograms.scope = summaries.scope
           AND audio_histograms.section_key = summaries.section_key
          CROSS JOIN watermark
-       ON CONFLICT (project_id, file_id, scope, section_key, target_lang) DO UPDATE SET
+       ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,
     ).bind(
       projectId, fileId,
@@ -612,7 +655,7 @@ export function fullProgressRecomputeStmts(
       projectId, fileId,
       projectId, fileId,
       projectId, fileId, projectId,
-      projectId, fileId, updatedAt,
+      projectId, fileId, projectId, updatedAt,
     ),
     db.prepare(
       // Prune sections/books whose cells are gone, and every book row once the
@@ -635,6 +678,10 @@ export function fullProgressRecomputeStmts(
                 COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+' AS is_scripture
            FROM cells source
           WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
+            -- AQU-1424: a section whose every cell is now parked has no surviving key,
+            -- so its progress row is deleted rather than left behind at a stale count
+            -- that no later recompute would revisit.
+            AND ${visibleSourceSql('source')}
        ), surviving_keys AS (
          SELECT 'section'::text AS scope, section_key FROM source_keys
          UNION

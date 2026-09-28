@@ -21,6 +21,7 @@ import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
+import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
 import type { DispatchResult } from './types'
 
 export type AssignmentEventKind = Extract<
@@ -67,8 +68,8 @@ export function handleAssignmentEvent(
         .prepare(
           `INSERT INTO assignments (
             assignment_id, project_id, assignee_user_id, scope_kind, scope_label,
-            target_lang, cells_total, deadline, note, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            target_lang, lane_id, cells_total, deadline, note, created_by, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')}, 0, ?, ?, ?, ?)
           ON CONFLICT DO NOTHING`,
         )
         .bind(
@@ -79,6 +80,7 @@ export function handleAssignmentEvent(
           p.scopeLabel,
           // AQU-538 (§3.5): '' is the default lane (absent/omitted on the wire).
           p.targetLang ?? '',
+          ...laneIdResolveBinds('target', event.projectId, p.targetLang ?? ''),
           p.deadline ?? null,
           p.note ?? null,
           claims.userId,
@@ -139,10 +141,17 @@ export function handleAssignmentEvent(
       stmts.push(
         db
           .prepare(
-            `UPDATE assignments SET assignee_user_id = ?, target_lang = ?
+            `UPDATE assignments SET assignee_user_id = ?, target_lang = ?,
+                    lane_id = ${laneIdResolveSql('target')}
              WHERE assignment_id = ? AND project_id = ?`,
           )
-          .bind(p.assigneeUserId, p.targetLang, p.assignmentId, event.projectId),
+          .bind(
+            p.assigneeUserId,
+            p.targetLang,
+            ...laneIdResolveBinds('target', event.projectId, p.targetLang),
+            p.assignmentId,
+            event.projectId,
+          ),
       )
     } else {
       stmts.push(

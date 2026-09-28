@@ -21,25 +21,31 @@ import { downloadBlob } from "@/lib/export/export-service"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type LoadState = { status: "loading" } | { status: "ready"; data: OrgAccessPayload } | { status: "error" }
+// Keyed by the org it was loaded for: a result for another org is never shown.
+type KeyedState = { orgId: number | null; state: LoadState }
+const LOADING: LoadState = { status: "loading" }
 
 export function OrgAccessPage() {
   const t = useT()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [state, setState] = useState<LoadState>({ status: "loading" })
+  const [loaded, setLoaded] = useState<KeyedState>({ orgId: null, state: LOADING })
   const [view, setView] = useState<"tree" | "people">("tree")
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
     let cancelled = false
-    setState({ status: "loading" })
     fetchOrgAccess(jwt, activeOrgId).then(
-      (data) => { if (!cancelled) setState({ status: "ready", data }) },
-      () => { if (!cancelled) setState({ status: "error" }) },
+      (data) => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "ready", data } }) },
+      () => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "error" } }) },
     )
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
+
+  // On org switch (or signed-out / no org) the previous org's payload must not
+  // render or export: anything not loaded for the current org reads as loading.
+  const state: LoadState = jwt && activeOrgId != null && loaded.orgId === activeOrgId ? loaded.state : LOADING
 
   const title = t("org.access.page.title")
   const org = state.status === "ready" ? state.data.tree[0]?.scope : undefined

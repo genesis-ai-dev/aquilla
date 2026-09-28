@@ -94,6 +94,7 @@ import {
 } from "../services/sync-worker-notify"
 import { createProjectShared } from "../../../db/shared/projects"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
+import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -1293,9 +1294,25 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     console.warn("[AQU-1352] roster origins unavailable", err)
   }
 
+  // Spec §3.9 rule 4: a caller who cannot see the org (e.g. the ?minRole
+  // exception path below the roster floor) must not learn org/team names or
+  // ids from origins. Redact inherited paths; drop afterDirectRemoval.
+  let rowOrigins: Map<number, Partial<RosterOrigin>> = origins
+  if (project.org_id != null && origins.size > 0) {
+    const seesOrg = await new ViewerScope(c.env, user).canSeeOrg(Number(project.org_id))
+    if (!seesOrg) {
+      rowOrigins = new Map(
+        [...origins].map(([id, { afterDirectRemoval: _omit, ...o }]) => [
+          id,
+          { ...o, inheritedFrom: o.inheritedFrom ? redactOrgCrumbs(o.inheritedFrom) : null },
+        ]),
+      )
+    }
+  }
+
   return c.json({
     members: members.map((m) => ({
-      ...origins.get(m.userId),
+      ...rowOrigins.get(m.userId),
       userId: m.userId,
       username: m.username,
       email: m.email,

@@ -13,6 +13,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { ROLE } from "../types"
 import { listCreatableTeams } from "../services/team-roles"
+import { findPersonalOrg } from "../services/org-permissions"
 
 export interface CreateTarget {
   kind: "org" | "personal"
@@ -34,16 +35,12 @@ me.get("/create-targets", authMiddleware, async (c) => {
   const user = c.get("user")
   const env = c.env
 
-  // The personal org is the one getOrCreateUserOrg inserts: billing_scope
-  // 'personal' (unique per owner). Owning a TEAM org (createOrgForUser, scope
+  // The personal org is the one getOrCreateUserOrg resolves (findPersonalOrg):
+  // billing_scope 'personal', else a legacy owned org with NULL scope. Owning a TEAM org (createOrgForUser, scope
   // 'team') does not make it personal — matching on owner alone mislabeled a
   // user's first team org as Personal and dropped it from the org list.
   // No lazy insert here: a GET must not create an org as a side effect.
-  const personal = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? AND billing_scope = 'personal' LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: number; name: string | null }>()
+  const personal = await findPersonalOrg(env, user.id)
 
   const isAdmin = isPlatformAdminEmail(env, user.email)
   // Mirrors getEffectiveOrgRole: platform operators resolve as owner (700)

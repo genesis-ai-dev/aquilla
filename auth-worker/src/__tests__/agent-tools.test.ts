@@ -401,6 +401,43 @@ describe("executeDraft", () => {
     expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
   })
 
+  it("strips trailing bare markers from prompt source and from the model reply (AQU-1465)", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET value = value || ? WHERE project_id = ? AND side = 'source' AND cell_id = ?`,
+    )
+      .bind("\n\\p", PROJECT, cellId("c3"))
+      .run()
+    const requests: { messages: { role: string; content: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)))
+      const content =
+        requests.length === 1
+          ? "compact evidence"
+          : JSON.stringify([
+              { i: 1, t: "Primer verso.\n\\p" },
+              { i: 2, t: "Segundo verso\n\\q1 con texto" },
+            ])
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { ref: "MRK 4" },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.ok).toBe(true)
+    for (const req of requests) {
+      expect(req.messages.map((m) => m.content).join("\n")).not.toContain("\\p")
+    }
+    const values = out.proposal!.events.map((e) => (e.payload as { value: string }).value)
+    expect(values).toEqual(["Primer verso.", "Segundo verso\n\\q1 con texto"])
+  })
+
   it("reports scope exhaustion and remaining work honestly", async () => {
     await seedWorld()
     let calls = 0

@@ -22,6 +22,8 @@ export interface ActiveAudioController {
   clipKey?: () => string | null
   /** Where that take is, in seconds — for the copies that mirror it. */
   currentTime?: () => number
+  /** Move that take's playhead — a copy's scrub moves the one playback. */
+  seek?: (t: number) => void
 }
 
 let current: ActiveAudioController | null = null
@@ -32,6 +34,15 @@ function notify() { for (const l of listeners) l() }
 /** The active controller started, paused or ended: copies of the same take
  *  that mirror it (see `clipKey`) re-read its state. */
 export function notifyActiveAudioChanged(): void { notify() }
+
+/** The last-used copy of THIS take, when it is another one than `self` —
+ *  playing or paused. Play and seek on any copy go to it, so the take keeps
+ *  ONE playback that resumes where it was left, whichever copy is pressed. */
+export function otherCopyOf(self: ActiveAudioController, clipKey: string | null): ActiveAudioController | null {
+  const c = current
+  if (!c || c === self || !clipKey) return null
+  return c.clipKey?.() === clipKey ? c : null
+}
 
 /** Another controller is sounding THIS take, `self` being one of its copies. */
 export function playingElsewhere(self: ActiveAudioController, clipKey: string | null): ActiveAudioController | null {

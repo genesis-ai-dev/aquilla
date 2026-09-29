@@ -101,6 +101,25 @@ describe("useCellAudio — scrubbing and one playback per take", () => {
     expect(tab.result.current.isPlaying).toBe(false)
   })
 
+  it("resumes the take in the copy it was left in, and scrubs it there", async () => {
+    const card = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    const tab = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    await act(async () => { await card.result.current.play() })
+    instances[0].currentTime = 1.2
+    act(() => tab.result.current.pause())
+    // Paused in the card: the tab shows where it was left…
+    expect(tab.result.current.currentTime).toBeCloseTo(1.2)
+    // …and its play resumes it there — one element, not a second from 0:00.
+    await act(async () => { await tab.result.current.play() })
+    expect(instances).toHaveLength(1)
+    expect(instances[0].paused).toBe(false)
+    expect(instances[0].currentTime).toBeCloseTo(1.2)
+    // A scrub on the tab moves that same playback.
+    await seekTo(tab.result, 2)
+    expect(instances).toHaveLength(1)
+    expect(instances[0].currentTime).toBeCloseTo(2)
+  })
+
   it("stops whatever else was sounding when it starts", async () => {
     const one = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
     const two = renderHook(() => useCellAudio(project, cellWith("a2", 3000), "f1"))

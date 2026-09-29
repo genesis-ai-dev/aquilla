@@ -20,6 +20,7 @@ import {
   clearActiveAudioIf,
   getActiveAudio,
   notifyActiveAudioChanged,
+  otherCopyOf,
   playingElsewhere,
   subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
@@ -129,6 +130,7 @@ export function useCellAudio(
   // current ones.
   const playRef = useRef<() => Promise<void>>(async () => undefined)
   const pauseRef = useRef<() => void>(() => undefined)
+  const seekRef = useRef<(t: number) => void>(() => undefined)
   const coordinatorControllerRef = useRef<ActiveAudioController | null>(null)
   const clipKeyRef = useRef<string | null>(null)
   if (coordinatorControllerRef.current === null) {
@@ -138,6 +140,7 @@ export function useCellAudio(
       pause: () => pauseRef.current(),
       clipKey: () => clipKeyRef.current,
       currentTime: () => audioRef.current?.currentTime ?? 0,
+      seek: (t: number) => seekRef.current(t),
     }
   }
 
@@ -335,6 +338,11 @@ export function useCellAudio(
   }, [])
 
   const play = useCallback(async () => {
+    // The take was last played from another of its copies: resume it THERE,
+    // where it was left, rather than start a second playback from the top.
+    const self = coordinatorControllerRef.current
+    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    if (other && !(audioRef.current && !audioRef.current.paused)) { await other.play(); return }
     // CLAIM, not just record: whatever else is sounding stops — another take,
     // or another copy of this one (Sam, 2026-09-29: the Audio view card and
     // the Recording tab under it played the same take on top of each other).
@@ -546,6 +554,10 @@ export function useCellAudio(
   }, [])
 
   const seek = useCallback((t: number) => {
+    // Scrubbing a copy of the take another copy last played moves THAT one.
+    const self = coordinatorControllerRef.current
+    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    if (other?.seek) { other.seek(t); return }
     const a = audioRef.current
     if (a) {
       pendingSeekRef.current = t
@@ -625,29 +637,37 @@ export function useCellAudio(
   // the latest closures, not the ones captured at registration time.
   playRef.current = play
   pauseRef.current = pause
+  seekRef.current = seek
 
   // ── One take, one playback ──────────────────────────────────────────────
-  // While another copy of this take sounds (the Audio view card above the
-  // Recording tab, the recorder over either), this one shows it as its own:
-  // playing, at that copy's position, and its button stops it.
+  // While another copy of this take is the one last played (the Audio view
+  // card above the Recording tab, the recorder over either), this copy shows
+  // that playback as its own — playing or paused, at that copy's position —
+  // and its button, play and scrub all go there (see play, pause, seek).
   const [mirrored, setMirrored] = useState<ActiveAudioController | null>(null)
+  const [mirrorPlaying, setMirrorPlaying] = useState(false)
+  const [mirrorTime, setMirrorTime] = useState(0)
   useEffect(() => {
     const self = coordinatorControllerRef.current
     if (!self) return
-    const check = () => setMirrored(playingElsewhere(self, clipKey))
+    const check = () => {
+      const other = otherCopyOf(self, clipKey)
+      setMirrored(other)
+      setMirrorPlaying(Boolean(other?.isPlaying()))
+      if (other?.currentTime) setMirrorTime(other.currentTime())
+    }
     check()
     return subscribeActiveAudio(check)
   }, [clipKey])
-  const [mirrorTime, setMirrorTime] = useState(0)
   useEffect(() => {
-    if (!mirrored?.currentTime) return
+    if (!mirrorPlaying || !mirrored?.currentTime) return
     let frame = requestAnimationFrame(function follow() {
       // Stale once the coordinator has moved on; the check above clears it.
       if (getActiveAudio() === mirrored) setMirrorTime(mirrored.currentTime?.() ?? 0)
       frame = requestAnimationFrame(follow)
     })
     return () => cancelAnimationFrame(frame)
-  }, [mirrored])
+  }, [mirrored, mirrorPlaying])
   const mirroring = mirrored != null
 
   // The element (or the decode) reports the real length, but a waveform
@@ -661,7 +681,7 @@ export function useCellAudio(
   return {
     state,
     error,
-    isPlaying: isPlaying || mirroring,
+    isPlaying: isPlaying || mirrorPlaying,
     currentTime: mirroring ? mirrorTime : currentTime,
     duration: duration > 0 ? duration : attachmentDurationSec,
     peaks, peaksState,

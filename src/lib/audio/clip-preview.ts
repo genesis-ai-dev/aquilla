@@ -33,7 +33,7 @@
 // the same structural-parameter trick `slotAudible` already uses for the same
 // reason.
 
-import { clearActiveAudioIf, setActiveAudio, type ActiveAudioController } from "./audio-coordinator"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import {
   canDecodePreview,
@@ -211,8 +211,9 @@ async function loadBuffer(src: ClipPreviewSource): Promise<AudioBuffer | null> {
 // ── One preview at a time, app-wide ─────────────────────────────────────────
 //
 // A PROPERTY OF THE ENGINE, not a protocol every chip has to keep. Note that
-// `setActiveAudio` deliberately does NOT pause the previous holder, so the
-// coordinator alone would not give us this.
+// Previews take the floor from EACH OTHER here; `claimActiveAudio` below also
+// silences anything else sounding — the timeline's transport, a take playing
+// on a waveform — so a preview is never heard over another sound.
 
 let currentPreview: { stop(): void } | null = null
 
@@ -375,7 +376,7 @@ export function playClipWindow(
     play: async () => { /* a preview is not resumable — press it again */ },
     pause: finish,
   }
-  setActiveAudio(controller)
+  claimActiveAudio(controller)
 
   void loadBuffer(src).then((buffer) => {
     if (stopped) return
@@ -446,7 +447,7 @@ export function playLongClipWindow(
   }
   takeTheFloor(handle)
   controller = { isPlaying: () => !stopped, play: async () => {}, pause: finish }
-  setActiveAudio(controller)
+  claimActiveAudio(controller)
 
   void getCellAudioStreamUrl({
     projectId: src.projectId,

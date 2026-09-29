@@ -356,14 +356,16 @@ describe("the take that plays", () => {
     })
   }
 
-  it("says it plays for the line, with its name and length", () => {
+  // No "plays for this line" label (Sam, 2026-09-29): being the big one on
+  // top already says so.
+  it("names the take, with its length", () => {
     const owner = cueOwner()
     const id = owner.selectedAudioId!
     ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id] = {
       ...(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id], label: "Take 2", durationMs: 3400,
     }
     draw({ owner })
-    expect(screen.getByText("Plays for this line")).toBeInTheDocument()
+    expect(screen.queryByText("Plays for this line")).toBeNull()
     expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 2")
     expect(screen.getByText("3.4s")).toBeInTheDocument()
   })

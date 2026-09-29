@@ -303,9 +303,6 @@ function CellTakeBlockView({
     <div data-testid="cell-take-block" className="flex flex-col gap-2">
       {header}
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="rounded bg-emerald-500/15 px-1.5 text-[10px] font-medium leading-[18px] text-emerald-700 dark:text-emerald-300">
-          {t("editor.recordingTab.plays")}
-        </span>
         {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
         <span data-testid="cell-take-label" className="font-medium">{label}</span>
         {!isSection && attachment?.durationMs != null && (

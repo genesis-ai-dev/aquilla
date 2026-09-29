@@ -94,7 +94,7 @@ describe("RecordingTakes", () => {
     }))
     expect(screen.getByTestId("rec-tab-track-target-audio")).toBeInTheDocument()
     expect(within(screen.getByTestId("rec-tab-track-trk-2")).getByTestId("cell-take-label")).toHaveTextContent("Take 1")
-    expect(screen.getAllByText("Plays for this line")).toHaveLength(2)
+    expect(screen.getAllByTestId("cell-take-block")).toHaveLength(2)
   })
 
   it("shows the programme's section when no take plays on a media line", () => {

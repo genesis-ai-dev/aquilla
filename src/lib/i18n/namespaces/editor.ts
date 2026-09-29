@@ -1674,7 +1674,6 @@ export const editor = defineNamespace({
     "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
 
     // — Recording tab: the take that plays, and the others (2026-09-29) ————
-    "editor.recordingTab.plays": "Plays for this line",
     "editor.recordingTab.newTake": "New take",
     "editor.recordingTab.newTakeTooltip": "Open the recorder to record, upload or generate a take",
     "editor.recordingTab.otherTakes": plural({
@@ -6408,13 +6407,6 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many OTHER subtitle lines this heard line performs (never zero).",
         },
-      },
-      "editor.recordingTab.plays": {
-        description:
-          "Small label on the take at the top of a line's Recording tab (in the expanded " +
-          "row under a line): this is the take you hear when the line plays. Other takes " +
-          "of the line are listed below it.",
-        maxLength: 24,
       },
       "editor.recordingTab.newTake": {
         description:

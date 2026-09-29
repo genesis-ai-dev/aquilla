@@ -193,7 +193,7 @@ async function mapWithConcurrency<T, R>(
       cursor += 1
       if (index >= items.length) return
       try {
-        results[index] = await fn(items[index]!, index)
+        results[index] = await fn(items[index], index)
       } catch (err) {
         failed = true
         failure ??= err

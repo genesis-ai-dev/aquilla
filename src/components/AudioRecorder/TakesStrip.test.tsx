@@ -14,12 +14,15 @@ const notify = vi.fn((..._args: unknown[]) => {})
 const injectOptimistic = vi.fn((..._args: unknown[]) => {})
 const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-4")
 const injectDeselect = vi.fn((..._args: unknown[]) => {})
+const emitValidate = vi.fn(async (..._args: unknown[]) => "evt-5")
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
   emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioRemove: (...args: unknown[]) => emitRemove(...args),
   emitCellAudioRename: (...args: unknown[]) => emitRename(...args),
+  emitCellAudioValidate: (...args: unknown[]) => emitValidate(...args),
+  emitCellAudioUnvalidate: (...args: unknown[]) => emitValidate(...args),
 }))
 const injectOptimisticRemove = vi.fn((..._args: unknown[]) => {})
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
@@ -465,6 +468,22 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
 // happened AND what is left, so it reports the last one; the workspace resets
 // the target row the recording justified, or a line whose work was deleted goes
 // on counting as finished on the server.
+// Sam, 2026-09-29: only the take that plays can be validated, from the line's
+// audio check. The list shows every take's validation and takes no vote.
+describe("TakesStrip — validation is shown, not taken", () => {
+  it("draws each take's validation read-only; a press casts nothing", () => {
+    render(<TakesStrip {...common} takes={[take("audio-c1-a.webm", 1000), take("audio-c1-b.webm", 1000)]} selectedAudioId="audio-c1-a.webm" />)
+    const marks = screen.getAllByTestId("audio-validation-button")
+    expect(marks).toHaveLength(2)
+    for (const mark of marks) {
+      expect(mark).toHaveAccessibleName("Audio not validated — c1.")
+      expect(mark).not.toHaveAttribute("aria-pressed")
+      fireEvent.click(mark)
+    }
+    expect(emitValidate).not.toHaveBeenCalled()
+  })
+})
+
 describe("TakesStrip — reporting the last take", () => {
   // Real ids: buildAudioId embeds its seed, and the imported SOURCE clip is
   // seeded with the FILE id while takes are seeded with the CELL id. That

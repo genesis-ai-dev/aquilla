@@ -1478,6 +1478,9 @@ export const editor = defineNamespace({
     "editor.audioValidation.noValidators": "Nobody has validated this take",
     "editor.audioValidation.generatedTake": "Generated voice",
     "editor.audioValidation.defaultTrack": "Main",
+    "editor.audioValidation.readOnlyNote": "Only the take that plays for the line can be validated",
+    "editor.audioValidation.readOnlyNone":
+      "Nobody has validated this take. Only the take that plays for the line can be validated.",
     "editor.audio.addedTrackTakeHint": "Take on an added track",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
@@ -5534,6 +5537,20 @@ export const editor = defineNamespace({
       "editor.audioValidation.noValidators": {
         description: "Shown for a take in the popover that nobody has validated yet.",
         maxLength: 36,
+      },
+      "editor.audioValidation.readOnlyNote": {
+        description:
+          "Foot of the list of who validated a take, in lists of a line's takes (the " +
+          "recorder's takes list, the Recording tab). Says why nobody can vote there: a " +
+          "vote can only be cast on the take that currently plays for the line, from the " +
+          "line's own audio check. A statement, not an instruction.",
+        maxLength: 60,
+      },
+      "editor.audioValidation.readOnlyNone": {
+        description:
+          "Tooltip on the validation mark of a take in a list of a line's takes when nobody " +
+          "has validated it. First says that, then why it cannot be validated from the list: " +
+          "only the take that currently plays for the line can be, from the line's own audio check.",
       },
       "editor.audioValidation.generatedTake": {
         description:

@@ -440,3 +440,53 @@ describe("the optimistic vote retires when the server answers", () => {
     expect(button()).toHaveAccessibleName(/not validated/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Read-only in lists of takes (Sam, 2026-09-29): a vote is cast only on the
+// take that plays, from the line's audio check, because that is the take you
+// can hear. Every other list shows the votes and takes none.
+// ---------------------------------------------------------------------------
+
+describe("read-only", () => {
+  it("draws the same state, and a press casts nothing", async () => {
+    const { onValidationChange } = draw([take({ audioId: "a" })], { readOnly: true })
+    expect(button()).toHaveAccessibleName("Audio not validated — GEN 1:1.")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("says why there is nothing to click on a take nobody has validated", async () => {
+    draw([take({ audioId: "a" })], { readOnly: true })
+    await userEvent.hover(button()!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Nobody has validated this take. Only the take that plays for the line can be validated.",
+    )
+  })
+
+  it("lists who validated, with no way to withdraw, and says why at the foot", async () => {
+    const { onValidationChange } = draw(
+      [take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] })],
+      { readOnly: true, validationRequirement: 2 },
+    )
+    expect(button()).toHaveAccessibleName("Audio validated — GEN 1:1.")
+    expect(button()).not.toHaveAttribute("aria-pressed")
+    await userEvent.hover(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).getByText("bo")).toBeInTheDocument()
+    expect(within(list).queryByRole("button", { name: /remove your validation/i })).toBeNull()
+    expect(within(list).getByTestId("audio-validation-blocked-note"))
+      .toHaveTextContent("Only the take that plays for the line can be validated")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("never offers to validate a take from the list", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "b", slot: "track-2", validatorCount: 1, validators: ["bo"] }),
+    ], { readOnly: true, validationRequirement: 2 })
+    await userEvent.hover(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).queryByRole("button", { name: /validate this take/i })).toBeNull()
+  })
+})

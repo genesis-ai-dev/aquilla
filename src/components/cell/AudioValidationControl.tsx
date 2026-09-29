@@ -54,6 +54,14 @@ interface AudioValidationControlProps {
    * the two line up. "inline" is bare, for the take block and the chips.
    */
   variant?: "gutter" | "inline"
+  /**
+   * Show the take's validation without taking a vote (Sam, 2026-09-29). Only
+   * the take that PLAYS for the line can be validated — from the line's audio
+   * check, where it can be heard — so every list of takes shows the others'
+   * votes read-only. The icon and the "validated by" list are the same; the
+   * press, the withdraw buttons and "Validate this take" are not there.
+   */
+  readOnly?: boolean
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -68,6 +76,7 @@ export function AudioValidationControl({
   canValidate,
   onValidationChange,
   variant = "gutter",
+  readOnly = false,
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -191,7 +200,9 @@ export function AudioValidationControl({
 
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
-  const tooltip = mineToGive.length > 0
+  const tooltip = readOnly
+    ? t("editor.audioValidation.readOnlyNone")
+    : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
     : blocked?.blockedReason
       ?? (canValidate
@@ -207,10 +218,13 @@ export function AudioValidationControl({
     (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
     0,
   )
-  const clickable = mineToGive.length > 0
+  const clickable = !readOnly && mineToGive.length > 0
   // Why the viewer cannot add a vote, for the foot of the list. Nothing when
-  // they can, or when every take already carries theirs.
-  const blockedNote = !clickable && !allMine ? tooltip : null
+  // they can, or when every take already carries theirs. Read-only, it is
+  // why nobody can vote HERE.
+  const blockedNote = readOnly
+    ? t("editor.audioValidation.readOnlyNote")
+    : !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
   // come from `allMine`, a different question — so a line two other people
@@ -219,7 +233,16 @@ export function AudioValidationControl({
   // last take I was allowed to touch said the same. Four such disagreements
   // were reachable (adversarial review, 2026-09-22); deriving both from one
   // value is what stops a fifth.
-  const ariaLabel = state === "full"
+  const ariaLabel = readOnly
+    // No "click to…" of any kind: there is nothing to click.
+    ? (state === "full" || (state === "self" && shortBy === 0)
+        ? t("editor.audioValidation.ariaValidatedNoAction", { ref: cellRef })
+        : state === "self"
+          ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
+          : state === "others"
+            ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
+            : t("editor.audioValidation.ariaNotValidatedByYou", { ref: cellRef }))
+    : state === "full"
     // "Click to remove your validation" only when there IS one of mine on
     // every take. A line others finished used to say it to someone who had
     // never voted (Sam, 2026-09-23) — the text control's "by others" twin.
@@ -259,7 +282,7 @@ export function AudioValidationControl({
       type="button"
       data-showcase="cell.audioValidation"
       data-testid="audio-validation-button"
-      aria-pressed={allMine}
+      aria-pressed={readOnly ? undefined : allMine}
       aria-label={ariaLabel}
       onClick={(event) => {
         if (!onClick) return
@@ -384,7 +407,7 @@ export function AudioValidationControl({
                             that setting afterwards used to strand the vote
                             with no way to remove it here. The bulk predicate
                             already refuses this gate for the same reason. */}
-                        {validator === currentUsername && (
+                        {validator === currentUsername && !readOnly && (
                           <AppTooltip content={t("editor.validation.removeYours")}>
                             <button
                               type="button"
@@ -403,7 +426,7 @@ export function AudioValidationControl({
                     ))}
                   </ul>
                 )}
-                {!mine && take.canValidate && displayed.length > 1 && (
+                {!mine && take.canValidate && !readOnly && displayed.length > 1 && (
                   <button
                     type="button"
                     className="mt-0.5 rounded px-1 py-0.5 text-[11px] text-green-600 hover:bg-muted/60"

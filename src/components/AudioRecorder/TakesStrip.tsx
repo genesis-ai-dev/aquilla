@@ -682,10 +682,12 @@ export function TakesStrip({
                   is exactly where you compare takes to choose the keeper, so
                   "that older one was signed off by two people" is part of
                   the choice. Showing it on the circled take alone made it
-                  look as though validation belonged to the selection. A vote
-                  on an unselected take is a real vote with no effect on the
-                  line until that take is chosen. */}
+                  look as though validation belonged to the selection.
+                  READ-ONLY since 2026-09-29 (Sam): a vote is cast only on the
+                  take that plays, from the line's audio check, where it can
+                  actually be heard — so here it is shown, never taken. */}
               <AudioValidationControl
+                  readOnly
                   cellRef={cellId}
                   takes={audioValidation.takeFor(
                     { attachments: { [att.audioId]: att }, selectedBySlot: { [att.slot]: att.audioId } },

@@ -6175,7 +6175,7 @@ function EditorRow({
   // no heard line performing it.
   const recordingTabEmpty =
     !hasAudio &&
-    !(linkedTakes?.length) &&
+    !linkedTakes?.some((t) => t.hasTake) &&
     !Object.entries(cell.attachments ?? {}).some(([id, a]) => !a.isDeleted && !audioIdSeededWith(id, cell.fileId))
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -8262,7 +8262,7 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAnyTrackAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
+                : (hasAnyTrackAudio || hasGeneratedVoice || Boolean(linkedTakes?.some((t) => t.hasTake)))
                   ? "emerald"
                   : undefined,
               renderContent: () => (

@@ -54,7 +54,7 @@ export interface RecordingTakesProps extends Shared {
   /** The row's own cell. */
   cell: CellData
   /** Takes that live on the heard lines performing this row (dubbing). */
-  linkedTakes?: ReadonlyArray<{ cell: CellData; sharedWith: number }>
+  linkedTakes?: ReadonlyArray<{ cell: CellData; sharedWith: number; hasTake?: boolean }>
   /** The row's own players, by the take each plays (AQU-1211): a take the row
    *  plays is played through them here, so the cell's word highlight follows. */
   players?: ReadonlyMap<string, UseCellAudioResult>
@@ -102,6 +102,7 @@ function OwnerTakes({
   validation = false,
   headings = true,
   players,
+  offerWhenEmpty = false,
   project,
   session,
   ...rest
@@ -114,6 +115,9 @@ function OwnerTakes({
   headings?: boolean
   /** The row's players, by take — the row's own cell only. */
   players?: ReadonlyMap<string, UseCellAudioResult>
+  /** A heard line nobody has recorded yet: say so and offer New take, rather
+   *  than draw nothing (Sam, 2026-09-29 — a line split across heard lines). */
+  offerWhenEmpty?: boolean
 }) {
   const t = useT()
   const shared: Shared = { ...rest, project, session }
@@ -161,6 +165,22 @@ function OwnerTakes({
   return (
     <div className="flex flex-col gap-3">
       {header}
+      {offerWhenEmpty && groups.length === 0 && !sourceClip && (
+        <div data-testid="rec-tab-no-take" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {t("editor.recordingTab.noTakeYet")}
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="ms-auto"
+            onClick={() => shared.onOpenRecording?.(owner.id)}
+            disabled={!shared.editable || !shared.onOpenRecording}
+          >
+            <Mic className="h-3 w-3" />
+            {t("editor.recordingTab.newTake")}
+          </Button>
+        </div>
+      )}
       {nonePlays && (
         <div data-testid="rec-tab-none-plays" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {t("editor.recordingTab.nonePlays")}
@@ -260,8 +280,16 @@ export function RecordingTakes({ cell, linkedTakes, players, ...shared }: Record
           // are still to be worked through (Sam, 2026-09-29).
           validation
           headings={false}
+          offerWhenEmpty
           header={
             <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
+              {/* What this heard line SAYS — the one thing that tells two
+                  heard lines of one subtitle line apart (Sam, 2026-09-29). */}
+              {cue.original?.trim() && (
+                <span data-testid="cell-linked-take-text" className="text-xs font-medium text-foreground">
+                  “{cue.original.trim()}”
+                </span>
+              )}
               <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
                 {t("editor.audio.heardLineAt", {
                   range: `${fmtClock(cue.startTime ?? 0, true)}–${fmtClock(cue.endTime ?? cue.startTime ?? 0, true)}`,

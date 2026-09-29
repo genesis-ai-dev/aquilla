@@ -1691,6 +1691,7 @@ export const editor = defineNamespace({
     "editor.recordingTab.stale": "Transcript out of date",
     "editor.recordingTab.notTranscribed": "Not transcribed",
     "editor.recordingTab.sourceSection": "Source audio",
+    "editor.recordingTab.noTakeYet": "No take yet",
     "editor.recordingTab.nonePlays": "No take plays for this line. Use one below, or make a new one.",
 
     // — Expansion tabs: issues and metadata ————————————————————————
@@ -6454,6 +6455,13 @@ export const editor = defineNamespace({
           "In the Recording tab, when the line has takes but none of them is chosen to play. " +
           "Points to the list of takes below (each has a button to use it) and to the New " +
           "take button beside this text.",
+      },
+      "editor.recordingTab.noTakeYet": {
+        description:
+          "In the Recording tab, under a heard line (one recorded performance of part of a " +
+          "subtitle line, in dubbing) that nobody has recorded yet. A New take button sits " +
+          "beside it.",
+        maxLength: 24,
       },
       "editor.recordingTab.sourceSection": {
         description:

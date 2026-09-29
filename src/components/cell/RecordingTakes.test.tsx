@@ -182,4 +182,35 @@ describe("RecordingTakes", () => {
       "Also performs 1 other subtitle line — a new or different take changes it too.",
     )
   })
+
+  // Sam, 2026-09-29: one subtitle line split across two heard lines — each
+  // says what it says, and the one nobody has recorded offers New take.
+  it("tells a split line's heard lines apart, and offers the unrecorded one a take", () => {
+    const onOpenRecording = vi.fn()
+    const part1 = cell({
+      id: "cue-a", fileId: "cue-sib", startTime: 3, endTime: 5.5, original: "Bring back some bread,",
+      selectedAudioId: "audio-cue-a-1.wav",
+      attachments: { "audio-cue-a-1.wav": audio("frontier-audio://a", "recording", { label: "Take 1" }) },
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    const part2 = cell({
+      id: "cue-b", fileId: "cue-sib", startTime: 5.5, endTime: 8, original: "and some milk too.",
+      attachments: {},
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    render(
+      <RecordingTakes
+        project={project} cell={cell({ attachments: {} })}
+        linkedTakes={[{ cell: part1, sharedWith: 1, hasTake: true }, { cell: part2, sharedWith: 1, hasTake: false }]}
+        cellText="Bring back some bread, and some milk too." editable username="dir" session={{ jwt: "j", username: "dir" } as never}
+        onOpenRecording={onOpenRecording} onUseAsCellText={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByTestId("cell-linked-take-text").map((e) => e.textContent)).toEqual([
+      "“Bring back some bread,”",
+      "“and some milk too.”",
+    ])
+    const empty = screen.getByTestId("rec-tab-no-take")
+    expect(empty).toHaveTextContent("No take yet")
+    within(empty).getByRole("button", { name: /new take/i }).click()
+    expect(onOpenRecording).toHaveBeenCalledWith("cue-b")
+  })
 })

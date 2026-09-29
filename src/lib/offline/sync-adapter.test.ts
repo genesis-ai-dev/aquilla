@@ -619,3 +619,29 @@ describe("catch-up", () => {
     adapter.close()
   })
 })
+
+describe("startup recovery", () => {
+  it("re-sends rows a previous session left at 'flushing'", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    store.commit(events.eventQueueStatusSet({ id: "q1", status: "flushing" }))
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 }),
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
+
+    adapter.close()
+  })
+})

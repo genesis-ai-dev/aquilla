@@ -425,6 +425,15 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     },
   )
 
+  // A row left at "flushing" belongs to a flush that died with a previous
+  // session (reload/quit mid-POST). No flush of ours is in flight yet, so it
+  // is safe to retry — POST /events is idempotent on event id. Left as-is it
+  // would never be sent (flushes only pick up "pending"), and catch-up would
+  // skip its cell forever as a protected local edit.
+  for (const row of store.query(tables.eventQueue.select().where({ projectId, status: "flushing" }))) {
+    store.commit(events.eventQueueStatusSet({ id: row.id, status: "pending" }))
+  }
+
   // Anything already queued from a previous session (the app was closed with
   // unsynced work) goes out without waiting for the socket.
   armFlush(flushDebounceMs)

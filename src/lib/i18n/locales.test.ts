@@ -9,6 +9,7 @@ import {
 } from "./locales"
 import { CATALOGS } from "./messages"
 import { detectInitialLocale } from "./store"
+import { isPluralMessage } from "./plurals"
 
 describe("locale registry", () => {
   it("English is the default and is LTR", () => {
@@ -113,6 +114,44 @@ describe("Traditional Chinese (AQU-976)", () => {
   })
   it("resolves to itself rather than falling through to zh-Hans", () => {
     expect(normalizeLocale("zh-Hant")).toBe("zh-Hant")
+  })
+})
+
+describe("Russian (AQU-1226)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const ru = LOCALES.find((l) => l.code === "ru")
+    expect(ru).toBeDefined()
+    expect(ru?.dir).toBe("ltr")
+    // Cyrillic is LTR; the switcher lists locales by endonym, so this is the
+    // string a Russian reader scans the menu for.
+    expect(ru?.nativeName).toBe("\u0420\u0443\u0441\u0441\u043a\u0438\u0439")
+    expect(ru?.englishName).toBe("Russian")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    // Registering the locale is not the deliverable — the strings are. An empty
+    // catalog falls back to English per key and would look, from the switcher
+    // alone, exactly like a working locale.
+    expect(Object.keys(CATALOGS.ru ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("resolves region and script variants onto it", () => {
+    expect(normalizeLocale("ru")).toBe("ru")
+    expect(normalizeLocale("ru-RU")).toBe("ru")
+    expect(detectInitialLocale(null, "ru-RU")).toBe("ru")
+  })
+  it("supplies Russian's one/few/many forms for a count-governed key", () => {
+    // Russian has four categories where English wrote two, so a catalog that
+    // only carried English's pair would read ungrammatically at 2 and at 5 —
+    // see plurals.ts. Assert the forms are actually present, not just the key.
+    const counted = CATALOGS.ru?.["common.cellCount"]
+    expect(counted, "common.cellCount must be count-governed in ru").toBeDefined()
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "few", "many", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+      expect(counted.forms.one).not.toBe(counted.forms.few)
+      expect(counted.forms.few).not.toBe(counted.forms.many)
+    }
   })
 })
 

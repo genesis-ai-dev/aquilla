@@ -1678,6 +1678,27 @@ export const editor = defineNamespace({
     "editor.audio.heardLineAt": "Heard line · {range}",
     "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
 
+    // — Recording tab: the take that plays, and the others (2026-09-29) ————
+    "editor.recordingTab.plays": "Plays for this line",
+    "editor.recordingTab.newTake": "New take",
+    "editor.recordingTab.newTakeTooltip": "Open the recorder to record, upload or generate a take",
+    "editor.recordingTab.otherTakes": plural({
+      one: "{count} other take",
+      other: "{count} other takes",
+    }),
+    "editor.recordingTab.matches": "Matches the text",
+    "editor.recordingTab.differs": plural({
+      one: "{count} word differs",
+      other: "{count} words differ",
+    }),
+    "editor.recordingTab.stale": "Transcript out of date",
+    "editor.recordingTab.notTranscribed": "Not transcribed",
+    "editor.recordingTab.sharedNote": plural({
+      one: "Using another take changes what {count} other line plays too.",
+      other: "Using another take changes what {count} other lines play too.",
+    }),
+    "editor.recordingTab.sourceSection": "Source audio",
+
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
@@ -6415,6 +6436,67 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many OTHER subtitle lines this heard line performs (never zero).",
         },
+      },
+      "editor.recordingTab.plays": {
+        description:
+          "Small label on the take at the top of a line's Recording tab (in the expanded " +
+          "row under a line): this is the take you hear when the line plays. Other takes " +
+          "of the line are listed below it.",
+        maxLength: 24,
+      },
+      "editor.recordingTab.newTake": {
+        description:
+          "Button in the Recording tab that opens the recorder, where a new take is " +
+          "recorded, uploaded or generated. 'Take' as in one recording of a line.",
+        maxLength: 14,
+      },
+      "editor.recordingTab.newTakeTooltip": {
+        description: "Tooltip of the New take button: what the recorder it opens can do.",
+      },
+      "editor.recordingTab.otherTakes": {
+        description:
+          "Heading over the list of a line's takes other than the one that plays, in " +
+          "the Recording tab. Count-governed.",
+        placeholders: { count: "How many other takes the line has. Always 1 or more here." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.matches": {
+        description:
+          "Beside a take in the Recording tab: the words heard in the recording (from its " +
+          "transcript) are the line's text, ignoring case and punctuation.",
+        maxLength: 24,
+      },
+      "editor.recordingTab.differs": {
+        description:
+          "Beside a take in the Recording tab: the words heard in the recording differ from " +
+          "the line's text by this many words (added, dropped or changed). Count-governed.",
+        placeholders: { count: "How many words differ. Always 1 or more." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.stale": {
+        description:
+          "Beside a take in the Recording tab: the take was transcribed before the line's " +
+          "text was edited, so its transcript no longer lines up and should be redone.",
+        maxLength: 26,
+      },
+      "editor.recordingTab.notTranscribed": {
+        description:
+          "Beside a take in the Recording tab: nobody has transcribed it yet, so there is " +
+          "nothing to compare with the text. May be followed by a Transcribe link.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.sharedNote": {
+        description:
+          "Under the takes of a heard line in a dubbing project — one recording that performs " +
+          "several subtitle lines at once. Warns that choosing another of its takes changes " +
+          "what the other lines play as well. Count-governed.",
+        placeholders: { count: "How many OTHER subtitle lines the heard line performs." },
+      },
+      "editor.recordingTab.sourceSection": {
+        description:
+          "Name shown on the audio at the top of the Recording tab when what plays for the " +
+          "line is its section of the imported programme audio, not a take anyone made.",
+        maxLength: 20,
       },
       "editor.expansion.issues": {
         description:

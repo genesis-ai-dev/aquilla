@@ -5,7 +5,7 @@
 // cell.audio.rename). Self-contained: resolves frontier audio URLs to
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -28,9 +28,18 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
+import type { RecordingTextDrift } from "@/lib/audio/text-drift"
+import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { TakeRowWave } from "@/components/audio/TakeRowWave"
+import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
+
+/** The tab's row tools — rename, remove noise, revert, delete — show on the
+ *  row's hover or keyboard focus, so a list of takes reads as takes. */
+const HOVER_ONLY = "opacity-0 transition-opacity group-hover/take:opacity-100 group-focus-within/take:opacity-100 focus-visible:opacity-100"
 
 /** "Take 7" → 7; anything else → null. */
 function parseTakeNumber(label: string | null | undefined): number | null {
@@ -85,6 +94,26 @@ interface Props {
   chromeless?: boolean
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /**
+   * "tab": the expanded cell's Recording tab lists a line's OTHER takes with
+   * this (Sam, 2026-09-29) — the take that plays is drawn above the list, so
+   * `hide` leaves it out. Each row gains the take's shape and how it compares
+   * with the text; rename, remove noise, revert and delete show on hover.
+   * Selecting, renaming, deleting and cleaning are this component's, exactly
+   * as in the recorder.
+   */
+  variant?: "recorder" | "tab"
+  /** Takes to leave out of the list (the tab's playing take). */
+  hide?: readonly string[]
+  /** Tab: each take's word timings, for how it compares with the text. */
+  timingsFor?: (audioId: string) => ReadonlyArray<{ word: string; end: number }> | null | undefined
+  /** Tab: the line's text those timings are compared with. */
+  cellText?: string
+  /** Tab: a line under the list (a heard line's shared-take warning). */
+  note?: ReactNode
+  /** The cell's take history, when the caller already read it — the tab reads
+   *  it once for the playing take and this list together. */
+  history?: ReadonlyMap<string, RecordingTextDrift>
 }
 
 export function TakesStrip({
@@ -101,7 +130,14 @@ export function TakesStrip({
   session,
   chromeless = false,
   targetLang,
+  variant = "recorder",
+  hide,
+  timingsFor,
+  cellText = "",
+  note,
+  history,
 }: Props) {
+  const tab = variant === "tab"
   const t = useT()
   const audioValidation = useAudioValidation({
     project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
@@ -135,14 +171,15 @@ export function TakesStrip({
   // doubled the history read on the hottest strip in the editor.
   const allTakeIds = useMemo(() => takes.map((t) => t.audioId), [takes])
   const driftTokenFetcher = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
-  const takeHistory = useRecordingTextDrift({
-    enabled: Boolean(session?.jwt) && allTakeIds.length > 0,
+  const ownHistory = useRecordingTextDrift({
+    enabled: !history && Boolean(session?.jwt) && allTakeIds.length > 0,
     projectId,
     fileId,
     cellId,
     audioIds: allTakeIds,
     getTokenForFile: driftTokenFetcher,
   })
+  const takeHistory = history ?? ownHistory
 
   // The take that actually SOUNDS, mirroring playback's preference order: a
   // recorded take holding the recording slot wins; otherwise the selected
@@ -440,24 +477,30 @@ export function TakesStrip({
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   const ordered = useMemo(() => {
     const byId = (a: AudioAttachmentOut, b: AudioAttachmentOut) => a.audioId.localeCompare(b.audioId)
-    const cleaned = takes.filter((t) => isDenoisedAudioId(t.audioId)).sort(byId)
-    const originals = takes.filter((t) => !isDenoisedAudioId(t.audioId)).sort(byId)
+    const listed = hide?.length ? takes.filter((t) => !hide.includes(t.audioId)) : takes
+    const cleaned = listed.filter((t) => isDenoisedAudioId(t.audioId)).sort(byId)
+    const originals = listed.filter((t) => !isDenoisedAudioId(t.audioId)).sort(byId)
     return [...cleaned, ...originals].map((att) => ({
       att,
       isCleaned: isDenoisedAudioId(att.audioId),
     }))
-  }, [takes])
+  }, [takes, hide])
 
-  if (takes.length === 0) return null
+  if (ordered.length === 0) return null
 
   const haveTake = new Set(takes.map((t) => t.audioId))
 
   return (
-    <div className={chromeless ? "px-4 py-2" : "border-t px-5 py-3"}>
+    <div className={tab ? "flex flex-col gap-1" : chromeless ? "px-4 py-2" : "border-t px-5 py-3"} data-testid={tab ? "tab-other-takes" : undefined}>
+      {tab && (
+        <div className="text-[11px] font-medium text-muted-foreground">
+          {t("editor.recordingTab.otherTakes", { count: ordered.length })}
+        </div>
+      )}
       {/* The recorder's utility strip carries the count and the border itself,
           so inside it this component renders rows and nothing else — two
           "Takes (3)" headings three inches apart is the failure this avoids. */}
-      {!chromeless && (
+      {!chromeless && !tab && (
         <div className="mb-2 text-xs text-muted-foreground/60">
           {t("audio.takesStrip.heading", { count: takes.length })}
         </div>
@@ -496,14 +539,14 @@ export function TakesStrip({
               key={att.audioId}
               data-testid={`take-row-${att.audioId}`}
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
+                "group/take flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
                 isCircled
                   ? isGenerated
                     ? "border-violet-500/60 bg-violet-500/10"
                     : "border-emerald-500/60 bg-emerald-500/10"
                   : isCleaned
                     ? "border-emerald-500/30 bg-emerald-500/5"
-                    : "border-border bg-muted/30",
+                    : tab ? "border-border bg-background hover:bg-muted/40" : "border-border bg-muted/30",
               )}
             >
               <AppTooltip content={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}>
@@ -520,6 +563,17 @@ export function TakesStrip({
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
+              {tab && (
+                <TakeRowWave
+                  projectId={projectId}
+                  fileId={fileId}
+                  att={att}
+                  session={session}
+                  strategy={project.audioMediaStrategy}
+                  generated={isGenerated}
+                  trackVars={takeTrackVars({ files: project.files, fileId, slot: att.slot })}
+                />
+              )}
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
                 {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
@@ -627,6 +681,15 @@ export function TakesStrip({
                         <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
                       </span>
                     )}
+                    {/* The tab's question about every take: does it say the
+                        text? A generated take is read FROM the text, so only
+                        a recording is asked. */}
+                    {tab && !isGenerated && (
+                      <TakeTextVerdict
+                        verdict={transcriptVerdict({ timings: timingsFor?.(att.audioId), cellText })}
+                        testId={`take-verdict-${att.audioId}`}
+                      />
+                    )}
                     <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
@@ -637,7 +700,7 @@ export function TakesStrip({
                           setRenamingId(att.audioId)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
-                        className="rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"
+                        className={cn("rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground", tab && HOVER_ONLY)}
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
@@ -654,7 +717,7 @@ export function TakesStrip({
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
                     aria-label={t("audio.takesStrip.removeNoiseTooltip")}
-                    className="rounded-md text-muted-foreground/60 hover:bg-background"
+                    className={cn("rounded-md text-muted-foreground/60 hover:bg-background", tab && HOVER_ONLY)}
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
                   </Button>
@@ -669,7 +732,7 @@ export function TakesStrip({
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
                     aria-label={t("audio.takesStrip.revertTooltip")}
-                    className="rounded-md text-muted-foreground/60 hover:bg-background"
+                    className={cn("rounded-md text-muted-foreground/60 hover:bg-background", tab && HOVER_ONLY)}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
@@ -727,7 +790,7 @@ export function TakesStrip({
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
                   aria-label={t("audio.takesStrip.deleteTakeTooltip")}
-                  className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                  className={cn("rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive", tab && HOVER_ONLY)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -736,6 +799,7 @@ export function TakesStrip({
           )
         })}
       </div>
+      {tab && note}
     </div>
   )
 }

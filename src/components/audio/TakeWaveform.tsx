@@ -25,7 +25,7 @@ import { AlertCircle, CloudDownload, Download, RotateCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
+import { WAVEFORM_BINS, autoLoadsPeaks } from "@/lib/audio/peaks-loader"
 import {
   formatTrimTime,
   moveTrimEnd,
@@ -40,7 +40,6 @@ import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 import { WaveformRect, type WaveformEdge } from "./WaveformRect"
 
-const AUTO_LOAD: ReadonlySet<AudioMediaStrategy> = new Set(["lazy", "eager"])
 
 export interface TakeWaveformProps {
   controller: UseCellAudioResult
@@ -89,7 +88,7 @@ export function TakeWaveform({
 
   // ── Peaks, on the project's terms ────────────────────────────────────
   const [userTriggered, setUserTriggered] = useState(false)
-  const shouldLoad = AUTO_LOAD.has(strategy) || userTriggered
+  const shouldLoad = autoLoadsPeaks(strategy) || userTriggered
   useEffect(() => {
     if (shouldLoad) void requestPeaks(WAVEFORM_BINS)
   }, [shouldLoad, requestPeaks, audioId])

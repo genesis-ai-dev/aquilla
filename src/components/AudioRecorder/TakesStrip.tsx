@@ -111,6 +111,14 @@ interface Props {
   /** The cell's take history, when the caller already read it — the tab reads
    *  it once for the playing take and this list together. */
   history?: ReadonlyMap<string, RecordingTextDrift>
+  /**
+   * Nothing here may change a take: no choosing, renaming, cleaning,
+   * reverting or deleting — play only. The recorder only ever opens for
+   * someone who can edit; the Recording tab shows this list to everyone, and
+   * a viewer's press would paint a change the server then refuses (found
+   * 2026-09-29, walking the tab as a viewer).
+   */
+  readOnly?: boolean
 }
 
 export function TakesStrip({
@@ -133,6 +141,7 @@ export function TakesStrip({
   cellText = "",
   note,
   history,
+  readOnly = false,
 }: Props) {
   const tab = variant === "tab"
   const t = useT()
@@ -425,7 +434,9 @@ export function TakesStrip({
   // the takes' stable id/order), after which every name is permanent.
   const backfilledRef = useRef(false)
   useEffect(() => {
-    if (backfilledRef.current || !session?.jwt) return
+    // Not for someone who may not rename: every backfilled name would be
+    // refused by the server.
+    if (backfilledRef.current || !session?.jwt || readOnly) return
     const unlabeled = takes.filter((t) => !t.label && !isDenoisedAudioId(t.audioId) && !labelOverrides.has(t.audioId))
     if (unlabeled.length === 0) return
     backfilledRef.current = true
@@ -451,7 +462,7 @@ export function TakesStrip({
       }
       notifyAudioAttachmentsChanged(fileId)
     })()
-  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang])
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly])
 
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   const ordered = useMemo(() => {
@@ -681,6 +692,7 @@ export function TakesStrip({
                           setRenamingId(att.audioId)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
+                        disabled={readOnly}
                         className={"rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"}
                       >
                         <Pencil className="h-3 w-3" />
@@ -696,7 +708,7 @@ export function TakesStrip({
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void denoise(att)}
-                    disabled={!session?.jwt || denoisingId !== null}
+                    disabled={readOnly || !session?.jwt || denoisingId !== null}
                     aria-label={t("audio.takesStrip.removeNoiseTooltip")}
                     className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
@@ -711,7 +723,7 @@ export function TakesStrip({
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void circle(revertTo)}
-                    disabled={isSelectInFlight}
+                    disabled={readOnly || isSelectInFlight}
                     aria-label={t("audio.takesStrip.revertTooltip")}
                     className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
@@ -749,7 +761,7 @@ export function TakesStrip({
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void circle(att.audioId)}
-                  disabled={isSelectInFlight || isCircled}
+                  disabled={readOnly || isSelectInFlight || isCircled}
                   aria-label={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}
                   className={cn(
                     "rounded-md hover:bg-background",
@@ -769,7 +781,7 @@ export function TakesStrip({
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void remove(att.audioId)}
-                  disabled={isBusy}
+                  disabled={readOnly || isBusy}
                   aria-label={t("audio.takesStrip.deleteTakeTooltip")}
                   className={"rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"}
                 >

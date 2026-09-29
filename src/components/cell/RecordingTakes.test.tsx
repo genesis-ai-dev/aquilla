@@ -39,11 +39,11 @@ function cell(over: Partial<CellData> & { attachments: Record<string, unknown> }
   return { id: "c1", fileId: "f1", original: "", translated: "", ...over } as unknown as CellData
 }
 
-function draw(c: CellData, linkedTakes?: Array<{ cell: CellData; sharedWith: number }>) {
+function draw(c: CellData, linkedTakes?: Array<{ cell: CellData; sharedWith: number }>, editable = true) {
   render(
     <RecordingTakes
       project={project} cell={c} linkedTakes={linkedTakes}
-      cellText="Te he llamado por tu nombre" editable username="dir" session={{ jwt: "j", username: "dir" } as never}
+      cellText="Te he llamado por tu nombre" editable={editable} username="dir" session={{ jwt: "j", username: "dir" } as never}
       onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
     />,
   )
@@ -69,6 +69,21 @@ describe("RecordingTakes", () => {
     expect(within(others).getByTestId(`take-row-${GEN}`)).toBeInTheDocument()
     expect(within(others).getByTestId(`take-row-${OLD}`)).toBeInTheDocument()
     expect(within(others).queryByTestId(`take-row-${REC}`)).toBeNull()
+  })
+
+  // Found 2026-09-29, walking the tab as a viewer.
+  it("lets someone who cannot edit only listen", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording", { label: "Take 1" }),
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+      },
+    }), undefined, false)
+    const listed = within(screen.getByTestId("tab-other-takes")).getByTestId(`take-row-${OLD}`)
+    expect(within(listed).getByRole("button", { name: "Use this take" })).toBeDisabled()
+    expect(within(listed).getByRole("button", { name: /delete/i })).toBeDisabled()
+    expect(screen.getByTestId("cell-take-delete")).toBeDisabled()
   })
 
   it("puts the generated voice on top once the recording slot is empty", () => {

@@ -125,6 +125,21 @@ describe("TakesStrip — the Recording tab's list of other takes", () => {
     expect(emitDeselect.mock.calls[0][0]).toMatchObject({ slot: "recording" })
   })
 
+  // Found 2026-09-29 walking the tab as a viewer: the recorder only opens for
+  // editors, so this list never needed a read-only form — the tab shows it to
+  // everyone.
+  it("changes nothing for someone who cannot edit — play only", () => {
+    draw({ readOnly: true })
+    const row = screen.getByTestId(`take-row-${OLD.audioId}`)
+    for (const name of ["Rename", "Remove", "Use this take", "Delete"]) {
+      const b = [...row.querySelectorAll("button")].find((el) => el.getAttribute("aria-label")?.startsWith(name))
+      expect(b, name).toBeDefined()
+      expect(b, name).toBeDisabled()
+    }
+    const play = [...row.querySelectorAll("button")].find((el) => /play/i.test(el.getAttribute("aria-label") ?? ""))
+    expect(play).toBeEnabled()
+  })
+
   it("shows the note under the list", () => {
     draw({ note: <p>Using another take changes what 2 other lines play too.</p> })
     expect(screen.getByText("Using another take changes what 2 other lines play too.")).toBeInTheDocument()

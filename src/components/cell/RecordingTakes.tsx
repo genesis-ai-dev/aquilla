@@ -240,6 +240,7 @@ function OwnerTakes({
               timingsFor={(audioId) => owner.audioTimings?.[audioId] as never}
               note={shareNote}
               onLastTakeRemoved={shared.onLastTakeRemoved}
+              readOnly={!shared.editable}
             />
           </section>
         )

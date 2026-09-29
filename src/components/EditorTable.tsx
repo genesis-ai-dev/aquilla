@@ -196,7 +196,6 @@ import {
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
-import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
@@ -929,9 +928,6 @@ interface EditorTableProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  /** Called when the user drops a voice chip onto a cell's audio area.
-   *  Parent should assign the voice then trigger TTS generation. */
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
    *  translator's last commit. When provided, each row renders the small
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
@@ -1002,7 +998,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
   onValidated,
   repetitionCounts,
@@ -2549,7 +2545,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           canApproveConcept={canApproveConcept}
           onSetUpAffixes={onSetUpAffixes}
           onAskAiFromSelection={onAskAiFromSelection}
-          onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
           onDragEnter={handleDragEnter}
           onSelectionPointerDown={handleSelectionPointerDown}
@@ -2655,7 +2650,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSeekToCue,
-    onAssignVoice,
     previews,
     project,
     ruleMap,
@@ -3628,7 +3622,6 @@ interface MemoizedRowProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
   onSelectionPointerDown: (
@@ -3704,7 +3697,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3871,7 +3864,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         canApproveConcept={canApproveConcept}
         onSetUpAffixes={onSetUpAffixes}
         onAskAiFromSelection={onAskAiFromSelection}
-        onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
@@ -4064,7 +4056,6 @@ interface EditorRowProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
@@ -4933,7 +4924,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -5107,8 +5098,6 @@ function EditorRow({
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
-  /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
-  const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
   // FRO-237: mic-denied help popover state — the rail button stays ENABLED
   // when mic is blocked and routes click here. Portaled so the cell's
   // overflow clip cannot hide it.
@@ -8276,37 +8265,7 @@ function EditorRow({
                   ? "emerald"
                   : undefined,
               renderContent: () => (
-                <div
-                  className={cn(
-                    "flex flex-col gap-3 rounded-xl transition-colors",
-                    dragOverVoiceId && "bg-primary/10 ring-2 ring-primary/40",
-                  )}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes(VOICE_ASSIGN_MIME)) {
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = "copy"
-                      const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
-                      if (voiceId && voiceId !== dragOverVoiceId) setDragOverVoiceId(voiceId)
-                    }
-                  }}
-                  onDragLeave={() => setDragOverVoiceId(null)}
-                  onDrop={(e) => {
-                    const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
-                    setDragOverVoiceId(null)
-                    if (voiceId && onAssignVoice) {
-                      e.preventDefault()
-                      onAssignVoice(cell.id, voiceId)
-                    }
-                  }}
-                >
-                  {dragOverVoiceId && (
-                    <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 py-2 text-xs font-medium text-primary">
-                      {(() => {
-                        const v = audioLens?.voices.find(vv => vv.id === dragOverVoiceId)
-                        return v ? t("editor.voice.synthesizeWith", { name: v.name }) : t("editor.voice.dropToSynthesize")
-                      })()}
-                    </div>
-                  )}
+                <div className="flex flex-col gap-3">
                   {/* Sam, 2026-09-29: the tab's one job is choosing which take
                       this line uses, and checking that it says the text. Per
                       track, the take that plays sits on top and the others

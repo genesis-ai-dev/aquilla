@@ -1664,16 +1664,8 @@ export const editor = defineNamespace({
 
     // — Expansion tab: recording ————————————————————————————————
     "editor.expansion.recording": "Recording",
-    "editor.voice.synthesizeWith": "Synthesize with {name}",
-    "editor.voice.dropToSynthesize": "Drop to synthesize",
-    "editor.audio.reRecordShort": "Re-record",
     "editor.cell.transcribeShort": "Transcribe",
-    "editor.voice.aiGeneratedHint":
-      "AI generated voice. Drag a voice from the toolbar to regenerate, or:",
-    "editor.audio.recordOver": "Record over",
-    "editor.audio.noAudioYet":
-      "No audio yet. Record below, or drag a voice onto this cell from the " +
-      "toolbar above.",
+    "editor.audio.noAudioYet": "No audio yet.",
     "editor.audio.recordShort": "Record",
     "editor.audio.heardLineAt": "Heard line · {range}",
     "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
@@ -6365,53 +6357,16 @@ export const editor = defineNamespace({
           "narrow screens.",
         maxLength: 18,
       },
-      "editor.voice.synthesizeWith": {
-        description:
-          "Label inside the drop zone while a voice from the cast toolbar is being " +
-          "dragged over the cell: releasing synthesizes this line in that voice. " +
-          "Imperative.",
-        placeholders: {
-          name:
-            "The dragged voice's own name from the project's cast — user data, so " +
-            "never translate the substituted value.",
-        },
-      },
-      "editor.voice.dropToSynthesize": {
-        description:
-          "The same drop-zone label when the dragged voice cannot be named. " +
-          "Imperative: describes the release gesture and its result.",
-        maxLength: 26,
-      },
-      "editor.audio.reRecordShort": {
-        description:
-          "Small button in the recording tab that re-opens the recording modal to " +
-          "replace the existing take. The short form of editor.cell.reRecord, for a " +
-          "narrow row of buttons.",
-        maxLength: 16,
-      },
       "editor.cell.transcribeShort": {
         description:
-          "Small button in the recording tab that runs speech-to-text on the take. " +
-          "The short form of editor.cell.transcribe, without naming the model.",
+          "Link in the recording tab, after 'Not transcribed', that runs speech-to-text " +
+          "on the take. The short form of editor.cell.transcribe, without naming the model.",
         maxLength: 16,
-      },
-      "editor.voice.aiGeneratedHint": {
-        description:
-          "Line above the buttons in the recording tab when the cell's audio is " +
-          "synthetic. Two parts: what this audio is, then how to change it. The " +
-          "trailing colon leads into the button beside it, so keep it.",
-      },
-      "editor.audio.recordOver": {
-        description:
-          "Small button offering to replace a synthesized voice with a real human " +
-          "recording. Imperative; 'over' carries the replacing sense.",
-        maxLength: 18,
       },
       "editor.audio.noAudioYet": {
         description:
-          "Empty state of the recording tab, offering the two ways to get audio: " +
-          "record it, or drag a synthetic voice onto the cell. 'Below' and 'above' " +
-          "refer to the button under this text and the cast toolbar over the table.",
+          "Empty state of the recording tab: the line has no audio of any kind yet. " +
+          "The Record button under it opens the recorder.",
       },
       "editor.audio.recordShort": {
         description:

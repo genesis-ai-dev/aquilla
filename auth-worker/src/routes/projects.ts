@@ -1928,6 +1928,21 @@ projects.post(
       : invite.role_level
 
     try {
+      // [Pen test 2026-09-29] Claim the single-use invite (compare-and-swap)
+      // BEFORE granting membership, so two concurrent redeemers can't both be
+      // admitted. Same-user re-redeem (used_at already set) skips the claim.
+      if (!invite.used_at) {
+        const claim = await c.env.AQUILLA_PG.prepare(
+          `UPDATE project_invites
+           SET used_by = ?, used_at = CURRENT_TIMESTAMP
+           WHERE token = ? AND used_at IS NULL`,
+        )
+          .bind(user.id, token)
+          .run()
+        if (claim.meta.changes === 0) {
+          return c.json({ error: "Invite already used", code: "used" }, 410)
+        }
+      }
       if (existing) {
         await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
@@ -1956,15 +1971,6 @@ projects.post(
           finalRole,
         )
       }
-      // Atomic stamp: only the first concurrent redeemer wins; subsequent
-      // concurrent calls lose the WHERE race and are treated as same-user re-redeem.
-      await c.env.AQUILLA_PG.prepare(
-        `UPDATE project_invites
-         SET used_by = ?, used_at = CURRENT_TIMESTAMP
-         WHERE token = ? AND used_at IS NULL`,
-      )
-        .bind(user.id, token)
-        .run()
     } catch (err) {
       console.error("[invites] accept failed:", err)
       return c.json({ error: "Failed to accept invite" }, 500)

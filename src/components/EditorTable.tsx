@@ -98,7 +98,7 @@ import { activeWordRange } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
-import { useCellAudio } from "@/hooks/useCellAudio"
+import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
@@ -169,8 +169,8 @@ import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { CellAttachmentButton } from "./CellAttachmentButton"
 import { CellAttachmentLinks } from "./cell/CellAttachmentLinks"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { CellTakeBlock } from "./CellTakeBlock"
-import { fmtClock } from "./timeline/format"
+import { RecordingTakes } from "./cell/RecordingTakes"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
@@ -6167,27 +6167,6 @@ function EditorRow({
    * every-track-must-be-validated rule cannot mean anything while the text
    * view cannot see those tracks.
    */
-  /**
-   * AQU-490: the selected dub takes on slots OTHER than the two named ones,
-   * for the Recording tab to list. Excludes the default track (shown by the
-   * block keyed on `selectedAudioId`), the generated voice (its own block),
-   * and the imported programme clip (role 'source', never a performance).
-   */
-  const extraTrackTakes = useMemo(() => {
-    const out: Array<{ audioId: string; label: string | null }> = []
-    const selections = slotSelections({
-      selectedBySlot: cell.selectedBySlot,
-      selectedAudioId: cell.selectedAudioId ?? null,
-      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
-    })
-    for (const [slot, audioId] of Object.entries(selections)) {
-      if (slot === "recording" || slot === "generatedVoice") continue
-      const att = cell.attachments?.[audioId]
-      if (!att || att.isDeleted || (att.role ?? "dub") !== "dub") continue
-      out.push({ audioId, label: att.label ?? null })
-    }
-    return out
-  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const hasAnyTrackAudio = useMemo(() => {
     const selections = slotSelections({
       selectedBySlot: cell.selectedBySlot,
@@ -6201,6 +6180,13 @@ function EditorRow({
     return false
   }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
+  // Nothing to show in the Recording tab: no take of this line's own (the
+  // imported programme clip is not one), no programme section selected, and
+  // no heard line performing it.
+  const recordingTabEmpty =
+    !hasAudio &&
+    !(linkedTakes?.length) &&
+    !Object.entries(cell.attachments ?? {}).some(([id, a]) => !a.isDeleted && !audioIdSeededWith(id, cell.fileId))
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
     : undefined
@@ -6250,6 +6236,14 @@ function EditorRow({
     cell.attachments, cell.selectedGeneratedVoiceAudioId,
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
+  // AQU-1211: the Recording tab plays the takes this row plays through the
+  // row's own players, so the word highlight in the cell follows them.
+  const rowPlayers = useMemo(() => {
+    const players = new Map<string, UseCellAudioResult>()
+    if (cell.selectedAudioId) players.set(cell.selectedAudioId, audioController)
+    if (cell.selectedGeneratedVoiceAudioId) players.set(cell.selectedGeneratedVoiceAudioId, generatedVoiceController)
+    return players
+  }, [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, audioController, generatedVoiceController])
 
   // AQU-521: karaoke-while-listening for the read-only target view. When a cell
   // is not being actively edited its target renders as plain text (not a
@@ -8313,17 +8307,17 @@ function EditorRow({
                       })()}
                     </div>
                   )}
-                  {/* BOTH/AND, not either/or (Sam, 2026-08-22): this row's own
-                      audio first, then every take that lives on a heard line
-                      performing it. A line can have both, and a reader who
-                      opened this panel wants to see everything that sounds for
-                      this line, not whichever one we ranked highest. */}
-                  {hasAudio && (
-                    <CellTakeBlock
+                  {/* Sam, 2026-09-29: the tab's one job is choosing which take
+                      this line uses, and checking that it says the text. Per
+                      track, the take that plays sits on top and the others
+                      are listed under it; a heard line performing this line
+                      (dubbing) follows with its own. */}
+                  {!recordingTabEmpty && (
+                    <RecordingTakes
                       project={project}
-                      owner={cell}
-                      controller={audioController}
-                      timings={cellAudioTimings}
+                      cell={cell}
+                      linkedTakes={linkedTakes}
+                      players={rowPlayers}
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
@@ -8334,97 +8328,7 @@ function EditorRow({
                       onCommitted={onCellCommitted}
                     />
                   )}
-                  {/* AQU-490 / AQU-646: takes on ADDED target-audio tracks.
-                      The block above shows the default track's take and the
-                      one below the generated voice; a take on any other slot
-                      had no block at all, so a line whose only recording sat
-                      on track 2 opened to an EMPTY panel — the attention dot
-                      said audio, the panel said nothing. Sam hit exactly that
-                      on 2026-09-21. Every selected dub take that is not on the
-                      two named slots gets its own block here, named by the
-                      take's label or its track. */}
-                  {extraTrackTakes.map((take) => (
-                    <CellTakeBlock
-                      key={take.audioId}
-                      project={project}
-                      owner={cell}
-                      audioId={take.audioId}
-                      timings={cell.audioTimings?.[take.audioId]}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      onCommitted={onCellCommitted}
-                      header={
-                        <span className="text-[11px] text-muted-foreground">
-                          {take.label ?? t("editor.audio.addedTrackTakeHint")}
-                        </span>
-                      }
-                    />
-                  ))}
-                  {hasGeneratedVoice && (
-                    // A synthesized voice is nobody's performance: it can be
-                    // recorded over, but not transcribed or cleaned up.
-                    <CellTakeBlock
-                      project={project}
-                      owner={cell}
-                      audioId={cell.selectedGeneratedVoiceAudioId}
-                      controller={generatedVoiceController}
-                      timings={generatedVoiceTimings}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      recordLabel={t("editor.audio.recordOver")}
-                      readOnlyTranscript
-                      header={
-                        <span className="text-[11px] text-muted-foreground">
-                          {t("editor.voice.aiGeneratedHint")}
-                        </span>
-                      }
-                    />
-                  )}
-                  {linkedTakes?.map(({ cell: take, sharedWith }) => (
-                    <CellTakeBlock
-                      key={take.id}
-                      project={project}
-                      owner={take}
-                      timings={take.selectedAudioId ? take.audioTimings?.[take.selectedAudioId] : undefined}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      onCommitted={onCellCommitted}
-                      header={
-                        <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
-                          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                            {t("editor.audio.heardLineAt", {
-                              range: `${fmtClock(take.startTime ?? 0, true)}–${fmtClock(take.endTime ?? take.startTime ?? 0, true)}`,
-                            })}
-                          </span>
-                          {sharedWith > 1 && (
-                            // One heard line can perform several subtitle lines
-                            // — real in this data, up to seven. Re-recording it
-                            // changes all of them, and that should not be a
-                            // surprise discovered afterwards.
-                            <span className="text-[10px] text-muted-foreground">
-                              {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
-                            </span>
-                          )}
-                        </div>
-                      }
-                    />
-                  ))}
-                  {!hasAnyTrackAudio && !hasGeneratedVoice && !linkedTakes?.length && (
+                  {recordingTabEmpty && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

@@ -1,5 +1,9 @@
-// One recording, with everything you can do to it: play it, see its shape,
-// read its transcript, re-record it, transcribe it, clean it up.
+// The take that PLAYS for a line, at the top of its Recording tab (Sam,
+// 2026-09-29): what it is, how it compares with the text, its shape to play
+// and trim, and — only when the words differ — its transcript. The line's
+// other takes are listed under it by the tab (TakesStrip, variant "tab").
+// Validation is not here: the line's own audio check, just above the expanded
+// cell, judges this very take.
 //
 // Extracted from EditorTable's Recording tab (2026-08-22, review feedback) for
 // one reason: a subtitle line's takes do not necessarily live ON that line.
@@ -19,9 +23,13 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef } from "react"
-import { Mic } from "lucide-react"
+import { FileClock, Mic, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { TakeTextVerdict } from "./audio/TakeTextVerdict"
+import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
+import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { TakeWaveform } from "./audio/TakeWaveform"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
@@ -71,12 +79,9 @@ export interface CellTakeBlockProps {
   onUseAsCellText: (transcript: string) => void
   /** Flush + revalidate after a write. Given the OWNER's id. */
   onCommitted?: (cellId: string) => void | Promise<void>
-  /** A line above the controls saying which recording this is. Only linked
-   *  takes need one — the row's own audio is self-evident. */
+  /** A line above the take saying where it lives. Only a heard line's take
+   *  needs one — the row's own audio is self-evident. */
   header?: React.ReactNode
-  /** Label for the re-record button; the generated-voice case says "Record
-   *  over" instead. */
-  recordLabel?: string
   /** Generated voice: no transcribe, no denoise, no correcting — it is not a
    *  performance anybody recorded. */
   readOnlyTranscript?: boolean
@@ -88,6 +93,16 @@ export interface CellTakeBlockProps {
   controller?: UseCellAudioResult
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** When and by whom the take was made, and whether the text has changed
+   *  since — read once by the tab for all of a line's takes. */
+  provenance?: RecordingTextDrift | null
+  /**
+   * Draw the vote on this take. Only a HEARD LINE's take asks for it: the
+   * subtitle row's audio check does not cover a take that lives on the cue
+   * performing it, so without this it could not be validated from the text at
+   * all. Provisional until heard lines are worked through (Sam, 2026-09-29).
+   */
+  validation?: boolean
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -121,10 +136,11 @@ function CellTakeBlockView({
   onUseAsCellText,
   onCommitted,
   header,
-  recordLabel,
   readOnlyTranscript = false,
   controller,
   targetLang,
+  provenance = null,
+  validation = false,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -177,14 +193,24 @@ function CellTakeBlockView({
     // The ASR language follows the AUDIO, by provenance: an imported media
     // segment is source speech, every take voices the target text.
     const language = isSourceSegmentSelected(owner) ? project.sourceLanguage : project.targetLanguage
-    await transcribeCell({ cell: owner, session, projectId: project.id, language, askAgain: true })
+    // THIS take, on its own slot: the transcriber reads the cell's selected
+    // recording, which for a take on an added track is a different take —
+    // that block used to transcribe the default track's recording instead.
+    await transcribeCell({
+      cell: { ...owner, selectedAudioId },
+      slot: attachment?.slot,
+      session,
+      projectId: project.id,
+      language,
+      askAgain: true,
+    })
     // The transcript rides a queued cell.audio.attach — flush it, then poke the
     // OWNER's file so its attachment read picks the timings up. For a linked
     // take that is the cue sibling, which is exactly the read the row's linked
     // takes are drawn from.
     await onCommitted?.(owner.id)
     notifyAudioAttachmentsChanged(owner.fileId)
-  }, [owner, selectedAudioId, session, project.id, project.sourceLanguage, project.targetLanguage, onCommitted])
+  }, [owner, selectedAudioId, attachment?.slot, session, project.id, project.sourceLanguage, project.targetLanguage, onCommitted])
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
@@ -227,11 +253,129 @@ function CellTakeBlockView({
     [owner, selectedAudioId, timings, attachment, project.id, username, targetLang],
   )
 
+  const isSection = kept.kind === "section"
+  // The words heard against the words written. A source section speaks the
+  // SOURCE language, so comparing it with the target text says nothing; its
+  // transcript card shows as it always has.
+  const verdict = transcriptVerdict({ timings: timings as never, cellText })
+  const showVerdict = !isSection && !readOnlyTranscript
+  const showTranscript = Boolean(timings && timings.length > 0) && (isSection || verdict.kind !== "match")
+  const label = isSection
+    ? t("editor.recordingTab.sourceSection")
+    : attachment?.label ?? t("audio.takesStrip.takeFallback")
+
   return (
-    <div className="flex flex-col gap-3">
+    <div data-testid="cell-take-block" className="flex flex-col gap-2">
       {header}
-      {/* The take, drawn as its timeline chip (AQU-1217). Play from its corner;
-          its mic opens the recorder, as a chip's does; trim right here. */}
+      <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="rounded bg-emerald-500/15 px-1.5 text-[10px] font-medium leading-[18px] text-emerald-700 dark:text-emerald-300">
+          {t("editor.recordingTab.plays")}
+        </span>
+        {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+        <span data-testid="cell-take-label" className="font-medium">{label}</span>
+        {!isSection && attachment?.durationMs != null && (
+          <span className="tabular-nums text-muted-foreground">{(attachment.durationMs / 1000).toFixed(1)}s</span>
+        )}
+        {provenance && (
+          <span
+            data-testid="cell-take-recorded"
+            title={t(isGenerated ? "audio.takesStrip.generatedByTooltip" : "audio.takesStrip.recordedByTooltip", {
+              datetime: new Date(provenance.recordedAt).toLocaleString(),
+              author: provenance.recordedBy,
+            })}
+            className="text-[11px] text-muted-foreground"
+          >
+            {t("audio.takesStrip.recordedByBadge", {
+              date: new Date(provenance.recordedAt).toLocaleDateString(),
+              author: provenance.recordedBy,
+            })}
+          </span>
+        )}
+        {!isGenerated && provenance?.drifted && (
+          <span
+            title={t("audio.takesStrip.textDriftTooltip", {
+              date: new Date(provenance.recordedAt).toLocaleDateString(),
+              text: provenance.textAtRecording ?? "",
+            })}
+            className="flex items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+          >
+            <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
+          </span>
+        )}
+        {showVerdict && (
+          <TakeTextVerdict
+            verdict={verdict}
+            onTranscribe={editable ? handleTranscribe : undefined}
+            transcribeDisabled={isTranscribing}
+            testId="cell-take-verdict"
+          />
+        )}
+        {!readOnlyTranscript && (
+          // Model download %, failures (click to expand, with Retry) and a
+          // success flash — the only place a transcription reports itself.
+          <CellTranscribeBadge
+            audioId={selectedAudioId}
+            hasTimings={(timings?.length ?? 0) > 0}
+            onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
+            onRetry={handleTranscribe}
+          />
+        )}
+        {validation && validationTakes.length > 0 && (
+          <AudioValidationControl
+            cellRef={owner.context?.trim() || owner.id}
+            takes={validationTakes}
+            currentUsername={username}
+            validationRequirement={audioValidation.validationRequirement}
+            canValidate={audioValidation.canValidate}
+            onValidationChange={audioValidation.onValidationChange}
+            variant="inline"
+          />
+        )}
+        <span className="ms-auto flex items-center gap-1.5">
+          {!readOnlyTranscript && !isSection && selectedAudioId && attachment && (
+            <DenoiseButton
+              projectId={project.id}
+              fileId={owner.fileId}
+              cellId={owner.id}
+              selectedAudioId={selectedAudioId}
+              selectedUrl={attachment.url}
+              referenceAudioId={attachment.referenceAudioId ?? null}
+              originalUrl={
+                attachment.referenceAudioId
+                  ? owner.attachments?.[attachment.referenceAudioId]?.url ?? null
+                  : null
+              }
+              originalDurationMs={
+                attachment.referenceAudioId
+                  ? owner.attachments?.[attachment.referenceAudioId]?.durationMs ?? null
+                  : null
+              }
+              author={username}
+              session={session}
+              editable={editable}
+              targetLang={targetLang}
+            />
+          )}
+          {/* The one way into the recorder from here: it records, uploads
+              and generates, and switches takes too. */}
+          <AppTooltip content={t("editor.recordingTab.newTakeTooltip")}>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              data-testid="cell-take-new"
+              onClick={() => onOpenRecording?.(owner.id)}
+              disabled={!editable || !onOpenRecording}
+            >
+              <Mic className="h-3 w-3" />
+              {t("editor.recordingTab.newTake")}
+            </Button>
+          </AppTooltip>
+        </span>
+      </div>
+      {/* The take, drawn as its timeline chip (AQU-1217). Play from its
+          corner; trim right here. No mic on it: New take, above, is the way
+          into the recorder. */}
       <TakeWaveform
         controller={controller}
         audioId={selectedAudioId}
@@ -239,27 +383,19 @@ function CellTakeBlockView({
         height={56}
         // In its track's colour (Sam, 2026-09-26): a source section in the
         // source row's lighter blue, a take in its own track's.
-        kind={isGenerated || kept.kind === "section" ? "generated" : "take"}
+        kind={isGenerated || isSection ? "generated" : "take"}
         trackVars={takeTrackVars({
           files: project.files,
           fileId: owner.fileId,
           slot: attachment?.slot,
-          sourceSection: kept.kind === "section",
+          sourceSection: isSection,
         })}
         strategy={project.audioMediaStrategy ?? "lazy"}
         trimEditable={editable}
         onCommitTrim={commitTrim}
-        onRecord={editable && onOpenRecording ? () => onOpenRecording(owner.id) : undefined}
-        // The chip's own label, not the row button's: the two do the same
-        // thing, but a screen reader should not hear two "Re-record"s.
-        recordLabel={t("workspace.targetAudioLane.recordAudio")}
-        recordGlyph={<Mic className="h-2.5 w-2.5" />}
-        // No validation tick on the waveform (Sam, 2026-09-28): the row's
-        // audio check sits right above this expanded cell, and this block's
-        // own control is in its button row. The waveform shows the audio.
         testId="cell-take-waveform"
       />
-      {timings && timings.length > 0 && (
+      {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}
           timings={timings as never}
@@ -273,74 +409,6 @@ function CellTakeBlockView({
           onUseAsCellText={onUseAsCellText}
         />
       )}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {validationTakes.length > 0 && (
-          <AudioValidationControl
-            cellRef={owner.context?.trim() || owner.id}
-            takes={validationTakes}
-            currentUsername={username}
-            validationRequirement={audioValidation.validationRequirement}
-            canValidate={audioValidation.canValidate}
-            onValidationChange={audioValidation.onValidationChange}
-            variant="inline"
-          />
-        )}
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          onClick={() => onOpenRecording?.(owner.id)}
-          disabled={!editable || !onOpenRecording}
-        >
-          <Mic className="h-3 w-3" />
-          {recordLabel ?? t("editor.audio.reRecordShort")}
-        </Button>
-        {!readOnlyTranscript && (
-          <>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              onClick={handleTranscribe}
-              disabled={!editable || isTranscribing}
-            >
-              {isTranscribing ? t("common.transcribing") : t("editor.cell.transcribeShort")}
-            </Button>
-            {/* Surfaces model-download %, failures (click-to-expand with
-                Retry), and a success flash. */}
-            <CellTranscribeBadge
-              audioId={selectedAudioId}
-              hasTimings={(timings?.length ?? 0) > 0}
-              onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
-              onRetry={handleTranscribe}
-            />
-            {selectedAudioId && attachment && (
-              <DenoiseButton
-                projectId={project.id}
-                fileId={owner.fileId}
-                cellId={owner.id}
-                selectedAudioId={selectedAudioId}
-                selectedUrl={attachment.url}
-                referenceAudioId={attachment.referenceAudioId ?? null}
-                originalUrl={
-                  attachment.referenceAudioId
-                    ? owner.attachments?.[attachment.referenceAudioId]?.url ?? null
-                    : null
-                }
-                originalDurationMs={
-                  attachment.referenceAudioId
-                    ? owner.attachments?.[attachment.referenceAudioId]?.durationMs ?? null
-                    : null
-                }
-                author={username}
-                session={session}
-                editable={editable}
-                targetLang={targetLang}
-              />
-            )}
-          </>
-        )}
-      </div>
     </div>
   )
 }

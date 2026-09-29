@@ -1,0 +1,284 @@
+// The expanded cell's Recording tab, as one job (Sam, 2026-09-29): choose which
+// take this line uses, and check that it says the text.
+//
+// Per track, the take that PLAYS sits on top (CellTakeBlock), and every other
+// take is listed under it (TakesStrip, variant "tab") with how it compares with
+// the text and a check to use it instead. The default track's recordings and
+// generated voices are one list, since only one of them can play; each added
+// track has its own section, headed by its name and colour once there is more
+// than one. A heard line that performs this line (dubbing) gets a section of
+// its own, last.
+//
+// Making takes is the recorder's (New take opens it); placing them is the
+// timeline's; voice, volume and colour are the Audio view card's; validation
+// is the line's audio check, just above the expanded cell.
+
+import { useMemo } from "react"
+import { Mic } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import type { CellData } from "@/hooks/useCells"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { audioIdSeededWith } from "@/lib/audio/upload"
+import { groupSelection, groupTakesByTrack, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
+import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { fmtClock } from "@/components/timeline/format"
+import { CellTakeBlock } from "@/components/CellTakeBlock"
+import type { UseCellAudioResult } from "@/hooks/useCellAudio"
+import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
+
+interface Shared {
+  project: ProjectRecord
+  cellText: string
+  editable: boolean
+  username: string
+  session: FrontierSession | null
+  onOpenRecording?: (cellId: string) => void
+  onUseAsCellText: (transcript: string) => void
+  onCommitted?: (cellId: string) => void | Promise<void>
+  /** AQU-1462: lane the member is working in, stamped on every write here so
+   *  an archived lane can refuse it. Omitted for the default lane. */
+  targetLang?: string
+}
+
+export interface RecordingTakesProps extends Shared {
+  /** The row's own cell. */
+  cell: CellData
+  /** Takes that live on the heard lines performing this row (dubbing). */
+  linkedTakes?: ReadonlyArray<{ cell: CellData; sharedWith: number }>
+  /** The row's own players, by the take each plays (AQU-1211): a take the row
+   *  plays is played through them here, so the cell's word highlight follows. */
+  players?: ReadonlyMap<string, UseCellAudioResult>
+}
+
+/**
+ * A cell's audio as the takes list reads it. The cell carries its clips keyed
+ * by id with the read's extra fields (label, votes, who recorded it) riding
+ * along; the list wants each clip to name itself. Clips gone from the read but
+ * still flagged deleted are left for the grouping to drop.
+ */
+function takesOfCell(
+  attachments: CellData["attachments"],
+  generatedId: string | null | undefined,
+): Record<string, AudioAttachmentOut> {
+  const out: Record<string, AudioAttachmentOut> = {}
+  for (const [audioId, raw] of Object.entries(attachments ?? {})) {
+    const a = raw as typeof raw & Partial<AudioAttachmentOut>
+    out[audioId] = {
+      ...a,
+      audioId,
+      url: a.url,
+      slot: a.slot ?? (audioId === generatedId ? GENERATED_VOICE_SLOT : RECORDING_SLOT),
+      mimeType: a.mimeType ?? null,
+      voiceId: a.voiceId ?? null,
+      referenceAudioId: a.referenceAudioId ?? null,
+      durationMs: a.durationMs ?? null,
+      trimStartMs: a.trimStartMs ?? null,
+      trimEndMs: a.trimEndMs ?? null,
+    } as AudioAttachmentOut
+  }
+  return out
+}
+
+const selectionsOf = (cell: CellData) => ({
+  selectedBySlot: cell.selectedBySlot,
+  selectedAudioId: cell.selectedAudioId ?? null,
+  selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+})
+
+/** One cell's takes: a section per track, playing take above its others. */
+function OwnerTakes({
+  owner,
+  header,
+  shareNote,
+  validation = false,
+  headings = true,
+  players,
+  project,
+  session,
+  ...rest
+}: Shared & {
+  owner: CellData
+  header?: React.ReactNode
+  /** Under each list: using another take changes other lines too. */
+  shareNote?: React.ReactNode
+  /** The vote on the playing take (heard lines only — see CellTakeBlock). */
+  validation?: boolean
+  /** Track headings once there is more than one track. */
+  headings?: boolean
+  /** The row's players, by take — the row's own cell only. */
+  players?: ReadonlyMap<string, UseCellAudioResult>
+}) {
+  const t = useT()
+  const shared: Shared = { ...rest, project, session }
+  const { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, fileId, id: cellId } = owner
+  const file = project.files?.find((f) => f.id === fileId) ?? null
+  const tracks = useMemo(() => deriveTracksForFile(file), [file])
+  const takes = useMemo(
+    () => takesOfCell(attachments, selectedGeneratedVoiceAudioId),
+    [attachments, selectedGeneratedVoiceAudioId],
+  )
+  const groups = useMemo(() => groupTakesByTrack(takes, fileId, tracks), [takes, fileId, tracks])
+  const entry = selectionsOf(owner)
+
+  // The imported programme audio riding the recording slot: not a take, but
+  // what the line plays when no take does — its section, shown as before.
+  const sourceClip = useMemo(() => {
+    const att = selectedAudioId ? takes[selectedAudioId] : undefined
+    return att && audioIdSeededWith(att.audioId, fileId) && !(att as { isDeleted?: boolean }).isDeleted
+      ? att
+      : null
+  }, [selectedAudioId, takes, fileId])
+
+  // Who made each take and whether the text has moved on since: ONE history
+  // read for the cell, shared by the playing take and its list.
+  const allIds = useMemo(() => groups.flatMap((g) => g.takes.map((a) => a.audioId)), [groups])
+  const getTokenForFile = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
+  const history = useRecordingTextDrift({
+    enabled: Boolean(session?.jwt) && allIds.length > 0,
+    projectId: project.id,
+    fileId,
+    cellId,
+    audioIds: allIds,
+    getTokenForFile,
+  })
+
+  const defaultGroup: TakeGroup | undefined = groups.find((g) => g.trackId === DEFAULT_TARGET_TRACK_ID)
+  const defaultPlays = defaultGroup ? playingTakeId(defaultGroup, entry) : null
+  // Headings once there is more than one track to tell apart — or when the
+  // one track is not the line's own dub track, which should not pass as it.
+  const showHeadings = headings && (groups.length > 1 || (groups.length === 1 && groups[0].trackId !== DEFAULT_TARGET_TRACK_ID))
+  // Takes, but none chosen — every one set aside. The playing take's line is
+  // where New take lives, so without one it needs a line of its own.
+  const nonePlays = !sourceClip && groups.length > 0 && groups.every((g) => !playingTakeId(g, entry))
+
+  return (
+    <div className="flex flex-col gap-3">
+      {header}
+      {nonePlays && (
+        <div data-testid="rec-tab-none-plays" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {t("editor.recordingTab.nonePlays")}
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="ms-auto"
+            onClick={() => shared.onOpenRecording?.(owner.id)}
+            disabled={!shared.editable || !shared.onOpenRecording}
+          >
+            <Mic className="h-3 w-3" />
+            {t("editor.recordingTab.newTake")}
+          </Button>
+        </div>
+      )}
+      {/* A media line whose only audio is its section of the programme. */}
+      {!defaultPlays && sourceClip && (
+        <CellTakeBlock {...shared} owner={owner} audioId={sourceClip.audioId} timings={owner.audioTimings?.[sourceClip.audioId]} validation={validation} controller={players?.get(sourceClip.audioId)} />
+      )}
+      {groups.map((group) => {
+        const playing = playingTakeId(group, entry)
+        const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
+        const playingAtt = playing ? group.takes.find((a) => a.audioId === playing) : undefined
+        const generated = Boolean(playingAtt && (playingAtt.voiceId || playingAtt.slot === GENERATED_VOICE_SLOT))
+        return (
+          <section key={group.trackId} data-testid={`rec-tab-track-${group.trackId}`} className="flex flex-col gap-2">
+            {showHeadings && (
+              <div className="flex items-center gap-2 text-xs font-medium">
+                <span
+                  aria-hidden
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{
+                    background: takeTrackVars({
+                      files: project.files,
+                      fileId: owner.fileId,
+                      slot: isDefault ? RECORDING_SLOT : group.takes[0]?.slot,
+                    })["--tl-track-hue"],
+                  }}
+                />
+                {group.name || t("editor.audio.addedTrackTakeHint")}
+              </div>
+            )}
+            {playing && (
+              <CellTakeBlock
+                {...shared}
+                owner={owner}
+                audioId={playing}
+                controller={players?.get(playing)}
+                timings={owner.audioTimings?.[playing]}
+                readOnlyTranscript={generated}
+                provenance={history.get(playing) ?? null}
+                validation={validation}
+              />
+            )}
+            <TakesStrip
+              variant="tab"
+              projectId={project.id}
+              project={project}
+              fileId={owner.fileId}
+              cellId={owner.id}
+              takes={group.takes}
+              hide={playing ? [playing] : undefined}
+              selectedAudioId={groupSelection(entry, group.trackId)}
+              // The displace-to-source dance belongs to the default row alone.
+              selectedGeneratedAudioId={isDefault ? entry.selectedGeneratedVoiceAudioId : null}
+              sourceClip={isDefault ? sourceClip : null}
+              author={shared.username}
+              session={session}
+              targetLang={shared.targetLang}
+              history={history}
+              cellText={shared.cellText}
+              timingsFor={(audioId) => owner.audioTimings?.[audioId] as never}
+              note={shareNote}
+            />
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+export function RecordingTakes({ cell, linkedTakes, players, ...shared }: RecordingTakesProps) {
+  const t = useT()
+  return (
+    <div data-testid="recording-takes" className="flex flex-col gap-4">
+      <OwnerTakes {...shared} owner={cell} players={players} />
+      {linkedTakes?.map(({ cell: cue, sharedWith }) => (
+        <OwnerTakes
+          key={cue.id}
+          {...shared}
+          owner={cue}
+          // A heard line performs one or more subtitle lines at once; its take
+          // is recorded, chosen and validated there. Provisional: heard lines
+          // are still to be worked through (Sam, 2026-09-29).
+          validation
+          headings={false}
+          header={
+            <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
+              <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                {t("editor.audio.heardLineAt", {
+                  range: `${fmtClock(cue.startTime ?? 0, true)}–${fmtClock(cue.endTime ?? cue.startTime ?? 0, true)}`,
+                })}
+              </span>
+              {sharedWith > 1 && (
+                <span className="text-[10px] text-muted-foreground">
+                  {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
+                </span>
+              )}
+            </div>
+          }
+          shareNote={sharedWith > 1 ? (
+            <p data-testid="rec-tab-shared-note" className="text-[11px] text-amber-700 dark:text-amber-400">
+              {t("editor.recordingTab.sharedNote", { count: sharedWith - 1 })}
+            </p>
+          ) : undefined}
+        />
+      ))}
+    </div>
+  )
+}

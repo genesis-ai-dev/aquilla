@@ -1698,6 +1698,7 @@ export const editor = defineNamespace({
       other: "Using another take changes what {count} other lines play too.",
     }),
     "editor.recordingTab.sourceSection": "Source audio",
+    "editor.recordingTab.nonePlays": "No take plays for this line. Use one below, or make a new one.",
 
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
@@ -6491,6 +6492,12 @@ export const editor = defineNamespace({
           "several subtitle lines at once. Warns that choosing another of its takes changes " +
           "what the other lines play as well. Count-governed.",
         placeholders: { count: "How many OTHER subtitle lines the heard line performs." },
+      },
+      "editor.recordingTab.nonePlays": {
+        description:
+          "In the Recording tab, when the line has takes but none of them is chosen to play. " +
+          "Points to the list of takes below (each has a button to use it) and to the New " +
+          "take button beside this text.",
       },
       "editor.recordingTab.sourceSection": {
         description:

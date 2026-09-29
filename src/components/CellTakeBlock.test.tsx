@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
-const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; askAgain?: boolean }> = []
+const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; selectedAudioId?: string; slot?: string; askAgain?: boolean }> = []
 const trimCalls: Array<[number | null, number | null]> = []
 const setTrimSpy = (start: number | null, end: number | null) => { trimCalls.push([start, end]) }
 
@@ -32,8 +32,8 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 vi.mock("@/lib/audio/transcribe", () => ({
-  transcribeCell: vi.fn(async ({ cell, language, askAgain }: { cell: { id: string; fileId: string }; language?: string; askAgain?: boolean }) => {
-    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language, askAgain })
+  transcribeCell: vi.fn(async ({ cell, language, slot, askAgain }: { cell: { id: string; fileId: string; selectedAudioId?: string }; language?: string; slot?: string; askAgain?: boolean }) => {
+    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language, selectedAudioId: cell.selectedAudioId, slot, askAgain })
     return 1
   }),
 }))
@@ -288,10 +288,28 @@ describe("whose recording it acts on", () => {
     expect(transcribeCalls[0].language).toBe("hy")
   })
 
-  it("re-records the OWNER's cell", () => {
+  it("opens the recorder on the OWNER's cell from New take", () => {
     const { onOpenRecording } = draw()
-    fireEvent.click(screen.getByRole("button", { name: /re-record/i }))
+    fireEvent.click(screen.getByRole("button", { name: /new take/i }))
     expect(onOpenRecording).toHaveBeenCalledWith("cue-1")
+  })
+
+  // A take on an added track: the transcriber reads the cell's SELECTED
+  // recording, which is the default track's — this block used to transcribe
+  // that one instead of its own take.
+  it("transcribes THIS take, on its own track", async () => {
+    const owner = {
+      id: "c1", fileId: "f1", original: "", translated: "",
+      selectedAudioId: "audio-c1-main.webm",
+      attachments: {
+        "audio-c1-main.webm": { type: "audio", url: "frontier-audio://main", slot: "recording" },
+        "audio-c1-t2.webm": { type: "audio", url: "frontier-audio://t2", slot: "trk-2" },
+      },
+    } as unknown as CellData
+    draw({ owner, audioId: "audio-c1-t2.webm" })
+    fireEvent.click(screen.getByRole("button", { name: /transcribe/i }))
+    await waitFor(() => expect(transcribeCalls).toHaveLength(1))
+    expect(transcribeCalls[0]).toMatchObject({ cellId: "c1", selectedAudioId: "audio-c1-t2.webm", slot: "trk-2" })
   })
 
   it("flushes against the OWNER after a transcribe", async () => {
@@ -308,15 +326,87 @@ describe("what it offers", () => {
   })
 
   it("offers no transcribing on a synthesized voice — nobody performed it", () => {
-    draw({ readOnlyTranscript: true, recordLabel: "Record over" })
-    expect(screen.getByRole("button", { name: /record over/i })).toBeInTheDocument()
+    draw({ readOnlyTranscript: true })
+    expect(screen.getByRole("button", { name: /new take/i })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /transcribe/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("cell-take-verdict")).toBeNull()
   })
 
   it("keeps its controls out of reach on a read-only surface", () => {
     draw({ editable: false })
-    expect(screen.getByRole("button", { name: /re-record/i })).toBeDisabled()
-    expect(screen.getByRole("button", { name: /transcribe/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /new take/i })).toBeDisabled()
+    // Says it is not transcribed, but offers nothing to do about it.
+    expect(screen.getByTestId("cell-take-verdict")).toHaveTextContent("Not transcribed")
+    expect(screen.queryByRole("button", { name: /transcribe/i })).not.toBeInTheDocument()
+  })
+})
+
+// Sam, 2026-09-29: the take that plays, said plainly, with how it compares
+// with the text — and the transcript only when there is something to read.
+describe("the take that plays", () => {
+  const words = (text: string) => {
+    let at = 0
+    return text.split(" ").map((word) => {
+      const start = at
+      at += word.length + 1
+      return { word, start, end: start + word.length, t0: 0, t1: 0 } as unknown as WordTiming
+    })
+  }
+
+  it("says it plays for the line, with its name and length", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id] = {
+      ...(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id], label: "Take 2", durationMs: 3400,
+    }
+    draw({ owner })
+    expect(screen.getByText("Plays for this line")).toBeInTheDocument()
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 2")
+    expect(screen.getByText("3.4s")).toBeInTheDocument()
+  })
+
+  it("says it matches the text and keeps the transcript out of the way", () => {
+    draw({ timings: words("the translated line") })
+    expect(screen.getByTestId("cell-take-verdict")).toHaveTextContent("Matches the text")
+    // The card would say "Your recording matches your text" — once is enough.
+    expect(screen.queryByText(/matches your text/i)).toBeNull()
+  })
+
+  it("says how many words differ and shows what was heard", () => {
+    draw({ timings: words("the translated lime") })
+    expect(screen.getByTestId("cell-take-verdict")).toHaveTextContent("1 word differs")
+    expect(screen.getByText(/sounds a little different/i)).toBeInTheDocument()
+  })
+
+  it("names who recorded it, and when the text has moved on since", () => {
+    draw({
+      provenance: {
+        audioId: "x", recordedAt: Date.parse("2026-09-28T10:00:00Z"), recordedBy: "sam",
+        textAtRecording: "old", textAtRecordingEventId: "e1", latestText: "new", latestTextEventId: "e2", drifted: true,
+      },
+    })
+    expect(screen.getByTestId("cell-take-recorded")).toHaveTextContent("sam")
+    expect(screen.getByText("Text changed")).toBeInTheDocument()
+  })
+
+  it("draws no vote of its own — the line's audio check judges this take", () => {
+    draw()
+    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+  })
+
+  it("draws the vote for a heard line's take, which no row check covers", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id].validators = []
+    draw({ owner, validation: true })
+    expect(screen.getByTestId("audio-validation-button")).toBeInTheDocument()
+  })
+
+  it("has no mic on the waveform — New take is the way into the recorder", () => {
+    draw()
+    // The waveform's corner mic was named "Record audio".
+    expect(screen.queryAllByRole("button", { name: /record/i })).toHaveLength(0)
+    expect(screen.getByRole("button", { name: /new take/i })).toBeInTheDocument()
   })
 })
 

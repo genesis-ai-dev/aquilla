@@ -91,6 +91,8 @@ export type DraftGeneration =
       drafted: CellPair[]
       /** True when nothing in scope needed drafting (not an error). */
       empty: boolean
+      /** AQU-1455: set when a failed ref widened the scope to the whole file. */
+      notice?: string
     }
 
 // Keep agent proposals in the same human-review package used by the editor.
@@ -268,7 +270,7 @@ export async function generateDrafts(
   work = work.slice(0, limit)
 
   if (work.length === 0) {
-    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true }
+    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.
@@ -396,6 +398,7 @@ export async function generateDrafts(
     remaining,
     drafted: work.filter((_, i) => drafts.has(i + 1)),
     empty: false,
+    notice: scope.notice,
   }
 }
 
@@ -407,13 +410,15 @@ export async function executeDraft(
 ): Promise<DraftOutcome> {
   const gen = await generateDrafts(db, args, ctx, modelCfg)
   if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
-  if (gen.empty) return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+  if (gen.empty) {
+    return { ok: true, text: `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope.` }
+  }
 
   // Stage through the SAME path as a hand emit: role floors, staleness
   // pre-check, provenance injection, and rule lint all apply.
   const { proposal, modelVerdictBlock } = await stageEvents(db, gen.emits, ctx.stageCtx)
 
-  const lines = [modelVerdictBlock]
+  const lines = gen.notice ? [gen.notice, modelVerdictBlock] : [modelVerdictBlock]
   if (gen.missed.length > 0) lines.push(`No draft returned for: ${gen.missed.join(", ")} — re-run draft with their cellIds.`)
   if (gen.remaining > 0) lines.push(`${gen.remaining} more untranslated cells remain in scope — call draft again to continue.`)
 

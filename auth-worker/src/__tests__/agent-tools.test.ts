@@ -252,6 +252,204 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
   })
 })
 
+// AQU-1455 — "translate the first 20 cells of the project" asked which file on
+// a one-file project (the hidden audio-cues sibling counted as a second
+// document), "practise1 file" could not be named, and a non-Bible book made the
+// agent guess MRK. These pin the server half of the fix.
+describe("resolveScope — file names and non-canonical books (AQU-1455)", () => {
+  const noFocus = () => ({ projectId: PROJECT, aliases: new AliasMap() })
+  const XXB_FILE = "77777777-7777-4777-8777-777777777777"
+
+  async function addFile(id: string, name: string, bookCode: string | null, extra = "", binds: unknown[] = []) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id${extra ? ", " + extra.split("=")[0] : ""}) VALUES (?, ?, ?, ?, ?${extra ? ", ?" : ""})`,
+    )
+      .bind(id, PROJECT, name, bookCode, crypto.randomUUID(), ...binds)
+      .run()
+  }
+
+  async function seedProject() {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(`INSERT INTO projects (id, name, created_by) VALUES (?, 'P', 1)`).bind(PROJECT).run()
+  }
+
+  it("ignores the hidden audio-cues sibling when counting documents", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    await addFile("88888888-8888-4888-8888-888888888888", "Story (cues)", null, "role", ["audio-cues"])
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  it("treats a source file and its target sibling as one document", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    await addFile("99999999-9999-4999-8999-999999999999", "Story (target)", null, "source_file_id", [FILE])
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(true)
+  })
+
+  it("still asks when two real documents exist and nothing is focused", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(false)
+    expect(scope.ok === false && scope.error).toContain("ASK THE USER")
+    expect(scope.ok === false && scope.error).toContain('"Story Two"')
+  })
+
+  describe("name lookup", () => {
+    const PRACTICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    async function seedNamed() {
+      await seedProject()
+      await addFile(PRACTICE, "Practice1_Come_Before_God_Today", null)
+      await addFile(FILE, "Practice_Notes", null)
+      await addFile(XXB_FILE, "Genesis_Intro", null)
+    }
+
+    it("matches by prefix, ignoring case", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice1_come" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("matches by substring", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "before god" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("tolerates a typo and filler words ('practise1 file')", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practise1 file" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("lists candidates by exact name and id when several match", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Practice1_Come_Before_God_Today"')
+      expect(error).toContain('"Practice_Notes"')
+      expect(error).toContain(PRACTICE)
+    })
+
+    it("lists every file when nothing matches", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "zzzzzz" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Practice1_Come_Before_God_Today"')
+      expect(error).toContain('"Genesis_Intro"')
+      expect(error).toContain('"Practice_Notes"')
+    })
+
+    it("still resolves a real file id", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+    })
+  })
+
+  describe("non-canonical book codes", () => {
+    const XX_CELLS = [
+      // sequence order deliberately differs from insert order
+      { id: "a1", ref: "XXB:h:1", seq: 3, source: "Third" },
+      { id: "a2", ref: "XXB 1:1", seq: 1, source: "First" },
+      { id: "a3", ref: "XXB 1:2", seq: 2, source: "Second" },
+    ]
+    async function seedXxb() {
+      await seedProject()
+      await addFile(XXB_FILE, "Appendix", "XXB")
+      for (const c of XX_CELLS) {
+        await env.AQUILLA_PG.prepare(
+          `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, sequence_index, event_id, last_edit_at)
+           VALUES (?, ?, ?, 'source', ?, ?, ?, ?, 0)`,
+        )
+          .bind(PROJECT, XXB_FILE, cellId(c.id), c.source, c.ref, c.seq, crypto.randomUUID())
+          .run()
+      }
+    }
+
+    it("parses a marker ref as a whole-book scope", () => {
+      expect(parseRefRange("XXB:h:1")).toEqual({ book: "XXB" })
+      expect(parseRefRange("FRT")).toEqual({ book: "FRT" })
+    })
+
+    it("reads the whole file in sequence order for a book-only and a marker ref", async () => {
+      await seedXxb()
+      for (const ref of ["XXB", "XXB:h:1"]) {
+        const out = await executeRead(env.AQUILLA_PG, { ref, filter: "untranslated" }, noFocus())
+        expect(out.data?.cells?.map((c) => c.source)).toEqual(["First", "Second", "Third"])
+      }
+    })
+
+    it("errors, listing the files and their codes, when the project lacks the requested book", async () => {
+      await seedXxb()
+      await addFile(FILE, "Second file", "XXC")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Appendix"')
+      expect(error).toContain('"Second file"')
+      expect(error).toContain("XXB")
+      expect(error).toContain("omit ref")
+      expect(error.replace("book code MRK", "")).not.toContain("MRK")
+    })
+
+    it("does not fall back to the focused file when the requested book is absent", async () => {
+      await seedWorld() // Mark
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis', 'GEN', ?)`,
+      )
+        .bind(XXB_FILE, PROJECT, crypto.randomUUID())
+        .run()
+      await env.AQUILLA_PG.prepare(`DELETE FROM files WHERE id = ?`).bind(FILE).run()
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
+        projectId: PROJECT,
+        focusedFileId: XXB_FILE,
+        aliases: new AliasMap(),
+      })
+      expect(scope.ok).toBe(false)
+      expect(scope.ok === false && scope.error).toContain('"Genesis"')
+    })
+
+    it("does not auto-pick the only document when the requested book is absent", async () => {
+      await seedProject()
+      await addFile(XXB_FILE, "Genesis", "GEN")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      expect(scope.ok).toBe(false)
+      expect(scope.ok === false && scope.error).toContain('"Genesis"')
+      expect(scope.ok === false && scope.error).toContain("GEN")
+    })
+
+    it("falls back to a NAMED file with a notice when its cells never carry the ref's book", async () => {
+      await seedXxb()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE, ref: "MRK 4" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+      expect(scope.ok && scope.range).toBeUndefined()
+      expect(scope.ok && scope.notice).toContain('"Appendix"')
+      expect(scope.ok && scope.notice).toContain('"MRK 4"')
+      // read prints the notice first and reads in sequence order.
+      const out = await executeRead(env.AQUILLA_PG, { fileId: "Appendix", ref: "MRK 4", limit: 5 }, noFocus())
+      expect(out.ok).toBe(true)
+      expect(out.text.split("\n")[0]).toContain("notice:")
+      expect(out.data?.cells?.map((c) => c.source)).toEqual(["First", "Second", "Third"])
+    })
+
+    it("treats an unparseable ref as the whole file when the file is known", async () => {
+      await seedXxb()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE, ref: "the first bit!" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+      expect(scope.ok && scope.range).toBeUndefined()
+      expect(scope.ok && scope.notice).toContain('"the first bit!"')
+      expect(scope.ok && scope.notice).toContain('"Appendix"')
+    })
+  })
+})
+
 describe("executeExamples", () => {
   it("returns only approved pairs with stable retrieval ids", async () => {
     await seedWorld()
@@ -428,5 +626,24 @@ describe("executeDraft", () => {
       { model: "m", apiKey: "k", url: "https://mock/x" },
     )
     expect(done.text).toContain("Nothing to draft")
+  })
+
+  // AQU-1455: draft prints the same widening notice as read, as its first line.
+  it("prints the ref-widening notice first when a named file's ref matches nothing", async () => {
+    await seedWorld() // Mark: every MRK cell with a target is translated; c3/c10 are not
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '[{"i":1,"t":"borrador"}]' } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { fileId: FILE, ref: "GEN 1", limit: 1 },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.text.split("\n")[0]).toContain('notice: ref "GEN 1" matched nothing in file "Mark"')
   })
 })

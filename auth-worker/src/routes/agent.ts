@@ -163,8 +163,8 @@ type AgentFrame =
 // mocks + old transcripts in stored sessions still call it).
 
 const SCOPE_PROPS = {
-  fileId: { type: "string", description: "File id, #f-alias, or :file (the focused file)." },
-  ref: { type: "string", description: 'Scripture scope: "MRK", "MRK 4", or "MRK 4:1-20". Resolves the file by book code when fileId is omitted.' },
+  fileId: { type: "string", description: "File id, #f-alias, :file (the focused file), or the file's name as the user said it (case and small typos tolerated; several matches return the candidates)." },
+  ref: { type: "string", description: 'Book scope: "<BOOK>", "<BOOK> 4", or "<BOOK> 4:1-20", where <BOOK> is a code the project actually contains (read it from a file, never invent one). Resolves the file by book code when fileId is omitted. Omit ref to work through the file in order.' },
 } as const
 
 const AQUIFER_PROPS = {

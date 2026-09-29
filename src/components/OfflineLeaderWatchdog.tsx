@@ -3,7 +3,7 @@ import { toast } from "@/components/ui/toast"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { LeaderLogEntry } from "@/lib/offline/leader-log-bridge"
-import { watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
+import { setLeaderStalled, watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
 
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
 const LOG_TAIL = 40
@@ -36,6 +36,7 @@ export function OfflineLeaderWatchdog({ stallMs, checkEveryMs, reload = reloadWi
       stallMs,
       checkEveryMs,
       onStall: (stall) => {
+        setLeaderStalled(true)
         const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
         console.error("[offline] LiveStore leader stopped persisting writes", {
           ...stall,
@@ -52,7 +53,10 @@ export function OfflineLeaderWatchdog({ stallMs, checkEveryMs, reload = reloadWi
           },
         })
       },
-      onRecover: () => toast.close(LEADER_STALLED_TOAST_ID),
+      onRecover: () => {
+        setLeaderStalled(false)
+        toast.close(LEADER_STALLED_TOAST_ID)
+      },
     })
   }, [store, stallMs, checkEveryMs, reload, t])
 

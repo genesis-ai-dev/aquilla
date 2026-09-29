@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { OfflineLeaderWatchdog } from "./OfflineLeaderWatchdog"
 import { Toaster, toast } from "@/components/ui/toast"
+import { __resetLeaderStalledForTests, isLeaderStalled } from "@/lib/offline/leader-watchdog"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
@@ -18,6 +19,7 @@ vi.mock("@/context/OfflineStoreContext", () => ({
 afterEach(() => {
   toast.close()
   vi.restoreAllMocks()
+  __resetLeaderStalledForTests()
 })
 
 const stuck: Status = { isSynced: false, pendingCount: 4, localHead: "e0.14", upstreamHead: "e0.10" }
@@ -62,8 +64,10 @@ describe("OfflineLeaderWatchdog", () => {
     status = stuck
     renderWatchdog()
     await screen.findByText(/aren't being saved on this device/)
+    expect(isLeaderStalled()).toBe(true)
 
     status = synced
     await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).toBeNull())
+    expect(isLeaderStalled()).toBe(false)
   })
 })

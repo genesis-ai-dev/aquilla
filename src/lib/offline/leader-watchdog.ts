@@ -8,8 +8,43 @@
 //
 // Polls rather than subscribing: a dead leader produces no sync-status
 // changes, which is exactly the condition to detect.
+import { useSyncExternalStore } from "react"
 import type { Store } from "@livestore/livestore"
 import type { schema } from "./schema"
+
+// App-wide "leader is stalled" flag, set by OfflineLeaderWatchdog and read by
+// any UI that would otherwise claim changes are saved (the outbox chip).
+// Mirrors the listener pattern in ./conflicts.ts.
+let leaderStalled = false
+const stallListeners = new Set<() => void>()
+
+export function setLeaderStalled(stalled: boolean): void {
+  if (leaderStalled === stalled) return
+  leaderStalled = stalled
+  for (const cb of stallListeners) cb()
+}
+
+export function isLeaderStalled(): boolean {
+  return leaderStalled
+}
+
+export function subscribeLeaderStalled(cb: () => void): () => void {
+  stallListeners.add(cb)
+  return () => {
+    stallListeners.delete(cb)
+  }
+}
+
+/** React binding — true while the offline store's leader has stopped persisting writes. */
+export function useLeaderStalled(): boolean {
+  return useSyncExternalStore(subscribeLeaderStalled, isLeaderStalled, isLeaderStalled)
+}
+
+/** Test-only reset. */
+export function __resetLeaderStalledForTests(): void {
+  leaderStalled = false
+  stallListeners.clear()
+}
 
 export type LeaderStall = {
   pendingCount: number

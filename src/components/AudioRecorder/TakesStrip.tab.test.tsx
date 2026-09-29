@@ -140,11 +140,6 @@ describe("TakesStrip — the Recording tab's list of other takes", () => {
     expect(play).toBeEnabled()
   })
 
-  it("shows the note under the list", () => {
-    draw({ note: <p>Using another take changes what 2 other lines play too.</p> })
-    expect(screen.getByText("Using another take changes what 2 other lines play too.")).toBeInTheDocument()
-  })
-
   it("reads no take history of its own when the caller passes it", () => {
     draw({ history: new Map() })
     expect(driftCalls.every((c) => c.enabled === false)).toBe(true)

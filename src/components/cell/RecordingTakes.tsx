@@ -99,7 +99,6 @@ const selectionsOf = (cell: CellData) => ({
 function OwnerTakes({
   owner,
   header,
-  shareNote,
   validation = false,
   headings = true,
   players,
@@ -109,8 +108,6 @@ function OwnerTakes({
 }: Shared & {
   owner: CellData
   header?: React.ReactNode
-  /** Under each list: using another take changes other lines too. */
-  shareNote?: React.ReactNode
   /** The vote on the playing take (heard lines only — see CellTakeBlock). */
   validation?: boolean
   /** Track headings once there is more than one track. */
@@ -238,7 +235,6 @@ function OwnerTakes({
               history={history}
               cellText={shared.cellText}
               timingsFor={(audioId) => owner.audioTimings?.[audioId] as never}
-              note={shareNote}
               onLastTakeRemoved={shared.onLastTakeRemoved}
               readOnly={!shared.editable}
             />
@@ -272,17 +268,14 @@ export function RecordingTakes({ cell, linkedTakes, players, ...shared }: Record
                 })}
               </span>
               {sharedWith > 1 && (
-                <span className="text-[10px] text-muted-foreground">
+                // The one warning: a new take, or choosing another, changes
+                // every line this heard line performs (Sam, 2026-09-29).
+                <span data-testid="rec-tab-shared-note" className="text-[10px] text-muted-foreground">
                   {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
                 </span>
               )}
             </div>
           }
-          shareNote={sharedWith > 1 ? (
-            <p data-testid="rec-tab-shared-note" className="text-[11px] text-amber-700 dark:text-amber-400">
-              {t("editor.recordingTab.sharedNote", { count: sharedWith - 1 })}
-            </p>
-          ) : undefined}
         />
       ))}
     </div>

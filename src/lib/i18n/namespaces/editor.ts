@@ -1671,7 +1671,10 @@ export const editor = defineNamespace({
     "editor.audio.noAudioYet": "No audio yet.",
     "editor.audio.recordShort": "Record",
     "editor.audio.heardLineAt": "Heard line · {range}",
-    "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
+    "editor.audio.heardLineShared": plural({
+      one: "Also performs {count} other subtitle line — a new or different take changes it too.",
+      other: "Also performs {count} other subtitle lines — a new or different take changes those too.",
+    }),
 
     // — Recording tab: the take that plays, and the others (2026-09-29) ————
     "editor.recordingTab.newTake": "New take",
@@ -1687,10 +1690,6 @@ export const editor = defineNamespace({
     }),
     "editor.recordingTab.stale": "Transcript out of date",
     "editor.recordingTab.notTranscribed": "Not transcribed",
-    "editor.recordingTab.sharedNote": plural({
-      one: "Using another take changes what {count} other line plays too.",
-      other: "Using another take changes what {count} other lines play too.",
-    }),
     "editor.recordingTab.sourceSection": "Source audio",
     "editor.recordingTab.nonePlays": "No take plays for this line. Use one below, or make a new one.",
 
@@ -6402,8 +6401,9 @@ export const editor = defineNamespace({
       "editor.audio.heardLineShared": {
         description:
           "Warning under a heard line's recording when that one performance " +
-          "also covers other subtitle lines, so re-recording it changes them " +
-          "as well. Only shown when the count is at least one.",
+          "also covers other subtitle lines, so recording a new take or choosing " +
+          "another of its takes changes them as well. Count-governed; only shown " +
+          "when the count is at least one.",
         placeholders: {
           count: "How many OTHER subtitle lines this heard line performs (never zero).",
         },
@@ -6448,13 +6448,6 @@ export const editor = defineNamespace({
           "Beside a take in the Recording tab: nobody has transcribed it yet, so there is " +
           "nothing to compare with the text. May be followed by a Transcribe link.",
         maxLength: 20,
-      },
-      "editor.recordingTab.sharedNote": {
-        description:
-          "Under the takes of a heard line in a dubbing project — one recording that performs " +
-          "several subtitle lines at once. Warns that choosing another of its takes changes " +
-          "what the other lines play as well. Count-governed.",
-        placeholders: { count: "How many OTHER subtitle lines the heard line performs." },
       },
       "editor.recordingTab.nonePlays": {
         description:

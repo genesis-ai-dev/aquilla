@@ -158,12 +158,28 @@ describe("RecordingTakes", () => {
     } as Partial<CellData> & { attachments: Record<string, unknown> })
     draw(cell({ attachments: {} }), [{ cell: cue, sharedWith: 3 }])
     expect(screen.getByTestId("cell-linked-take")).toHaveTextContent("Heard line")
-    expect(screen.getByTestId("rec-tab-shared-note")).toHaveTextContent("Using another take changes what 2 other lines play too.")
+    // One warning, under the heard line's time (Sam, 2026-09-29).
+    expect(screen.getByTestId("rec-tab-shared-note")).toHaveTextContent(
+      "Also performs 2 other subtitle lines — a new or different take changes those too.",
+    )
     // The vote is on the heard line's PLAYING take; its list shows the other
     // take's validation read-only.
     const playing = within(screen.getByTestId("cell-take-block")).getByTestId("audio-validation-button")
     expect(playing.getAttribute("aria-label")).toMatch(/click to validate/i)
     const listed = within(screen.getByTestId("tab-other-takes")).getByTestId("audio-validation-button")
     expect(listed.getAttribute("aria-label")).not.toMatch(/click/i)
+  })
+
+  // It said "1 other subtitle lines" (Sam, 2026-09-29).
+  it("says line, not lines, when the heard line performs one other", () => {
+    const cue = cell({
+      id: "cue-1", fileId: "cue-sib", startTime: 1, endTime: 5,
+      selectedAudioId: "audio-cue-1-a.wav",
+      attachments: { "audio-cue-1-a.wav": audio("frontier-audio://a", "recording", { label: "Take 1" }) },
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    draw(cell({ attachments: {} }), [{ cell: cue, sharedWith: 2 }])
+    expect(screen.getByTestId("rec-tab-shared-note")).toHaveTextContent(
+      "Also performs 1 other subtitle line — a new or different take changes it too.",
+    )
   })
 })

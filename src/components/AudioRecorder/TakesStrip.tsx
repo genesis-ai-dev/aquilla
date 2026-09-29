@@ -5,7 +5,7 @@
 // cell.audio.rename). Self-contained: resolves frontier audio URLs to
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -106,8 +106,6 @@ interface Props {
   timingsFor?: (audioId: string) => ReadonlyArray<{ word: string; end: number }> | null | undefined
   /** Tab: the line's text those timings are compared with. */
   cellText?: string
-  /** Tab: a line under the list (a heard line's shared-take warning). */
-  note?: ReactNode
   /** The cell's take history, when the caller already read it — the tab reads
    *  it once for the playing take and this list together. */
   history?: ReadonlyMap<string, RecordingTextDrift>
@@ -139,7 +137,6 @@ export function TakesStrip({
   hide,
   timingsFor,
   cellText = "",
-  note,
   history,
   readOnly = false,
 }: Props) {
@@ -792,7 +789,6 @@ export function TakesStrip({
           )
         })}
       </div>
-      {tab && note}
     </div>
   )
 }

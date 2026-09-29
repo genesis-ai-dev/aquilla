@@ -170,6 +170,7 @@ import { CellAttachmentButton } from "./CellAttachmentButton"
 import { CellAttachmentLinks } from "./cell/CellAttachmentLinks"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
 import { RecordingTakes } from "./cell/RecordingTakes"
+import { initialExpansionTab } from "./cell/expansion-tab"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
@@ -6499,22 +6500,22 @@ function EditorRow({
   const railOverflowAttentionDot: "emerald" | "primary" | null =
     openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
-  // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
-  // when the panel was closed and is being opened — once open, the user's
-  // choice (or programmatic switches via inline rule clicks) wins.
+  // First-open auto-tab: prefer the most-attention-worthy tab — and in the
+  // Audio view, Recording (Sam, 2026-09-29). Only applied when the panel was
+  // closed and is being opened — once open, the user's choice (or
+  // programmatic switches via inline rule clicks) wins.
   const previousExpandedRef = useRef(false)
+  const inAudioView = audioLens != null
   useEffect(() => {
     if (expanded && !previousExpandedRef.current) {
-      const initial =
-        cellInfractions.length > 0
-          ? "issues"
-          : transcriptNeedsAttention
-            ? "audio"
-            : "backtranslation"
-      setExpansionTab(initial)
+      setExpansionTab(initialExpansionTab({
+        hasIssues: cellInfractions.length > 0,
+        transcriptNeedsAttention,
+        audioView: inAudioView,
+      }))
     }
     previousExpandedRef.current = expanded
-  }, [expanded, cellInfractions.length, transcriptNeedsAttention])
+  }, [expanded, cellInfractions.length, transcriptNeedsAttention, inAudioView])
 
   useEffect(() => {
     if (expansionTab === "footnotes" && !showFootnotesInExpansion) {

@@ -1,8 +1,9 @@
-// Deleting a take, one way everywhere: the recorder's takes list, the Recording
-// tab's list, and the take that plays at the top of the tab (Sam, 2026-09-29:
-// "even if it's the only take that exists, it should still be deletable").
+// Deleting and renaming a take, one way everywhere: the recorder's takes list,
+// the Recording tab's list, and the take that plays at the top of the tab (Sam,
+// 2026-09-29: deletable "even if it's the only take that exists", and
+// renameable when it is the selected one).
 
-import { emitCellAudioRemove } from "@/lib/sync/events-emit"
+import { emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 
@@ -29,6 +30,25 @@ export async function removeTake(args: {
   injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
   await removeP
   notifyAudioAttachmentsChanged(fileId)
+}
+
+/**
+ * Give a take its permanent name (round 8: names are persisted, never derived
+ * from position). Rejects when the emit fails, so a caller showing the new name
+ * early can put the old one back.
+ */
+export async function renameTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  label: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  author: string
+}): Promise<void> {
+  await emitCellAudioRename(args)
+  notifyAudioAttachmentsChanged(args.fileId)
 }
 
 /**

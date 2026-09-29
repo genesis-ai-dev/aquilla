@@ -23,7 +23,7 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FileClock, Mic, Sparkles, Trash2 } from "lucide-react"
+import { FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -53,7 +53,7 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
-import { hasOwnRecordingLeft, removeTake } from "@/lib/audio/take-actions"
+import { hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 
 export interface CellTakeBlockProps {
@@ -247,6 +247,36 @@ function CellTakeBlockView({
     }
   }, [selectedAudioId, attachment, controller, project.id, owner, username, onLastTakeRemoved, targetLang])
 
+  // Renameable in place, as every take in the lists is (Sam, 2026-09-29).
+  // The new name shows at once, for as long as the take still carries the
+  // name it replaced — a rename made elsewhere meanwhile is never hidden.
+  const [renaming, setRenaming] = useState(false)
+  const [renameDraft, setRenameDraft] = useState("")
+  // Escape closes the box, and a closing box loses focus — whose handler
+  // would then save what Escape meant to throw away.
+  const renameCancelledRef = useRef(false)
+  const [renamed, setRenamed] = useState<{ audioId: string; from: string | null; to: string } | null>(null)
+  const storedLabel = attachment?.label ?? null
+  const shownLabel =
+    renamed && renamed.audioId === selectedAudioId && renamed.from === storedLabel ? renamed.to : storedLabel
+  const commitRename = useCallback(async () => {
+    setRenaming(false)
+    if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
+    const label = renameDraft.trim()
+    // Against the name as SHOWN: an unnamed take shows "Take", and saving
+    // that unchanged would turn the placeholder into a real name.
+    if (!selectedAudioId || !label || label === (shownLabel ?? t("audio.takesStrip.takeFallback"))) return
+    setRenamed({ audioId: selectedAudioId, from: storedLabel, to: label })
+    try {
+      await renameTake({
+        projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username,
+        ...(targetLang ? { targetLang } : {}),
+      })
+    } catch {
+      setRenamed(null)
+    }
+  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, project.id, owner.fileId, owner.id, username, t, targetLang])
+
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
       if (!selectedAudioId || !timings || timings.length === 0) return
@@ -297,14 +327,30 @@ function CellTakeBlockView({
   const showTranscript = Boolean(timings && timings.length > 0) && (isSection || verdict.kind !== "match")
   const label = isSection
     ? t("editor.recordingTab.sourceSection")
-    : attachment?.label ?? t("audio.takesStrip.takeFallback")
+    : shownLabel ?? t("audio.takesStrip.takeFallback")
 
   return (
     <div data-testid="cell-take-block" className="flex flex-col gap-2">
       {header}
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
-        <span data-testid="cell-take-label" className="font-medium">{label}</span>
+        {renaming ? (
+          <input
+            autoFocus
+            data-testid="cell-take-rename"
+            aria-label={t("audio.takesStrip.renameTooltip")}
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onBlur={() => void commitRename()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); void commitRename() }
+              else if (e.key === "Escape") { e.preventDefault(); renameCancelledRef.current = true; setRenaming(false) }
+            }}
+            className="w-40 min-w-0 rounded border border-border bg-background px-1 py-0.5 text-xs font-medium"
+          />
+        ) : (
+          <span data-testid="cell-take-label" className="font-medium">{label}</span>
+        )}
         {!isSection && attachment?.durationMs != null && (
           <span className="tabular-nums text-muted-foreground">{(attachment.durationMs / 1000).toFixed(1)}s</span>
         )}
@@ -341,6 +387,22 @@ function CellTakeBlockView({
             transcribeDisabled={isTranscribing}
             testId="cell-take-verdict"
           />
+        )}
+        {!isSection && selectedAudioId && !renaming && (
+          <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              data-testid="cell-take-rename-button"
+              aria-label={t("audio.takesStrip.renameTooltip")}
+              disabled={!editable}
+              onClick={() => { renameCancelledRef.current = false; setRenameDraft(label); setRenaming(true) }}
+              className="rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          </AppTooltip>
         )}
         {!readOnlyTranscript && (
           // Model download %, failures (click to expand, with Retry) and a

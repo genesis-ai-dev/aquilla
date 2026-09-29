@@ -46,7 +46,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 // these tests are about.
 const trimEmits: Array<Record<string, unknown>> = []
 const removeEmits: Array<Record<string, unknown>> = []
+const renameEmits: Array<Record<string, unknown>> = []
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioRename: vi.fn(async (input: Record<string, unknown>) => { renameEmits.push(input); return "evt-rn" }),
   emitCellAudioRemove: vi.fn(async (input: Record<string, unknown>) => { removeEmits.push(input); return "evt-rm" }),
   emitCellAudioAttach: vi.fn(async () => "evt-1"),
   emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
@@ -104,6 +106,7 @@ beforeEach(() => {
   trimCalls.length = 0
   trimEmits.length = 0
   removeEmits.length = 0
+  renameEmits.length = 0
   localStorage.clear()
 })
 
@@ -441,6 +444,41 @@ describe("the take that plays", () => {
   it("cannot be deleted by someone who cannot edit", () => {
     draw({ editable: false })
     expect(screen.getByTestId("cell-take-delete")).toBeDisabled()
+  })
+
+  // Sam, 2026-09-29: renameable while it is the selected take, as every take
+  // in the lists is.
+  it("renames itself in place, on the cell that holds it", async () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id].label = "Take 4"
+    draw({ owner })
+    fireEvent.click(screen.getByTestId("cell-take-rename-button"))
+    const input = screen.getByTestId("cell-take-rename") as HTMLInputElement
+    expect(input.value).toBe("Take 4")
+    fireEvent.change(input, { target: { value: "Keeper" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(renameEmits).toHaveLength(1))
+    expect(renameEmits[0]).toMatchObject({ fileId: "cue-sibling", cellId: "cue-1", audioId: id, label: "Keeper" })
+    // The new name shows at once, before the read catches up.
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Keeper")
+  })
+
+  it("keeps its name when the rename is cancelled or left unchanged", () => {
+    draw()
+    fireEvent.click(screen.getByTestId("cell-take-rename-button"))
+    const input = screen.getByTestId("cell-take-rename")
+    fireEvent.change(input, { target: { value: "Something else" } })
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(screen.queryByTestId("cell-take-rename")).toBeNull()
+    fireEvent.click(screen.getByTestId("cell-take-rename-button"))
+    fireEvent.keyDown(screen.getByTestId("cell-take-rename"), { key: "Enter" })
+    expect(renameEmits).toHaveLength(0)
+  })
+
+  it("cannot be renamed by someone who cannot edit", () => {
+    draw({ editable: false })
+    expect(screen.getByTestId("cell-take-rename-button")).toBeDisabled()
   })
 
   it("has no mic on the waveform — New take is the way into the recorder", () => {

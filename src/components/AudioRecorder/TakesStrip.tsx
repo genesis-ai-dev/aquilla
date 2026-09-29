@@ -26,7 +26,7 @@ import {
   notifyAudioAttachmentsChanged,
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
-import { hasOwnRecordingLeft, removeTake } from "@/lib/audio/take-actions"
+import { hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
@@ -398,18 +398,18 @@ export function TakesStrip({
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
+  // Escape closes the box, and a closing box loses focus — whose handler
+  // would then save what Escape meant to throw away.
+  const renameCancelledRef = useRef(false)
   const commitRename = useCallback(
     async (att: AudioAttachmentOut) => {
       const label = renameDraft.trim()
       setRenamingId(null)
+      if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
       if (!label || label === displayLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
-        await emitCellAudioRename({
-          projectId, fileId, cellId, audioId: att.audioId, label, author,
-          ...(targetLang ? { targetLang } : {}),
-        })
-        notifyAudioAttachmentsChanged(fileId)
+        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}) })
       } catch {
         setLabelOverrides((prev) => {
           const next = new Map(prev)
@@ -568,6 +568,7 @@ export function TakesStrip({
                         e.preventDefault()
                         void commitRename(att)
                       } else if (e.key === "Escape") {
+                        renameCancelledRef.current = true
                         setRenamingId(null)
                       }
                     }}
@@ -675,6 +676,7 @@ export function TakesStrip({
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => {
+                          renameCancelledRef.current = false
                           setRenameDraft(displayLabel(att))
                           setRenamingId(att.audioId)
                         }}

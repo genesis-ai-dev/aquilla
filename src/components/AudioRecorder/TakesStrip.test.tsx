@@ -316,6 +316,22 @@ describe("TakesStrip — stable names (round 8)", () => {
     expect(screen.getByTestId("take-label-a")).toHaveTextContent("Best whisper")
   })
 
+  // Escape closes the box. In Chromium the closing box then fires blur (WebKit
+  // does not — probed 2026-09-29), whose handler saved the very name Escape
+  // meant to throw away. happy-dom does not fire it on removal either, so this
+  // pins the outcome rather than reproducing the Chromium path.
+  it("Escape cancels a rename — nothing is saved", async () => {
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1")]} selectedAudioId="a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Rename take" }))
+    const input = screen.getByTestId("take-rename-a")
+    fireEvent.change(input, { target: { value: "Not this" } })
+    fireEvent.keyDown(input, { key: "Escape" })
+    fireEvent.blur(input)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitRename).not.toHaveBeenCalled()
+    expect(screen.getByTestId("take-label-a")).toHaveTextContent("Take 1")
+  })
+
   it("legacy unlabeled takes are backfilled ONCE with sequential names", async () => {
     render(<TakesStrip {...common} takes={[take("a", 1000), take("b", 1000)]} selectedAudioId="a" />)
     await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))

@@ -128,17 +128,17 @@ function chaptersForCells(
   })
   if (!includeChapterHeadings) return direct
   for (let i = 0; i < cells.length; i++) {
-    if (!isChapterHeading(cells[i]!) || direct[i]) continue
+    if (!isChapterHeading(cells[i]) || direct[i]) continue
     let found: { book: string; chapter: string; key: string } | null = null
     for (let j = i + 1; j < cells.length; j++) {
-      if (direct[j] && !isChapterHeading(cells[j]!)) {
+      if (direct[j] && !isChapterHeading(cells[j])) {
         found = direct[j]
         break
       }
     }
     if (!found) {
       for (let j = i - 1; j >= 0; j--) {
-        if (direct[j] && !isChapterHeading(cells[j]!)) {
+        if (direct[j] && !isChapterHeading(cells[j])) {
           found = direct[j]
           break
         }
@@ -165,14 +165,14 @@ function orderClips(clips: ChapterClip[]): ChapterClip[] {
   const ordered: ChapterClip[] = []
   let h = 0
   for (const verse of verses) {
-    while (h < headings.length && headings[h]!.documentIndex < verse.documentIndex) {
-      ordered.push(headings[h]!)
+    while (h < headings.length && headings[h].documentIndex < verse.documentIndex) {
+      ordered.push(headings[h])
       h += 1
     }
     ordered.push(verse)
   }
   while (h < headings.length) {
-    ordered.push(headings[h]!)
+    ordered.push(headings[h])
     h += 1
   }
   return ordered
@@ -368,7 +368,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
   }
 
   if (chapterWavs.length === 1) {
-    const only = chapterWavs[0]!
+    const only = chapterWavs[0]
     const stem = only.name.replace(/\.wav$/i, "")
     return {
       blob: only.blob,

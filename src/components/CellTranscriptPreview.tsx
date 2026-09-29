@@ -11,6 +11,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 
 export type TranscriptPreviewState = "stale" | "match" | "differs"
 
@@ -35,10 +36,6 @@ function transcriptOf(timings: WordTiming[]): string {
   return timings.map((t) => t.word).join(" ")
 }
 
-function looselyEquals(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-  return norm(a) === norm(b)
-}
 
 /**
  * What the preview should say about this recording versus the cell.
@@ -55,14 +52,10 @@ export function classifyTranscriptPreview(
   cellText: string,
   alignedToCellText: boolean,
 ): TranscriptPreviewState {
-  const transcript = transcriptOf(timings)
-  if (looselyEquals(transcript, cellText)) return "match"
-  const lastTiming = timings[timings.length - 1]
-  const cellLostTheTail =
-    alignedToCellText &&
-    lastTiming.end > cellText.length &&
-    transcript.startsWith(cellText)
-  return cellLostTheTail ? "stale" : "differs"
+  // The same verdict labels every take in the Recording tab
+  // (transcript-verdict.ts), so the two cannot disagree.
+  const verdict = transcriptVerdict({ timings, cellText, alignedToCellText })
+  return verdict.kind === "stale" ? "stale" : verdict.kind === "match" ? "match" : "differs"
 }
 
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({

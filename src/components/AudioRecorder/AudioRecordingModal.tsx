@@ -27,8 +27,9 @@ import {
   trackIdForSlot,
 } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
-import { DEFAULT_TARGET_TRACK_ID, slotForTrack } from "@/lib/timeline/track-slots"
+import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { groupSelection, groupTakesByTrack } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -319,11 +320,7 @@ function GroupedTakes({
         // recording pointer (falling through to the generated one, exactly as
         // it always has); for an added track it is that track's single slot.
         const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
-        const selected = isDefault
-          ? (entry?.selectedAudioId ?? null)
-          : (slotSelections(entry ?? { selectedAudioId: null, selectedGeneratedVoiceAudioId: null })[
-              slotForTrack(group.trackId)
-            ] ?? null)
+        const selected = groupSelection(entry, group.trackId)
         return (
           <div key={group.trackId}>
             {showHeadings && (
@@ -633,29 +630,10 @@ export function AudioRecordingModal({
    * A single group renders exactly as the ungrouped list always did — the
    * heading only appears once there is more than one thing to tell apart.
    */
-  const takeGroups = useMemo(() => {
-    const all = Object.values(audioEntry?.attachments ?? {})
-      // The imported SOURCE clip rides the recording slot but is not a take.
-      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
-    const byTrack = new Map<string, AudioAttachmentOut[]>()
-    for (const att of all) {
-      const trackId = trackIdForSlot(att.slot)
-      const list = byTrack.get(trackId)
-      if (list) list.push(att)
-      else byTrack.set(trackId, [att])
-    }
-    // In the file's own track order, so the headings read down the tab the way
-    // the lanes read down the timeline. Tracks this build cannot name (a
-    // collaborator's newer one) still list their takes rather than hiding them.
-    const ordered = (timelineTracks ?? []).filter((tr) => byTrack.has(tr.id))
-    const named = new Set(ordered.map((tr) => tr.id))
-    return [
-      ...ordered.map((tr) => ({ trackId: tr.id, name: tr.name, takes: byTrack.get(tr.id)! })),
-      ...[...byTrack.entries()]
-        .filter(([id]) => !named.has(id))
-        .map(([id, takes]) => ({ trackId: id, name: "", takes })),
-    ].map((g) => ({ ...g, takes: g.takes.sort((a, b) => a.audioId.localeCompare(b.audioId)) }))
-  }, [audioEntry, activeCell?.fileId, timelineTracks])
+  const takeGroups = useMemo(
+    () => groupTakesByTrack(audioEntry?.attachments, activeCell?.fileId ?? "", timelineTracks),
+    [audioEntry, activeCell?.fileId, timelineTracks],
+  )
 
   /**
    * How many takes the strip will actually LIST — every track's, not this one's.

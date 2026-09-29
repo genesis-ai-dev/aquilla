@@ -148,6 +148,28 @@ export const editor = defineNamespace({
     "editor.audio.upload": "Upload audio file",
     "editor.audio.uploadSignIn": "Sign in to upload recordings",
 
+    // — Per-cell attachments (AQU-777) ———————————————————————————
+    "editor.attachments.attach": "Attach a file",
+    "editor.attachments.signIn": "Sign in to attach files",
+    "editor.attachments.countTooltip": plural({
+      one: "{count} attachment",
+      other: "{count} attachments",
+    }),
+    "editor.attachments.drawerTitle": "Attachments",
+    "editor.attachments.closeLabel": "Close attachments panel",
+    "editor.attachments.resizeLabel": "Resize attachments panel",
+    "editor.attachments.empty": "No attachments in this file yet.",
+    "editor.attachments.loading": "Loading attachments…",
+    "editor.attachments.loadError": "Couldn't load attachments. Check your connection.",
+    "editor.attachments.truncated":
+      "Showing the first {count} attachments in this file.",
+    "editor.attachments.openFull": "Open full size",
+    "editor.attachments.remove": "Remove attachment",
+    "editor.attachments.removeFailed": "Couldn't remove this attachment.",
+    "editor.attachments.previewAlt": "Attachment preview: {name}",
+    "editor.attachments.openInDrawer": "Show in the attachments panel",
+    "editor.attachments.cellGroupUnlabelled": "Unlabelled cell",
+
     // — Audio crop popover ————————————————————————————————————————
     "editor.crop.open": "Crop audio",
     "editor.crop.title": "Crop",
@@ -944,9 +966,38 @@ export const editor = defineNamespace({
     "editor.addCell.forbiddenToast": "You don\u2019t have permission to add cells here, so it has been removed again.",
     "editor.removeCell.forbiddenToast": "You don\u2019t have permission to remove cells here, so it has been put back.",
     "editor.removeCell.notYetSavedToast": "That cell is still being saved \u2014 try removing it again in a moment.",
+    // AQU-1422: a refused hide/show puts the row back, so these say what the
+    // user can now see for themselves — same shape as the removeCell pair above.
+    "editor.hideCell.failedToast": "Couldn’t hide that cell, so it is still showing.",
+    "editor.showCell.failedToast": "Couldn’t show that cell, so it is still hidden.",
+    "editor.hideCell.forbiddenToast":
+      "You don’t have permission to hide cells here, so nothing changed.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
+    // AQU-1422: the reversible sibling of "Remove this line". The wording says
+    // "cell" rather than "line" on purpose — one hide parks the row in EVERY
+    // language lane at once, so calling it a line invites the reading that it
+    // only affects the lane you are looking at.
+    "editor.row.hideCell": "Hide cell",
+    "editor.row.showCell": "Show cell",
+    "editor.row.hiddenBadgeTooltip":
+      "Hidden — not shown to translators and left out of exports.",
+    "editor.row.hiddenBadgeAria": "Hidden cell",
+    // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
+    // indicator sits in a crowded toolbar where the shortest true string wins.
+    "editor.hiddenCells.indicator": "{count} hidden",
+    "editor.hiddenCells.toggle": "Show hidden cells",
+    "editor.hiddenCells.indicatorTooltip": plural({
+      one:
+        "{count} cell in this file is hidden: translators do not see it and exports " +
+        "leave it out. Nothing was deleted — show it to bring its text, " +
+        "translations, recordings and comments back.",
+      other:
+        "{count} cells in this file are hidden: translators do not see them and " +
+        "exports leave them out. Nothing was deleted — show a cell to bring " +
+        "its text, translations, recordings and comments back.",
+    }),
     "editor.row.addLineAbove": "Add a line above",
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
@@ -2121,6 +2172,113 @@ export const editor = defineNamespace({
           "Error shown in that popover when the user is signed out: uploading a " +
           "recording needs an account. Imperative sentence telling them what to do, " +
           "not an accusation.",
+      },
+      "editor.attachments.attach": {
+        description:
+          "Tooltip and screen-reader name of the paperclip button in a cell's " +
+          "action rail, which opens a file picker to attach a screenshot or other " +
+          "reference image to that one cell. 'Attach' as a verb — this adds a file " +
+          "to the cell, it does not upload a translation.",
+        maxLength: 20,
+      },
+      "editor.attachments.signIn": {
+        description:
+          "Error shown in the rail's popover when a signed-out user tries to " +
+          "attach a file. Imperative sentence telling them what to do, not an " +
+          "accusation.",
+      },
+      "editor.attachments.countTooltip": {
+        description:
+          "Tooltip of that same paperclip button when the cell already has " +
+          "attachments, stating how many. Count-governed.",
+        placeholders: {
+          count: "How many attachments the cell has. Always 1 or more here.",
+        },
+        maxLength: 22,
+      },
+      "editor.attachments.drawerTitle": {
+        description:
+          "Heading of the right-hand attachments panel, which previews every " +
+          "attachment in the open file grouped by the cell it belongs to. A plural " +
+          "noun naming the panel's contents.",
+        maxLength: 16,
+      },
+      "editor.attachments.closeLabel": {
+        description:
+          "Screen-reader name of the X button that closes the attachments panel. " +
+          "Icon-only, so this string is the only name it has.",
+      },
+      "editor.attachments.resizeLabel": {
+        description:
+          "Screen-reader name of the drag handle on the panel's left edge, which " +
+          "makes the panel wider or narrower.",
+      },
+      "editor.attachments.empty": {
+        description:
+          "Message filling the attachments panel when the open file has no " +
+          "attachments on any cell. Full sentence with a period; states the fact " +
+          "rather than instructing, since the way to add one is on the cell itself.",
+      },
+      "editor.attachments.loading": {
+        description:
+          "Placeholder in the attachments panel while the file's attachments are " +
+          "being fetched. Ends with an ellipsis glyph (…).",
+      },
+      "editor.attachments.loadError": {
+        description:
+          "Message in the attachments panel when the fetch failed. Two short " +
+          "sentences: what happened, then what to check. Never blames the user's " +
+          "data — nothing has been lost.",
+      },
+      "editor.attachments.truncated": {
+        description:
+          "Notice at the top of the attachments panel when the file holds more " +
+          "attachments than the panel will list, stating how many are shown.",
+        placeholders: {
+          count:
+            "How many attachments the panel is showing — not the file's total, " +
+            "which is larger. A number already formatted for the locale.",
+        },
+      },
+      "editor.attachments.openFull": {
+        description:
+          "Link/button under an attachment's preview in the panel that opens the " +
+          "image at full size in a new browser tab.",
+        maxLength: 18,
+      },
+      "editor.attachments.remove": {
+        description:
+          "Screen-reader name and tooltip of the button that detaches an " +
+          "attachment from its cell, for every collaborator. 'Remove' rather than " +
+          "'Delete': the file is detached, not scrubbed from history.",
+        maxLength: 20,
+      },
+      "editor.attachments.removeFailed": {
+        description:
+          "Error shown beside an attachment when detaching it failed. Full " +
+          "sentence with a period; the attachment is still there.",
+      },
+      "editor.attachments.previewAlt": {
+        description:
+          "Alt text of an attachment's inline image preview in the panel.",
+        placeholders: {
+          name:
+            "The uploaded file's own name, e.g. 'chapter-3-layout.png'. Content, " +
+            "so never translate the substituted value.",
+        },
+      },
+      "editor.attachments.openInDrawer": {
+        description:
+          "Screen-reader name of an attachment link rendered under a cell in the " +
+          "editor. Clicking it opens the right-hand attachments panel scrolled to " +
+          "that attachment, which is what this string has to convey.",
+      },
+      "editor.attachments.cellGroupUnlabelled": {
+        description:
+          "Heading of a group in the attachments panel when the cell it collects " +
+          "has no canonical reference (no verse address) to name it by. A noun " +
+          "phrase standing in for that missing label.",
+        maxLength: 20,
       },
       "editor.crop.open": {
         description:
@@ -5632,6 +5790,59 @@ export const editor = defineNamespace({
         placeholders: {
           key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
         },
+      },
+      // AQU-1422 — hide / show one cell.
+      "editor.row.hideCell": {
+        description:
+          "Menu entry on a source cell that parks the cell: translators stop seeing " +
+          "it and exports leave it out, but nothing is deleted. Imperative. Say " +
+          "\"cell\", not \"line\" — one hide parks the row in every language at once.",
+        maxLength: 18,
+      },
+      "editor.row.showCell": {
+        description:
+          "The same menu entry on a cell that is already parked — it brings the cell " +
+          "back, with its text, translations, recordings and comments intact. " +
+          "Imperative. The opposite of \"Hide cell\"; keep the pair recognisable.",
+        maxLength: 18,
+      },
+      "editor.row.hiddenBadgeTooltip": {
+        description:
+          "Tooltip on the crossed-out-eye badge drawn on a parked cell, for the source " +
+          "editor who has turned on \"Show hidden cells\". States the two consequences " +
+          "of hiding. Full sentence with a period.",
+      },
+      "editor.row.hiddenBadgeAria": {
+        description:
+          "Screen-reader name of that crossed-out-eye badge. A short noun phrase, not " +
+          "a sentence.",
+        maxLength: 20,
+      },
+      "editor.hiddenCells.indicator": {
+        description:
+          "Compact count in the file header telling a source editor how many of this " +
+          "file's cells are parked, e.g. \"3 hidden\". Only they see it. Keep it as " +
+          "short as the English — it sits in a crowded toolbar.",
+        placeholders: {
+          count: "How many cells in this file are hidden. Always one or more — the " +
+            "indicator is not drawn at zero.",
+        },
+        maxLength: 16,
+      },
+      "editor.hiddenCells.indicatorTooltip": {
+        description:
+          "Tooltip on that count. Explains what hiding does and reassures the reader " +
+          "that nothing was lost. Full sentences with periods.",
+        placeholders: {
+          count: "How many cells in this file are hidden. Always one or more.",
+        },
+      },
+      "editor.hiddenCells.toggle": {
+        description:
+          "Label of the switch beside the hidden-cell count. On, the parked cells are " +
+          "drawn dimmed instead of dropped from the list — it reveals them on this " +
+          "screen only and un-hides nothing for anyone else. Imperative.",
+        maxLength: 24,
       },
       "editor.issues.none": {
         description:

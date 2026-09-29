@@ -26,6 +26,11 @@ export type OutboxEventKind =
   | "source.cell.commit"
   | "source.cell.delete"
   | "source.cell.reorder"
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row, so nothing is deleted
+  // and no lane's translation goes stale. Hiding is per CELL, not per lane,
+  // which is why one source-side kind covers every language.
+  | "source.cell.visibility.set"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -45,6 +50,11 @@ export type OutboxEventKind =
   | "cell.audio.trim"
   | "cell.audio.place"
   | "cell.audio.measure"
+  // AQU-777: per-cell file attachments (screenshots / reference images).
+  // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
+  // time these land — same ordering contract as cell.audio.attach.
+  | "cell.attachment.add"
+  | "cell.attachment.remove"
   // AQU-490: a vote on a TAKE. Reviewer-level, unlike the contributor-level
   // audio kinds above — it is a review action, like the text pair.
   | "cell.audio.validate"
@@ -171,6 +181,10 @@ export interface OutboxEventPayloads {
   "source.cell.delete": Record<string, never>
   "source.cell.reorder": {
     anchorCellId: string | null
+  }
+  "source.cell.visibility.set": {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
   }
 
   "target.cell.create": {
@@ -396,6 +410,25 @@ export interface OutboxEventPayloads {
     linked: boolean
     origin: "auto" | "manual"
     confidence: number | null
+  }
+
+  // ── Cell attachments (AQU-777; non-chain-mutating) ──────────────────────
+  // Bytes are PUT to R2 before the event is emitted, exactly as
+  // cell.audio.attach does it, so a projected row always points at an object
+  // that exists. A failed emit after a successful PUT is cleaned up by the
+  // client (see src/lib/attachments/attach-file.ts).
+  "cell.attachment.add": {
+    /** Client-generated uuidv7; the projection's key within the project. */
+    attachmentId: string
+    /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+    objectName: string
+    /** The user-visible file name, as picked. */
+    name: string
+    mimeType?: string
+    sizeBytes?: number
+  }
+  "cell.attachment.remove": {
+    attachmentId: string // soft-delete: stamps deleted_at
   }
 
   /**

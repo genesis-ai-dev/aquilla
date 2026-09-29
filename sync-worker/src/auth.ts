@@ -29,9 +29,9 @@ export interface SyncTokenClaims {
    * Source-side, comment, audio, and file-level events are never scope-gated.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
-  /** AQU-730: additive per-lane role grants. ABSENT = no grants. Each entry
-   *  grants access to `lane` at `level`. Consumed by the lane-visibility
-   *  authority; role >= 600 cascades to all lanes regardless of grants. */
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. The UI shows `lanes.name`. Role >= 600
+   *  cascades to all lanes regardless of grants. */
   laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number

@@ -9,6 +9,7 @@
 // path as a hand emit. One tool call is one human-review package; the verdict
 // tells the orchestrator how much work remains.
 
+import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
@@ -280,7 +281,7 @@ export async function generateDrafts(
   const precedingBlock =
     preceding.length > 0
       ? `\nImmediately preceding, validated context (continue its discourse flow):\n${preceding
-          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
+          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(p.source))} → ${JSON.stringify(stripTrailingBareMarkers(p.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -294,7 +295,7 @@ export async function generateDrafts(
   const examplesBlock =
     examplePairs.length > 0
       ? `\nTranslation pairs from this project (imitate them):\n${examplePairs
-          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
+          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(e.source))} → ${JSON.stringify(stripTrailingBareMarkers(e.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -303,7 +304,7 @@ export async function generateDrafts(
       ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
       : ""
   const numbered = work
-    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${p.source}`)
+    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)
     .join("\n")
 
   // Preserve the benchmarked causal structure: research finishes before the
@@ -359,14 +360,14 @@ export async function generateDrafts(
   const emits: DraftEmit[] = []
   const missed: string[] = []
   work.forEach((p, i) => {
-    const t = drafts.get(i + 1)
-    if (t && t.trim()) {
+    const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    if (t) {
       emits.push({
         kind: "target.cell.commit",
         fileId: scope.fileId,
         cellId: p.cellId,
         payload: {
-          value: t.trim(),
+          value: t,
           ai_draft: {
             model: modelCfg.model,
             provider: "platform",

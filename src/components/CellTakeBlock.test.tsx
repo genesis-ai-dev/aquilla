@@ -518,6 +518,13 @@ describe("the take that plays", () => {
     expect(renameEmits).toHaveLength(0)
   })
 
+  // Sam, 2026-09-29: the running time in the waveform's bottom-left corner,
+  // as the Audio view card has it.
+  it("shows the running time over the part that plays", () => {
+    draw()
+    expect(screen.getByTestId("cell-take-time")).toHaveTextContent("0:00 / 0:03")
+  })
+
   it("cannot be renamed by someone who cannot edit", () => {
     draw({ editable: false })
     expect(screen.getByTestId("cell-take-rename-button")).toBeDisabled()

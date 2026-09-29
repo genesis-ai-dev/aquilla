@@ -12,7 +12,7 @@
 // opened: the recorder is holding the microphone.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { UseCellAudioResult } from "@/hooks/useCellAudio"
+import { SEEK_END_GUARD_SEC, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { prepareTakeBlob, type PreparedTake } from "@/lib/audio/blob-peaks"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
@@ -20,6 +20,13 @@ import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from
 interface Prepared extends PreparedTake {
   source: Blob
   url: string
+}
+
+/** Move a player's playhead. Safari refuses (throws) before the element knows
+ *  enough of its media to seek; a refused move is simply not made, never an
+ *  uncaught error in the middle of playback. */
+function setPlayhead(a: HTMLMediaElement, t: number): void {
+  try { a.currentTime = t } catch { /* not seekable yet */ }
 }
 
 export function usePreviewTake(blob: Blob | null): UseCellAudioResult {
@@ -32,6 +39,11 @@ export function usePreviewTake(blob: Blob | null): UseCellAudioResult {
   const rafRef = useRef<number | null>(null)
   const trimRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null })
   const controllerRef = useRef<ActiveAudioController | null>(null)
+  const pendingSeekRef = useRef<number | null>(null)
+  const seekFrameRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (seekFrameRef.current != null) cancelAnimationFrame(seekFrameRef.current)
+  }, [])
 
   // ── Prepare the blob: peaks and a seekable copy ───────────────────────
   useEffect(() => {
@@ -76,7 +88,7 @@ export function usePreviewTake(blob: Blob | null): UseCellAudioResult {
     const { start, end } = trimRef.current
     if (end != null && a.currentTime >= end) {
       a.pause()
-      a.currentTime = start ?? 0
+      setPlayhead(a, start ?? 0)
       setCurrentTime(start ?? 0)
       return
     }
@@ -119,29 +131,44 @@ export function usePreviewTake(blob: Blob | null): UseCellAudioResult {
     const { start, end } = trimRef.current
     const from = start ?? 0
     if (a.ended || a.currentTime < from || (end != null && a.currentTime >= end - 0.01)) {
-      a.currentTime = from
+      setPlayhead(a, from)
       setCurrentTime(from)
     }
     try { await a.play() } catch { /* autoplay refusal: nothing to do */ }
   }, [element, controller])
 
+  // As the editor's player does (useCellAudio): a seek lands a hair inside the
+  // window's end — landing ON it is "reached the end", which pauses and
+  // rewinds, so a drag into the trimmed tail paused, rewound, restarted and
+  // seeked the take (and, following it, the film) on every pointer move (Sam,
+  // 2026-09-29: scrubbing while playing froze the app) — and the element is
+  // moved once a frame, to the latest pointer position.
   const seek = useCallback((t: number) => {
     const a = element()
     if (!a) return
     const dur = live?.durationSec ?? 0
     const lo = trimRef.current.start ?? 0
     const hi = trimRef.current.end ?? dur
-    const clamped = Math.max(lo, Math.min(t, hi))
-    a.currentTime = clamped
+    const clamped = Math.max(lo, Math.min(t, Math.max(lo, hi - SEEK_END_GUARD_SEC)))
+    pendingSeekRef.current = clamped
     setCurrentTime(clamped)
-    if (a.paused) void play()
+    if (seekFrameRef.current != null) return
+    seekFrameRef.current = requestAnimationFrame(() => {
+      seekFrameRef.current = null
+      const target = pendingSeekRef.current
+      pendingSeekRef.current = null
+      const el = audioRef.current
+      if (!el || target == null) return
+      try { el.currentTime = target } catch { /* not seekable yet — the next move tries again */ }
+      if (el.paused) void play()
+    })
   }, [element, live, play])
 
   const setTrim = useCallback((start: number | null, end: number | null) => {
     trimRef.current = { start, end }
     const a = audioRef.current
     if (a && start != null && (a.currentTime < start || (end != null && a.currentTime > end))) {
-      a.currentTime = start
+      setPlayhead(a, start)
       setCurrentTime(start)
     }
   }, [])

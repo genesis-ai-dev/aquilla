@@ -16,8 +16,12 @@ import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
 import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
 import {
   type ActiveAudioController,
+  claimActiveAudio,
   clearActiveAudioIf,
-  setActiveAudio,
+  getActiveAudio,
+  notifyActiveAudioChanged,
+  playingElsewhere,
+  subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -33,6 +37,16 @@ export interface AudioError {
   kind: AudioErrorKind
   message: string
 }
+
+/** Move a player's playhead. Safari refuses (throws) before the element knows
+ *  enough of its media to seek; a refused move is simply not made, never an
+ *  uncaught error in the middle of playback. */
+function setPlayhead(a: HTMLMediaElement, t: number): void {
+  try { a.currentTime = t } catch { /* not seekable yet */ }
+}
+
+/** How far inside a trim window's end a seek lands — see `clampToTrim`. */
+export const SEEK_END_GUARD_SEC = 0.05
 
 /** "missing" = the clip's stored audio is permanently gone (404) — unlike
  *  "error" it is not retryable, so UI must not offer a retry affordance. */
@@ -116,15 +130,21 @@ export function useCellAudio(
   const playRef = useRef<() => Promise<void>>(async () => undefined)
   const pauseRef = useRef<() => void>(() => undefined)
   const coordinatorControllerRef = useRef<ActiveAudioController | null>(null)
+  const clipKeyRef = useRef<string | null>(null)
   if (coordinatorControllerRef.current === null) {
     coordinatorControllerRef.current = {
       isPlaying: () => Boolean(audioRef.current && !audioRef.current.paused),
       play: () => playRef.current(),
       pause: () => pauseRef.current(),
+      clipKey: () => clipKeyRef.current,
+      currentTime: () => audioRef.current?.currentTime ?? 0,
     }
   }
 
   const selectedAudioId = cell.metadata?.selectedAudioId
+  // Which take this is, across every waveform that shows it.
+  const clipKey = selectedAudioId ? `${fileId}|${selectedAudioId}` : null
+  clipKeyRef.current = clipKey
   const attachment = selectedAudioId
     ? cell.metadata?.attachments?.[selectedAudioId]
     : undefined
@@ -293,7 +313,7 @@ export function useCellAudio(
     const { start, end } = trimRef.current
     if (end != null && a.currentTime >= end) {
       a.pause()
-      a.currentTime = start ?? 0
+      setPlayhead(a, start ?? 0)
       setCurrentTime(start ?? 0)
       return // onpause → stopTicking
     }
@@ -315,7 +335,10 @@ export function useCellAudio(
   }, [])
 
   const play = useCallback(async () => {
-    if (coordinatorControllerRef.current) setActiveAudio(coordinatorControllerRef.current)
+    // CLAIM, not just record: whatever else is sounding stops — another take,
+    // or another copy of this one (Sam, 2026-09-29: the Audio view card and
+    // the Recording tab under it played the same take on top of each other).
+    if (coordinatorControllerRef.current) claimActiveAudio(coordinatorControllerRef.current)
     if (audioRef.current) {
       const a = audioRef.current
       const { start, end } = trimRef.current
@@ -324,7 +347,7 @@ export function useCellAudio(
       // the file's natural end: a replay would otherwise restart at 0 and play
       // the trimmed-off head (AQU-1217).
       if (start != null && (a.ended || a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
-        a.currentTime = start
+        setPlayhead(a, start)
       }
       try { await a.play() } catch (e) {
         console.error("[useCellAudio] play() rejected", e)
@@ -379,9 +402,10 @@ export function useCellAudio(
         setError({ kind: "download-failed", message: t("audio.error.streamingFailed") })
         setState("error")
       }
-      audio.onplay = () => { setIsPlaying(true); startTicking() }
-      audio.onpause = () => { setIsPlaying(false); stopTicking() }
-      audio.onended = () => { setIsPlaying(false); stopTicking() }
+      // Each change is announced: the take's other copies mirror it.
+      audio.onplay = () => { setIsPlaying(true); startTicking(); notifyActiveAudioChanged() }
+      audio.onpause = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
+      audio.onended = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
       audio.onloadedmetadata = () => {
         if (Number.isFinite(audio.duration)) setDuration(audio.duration)
         const { start } = trimRef.current
@@ -390,7 +414,7 @@ export function useCellAudio(
         // fire \`ended\` at once, so the take is never heard (play-queue's
         // wireOverlayElement refuses the same seek).
         if (start != null && start > 0 && Number.isFinite(audio.duration)) {
-          audio.currentTime = start
+          setPlayhead(audio, start)
           setCurrentTime(start)
         }
       }
@@ -398,7 +422,7 @@ export function useCellAudio(
         const { start, end } = trimRef.current
         if (end != null && audio.currentTime >= end) {
           audio.pause()
-          audio.currentTime = start ?? 0
+          setPlayhead(audio, start ?? 0)
           setCurrentTime(start ?? 0)
           return
         }
@@ -477,7 +501,11 @@ export function useCellAudio(
   }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t])
 
   const pause = useCallback(() => {
-    audioRef.current?.pause()
+    const own = audioRef.current
+    if (own && !own.paused) { own.pause(); return }
+    // Sounding from another copy of this take: stop it there.
+    const self = coordinatorControllerRef.current
+    if (self) playingElsewhere(self, clipKeyRef.current)?.pause()
   }, [])
 
   const setVolume = useCallback((v: number) => {
@@ -492,28 +520,52 @@ export function useCellAudio(
     if (a && start != null && Number.isFinite(a.duration)) {
       // Snap the playhead into the new window if it fell outside.
       if (a.currentTime < start || (end != null && a.currentTime > end)) {
-        a.currentTime = start
+        setPlayhead(a, start)
         setCurrentTime(start)
       }
     }
   }, [])
 
+  // A seek lands a hair INSIDE the window's end. Landing exactly on it is
+  // "reached the end" to the tick, which pauses and rewinds — so a drag into
+  // the trimmed-off tail made every pointer move pause, rewind, restart and
+  // seek again (Sam, 2026-09-29: scrubbing while playing froze the app).
   const clampToTrim = (t: number, dur: number): number => {
     const lo = trimRef.current.start ?? 0
     const hi = trimRef.current.end ?? dur
-    return Math.max(lo, Math.min(t, hi))
+    return Math.max(lo, Math.min(t, Math.max(lo, hi - SEEK_END_GUARD_SEC)))
   }
+
+  // A drag reports every pointer move; the element is moved once a frame, to
+  // the latest of them. Moving it more often only queues seeks it cannot keep
+  // up with — on a streamed take each one is a new range request.
+  const pendingSeekRef = useRef<number | null>(null)
+  const seekFrameRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (seekFrameRef.current != null) cancelAnimationFrame(seekFrameRef.current)
+  }, [])
 
   const seek = useCallback((t: number) => {
     const a = audioRef.current
     if (a) {
-      const clamped = clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t)
-      a.currentTime = clamped
-      setCurrentTime(clamped)
-      // Clicking the waveform implies "play from here" — resume if paused
-      // (covers the post-end and post-pause cases where audioRef is set but
-      // playback has stopped).
-      if (a.paused) void play()
+      pendingSeekRef.current = t
+      // The readout follows the pointer at once; the element, next frame.
+      setCurrentTime(clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t))
+      if (seekFrameRef.current != null) return
+      seekFrameRef.current = requestAnimationFrame(() => {
+        seekFrameRef.current = null
+        const target = pendingSeekRef.current
+        pendingSeekRef.current = null
+        const el = audioRef.current
+        if (!el || target == null) return
+        const clamped = clampToTrim(target, Number.isFinite(el.duration) ? el.duration : target)
+        try { el.currentTime = clamped } catch { /* not seekable yet — the next move tries again */ }
+        setCurrentTime(clamped)
+        // Clicking the waveform implies "play from here" — resume if paused
+        // (covers the post-end and post-pause cases where audioRef is set but
+        // playback has stopped).
+        if (el.paused) void playRef.current()
+      })
       return
     }
     // No audio loaded yet — kick off play and let the user-initiated promise
@@ -524,7 +576,7 @@ export function useCellAudio(
       const a2 = audioRef.current
       if (!a2) return
       const clamped = clampToTrim(t, Number.isFinite(a2.duration) ? a2.duration : t)
-      a2.currentTime = clamped
+      try { a2.currentTime = clamped } catch { /* not seekable yet */ }
       setCurrentTime(clamped)
     })()
   }, [play])
@@ -574,6 +626,30 @@ export function useCellAudio(
   playRef.current = play
   pauseRef.current = pause
 
+  // ── One take, one playback ──────────────────────────────────────────────
+  // While another copy of this take sounds (the Audio view card above the
+  // Recording tab, the recorder over either), this one shows it as its own:
+  // playing, at that copy's position, and its button stops it.
+  const [mirrored, setMirrored] = useState<ActiveAudioController | null>(null)
+  useEffect(() => {
+    const self = coordinatorControllerRef.current
+    if (!self) return
+    const check = () => setMirrored(playingElsewhere(self, clipKey))
+    check()
+    return subscribeActiveAudio(check)
+  }, [clipKey])
+  const [mirrorTime, setMirrorTime] = useState(0)
+  useEffect(() => {
+    if (!mirrored?.currentTime) return
+    let frame = requestAnimationFrame(function follow() {
+      // Stale once the coordinator has moved on; the check above clears it.
+      if (getActiveAudio() === mirrored) setMirrorTime(mirrored.currentTime?.() ?? 0)
+      frame = requestAnimationFrame(follow)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [mirrored])
+  const mirroring = mirrored != null
+
   // The element (or the decode) reports the real length, but a waveform
   // served from the peaks cache arrives with neither — and with no length the
   // strip can't place its playhead or a trim. The attachment already carries
@@ -583,7 +659,12 @@ export function useCellAudio(
     : 0
 
   return {
-    state, error, isPlaying, currentTime, duration: duration > 0 ? duration : attachmentDurationSec, peaks, peaksState,
+    state,
+    error,
+    isPlaying: isPlaying || mirroring,
+    currentTime: mirroring ? mirrorTime : currentTime,
+    duration: duration > 0 ? duration : attachmentDurationSec,
+    peaks, peaksState,
     play, pause, seek, setVolume, setTrim, requestPeaks, ensureBytes,
   }
 }

@@ -31,6 +31,7 @@ import { TakeTextVerdict } from "./audio/TakeTextVerdict"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { TakeWaveform } from "./audio/TakeWaveform"
+import { TakeTimeReadout } from "./audio/TakeTimeReadout"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
@@ -541,7 +542,17 @@ function CellTakeBlockView({
         trimEditable={editable}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
-      />
+      >
+        {/* The running time, as on the Audio view card (Sam, 2026-09-29). */}
+        <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+          <TakeTimeReadout
+            currentTime={controller.currentTime}
+            duration={controller.duration}
+            kept={kept}
+            testId="cell-take-time"
+          />
+        </span>
+      </TakeWaveform>
       {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

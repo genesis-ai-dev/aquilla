@@ -50,6 +50,69 @@ function cellWith(audioId: string, durationMs?: number): CodexCell {
   } as unknown as CodexCell
 }
 
+// The element moves once a frame, to the latest seek.
+async function seekTo(result: { current: { seek: (t: number) => void } }, t: number) {
+  await act(async () => {
+    result.current.seek(t)
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
+  })
+}
+
+// Sam, 2026-09-29: scrubbing while playing froze the app, and the Audio view
+// card and the Recording tab under it played the same take on top of each
+// other — "stop" on one started it again over the other.
+describe("useCellAudio — scrubbing and one playback per take", () => {
+  it("lands a drag past the window's end just inside it, and keeps playing", async () => {
+    const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    act(() => result.current.setTrim(0.4, 2.5))
+    await act(async () => { await result.current.play() })
+    const a = instances[0]
+    await seekTo(result, 2.9)
+    expect(a.currentTime).toBeLessThan(2.5)
+    expect(a.currentTime).toBeGreaterThan(2.4)
+    expect(a.paused).toBe(false)
+  })
+
+  it("moves the element once a frame, to the latest of a drag's positions", async () => {
+    const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    await act(async () => { await result.current.play() })
+    const a = instances[0]
+    let sets = 0
+    let at = a.currentTime
+    Object.defineProperty(a, "currentTime", { configurable: true, get: () => at, set: (v: number) => { sets += 1; at = v } })
+    await act(async () => {
+      for (const t of [0.5, 1, 1.5, 2]) result.current.seek(t)
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+    })
+    expect(sets).toBe(1)
+    expect(at).toBeCloseTo(2)
+  })
+
+  it("shows the take playing from another copy of it, and stops it there", async () => {
+    const card = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    const tab = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    await act(async () => { await card.result.current.play() })
+    expect(tab.result.current.isPlaying).toBe(true)
+    // The tab's button reads "stop" — and stops the card's playback, rather
+    // than starting a second one from the top.
+    act(() => tab.result.current.pause())
+    expect(instances).toHaveLength(1)
+    expect(instances[0].paused).toBe(true)
+    expect(tab.result.current.isPlaying).toBe(false)
+  })
+
+  it("stops whatever else was sounding when it starts", async () => {
+    const one = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    const two = renderHook(() => useCellAudio(project, cellWith("a2", 3000), "f1"))
+    await act(async () => { await one.result.current.play() })
+    await act(async () => { await two.result.current.play() })
+    expect(instances[0].paused).toBe(true)
+    expect(instances[1].paused).toBe(false)
+    // A different take is not "this take playing elsewhere".
+    expect(one.result.current.isPlaying).toBe(false)
+  })
+})
+
 describe("useCellAudio trim window", () => {
   it("reports the attachment's measured length before the element loads", () => {
     const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3600), "f1"))

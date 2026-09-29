@@ -12,12 +12,33 @@ export interface ActiveAudioController {
   isPlaying: () => boolean
   play: () => Promise<void>
   pause: () => void
+  /**
+   * The one take this controller plays, when it plays one ("file|audioId").
+   * Every waveform of that take then shows ONE playback — whichever copy
+   * started it — and stops it (Sam, 2026-09-29: the Audio view card and the
+   * Recording tab below it were two players, and "stop" on one started it
+   * again from the top over the other).
+   */
+  clipKey?: () => string | null
+  /** Where that take is, in seconds — for the copies that mirror it. */
+  currentTime?: () => number
 }
 
 let current: ActiveAudioController | null = null
 const listeners = new Set<() => void>()
 
 function notify() { for (const l of listeners) l() }
+
+/** The active controller started, paused or ended: copies of the same take
+ *  that mirror it (see `clipKey`) re-read its state. */
+export function notifyActiveAudioChanged(): void { notify() }
+
+/** Another controller is sounding THIS take, `self` being one of its copies. */
+export function playingElsewhere(self: ActiveAudioController, clipKey: string | null): ActiveAudioController | null {
+  const c = current
+  if (!c || c === self || !clipKey) return null
+  return c.clipKey?.() === clipKey && c.isPlaying() ? c : null
+}
 
 export function setActiveAudio(controller: ActiveAudioController): void {
   if (current === controller) return

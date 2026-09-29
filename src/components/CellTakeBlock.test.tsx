@@ -45,7 +45,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 // A corrected transcript rides a cell.audio.attach into the outbox — not what
 // these tests are about.
 const trimEmits: Array<Record<string, unknown>> = []
+const removeEmits: Array<Record<string, unknown>> = []
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioRemove: vi.fn(async (input: Record<string, unknown>) => { removeEmits.push(input); return "evt-rm" }),
   emitCellAudioAttach: vi.fn(async () => "evt-1"),
   emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
 }))
@@ -101,6 +103,7 @@ beforeEach(() => {
   transcribeCalls.length = 0
   trimCalls.length = 0
   trimEmits.length = 0
+  removeEmits.length = 0
   localStorage.clear()
 })
 
@@ -389,9 +392,17 @@ describe("the take that plays", () => {
     expect(screen.getByText("Text changed")).toBeInTheDocument()
   })
 
-  it("draws no vote of its own — the line's audio check judges this take", () => {
+  // Sam, 2026-09-29: a courtesy — the take's validation on its own waveform,
+  // view only. The vote is the line's audio check's.
+  it("shows its validation in the waveform's corner, view only", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event")
     draw()
-    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+    const corner = screen.getByTestId("cell-take-validation")
+    const mark = corner.querySelector('[data-testid="audio-validation-button"]') as HTMLElement
+    expect(mark).not.toBeNull()
+    expect(mark.getAttribute("aria-label")).not.toMatch(/click/i)
+    await userEvent.hover(mark)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Validate it from the line’s audio check")
   })
 
   it("draws the vote for a heard line's take, which no row check covers", () => {
@@ -399,7 +410,35 @@ describe("the take that plays", () => {
     const id = owner.selectedAudioId!
     ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id].validators = []
     draw({ owner, validation: true })
-    expect(screen.getByTestId("audio-validation-button")).toBeInTheDocument()
+    // Its vote, in the take's line — and no second, view-only mark on the waveform.
+    expect(screen.getByTestId("audio-validation-button").getAttribute("aria-label")).toMatch(/click to validate/i)
+    expect(screen.queryByTestId("cell-take-validation")).toBeNull()
+  })
+
+  // Sam, 2026-09-29: deletable even when it is the line's only take.
+  it("deletes itself from the cell that holds it, on its own slot", async () => {
+    const onLastTakeRemoved = vi.fn()
+    draw({ onLastTakeRemoved })
+    fireEvent.click(screen.getByTestId("cell-take-delete"))
+    await waitFor(() => expect(removeEmits).toHaveLength(1))
+    expect(removeEmits[0]).toMatchObject({ fileId: "cue-sibling", cellId: "cue-1", audioId: "audio-cue-1-1700000000-take.webm" })
+    // It was the cell's only recording: the workspace takes the line's credit back.
+    await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("cue-1"))
+  })
+
+  it("does not report the last take while another recording remains", async () => {
+    const onLastTakeRemoved = vi.fn()
+    const owner = cueOwner()
+    ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)["audio-cue-1-1700000001-older.webm"] = { type: "audio", url: "frontier-audio://older" }
+    draw({ owner, onLastTakeRemoved })
+    fireEvent.click(screen.getByTestId("cell-take-delete"))
+    await waitFor(() => expect(removeEmits).toHaveLength(1))
+    expect(onLastTakeRemoved).not.toHaveBeenCalled()
+  })
+
+  it("cannot be deleted by someone who cannot edit", () => {
+    draw({ editable: false })
+    expect(screen.getByTestId("cell-take-delete")).toBeDisabled()
   })
 
   it("has no mic on the waveform — New take is the way into the recorder", () => {

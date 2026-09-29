@@ -103,6 +103,12 @@ export interface EditorActionsContextValue {
    */
   onTakeSaved?: (cellId: string) => void
   /**
+   * The cell's last recording was deleted from the Recording tab (2026-09-29)
+   * — the same reset of the target row the recorder's delete triggers.
+   * Identity-stable in the workspace, like `onTakeSaved`.
+   */
+  onLastTakeRemoved?: (cellId: string) => void
+  /**
    * AQU-646 stage 3f: where this row's audio actually belongs.
    *
    * On a file with an audio-cue sibling a take hangs off the HEARD LINE that

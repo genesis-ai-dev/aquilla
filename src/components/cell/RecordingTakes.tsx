@@ -45,6 +45,9 @@ interface Shared {
   /** AQU-1462: lane the member is working in, stamped on every write here so
    *  an archived lane can refuse it. Omitted for the default lane. */
   targetLang?: string
+  /** A cell's last recording was deleted here; the workspace resets the
+   *  target row it justified. Given the OWNER's id (a cue for a heard line). */
+  onLastTakeRemoved?: (cellId: string) => void
 }
 
 export interface RecordingTakesProps extends Shared {
@@ -214,6 +217,7 @@ function OwnerTakes({
                 readOnlyTranscript={generated}
                 provenance={history.get(playing) ?? null}
                 validation={validation}
+                onLastTakeRemoved={shared.onLastTakeRemoved}
               />
             )}
             <TakesStrip
@@ -235,6 +239,7 @@ function OwnerTakes({
               cellText={shared.cellText}
               timingsFor={(audioId) => owner.audioTimings?.[audioId] as never}
               note={shareNote}
+              onLastTakeRemoved={shared.onLastTakeRemoved}
             />
           </section>
         )

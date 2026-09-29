@@ -22,8 +22,8 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useMemo, useRef } from "react"
-import { FileClock, Mic, Sparkles } from "lucide-react"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { FileClock, Mic, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -53,6 +53,10 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
+import { WAVE_OVERLAY_CLASS } from "./audio/chip-classes"
+import { hasOwnRecordingLeft, removeTake } from "@/lib/audio/take-actions"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { cn } from "@/lib/utils"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -103,6 +107,9 @@ export interface CellTakeBlockProps {
    * all. Provisional until heard lines are worked through (Sam, 2026-09-29).
    */
   validation?: boolean
+  /** The owner's last RECORDING was deleted here — the workspace resets the
+   *  target row it justified, as it does for a delete in the recorder. */
+  onLastTakeRemoved?: (cellId: string) => void
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -141,6 +148,7 @@ function CellTakeBlockView({
   targetLang,
   provenance = null,
   validation = false,
+  onLastTakeRemoved,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -211,6 +219,35 @@ function CellTakeBlockView({
     await onCommitted?.(owner.id)
     notifyAudioAttachmentsChanged(owner.fileId)
   }, [owner, selectedAudioId, attachment?.slot, session, project.id, project.sourceLanguage, project.targetLanguage, onCommitted])
+
+  // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
+  // same removal as the takes lists. Nothing is chosen in its place: the line
+  // plays its generated voice if it has one, and otherwise says no take plays.
+  const [deleting, setDeleting] = useState(false)
+  const handleDelete = useCallback(async () => {
+    if (!selectedAudioId || !attachment) return
+    setDeleting(true)
+    try {
+      if (controller.isPlaying) controller.pause()
+      await removeTake({
+        projectId: project.id,
+        fileId: owner.fileId,
+        cellId: owner.id,
+        audioId: selectedAudioId,
+        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT),
+        ...(targetLang ? { targetLang } : {}),
+        author: username,
+      })
+      const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
+        audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
+      }))
+      if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
+    } catch {
+      // The remove overlay drops itself and refetches; the take comes back.
+    } finally {
+      setDeleting(false)
+    }
+  }, [selectedAudioId, attachment, controller, project.id, owner, username, onLastTakeRemoved, targetLang])
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
@@ -371,6 +408,22 @@ function CellTakeBlockView({
               {t("editor.recordingTab.newTake")}
             </Button>
           </AppTooltip>
+          {!isSection && selectedAudioId && attachment && (
+            <AppTooltip content={t("audio.takesStrip.deleteTakeTooltip")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="cell-take-delete"
+                aria-label={t("audio.takesStrip.deleteTakeTooltip")}
+                onClick={() => void handleDelete()}
+                disabled={!editable || deleting}
+                className="rounded-md text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
+          )}
         </span>
       </div>
       {/* The take, drawn as its timeline chip (AQU-1217). Play from its
@@ -394,7 +447,27 @@ function CellTakeBlockView({
         trimEditable={editable}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
-      />
+      >
+        {/* Its validation, view only (Sam, 2026-09-29): the courtesy of seeing
+            it on the take itself. The vote is the line's audio check's — a
+            heard line's take, which no row check covers, has its own vote in
+            the line above instead. */}
+        {!validation && validationTakes.length > 0 && (
+          <span data-wave-overlay="" data-testid="cell-take-validation" className={cn("absolute bottom-1 right-2 z-10", WAVE_OVERLAY_CLASS)}>
+            <AudioValidationControl
+              cellRef={owner.context?.trim() || owner.id}
+              takes={validationTakes}
+              currentUsername={username}
+              validationRequirement={audioValidation.validationRequirement}
+              canValidate={audioValidation.canValidate}
+              onValidationChange={audioValidation.onValidationChange}
+              variant="corner"
+              readOnly
+              readOnlyFor="playing"
+            />
+          </span>
+        )}
+      </TakeWaveform>
       {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

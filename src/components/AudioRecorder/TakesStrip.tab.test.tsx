@@ -106,13 +106,14 @@ describe("TakesStrip — the Recording tab's list of other takes", () => {
     expect(screen.getByTestId(`take-verdict-${OLD.audioId}`)).toHaveTextContent("Not transcribed")
   })
 
-  it("keeps rename, remove noise and delete for the row's hover", () => {
+  // Sam, 2026-09-29: not hover-only — on every row, as in the recorder.
+  it("keeps rename, remove noise and delete on every row, all the time", () => {
     draw()
     const row = screen.getByTestId(`take-row-${OLD.audioId}`)
-    for (const name of ["Rename take", "Remove noise", "Delete take"]) {
-      const b = [...row.querySelectorAll("button")].find((el) => el.getAttribute("aria-label")?.startsWith(name.split(" ")[0]))
+    for (const name of ["Rename", "Remove", "Delete"]) {
+      const b = [...row.querySelectorAll("button")].find((el) => el.getAttribute("aria-label")?.startsWith(name))
       expect(b, name).toBeDefined()
-      expect(b!.className).toContain("group-hover/take:opacity-100")
+      expect(b!.className).not.toContain("opacity-0")
     }
   })
 

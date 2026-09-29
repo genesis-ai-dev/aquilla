@@ -4959,7 +4959,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onOpenAttachment, attachmentsByCell, onAttachmentAdded,
-    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, audioHomeFor, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
@@ -8285,6 +8285,7 @@ function EditorRow({
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
                       onCommitted={onCellCommitted}
+                      onLastTakeRemoved={onLastTakeRemoved}
                     />
                   )}
                   {recordingTabEmpty && (

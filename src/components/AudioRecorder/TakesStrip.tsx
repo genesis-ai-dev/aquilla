@@ -15,18 +15,18 @@ import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
-import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
+import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
   injectOptimisticAudioDeselect,
-  injectOptimisticAudioRemove,
   notifyAudioAttachmentsChanged,
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
+import { hasOwnRecordingLeft, removeTake } from "@/lib/audio/take-actions"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
@@ -36,10 +36,6 @@ import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
-
-/** The tab's row tools — rename, remove noise, revert, delete — show on the
- *  row's hover or keyboard focus, so a list of takes reads as takes. */
-const HOVER_ONLY = "opacity-0 transition-opacity group-hover/take:opacity-100 group-focus-within/take:opacity-100 focus-visible:opacity-100"
 
 /** "Take 7" → 7; anything else → null. */
 function parseTakeNumber(label: string | null | undefined): number | null {
@@ -98,7 +94,8 @@ interface Props {
    * "tab": the expanded cell's Recording tab lists a line's OTHER takes with
    * this (Sam, 2026-09-29) — the take that plays is drawn above the list, so
    * `hide` leaves it out. Each row gains the take's shape and how it compares
-   * with the text; rename, remove noise, revert and delete show on hover.
+   * with the text. Rename, remove noise, revert and delete stay on every row,
+   * as in the recorder (Sam, 2026-09-29: not hover-only).
    * Selecting, renaming, deleting and cleaning are this component's, exactly
    * as in the recorder.
    */
@@ -325,32 +322,14 @@ export function TakesStrip({
     setBusyId(audioId)
     try {
       if (playingId === audioId) stopPlayback()
-      // SUB-48: deletes get their own overlay. Without it the take stayed on
-      // screen while its remove sat in the outbox — reading as "it won't
-      // delete" — and any still-queued attach for the same clip painted it
-      // back (injectOptimisticAudioRemove cancels that attach outright).
       // The take's own slot, verbatim — see the note in `circle` above for why
       // the old binary coercion became a data-mover once a take could belong
       // to an added track.
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
-      const removeP = emitCellAudioRemove({
-        projectId, fileId, cellId, audioId, author,
-        ...(targetLang ? { targetLang } : {}),
-      })
-      injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
-      await removeP
-      notifyAudioAttachmentsChanged(fileId)
+      await removeTake({ projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}) })
       // Was that the cell's last recording? `takes` still holds the pre-removal
-      // list, so the survivors are everything else that is a take OF THIS CELL
-      // — `audioIdSeededWith` keeps the shared imported source clip, which is
-      // seeded with the file's id, from counting as one.
-      // …and "a recording" means a non-synthetic one on ANY track, which the
-      // attachment says (`voiceId`) rather than the slot: an added track's one
-      // slot holds recorded and generated takes alike.
-      const ownTakesLeft = takes.filter(
-        (t) => t.audioId !== audioId && !t.voiceId && audioIdSeededWith(t.audioId, cellId),
-      )
-      if (ownTakesLeft.length === 0) onLastTakeRemoved?.(cellId)
+      // list, so the survivors are everything else that is a take OF THIS CELL.
+      if (!hasOwnRecordingLeft(takes, audioId, cellId)) onLastTakeRemoved?.(cellId)
     } catch {
       // The overlay drops itself on rejection and pokes a refetch, so the row
       // reappears from server truth rather than the UI wedging.
@@ -700,7 +679,7 @@ export function TakesStrip({
                           setRenamingId(att.audioId)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
-                        className={cn("rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground", tab && HOVER_ONLY)}
+                        className={"rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"}
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
@@ -717,7 +696,7 @@ export function TakesStrip({
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
                     aria-label={t("audio.takesStrip.removeNoiseTooltip")}
-                    className={cn("rounded-md text-muted-foreground/60 hover:bg-background", tab && HOVER_ONLY)}
+                    className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
                   </Button>
@@ -732,7 +711,7 @@ export function TakesStrip({
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
                     aria-label={t("audio.takesStrip.revertTooltip")}
-                    className={cn("rounded-md text-muted-foreground/60 hover:bg-background", tab && HOVER_ONLY)}
+                    className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
@@ -790,7 +769,7 @@ export function TakesStrip({
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
                   aria-label={t("audio.takesStrip.deleteTakeTooltip")}
-                  className={cn("rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive", tab && HOVER_ONLY)}
+                  className={"rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

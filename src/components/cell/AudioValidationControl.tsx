@@ -53,7 +53,7 @@ interface AudioValidationControlProps {
    * "gutter" wears the fixed-width column wrapper the text control uses, so
    * the two line up. "inline" is bare, for the take block and the chips.
    */
-  variant?: "gutter" | "inline"
+  variant?: "gutter" | "inline" | "corner"
   /**
    * Show the take's validation without taking a vote (Sam, 2026-09-29). Only
    * the take that PLAYS for the line can be validated — from the line's audio
@@ -62,6 +62,12 @@ interface AudioValidationControlProps {
    * press, the withdraw buttons and "Validate this take" are not there.
    */
   readOnly?: boolean
+  /**
+   * What a read-only control says about voting. "listed": a take in a list,
+   * which cannot be validated until it plays. "playing": the take that plays,
+   * which IS validated — from the line's audio check, not from here.
+   */
+  readOnlyFor?: "listed" | "playing"
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -77,6 +83,7 @@ export function AudioValidationControl({
   onValidationChange,
   variant = "gutter",
   readOnly = false,
+  readOnlyFor = "listed",
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -201,7 +208,7 @@ export function AudioValidationControl({
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
   const tooltip = readOnly
-    ? t("editor.audioValidation.readOnlyNone")
+    ? t(readOnlyFor === "playing" ? "editor.audioValidation.playingNone" : "editor.audioValidation.readOnlyNone")
     : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
     : blocked?.blockedReason
@@ -223,7 +230,7 @@ export function AudioValidationControl({
   // they can, or when every take already carries theirs. Read-only, it is
   // why nobody can vote HERE.
   const blockedNote = readOnly
-    ? t("editor.audioValidation.readOnlyNote")
+    ? t(readOnlyFor === "playing" ? "editor.audioValidation.playingNote" : "editor.audioValidation.readOnlyNote")
     : !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
@@ -297,10 +304,14 @@ export function AudioValidationControl({
         ;(event as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative flex h-6 items-center justify-center gap-0.5 rounded-lg",
+        variant === "corner"
+          // The chip's corner circle (Sam, 2026-09-29), sized like its
+          // validated tick, showing every state rather than only "done".
+          ? "relative flex h-4 w-4 items-center justify-center rounded-full bg-background/80 shadow-sm ring-1 ring-border"
+          : "relative flex h-6 items-center justify-center gap-0.5 rounded-lg",
         "transition-[transform,color,background-color] duration-150 ease-out",
         "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30 hover:bg-muted/80",
-        showFraction ? "w-auto px-1" : "w-6",
+        variant === "corner" ? "" : showFraction ? "w-auto px-1" : "w-6",
         colorClass,
         clickable && "hover:text-green-500",
       )}
@@ -312,7 +323,7 @@ export function AudioValidationControl({
       // colour is what says so. (Same trap as the AQU-1068 tooltip.)
     >
       <Icon
-        className={cn("relative h-3.5 w-3.5", fillCapsule && "[&_rect]:fill-current")}
+        className={cn(variant === "corner" ? "relative h-2.5 w-2.5" : "relative h-3.5 w-3.5", fillCapsule && "[&_rect]:fill-current")}
         strokeWidth={2.5}
       />
       {showFraction && (
@@ -330,7 +341,7 @@ export function AudioValidationControl({
   // takes the hover that says why. Inline surfaces (the take block, the chips)
   // only ever mount beside a take, so there it is still nothing.
   if (state === "empty") {
-    if (variant === "inline") return null
+    if (variant !== "gutter") return null
     return (
       <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
         <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
@@ -470,7 +481,7 @@ export function AudioValidationControl({
           {renderButton(clickable ? validateAll : undefined)}
         </AppTooltip>
       )
-  if (variant === "inline") return wrapped
+  if (variant !== "gutter") return wrapped
   return (
     <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">
       {wrapped}

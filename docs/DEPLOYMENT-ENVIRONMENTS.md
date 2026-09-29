@@ -119,6 +119,16 @@ branches cut from `dev`; `main` is retired.
    annotated tag message includes the release branch, deployed commit SHA,
    GitHub commit/checks URLs, and the Workers Builds preview URL for that
    release branch, tying the production tag back to the QA preview artifact.
+   If the tag step fails, `deploy:aquilla` exits non-zero and dispatches the
+   **Tag Live Release** workflow, which finds the commit production is serving
+   (`aquilla.app/version.json`), runs `verify-live-environment.mjs production`
+   on all three surfaces, and runs the same tag script from `dev`'s copy. It
+   deploys nothing and tags nothing that fails a check. It comments on the
+   release commit either way: "`<tag>` is live and verified", or which step
+   failed. A release with no tag stays "in flight" and the Deploy bot cuts
+   nothing until it is tagged, so an untagged live release is never a finished
+   deploy. You can also dispatch the workflow by hand from the Actions tab; a
+   commit that is already tagged is left alone.
 4. Hotfix: cherry-pick onto the branch that was deployed, push, and redeploy.
    It gets the next NN in that date's tag series.
 

@@ -1,0 +1,98 @@
+name: Tag Live Release
+
+# Tags the build production is serving, once its three surfaces pass the live
+# checks. This deploys nothing: a person still runs `pnpm run deploy:aquilla`.
+# It exists because the tag is the last link of that local chain, and a broken
+# link (or a script that quietly did nothing) left a live release untagged,
+# which stops the Deploy bot from cutting the next one.
+#
+# There is no push trigger and no schedule. The last line of `deploy:aquilla`
+# dispatches this when its own tagging fails, and a person can dispatch it by
+# hand from the Actions tab. Dispatching is safe to repeat: a commit that is
+# already tagged is left alone.
+#
+# The tooling always comes from `dev`, never from the release branch, so a
+# release cut before a script fix still gets the fixed script. The release
+# branch is checked out only to be tagged.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the tag and post commit comments
+  deployments: write # record the production deployment the "release tags" ruleset requires
+
+concurrency:
+  group: tag-live-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+          path: tools
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      - id: live
+        name: Find the live commit and its release branch
+        working-directory: tools
+        run: node scripts/resolve-live-release.mjs
+
+      - id: verify
+        if: steps.live.outputs.action == 'tag'
+        name: Verify the SPA, sync and auth surfaces
+        working-directory: tools
+        run: node scripts/verify-live-environment.mjs production
+
+      - if: steps.live.outputs.action == 'tag'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.live.outputs.sha }}
+          fetch-depth: 0
+          path: release
+
+      - id: tag
+        if: steps.live.outputs.action == 'tag'
+        name: Record the deployment and push the tag
+        working-directory: release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ steps.live.outputs.branch }}
+        run: |
+          # tag-release.sh reads the release branch's name from HEAD. Name the
+          # checkout after it; the branch was matched against the release
+          # pattern before it reached this step.
+          git checkout --quiet -B "$RELEASE_BRANCH" HEAD
+          bash ../tools/scripts/tag-release.sh
+          echo "tag=$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Say what happened on the release commit
+        if: always() && steps.live.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_SHA: ${{ steps.live.outputs.sha }}
+          ACTION: ${{ steps.live.outputs.action }}
+          VERIFY: ${{ steps.verify.outcome }}
+          TAG_STEP: ${{ steps.tag.outcome }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$ACTION" != "tag" ]; then
+            exit 0 # already tagged: stay quiet
+          elif [ "$TAG_STEP" = "success" ]; then
+            body="\`$TAG\` is live and verified. The tag is on this commit."
+          elif [ "$VERIFY" = "failure" ]; then
+            body="Not tagged: a live surface failed its check. See the log for which one: $RUN_URL"
+          else
+            body="Not tagged: the tag step failed after the live checks passed. See the log: $RUN_URL"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/commits/$LIVE_SHA/comments" -f body="$body" >/dev/null

@@ -107,6 +107,52 @@ from this host plan the smaller suite and those three checks are NOT VERIFIED, n
 passed. This requires no credential or infrastructure change: build the new tag,
 verify it, and replace `harness_sha`.
 
+## Re-dispatching a run (AQU-1354)
+
+A PR author cannot re-run the suite on the same commit. The webhook accepts
+`opened`, `reopened`, `synchronize` and `ready_for_review`, but `enqueue()`
+rejects a `(pr, sha)` pair that already has a job row, so closing and reopening
+the PR — or any other repeat event on that commit — returns `duplicate` and
+nothing runs. The PR comment now says this outright, so a reader does not mistake
+an unrepeatable failure for one they simply forgot to retry.
+
+The two ways to get another run:
+
+- **Push a new commit.** `synchronize` with a new head sha enqueues a fresh job.
+  An empty commit works mechanically, but prefer a real one: a repeat result on
+  the same tree tells you nothing a re-read of the evidence would not.
+- **Ask the QA host operator to requeue.** With root on the host, delete the
+  job row for that pair and re-deliver the webhook:
+  `sqlite3 /var/lib/aquilla-qa/queue.sqlite "DELETE FROM jobs WHERE pr=<pr> AND sha='<sha>'"`,
+  then redeliver the `pull_request` event from the repository webhook's
+  Recent Deliveries. Confirm with `journalctl -u aquilla-qa-runner`.
+
+## Reading an INCONCLUSIVE report
+
+`INCONCLUSIVE` means the run produced no usable evidence — it never means the
+product passed, and since AQU-1354 it also never means "we cannot say which
+part broke". The comment names the disqualifying precondition
+(`evidenceDefect` in `scripts/smart-test-comment.mjs`):
+
+| Reason on the PR | Where to look |
+| --- | --- |
+| No evidence file reached the reporter | Setup failed before the suite finished: `docker`/readiness errors in `journalctl -u aquilla-qa-runner` and `/var/lib/aquilla-qa-jobs/<id>/{app,db,tests}.log` |
+| Schema version is not 2 | The deployed harness image predates this reporter — rebuild `aquilla-qa-harness:<commit>` and update `harness_sha` |
+| Evidence was collected for another commit | `SMART_TEST_APP_SHA` disagrees with the PR head, or a stale artifact was read |
+| The tested checkout was not clean | Something wrote into the container's tracked tree during setup |
+| No journey plan | Playwright collected zero tests: a config or harness-image fault, not a product fault |
+
+A per-journey verdict is not the same thing. A model-free journey (the DOM
+audits and the oracle qualifications) that runs and fails an assertion now reads
+`FAIL (model-free check)`, because that is real evidence about the product. Only
+a test timeout, an interrupted run, or a skip stays `INCONCLUSIVE`. Both are
+still "not a pass"; only the first is a bug to fix in the app.
+
+Changes to `scripts/smart-test-comment.mjs` reach PRs only after the file is
+copied beside `report.mjs` in `/opt/aquilla-qa`, and changes under
+`smart-tests/` only after a reviewed harness image is rebuilt and `harness_sha`
+is updated. Merging them to `dev` is not enough.
+
 ## Operations and evidence
 
 Inspect `systemctl status aquilla-qa-webhook aquilla-qa-runner` and

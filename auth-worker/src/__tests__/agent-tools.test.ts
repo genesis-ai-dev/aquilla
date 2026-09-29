@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
 import { AliasMap } from "../lib/agent/compress"
 import type { EmitStageContext } from "../lib/agent/emit-stage"
-import { parseRefRange, orderPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
+import { parseRefRange, orderPairs, selectCellPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
 import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
@@ -55,8 +55,8 @@ async function seedWorld() {
   }
 }
 
-function toolCtx() {
-  return { projectId: PROJECT, focusedFileId: FILE, aliases: new AliasMap() }
+function toolCtx(lane: string = "") {
+  return { projectId: PROJECT, focusedFileId: FILE, lane, aliases: new AliasMap() }
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -124,6 +124,7 @@ describe("executeRead", () => {
     await seedWorld()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -141,6 +142,7 @@ describe("executeRead", () => {
       .run()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -154,6 +156,7 @@ describe("executeRead", () => {
       .run()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -198,6 +201,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, { ref: "GEN 1" }, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -210,6 +214,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE, // Genesis is open, but the user said Mark
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -222,6 +227,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -233,6 +239,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     await seedGenesis()
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(false)
@@ -245,6 +252,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     await seedWorld() // Mark alone
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -289,12 +297,13 @@ describe("executeSearch", () => {
 })
 
 describe("executeDraft", () => {
-  function draftCtx(aliases = new AliasMap()) {
+  function draftCtx(aliases = new AliasMap(), lane: string = "") {
     const stageCtx: EmitStageContext = {
       runId: "run-1",
       projectId: PROJECT,
       roleLevel: 400,
       fileId: FILE,
+      lane,
       aliases,
     }
     const progress: { label: string; done: number; total: number }[] = []
@@ -303,6 +312,7 @@ describe("executeDraft", () => {
       ctx: {
         projectId: PROJECT,
         focusedFileId: FILE,
+        lane,
         aliases,
         stageCtx,
         sourceLanguage: "English",
@@ -428,5 +438,127 @@ describe("executeDraft", () => {
       { model: "m", apiKey: "k", url: "https://mock/x" },
     )
     expect(done.text).toContain("Nothing to draft")
+  })
+})
+
+describe("Lane plumbing (AQU-1447)", () => {
+  it("isolates work lists by lane: fresh lane B shows untranslated work, lane A untouched", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // Add target rows on lane B (empty translations)
+    for (const c of CELLS) {
+      const id = cellId(c.id)
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .run()
+    }
+
+    // Lane '' (default) should see the original translations
+    const defaultLane = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(""))
+    const defaultUntranslated = defaultLane.data?.cells?.filter((c) => c.status === "untranslated")
+    expect(defaultUntranslated).toHaveLength(2) // c3, c10 originally untranslated
+
+    // Lane B should see ALL as untranslated
+    const laneB_Read = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(laneB))
+    const laneBUntranslated = laneB_Read.data?.cells?.filter((c) => c.status === "untranslated")
+    expect(laneBUntranslated).toHaveLength(4) // all untranslated on lane B
+  })
+
+  it("pairs source with exactly one target per lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // Add empty lane B targets for first two cells
+    for (const c of CELLS.slice(0, 2)) {
+      const id = cellId(c.id)
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .run()
+    }
+
+    // Lane '' pairs should exclude lane B rows
+    const defaultPairs = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1-2" }, toolCtx(""))
+    expect(defaultPairs.data?.cells).toHaveLength(2)
+    defaultPairs.data?.cells?.forEach((c) => {
+      expect(c.cellId).toMatch(/c1|c2/)
+      expect(c.ref).toMatch(/4:1|4:2/)
+    })
+
+    // Lane B should show exactly one pair per source
+    const laneBPairs = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1-2" }, toolCtx(laneB))
+    expect(laneBPairs.data?.cells).toHaveLength(2)
+    laneBPairs.data?.cells?.forEach((c) => {
+      expect(c.target).toBe("") // empty lane B targets
+    })
+  })
+
+  it("default lane behavior unchanged (single-lane projects)", async () => {
+    await seedWorld()
+    // No additional lanes created; read from default lane
+    const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(""))
+    expect(out.ok).toBe(true)
+    expect(out.data?.cells).toHaveLength(4)
+    expect(out.data?.cells?.[0]).toMatchObject({ ref: "MRK 4:1", status: "validated" })
+  })
+
+  it("examples filters to the active lane only", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // A validated lane-B translation of c1 (its source matches "teach")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, validated, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Lane B taught', ?, ?, 1, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    // Default lane: sees its own validated c1 only
+    const defaultExamples = await executeExamples(env.AQUILLA_PG, { text: "teach" }, toolCtx(""))
+    expect(defaultExamples.ok).toBe(true)
+    expect(defaultExamples.text).toContain("Y comenzó otra vez a enseñar")
+    expect(defaultExamples.text).not.toContain("Lane B taught")
+
+    // Lane B: only its own validated pair, never the default lane's text
+    const laneBExamples = await executeExamples(env.AQUILLA_PG, { text: "teach" }, toolCtx(laneB))
+    expect(laneBExamples.text).toContain("Lane B taught")
+    expect(laneBExamples.text).not.toContain("Y comenzó otra vez a enseñar")
+  })
+
+  it("search filters target cells to the active lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    const hitIds = (out: Awaited<ReturnType<typeof executeSearch>>) => out.data?.hits?.map((h) => h.cellId) ?? []
+
+    // The lane-B wording is invisible from the default lane, and vice versa
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "Carril", side: "target" }, toolCtx("")))).toEqual([])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "Carril", side: "target" }, toolCtx(laneB)))).toEqual([cellId("c1")])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "cosas", side: "target" }, toolCtx(laneB)))).toEqual([])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "cosas", side: "target" }, toolCtx("")))).toEqual([cellId("c2")])
+  })
+
+  it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
+    await seedWorld()
+    // @ts-expect-error targetLang is required: no caller may leave the lane out
+    const untyped = selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
+    await untyped.catch(() => undefined)
+    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "no-such-lane" })
+    expect(pairs).toHaveLength(4)
+    expect(pairs.every((p) => !p.hasTargetRow && p.target === "")).toBe(true)
   })
 })

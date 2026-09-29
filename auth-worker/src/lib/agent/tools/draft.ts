@@ -41,6 +41,8 @@ export interface DraftModelConfig {
 export interface DraftGenerationContext {
   projectId: string
   focusedFileId?: string
+  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  lane: string
   aliases: AliasMap
   sourceLanguage?: string
   targetLanguage?: string
@@ -244,13 +246,14 @@ export async function generateDrafts(
   const scope = await resolveScope(db, args, {
     projectId: ctx.projectId,
     focusedFileId: ctx.focusedFileId,
+    lane: ctx.lane,
     aliases: ctx.aliases,
   })
   if (!scope.ok) return { ok: false, error: scope.error }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]
@@ -288,7 +291,7 @@ export async function generateDrafts(
   const examplesOutcome = await executeExamples(
     db,
     { text: work.map((p) => p.source).join(" "), n: EXAMPLES_N },
-    { projectId: ctx.projectId, aliases: ctx.aliases },
+    { projectId: ctx.projectId, lane: ctx.lane, aliases: ctx.aliases },
   )
   const examplePairs = examplesOutcome.data?.examples ?? []
   const examplesBlock =

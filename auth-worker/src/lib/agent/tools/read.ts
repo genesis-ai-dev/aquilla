@@ -29,6 +29,8 @@ export interface ReadContext {
   projectId: string
   /** Focused file (:file). */
   focusedFileId?: string
+  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  lane: string
   aliases: AliasMap
 }
 
@@ -176,7 +178,7 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const offset = Math.max(Number(args.offset) || 0, 0)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
   const filtered = filter === "all" ? all : all.filter((p) => statusOf(p) === filter)
   const page = filtered.slice(offset, offset + limit)
 

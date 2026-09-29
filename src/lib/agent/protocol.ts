@@ -131,7 +131,7 @@ export interface AgentRunRequest {
   sessionId?: string
   /** ≤10 turns, client truncates. With sessionId: exactly the new user turn. */
   messages: { role: 'user' | 'assistant'; content: string }[]
-  context?: { fileId?: string; cellId?: string }
+  context?: { fileId?: string; cellId?: string; lane?: string }
   /**
    * User-level translator profile (all fields optional, free-text). Injected as
    * JSON into the agent's system prompt to tailor answers and pick the reply

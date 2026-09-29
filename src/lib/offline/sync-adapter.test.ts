@@ -4,6 +4,15 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import { schema, tables, events, cellRowId } from "./schema"
 import { createOfflineSyncAdapter, type MintToken } from "./sync-adapter"
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
+import { catchUpProject } from "./catch-up"
+
+// The catch-up pull reads over real HTTP; these tests are about the socket and
+// the flush, so stub it (catch-up.test.ts covers it). The row-mapping helpers
+// stay real — applyRows uses them.
+vi.mock("./catch-up", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./catch-up")>()),
+  catchUpProject: vi.fn(async () => ({ filesChecked: 0, rowsChanged: 0 })),
+}))
 
 // ── Fake WebSocket harness (mirrors src/lib/sync/ws-reconciler.test.ts) ────
 
@@ -63,6 +72,7 @@ beforeEach(async () => {
   })
   FakeWebSocket.instances.length = 0
   __resetConflictsForTests()
+  vi.mocked(catchUpProject).mockClear()
 })
 
 const okMint: MintToken = async () => ({ token: "tok-1", status: null })
@@ -498,6 +508,113 @@ describe("flush on construction", () => {
     await waitFor(() => fetchImpl.mock.calls.length > 0)
     expect(FakeWebSocket.instances[0].readyState).not.toBe(FakeWebSocket.OPEN)
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
+
+    adapter.close()
+  })
+})
+
+describe("catch-up", () => {
+  it("runs a catch-up on open, after the flush, with a minted token", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    const order: string[] = []
+    const fetchImpl = vi.fn(async () => {
+      order.push("flush")
+      return new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 })
+    })
+    vi.mocked(catchUpProject).mockImplementation(async () => {
+      order.push("catch-up")
+      return { filesChecked: 1, rowsChanged: 0 }
+    })
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 10_000,
+    })
+    await drainMicrotasks()
+    FakeWebSocket.instances[0].open()
+
+    await waitFor(() => vi.mocked(catchUpProject).mock.calls.length > 0)
+    expect(catchUpProject).toHaveBeenCalledWith(store, "proj1", "tok-1", undefined)
+    expect(order).toEqual(["flush", "catch-up"])
+
+    adapter.close()
+  })
+
+  it("coalesces catch-up requests made while one is running into one follow-up", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    let release: () => void = () => {}
+    vi.mocked(catchUpProject).mockImplementation(
+      () => new Promise((resolve) => (release = () => resolve({ filesChecked: 1, rowsChanged: 0 }))),
+    )
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+
+    const first = adapter.catchUpNow()
+    await waitFor(() => vi.mocked(catchUpProject).mock.calls.length === 1)
+    const second = adapter.catchUpNow()
+    const third = adapter.catchUpNow()
+    expect(third).toBe(second)
+
+    release()
+    await first
+    await waitFor(() => vi.mocked(catchUpProject).mock.calls.length === 2)
+    release()
+    await second
+    expect(catchUpProject).toHaveBeenCalledTimes(2)
+
+    adapter.close()
+  })
+
+  it("ignores rows for non-default target lanes in live frames", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    const row = (targetLang: string, value: string) => ({
+      cellId: "GEN 1:1",
+      side: "target",
+      targetLang,
+      value,
+      valueHtml: null,
+      eventId: `evt-${targetLang || "default"}`,
+      sourceEventId: null,
+      validated: false,
+      aiDrafted: false,
+      sequenceIndex: 0,
+      canonicalRef: null,
+    })
+    ws.receive({
+      t: "event.applied",
+      id: "evt-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      rows: [row("", "In the beginning"), row("es", "En el principio")],
+    })
+
+    const stored = store.query(
+      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target") }).first(),
+    )
+    expect(stored).toMatchObject({ value: "In the beginning", eventId: "evt-default" })
 
     adapter.close()
   })

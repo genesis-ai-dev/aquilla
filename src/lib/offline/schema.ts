@@ -90,7 +90,25 @@ const offlineProjects = State.SQLite.table({
   },
 })
 
-export const tables = { projects, files, cells, eventQueue, offlineProjects }
+// Per-file `?since=` delta cursor for catch-up (catch-up.ts): the server
+// watermark (`maxServerSeq`) this device's copy of the file is known to be
+// complete up to, plus the project incarnation it was minted against
+// (AQU-943). Both null = no trusted cursor; the next catch-up full-streams.
+const syncCursors = State.SQLite.table({
+  name: "sync_cursors",
+  columns: {
+    id: State.SQLite.text({ primaryKey: true }),
+    projectId: State.SQLite.text(),
+    fileId: State.SQLite.text(),
+    serverSeq: State.SQLite.integer({ nullable: true }),
+    projectEpoch: State.SQLite.integer({ nullable: true }),
+  },
+  indexes: [{ name: "idx_sync_cursors_project", columns: ["projectId"] }],
+})
+
+export const syncCursorId = (projectId: string, fileId: string) => `${projectId}:${fileId}`
+
+export const tables = { projects, files, cells, eventQueue, offlineProjects, syncCursors }
 
 // All events are client-only: the server projection is authoritative and reaches
 // LiveStore only through the custom sync adapter (Phase 3), never through LiveStore's
@@ -190,6 +208,19 @@ const events = {
     name: "v1.OfflineProjectRemoved",
     schema: Schema.Struct({ projectId: Schema.String }),
   }),
+  syncCursorSet: Events.clientOnly({
+    name: "v1.SyncCursorSet",
+    schema: Schema.Struct({
+      projectId: Schema.String,
+      fileId: Schema.String,
+      serverSeq: Schema.NullOr(Schema.Number),
+      projectEpoch: Schema.NullOr(Schema.Number),
+    }),
+  }),
+  syncCursorsRemoved: Events.clientOnly({
+    name: "v1.SyncCursorsRemoved",
+    schema: Schema.Struct({ projectId: Schema.String }),
+  }),
 }
 
 export { events }
@@ -245,6 +276,12 @@ const materializers = State.SQLite.materializers(events, {
       queueDepth,
     }),
   "v1.OfflineProjectRemoved": ({ projectId }) => tables.offlineProjects.delete().where({ projectId }),
+
+  "v1.SyncCursorSet": ({ projectId, fileId, serverSeq, projectEpoch }) =>
+    tables.syncCursors
+      .insert({ id: syncCursorId(projectId, fileId), projectId, fileId, serverSeq, projectEpoch })
+      .onConflict("id", "update", { serverSeq, projectEpoch }),
+  "v1.SyncCursorsRemoved": ({ projectId }) => tables.syncCursors.delete().where({ projectId }),
 })
 
 const state = State.SQLite.makeState({ tables, materializers })

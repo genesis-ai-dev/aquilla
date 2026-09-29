@@ -21,6 +21,10 @@
  *    cell conflicted (src/lib/offline/conflicts.ts) rather than retrying —
  *    retrying a stale write forever cannot succeed, since its `parentId` no
  *    longer matches the row's head.
+ *  - Catch-up: every (re)connect, after the flush, pulls whatever changed on
+ *    the server since this device last caught up (catch-up.ts). Live frames
+ *    are best-effort — anything missed while closed, offline, or on a dead
+ *    socket would otherwise stay stale forever.
  *
  * Flushing is triggered by an `event_queue` SUBSCRIPTION, not only by the
  * reconciler's `onOpen`. Reconnect-only flushing was the bug (AQU-1003
@@ -43,6 +47,7 @@ import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
 import { cellRowId, events, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
+import { catchUpProject, isLocalLaneRow, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
 
 /** Matches buildProjectAwareMinter's signature (src/lib/sync/cqrs-bridge.ts) —
  *  callers typically pass that function directly. */
@@ -78,12 +83,16 @@ export interface OfflineSyncAdapterOptions {
   minFlushRetryMs?: number
   /** Ceiling the retry delay backs off to. */
   maxFlushRetryMs?: number
+  /** Test seam for the catch-up pull's HTTP reads (catch-up.ts). */
+  catchUpDeps?: CatchUpDeps
 }
 
 export interface OfflineSyncAdapter {
   isConnected(): boolean
   /** Flush the local event_queue now, outside the normal on-reconnect trigger. */
   flushNow(): Promise<void>
+  /** Pull everything that changed on the server since the last catch-up. */
+  catchUpNow(): Promise<void>
   close(): void
 }
 
@@ -140,22 +149,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   function applyRows(frame: Extract<ProjectWsServerMessage, { t: "event.applied" }>): void {
     if (!frame.file || !frame.rows) return
     for (const row of frame.rows) {
-      store.commit(
-        events.cellSynced({
-          projectId,
-          fileId: frame.file,
-          cellId: row.cellId,
-          side: row.side,
-          value: row.value,
-          valueHtml: row.valueHtml,
-          eventId: row.eventId,
-          sourceEventId: row.sourceEventId,
-          validated: row.validated,
-          aiDrafted: row.aiDrafted ?? false,
-          sequenceIndex: row.sequenceIndex ?? 0,
-          canonicalRef: row.canonicalRef,
-        }),
-      )
+      if (!isLocalLaneRow(row)) continue
+      store.commit(events.cellSynced(toCellSyncedArgs(projectId, frame.file, row)))
     }
   }
 
@@ -206,7 +201,11 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         // the connection was down.
         flushRetryDelay = minFlushRetryMs
         cancelFlushTimer()
+        // Flush first: our own writes' server rows land via the flush
+        // response, so the catch-up then has fewer protected cells to skip.
         void flushNow()
+          .catch(() => undefined)
+          .then(() => catchUpNow())
       },
     },
   )
@@ -382,6 +381,38 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return run
   }
 
+  // Serialized like flushes; a request made while one runs coalesces into a
+  // single follow-up run, since the in-flight one may have read before the
+  // change that prompted the new request.
+  let catchUpRunning: Promise<void> | null = null
+  let catchUpFollowUp: Promise<void> | null = null
+
+  async function runCatchUp(): Promise<void> {
+    if (closed) return
+    const token = await getToken()
+    if (!token || closed) return
+    try {
+      await catchUpProject(store, projectId, token, options.catchUpDeps)
+    } catch (err) {
+      // Best-effort: the next reconnect retries. Reads stay on the local copy.
+      console.warn(`[offline] catch-up failed for project ${projectId}`, err)
+    }
+  }
+
+  function catchUpNow(): Promise<void> {
+    if (!catchUpRunning) {
+      catchUpRunning = runCatchUp().finally(() => {
+        catchUpRunning = null
+      })
+      return catchUpRunning
+    }
+    catchUpFollowUp ??= catchUpRunning.then(() => {
+      catchUpFollowUp = null
+      return catchUpNow()
+    })
+    return catchUpFollowUp
+  }
+
   // THE upstream trigger: a write reaching `event_queue` flushes it. Skipped
   // while a flush is in flight — runFlush() reschedules from the outcome, and
   // letting its own pending→flushing→pending churn arm timers here would
@@ -401,6 +432,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   return {
     isConnected: () => reconciler.isConnected(),
     flushNow,
+    catchUpNow,
     close: (): void => {
       closed = true
       cancelFlushTimer()

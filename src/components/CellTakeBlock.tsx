@@ -53,10 +53,8 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
-import { WAVE_OVERLAY_CLASS } from "./audio/chip-classes"
 import { hasOwnRecordingLeft, removeTake } from "@/lib/audio/take-actions"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { cn } from "@/lib/utils"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -357,16 +355,24 @@ function CellTakeBlockView({
             onRetry={handleTranscribe}
           />
         )}
-        {validation && validationTakes.length > 0 && (
-          <AudioValidationControl
-            cellRef={owner.context?.trim() || owner.id}
-            takes={validationTakes}
-            currentUsername={username}
-            validationRequirement={audioValidation.validationRequirement}
-            canValidate={audioValidation.canValidate}
-            onValidationChange={audioValidation.onValidationChange}
-            variant="inline"
-          />
+        {/* Its validation, in its own line (Sam, 2026-09-29), beside what
+            else is said about the take. View only: the vote is the line's
+            audio check's — except a heard line's take, which no row check
+            covers, so its vote is here. */}
+        {validationTakes.length > 0 && (
+          <span data-testid="cell-take-validation" className="flex items-center">
+            <AudioValidationControl
+              cellRef={owner.context?.trim() || owner.id}
+              takes={validationTakes}
+              currentUsername={username}
+              validationRequirement={audioValidation.validationRequirement}
+              canValidate={audioValidation.canValidate}
+              onValidationChange={audioValidation.onValidationChange}
+              variant="inline"
+              readOnly={!validation}
+              readOnlyFor="playing"
+            />
+          </span>
         )}
         <span className="ms-auto flex items-center gap-1.5">
           {!readOnlyTranscript && !isSection && selectedAudioId && attachment && (
@@ -447,27 +453,7 @@ function CellTakeBlockView({
         trimEditable={editable}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
-      >
-        {/* Its validation, view only (Sam, 2026-09-29): the courtesy of seeing
-            it on the take itself. The vote is the line's audio check's — a
-            heard line's take, which no row check covers, has its own vote in
-            the line above instead. */}
-        {!validation && validationTakes.length > 0 && (
-          <span data-wave-overlay="" data-testid="cell-take-validation" className={cn("absolute bottom-1 right-2 z-10", WAVE_OVERLAY_CLASS)}>
-            <AudioValidationControl
-              cellRef={owner.context?.trim() || owner.id}
-              takes={validationTakes}
-              currentUsername={username}
-              validationRequirement={audioValidation.validationRequirement}
-              canValidate={audioValidation.canValidate}
-              onValidationChange={audioValidation.onValidationChange}
-              variant="corner"
-              readOnly
-              readOnlyFor="playing"
-            />
-          </span>
-        )}
-      </TakeWaveform>
+      />
       {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

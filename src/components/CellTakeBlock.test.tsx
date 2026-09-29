@@ -392,13 +392,13 @@ describe("the take that plays", () => {
     expect(screen.getByText("Text changed")).toBeInTheDocument()
   })
 
-  // Sam, 2026-09-29: a courtesy — the take's validation on its own waveform,
+  // Sam, 2026-09-29: a courtesy — the take's validation in its own line,
   // view only. The vote is the line's audio check's.
-  it("shows its validation in the waveform's corner, view only", async () => {
+  it("shows its validation in its line, view only", async () => {
     const { default: userEvent } = await import("@testing-library/user-event")
     draw()
-    const corner = screen.getByTestId("cell-take-validation")
-    const mark = corner.querySelector('[data-testid="audio-validation-button"]') as HTMLElement
+    const head = screen.getByTestId("cell-take-head")
+    const mark = head.querySelector('[data-testid="cell-take-validation"] [data-testid="audio-validation-button"]') as HTMLElement
     expect(mark).not.toBeNull()
     expect(mark.getAttribute("aria-label")).not.toMatch(/click/i)
     await userEvent.hover(mark)
@@ -410,9 +410,9 @@ describe("the take that plays", () => {
     const id = owner.selectedAudioId!
     ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id].validators = []
     draw({ owner, validation: true })
-    // Its vote, in the take's line — and no second, view-only mark on the waveform.
+    // One mark, in the take's line — and there it is the vote.
+    expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(1)
     expect(screen.getByTestId("audio-validation-button").getAttribute("aria-label")).toMatch(/click to validate/i)
-    expect(screen.queryByTestId("cell-take-validation")).toBeNull()
   })
 
   // Sam, 2026-09-29: deletable even when it is the line's only take.

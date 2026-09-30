@@ -299,6 +299,31 @@ describe("resolveScope — file names and non-canonical books (AQU-1455)", () =>
     expect(scope.ok === false && scope.error).toContain('"Story Two"')
   })
 
+  // AQU-1468: the unfocused ask carries every document as a button candidate,
+  // and still never auto-picks (AQU-846).
+  it("returns every document as a candidate when it asks, and picks none", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(false)
+    const candidates = scope.ok === false ? scope.candidates : undefined
+    expect([...(candidates ?? [])].sort((x, y) => x.name.localeCompare(y.name))).toEqual([
+      { id: FILE, name: "Story One" },
+      { id: XXB_FILE, name: "Story Two" },
+    ])
+  })
+
+  it("surfaces the unfocused candidates through executeRead's data", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const out = await executeRead(env.AQUILLA_PG, {}, noFocus())
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain("ASK THE USER which file to work in and stop")
+    expect(out.data?.candidates).toHaveLength(2)
+  })
+
   describe("name lookup", () => {
     const PRACTICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     async function seedNamed() {
@@ -334,6 +359,31 @@ describe("resolveScope — file names and non-canonical books (AQU-1455)", () =>
       expect(error).toContain('"Practice1_Come_Before_God_Today"')
       expect(error).toContain('"Practice_Notes"')
       expect(error).toContain(PRACTICE)
+    })
+
+    it("returns only the matching files as candidates when several match", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect(candidates).toHaveLength(2)
+      expect(candidates).toContainEqual({ id: PRACTICE, name: "Practice1_Come_Before_God_Today" })
+      expect(candidates).toContainEqual({ id: FILE, name: "Practice_Notes" })
+      const out = await executeRead(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      expect(out.ok).toBe(false)
+      expect(out.text).toContain('matches more than one file — ASK THE USER which one, quoting these exact names, and stop.')
+      expect(out.data?.candidates).toHaveLength(2)
+    })
+
+    it("returns the project's real files as candidates when nothing matches", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "zzzzzz" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect([...(candidates ?? [])].map((c) => c.name).sort()).toEqual([
+        "Genesis_Intro",
+        "Practice1_Come_Before_God_Today",
+        "Practice_Notes",
+      ])
+      expect(candidates).toContainEqual({ id: XXB_FILE, name: "Genesis_Intro" })
     })
 
     it("lists every file when nothing matches", async () => {
@@ -397,6 +447,17 @@ describe("resolveScope — file names and non-canonical books (AQU-1455)", () =>
       expect(error).toContain("XXB")
       expect(error).toContain("omit ref")
       expect(error.replace("book code MRK", "")).not.toContain("MRK")
+    })
+
+    it("returns the project's files as candidates when the requested book is missing", async () => {
+      await seedXxb()
+      await addFile(FILE, "Second file", "XXC")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect([...(candidates ?? [])].sort((x, y) => x.name.localeCompare(y.name))).toEqual([
+        { id: XXB_FILE, name: "Appendix" },
+        { id: FILE, name: "Second file" },
+      ])
     })
 
     it("does not fall back to the focused file when the requested book is absent", async () => {
@@ -682,5 +743,30 @@ describe("executeDraft", () => {
       { model: "m", apiKey: "k", url: "https://mock/x" },
     )
     expect(out.text.split("\n")[0]).toContain('notice: ref "GEN 1" matched nothing in file "Mark"')
+  })
+
+  // AQU-1468: a failed draft that asks "which file?" carries the candidates so
+  // the client can render buttons; the error text is unchanged.
+  it("passes the file candidates through when the draft scope is ambiguous", async () => {
+    await seedWorld()
+    const other = "abababab-abab-4bab-8bab-abababababab"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Mark (copy)', NULL, ?)`,
+    )
+      .bind(other, PROJECT, crypto.randomUUID())
+      .run()
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { fileId: "mar" },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain('"mar" matches more than one file — ASK THE USER which one, quoting these exact names, and stop. Matches: ')
+    expect(out.data?.candidates?.map((c) => c.name).sort()).toEqual(["Mark", "Mark (copy)"])
+    expect(out.data?.candidates).toContainEqual({ id: FILE, name: "Mark" })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

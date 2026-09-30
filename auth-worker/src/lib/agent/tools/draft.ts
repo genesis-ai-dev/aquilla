@@ -15,7 +15,7 @@ import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
-import type { ToolOutcome } from "./types"
+import type { FileCandidate, ToolOutcome } from "./types"
 
 export interface DraftArgs {
   fileId?: unknown
@@ -79,7 +79,7 @@ export interface DraftEmit {
 }
 
 export type DraftGeneration =
-  | { ok: false; error: string }
+  | { ok: false; error: string; candidates?: FileCandidate[] }
   | {
       ok: true
       fileId: string
@@ -249,7 +249,7 @@ export async function generateDrafts(
     focusedFileId: ctx.focusedFileId,
     aliases: ctx.aliases,
   })
-  if (!scope.ok) return { ok: false, error: scope.error }
+  if (!scope.ok) return { ok: false, error: scope.error, ...(scope.candidates ? { candidates: scope.candidates } : {}) }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
@@ -410,7 +410,13 @@ export async function executeDraft(
   modelCfg: DraftModelConfig,
 ): Promise<DraftOutcome> {
   const gen = await generateDrafts(db, args, ctx, modelCfg)
-  if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
+  if (!gen.ok) {
+    return {
+      ok: false,
+      text: `error: ${gen.error}`,
+      ...(gen.candidates ? { data: { candidates: gen.candidates } } : {}),
+    }
+  }
   if (gen.empty) {
     return { ok: true, text: `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope.` }
   }

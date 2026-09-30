@@ -28,6 +28,7 @@
  * resetContextualTransportForTesting().
  */
 
+import { findingsFromVerdicts, type DraftFindings } from "@/lib/agent/draft-findings"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { loadSession } from "@/lib/frontier/session-store"
@@ -222,6 +223,8 @@ export interface ContextualDraftRecord {
   cellId: string
   text: string
   spanLabel?: string
+  /** Verifier findings and triage stored at staging (draft-findings.ts). */
+  review?: DraftFindings
 }
 
 interface DraftListRow {
@@ -230,6 +233,7 @@ interface DraftListRow {
   cellId: string
   text: string
   provenance?: { spanId?: string; spanLabel?: string } | null
+  verdicts?: Record<string, string> | null
 }
 
 /**
@@ -263,6 +267,7 @@ export async function fetchContextualDrafts(
       cellId: d.cellId,
       text: d.text,
       ...(spanLabel && !isOpaqueId(spanLabel) ? { spanLabel } : {}),
+      review: findingsFromVerdicts(d.verdicts),
     }
   })
 }

@@ -61,6 +61,8 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 vi.mock("@/lib/contextual/transport", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/contextual/transport")>(),
+  // PR-style run view reads the run's pending drafts (useRunReview).
+  fetchContextualDrafts: vi.fn(async () => []),
   fetchContextualRuns: vi.fn().mockResolvedValue({
     available: true, runs: [], truncated: false, nextCursor: null,
   }),

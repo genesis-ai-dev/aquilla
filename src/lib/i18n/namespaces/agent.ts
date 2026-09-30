@@ -605,6 +605,46 @@ export const agent = defineNamespace({
     "agent.brief.field.qualityBar.label": "Quality bar",
     "agent.brief.field.qualityBar.helperText":
       "What 'good' and 'done' mean for this project — the standard a draft must meet before it is acceptable.",
+    "agent.pr.tabs.filesChanged": "Files changed",
+    "agent.pr.tabs.checks": "Checks",
+    "agent.pr.stats.drafts": plural({
+      one: "{count} draft",
+      other: "{count} drafts",
+    }),
+    "agent.pr.stats.flagged": plural({
+      one: "{count} with findings",
+      other: "{count} with findings",
+    }),
+    "agent.pr.stats.needsYou": plural({
+      one: "{count} needs you",
+      other: "{count} need you",
+    }),
+    "agent.pr.passageSummary": plural({
+      one: "{span} · {count} draft · no issues",
+      other: "{span} · {count} drafts · no issues",
+    }),
+    "agent.pr.review": plural({
+      one: "Reviewed {span}: {count} finding",
+      other: "Reviewed {span}: {count} findings",
+    }),
+    "agent.pr.reviewNeedsYou": plural({
+      one: "{count} needs you",
+      other: "{count} need you",
+    }),
+    "agent.pr.viewChecks": "View checks",
+    "agent.pr.checks.needsYou": "Needs you",
+    "agent.pr.checks.advisory": "Advisory",
+    "agent.pr.checks.empty": "No findings. Every pending draft passed its checks cleanly.",
+    "agent.pr.checks.loading": "Loading checks…",
+    "agent.pr.checks.open": "Open {ref} in Files changed",
+    "agent.finding.dissent.force": "Meaning check disagreed",
+    "agent.finding.dissent.naturalness": "Naturalness check disagreed",
+    "agent.finding.dissent.other": "A check disagreed",
+    "agent.finding.lint": "Project rule: {rule}",
+    "agent.finding.unsupported": "Wording not found in the sources",
+    "agent.finding.redrafted": "Redrafted after review",
+    "agent.finding.needsYou": "Needs you",
+    "agent.finding.advisory": "Advisory",
   },
   context: {
     _context: {
@@ -1290,6 +1330,80 @@ export const agent = defineNamespace({
           preview:
             "The conversation's ordinary preview line (a status and passage, or a drafts-ready count) — already translated, inserted verbatim.",
         },
+      },
+      "agent.pr.tabs.filesChanged": {
+        description: "Tab on an agent run (shown like a pull request) listing the run's pending drafts as changes to review.",
+      },
+      "agent.pr.tabs.checks": {
+        description: "Tab on an agent run (shown like a pull request) listing the verifier findings on its pending drafts.",
+      },
+      "agent.pr.stats.drafts": {
+        description: "Header stat on an agent run: pending drafts awaiting review.",
+        placeholders: {count: "Pending drafts in this run." },
+      },
+      "agent.pr.stats.flagged": {
+        description: "Header stat on an agent run: pending drafts that carry at least one verifier finding.",
+        placeholders: {count: "Drafts with findings." },
+      },
+      "agent.pr.stats.needsYou": {
+        description: "Header stat on an agent run: drafts whose findings were triaged as needing a human reviewer.",
+        placeholders: {count: "Drafts that need a person to look before approving." },
+      },
+      "agent.pr.passageSummary": {
+        description: "One-line summary of a finished passage with nothing to review, shown collapsed in an agent run's timeline. Expands to the passage's activity.",
+        placeholders: {span: "Passage label such as 'MRK 1:1–1:8' — not translated.", count: "Drafts staged in the passage." },
+      },
+      "agent.pr.review": {
+        description: "Reviewer persona's per-passage review entry in an agent run's timeline, like a pull-request review.",
+        placeholders: {span: "Passage label — not translated.", count: "Pending drafts in the passage with verifier findings." },
+      },
+      "agent.pr.reviewNeedsYou": {
+        description: "Suffix on the Reviewer's per-passage review entry: how many of those drafts need a person.",
+        placeholders: {count: "Drafts triaged as needing a human." },
+      },
+      "agent.pr.viewChecks": {
+        description: "Link from a Reviewer review entry to the run's Checks tab.",
+      },
+      "agent.pr.checks.needsYou": {
+        description: "Section heading in the Checks tab: findings a person should look at before approving.",
+      },
+      "agent.pr.checks.advisory": {
+        description: "Section heading in the Checks tab: minor findings that do not require a close look.",
+      },
+      "agent.pr.checks.empty": {
+        description: "Empty state of the Checks tab.",
+      },
+      "agent.pr.checks.loading": {
+        description: "Loading state of the Checks tab.",
+      },
+      "agent.pr.checks.open": {
+        description: "Accessible name of a Checks row link that opens that cell's draft in the Files changed tab.",
+        placeholders: {ref: "Cell reference such as 'MRK 1:3' — not translated." },
+      },
+      "agent.finding.dissent.force": {
+        description: "Verifier finding on a draft: the meaning/force verifier voted against this cell, but the other checks accepted it.",
+      },
+      "agent.finding.dissent.naturalness": {
+        description: "Verifier finding on a draft: the naturalness verifier voted against this cell, but the other checks accepted it.",
+      },
+      "agent.finding.dissent.other": {
+        description: "Verifier finding on a draft from a verifier with no dedicated label.",
+      },
+      "agent.finding.lint": {
+        description: "Verifier finding on a draft: it may break a project rule.",
+        placeholders: {rule: "The rule's id — not translated." },
+      },
+      "agent.finding.unsupported": {
+        description: "Verifier finding on a draft: some wording is not supported by the source or the validated examples.",
+      },
+      "agent.finding.redrafted": {
+        description: "Verifier finding on a draft: the first attempt was rejected and this is the redraft.",
+      },
+      "agent.finding.needsYou": {
+        description: "Badge on a draft whose findings were triaged as needing a person before approval.",
+      },
+      "agent.finding.advisory": {
+        description: "Badge on a draft whose findings are minor.",
       },
     },
   },

@@ -102,4 +102,16 @@ describe("TeamConversationHeader attention", () => {
     const roster = screen.getByRole("list", { name: "Your translation team" })
     expect(within(roster).getAllByRole("button")).toHaveLength(3)
   })
+
+  // PR header: beside "N drafts ready", say how many carry findings and how
+  // many a person must look at — the reason to open Checks first.
+  it("adds findings and needs-you counts for a run with flagged drafts", () => {
+    render(header({ run: runRecord({ proposedDrafts: 4 }), findings: { flagged: 2, needsHuman: 1 } }))
+    expect(screen.getByTestId("run-findings-summary")).toHaveTextContent("· 2 with findings · 1 needs you")
+  })
+
+  it("says nothing extra when no draft has findings", () => {
+    render(header({ run: runRecord({ proposedDrafts: 4 }), findings: { flagged: 0, needsHuman: 0 } }))
+    expect(screen.queryByTestId("run-findings-summary")).not.toBeInTheDocument()
+  })
 })

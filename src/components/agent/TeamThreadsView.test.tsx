@@ -34,6 +34,8 @@ import type {
 } from "@/lib/contextual/transport"
 
 vi.mock("@/lib/contextual/transport", () => ({
+  // PR-style run view reads the run's pending drafts (useRunReview).
+  fetchContextualDrafts: vi.fn(async () => []),
   fetchContextualRuns: vi.fn(),
   fetchContextualDecisions: vi.fn(),
   fetchContextualRunActivity: vi.fn(),
@@ -395,7 +397,9 @@ describe("TeamThreadsView — the active conversation surface", () => {
       ...activity([
         { ...stagedEvent, id: "started", kind: "span_started", createdAt: "2026-08-28T12:00:00Z" },
         { ...stagedEvent, id: "read-1", kind: "phase", phase: "reading", details: { step: "read-first" }, createdAt: "2026-08-28T12:00:01Z" },
-        { ...stagedEvent, id: "read-2", kind: "phase", phase: "reading", spanId: "s2", spanLabel: "MRK 4:9–4:12", createdAt: "2026-08-28T12:00:02Z" },
+        // Same passage: a passage is one timeline section, so its routine
+        // updates share one disclosure (different region, same Drafter).
+        { ...stagedEvent, id: "draft-2", kind: "phase", phase: "drafting", createdAt: "2026-08-28T12:00:02Z" },
         { ...stagedEvent, id: "note", kind: "scene_ready", createdAt: "2026-08-28T12:00:03Z" },
         stagedEvent,
         { ...stagedEvent, id: "failed", kind: "span_outcome", status: "failed", createdAt: "2026-08-28T12:00:06Z" },
@@ -417,8 +421,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
 
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-    const steps = within(thread).getAllByText(/Reading the situation/)
-    expect(steps).toHaveLength(2)
+    expect(within(thread).getByText(/Reading the situation/)).toBeVisible()
+    expect(within(thread).getByText(/Drafting MRK/)).toBeVisible()
     const inspectTrigger = within(thread).getByRole("button", { name: /^View details: Reading the situation around MRK 4:1/ })
     fireEvent.click(inspectTrigger)
     const inspector = await screen.findByTestId("team-step-inspector")

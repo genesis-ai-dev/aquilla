@@ -37,6 +37,8 @@ vi.mock("@/lib/agent/team-conversations", () => ({
   }),
 }))
 vi.mock("@/lib/contextual/transport", () => ({
+  // PR-style run view reads the run's pending drafts (useRunReview).
+  fetchContextualDrafts: vi.fn(async () => []),
   fetchContextualRunActivity: vi.fn(async () => ({
     run: null, events: [], sceneBriefs: [], drafts: [], truncated: false,
     truncatedCollections: { events: false, sceneBriefs: false, drafts: false },

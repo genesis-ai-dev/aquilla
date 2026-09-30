@@ -35,7 +35,7 @@ import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
-import { CONVERSATION_PARAM, TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
+import { CONVERSATION_PARAM, isRunThreadId, TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
 import { readAgentWorkspaceView, type AgentWorkspaceView } from "@/lib/agent/workspace-location"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { AgentChatOptions } from "./AgentChatOptions"
@@ -126,6 +126,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
   const isConversationView = view === "conversation"
   const isDocumentView = view === "document"
   const isReviewView = view === "review"
+  const isChecksView = view === "checks"
   const isKnowledgeView = view === "knowledge"
   const isTeamChat = conversationId === TEAM_CHAT_CONVERSATION
   const setView = useCallback((next: AgentWorkspaceView) => {
@@ -137,7 +138,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
     })
   }, [setSearchParams])
   const handleViewChange = useCallback((next: string) => {
-    if (next === "conversation" || next === "document" || next === "review" || next === "knowledge") setView(next)
+    if (next === "conversation" || next === "document" || next === "review" || next === "checks" || next === "knowledge") setView(next)
   }, [setView])
   // Selection-based requests belong to the main conversation, not the last task.
   useEffect(() => {
@@ -163,7 +164,10 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
   )
   const hasReviewWork = stageRows.length > 0
   const showDocumentTab = isTeamChat || view === "document"
-  const showReviewTab = view === "review" || (isTeamChat && hasReviewWork)
+  // A run conversation reads like a pull request: Files changed and Checks
+  // are always its tabs. Team chat keeps review only when there is work.
+  const isRunConversation = isRunThreadId(conversationId)
+  const showReviewTab = view === "review" || isRunConversation || (isTeamChat && hasReviewWork)
   const onVisibleCellIdsChange = workspace?.onVisibleCellIdsChange
   useEffect(() => {
     if (view !== "document") onVisibleCellIdsChange?.([])
@@ -355,7 +359,12 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
               <TabsTrigger value="document">{t("agentWorkspace.document")}</TabsTrigger>
             )}
             {showReviewTab && (
-              <TabsTrigger value="review">{t("agent.team.reviewDrafts")}</TabsTrigger>
+              <TabsTrigger value="review">
+                {isRunConversation ? t("agent.pr.tabs.filesChanged") : t("agent.team.reviewDrafts")}
+              </TabsTrigger>
+            )}
+            {isRunConversation && (
+              <TabsTrigger value="checks">{t("agent.pr.tabs.checks")}</TabsTrigger>
             )}
             <TabsTrigger value="knowledge">{t("agentWorkspace.projectKnowledge")}</TabsTrigger>
           </TabsList>
@@ -459,6 +468,10 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
           ) : (
             <TeamThreadsView projectId={agent.projectId} fileNames={fileNames} jwt={agent.jwt} author={agent.author} roleLevel={agent.roleLevel} review />
           )}
+        </TabsContent>}
+
+        {isChecksView && <TabsContent value="checks" className="flex min-h-0 flex-1 flex-col">
+          <TeamThreadsView projectId={agent.projectId} fileNames={fileNames} jwt={agent.jwt} author={agent.author} roleLevel={agent.roleLevel} checks />
         </TabsContent>}
 
         {isKnowledgeView && <TabsContent value="knowledge" className="min-h-0 flex-1 flex-col">

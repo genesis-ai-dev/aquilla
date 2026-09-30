@@ -100,6 +100,7 @@ describe("fetchContextualDrafts", () => {
       runId: "older-owning-run",
       cellId: "cell-1",
       text: "Review me",
+      review: { findings: [], triage: null, severity: 0 },
     }])
     expect(lastRequest().url).toContain("/contextual/drafts?fileId=file%201&status=proposed")
   })
@@ -121,7 +122,21 @@ describe("fetchContextualDrafts", () => {
       cellId: "cell-1",
       text: "Review me",
       spanLabel: "LUK 1:1–1:8",
+      review: { findings: [], triage: null, severity: 0 },
     }])
+  })
+
+  it("carries the pipeline's stored findings and triage to the review surface", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ drafts: [{
+      id: "draft-1", runId: "run-1", cellId: "cell-1", text: "Review me",
+      verdicts: { unsupported: "flag", _triage: "human", _severity: "3", _decidedBy: "model" },
+    }] }))
+    const [draft] = await fetchContextualDrafts(PROJECT_ID, FILE_ID)
+    expect(draft.review).toEqual({
+      findings: [{ code: "unsupported", kind: "unsupported", detail: null }],
+      triage: "human",
+      severity: 3,
+    })
   })
 })
 

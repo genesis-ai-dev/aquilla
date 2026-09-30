@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest"
 import type { ContextualActivityEvent } from "@/lib/contextual/transport"
-import { buildRunFeed, groupRunFeed } from "./social-feed"
+import { buildRunFeed, groupFeedByPassage, groupRunFeed, type TeamFeedMessage } from "./social-feed"
 
 let counter = 0
 function ev(overrides: Partial<ContextualActivityEvent> & { kind: string }): ContextualActivityEvent {
@@ -224,5 +224,55 @@ describe("groupRunFeed", () => {
 
   it("handles an empty feed", () => {
     expect(groupRunFeed(buildRunFeed({ events: [], sceneBriefs: [] }))).toEqual([])
+  })
+})
+
+describe("groupFeedByPassage", () => {
+  const m = (id: string, body: TeamFeedMessage["body"]): TeamFeedMessage => ({
+    id, persona: "coordinator", at: "2026-09-30T00:00:00Z", body, raw: { kind: "x", details: {} },
+  })
+  const passage = (span: string, outcome: "done" | "partial" | "failed", drafts = 4) => [
+    m(`${span}-start`, { kind: "started", spanLabel: span }),
+    m(`${span}-phase`, { kind: "phase", region: "drafting", spanLabel: span }),
+    m(`${span}-drafts`, { kind: "draftsStaged", spanLabel: span, count: drafts }),
+    m(`${span}-out`, { kind: "outcome", spanLabel: span, status: outcome, reasons: [] }),
+  ]
+
+  // A long run reads like a PR timeline: finished, clean passages fold to one
+  // line so the eye lands on the ones that need a person.
+  it("folds a finished clean passage and keeps a failed one open", () => {
+    const sections = groupFeedByPassage([...passage("MRK 1:1–1:8", "done"), ...passage("MRK 1:9–1:15", "failed")], new Set())
+    expect(sections.map((s) => [s.spanLabel, s.notable, s.drafts, s.outcome])).toEqual([
+      ["MRK 1:1–1:8", false, 4, "done"],
+      ["MRK 1:9–1:15", true, 4, "failed"],
+    ])
+  })
+
+  it("keeps a passage open when any of its drafts needs a human", () => {
+    const [section] = groupFeedByPassage(passage("MRK 2:1–2:12", "done"), new Set(["MRK 2:1–2:12"]))
+    expect(section.notable).toBe(true)
+  })
+
+  it("keeps the passage still in progress open", () => {
+    const sections = groupFeedByPassage(
+      [...passage("A", "done"), m("b-start", { kind: "started", spanLabel: "B" })],
+      new Set(),
+    )
+    expect(sections.map((s) => s.notable)).toEqual([false, true])
+  })
+
+  it("keeps concurrently drafted passages whole even when their events interleave", () => {
+    const [a, b] = [passage("A", "done"), passage("B", "done")]
+    const interleaved = a.flatMap((message, i) => [message, b[i]])
+    const sections = groupFeedByPassage(interleaved, new Set())
+    expect(sections.map((s) => [s.spanLabel, s.messages.length])).toEqual([["A", 4], ["B", 4]])
+  })
+
+  it("gives messages with no passage their own always-open section, in order", () => {
+    const sections = groupFeedByPassage(
+      [m("r", { kind: "phase", region: "reading", spanLabel: null }), ...passage("A", "done")],
+      new Set(),
+    )
+    expect(sections.map((s) => [s.spanLabel, s.notable])).toEqual([[null, true], ["A", false]])
   })
 })

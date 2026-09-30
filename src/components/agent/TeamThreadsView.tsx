@@ -61,6 +61,8 @@ import { AgentCardTrigger } from "./AgentCard"
 import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
 import { AgentDraftReview } from "./AgentDraftReview"
 import { AgentModeControl } from "./AgentModeControl"
+import { RunChecks } from "./RunChecks"
+import { useRunReview } from "@/hooks/useRunReview"
 import { TeamChannelComposer } from "./TeamChannelComposer"
 import { TeamConversationHeader } from "./TeamConversationHeader"
 import { TeamStepInspector } from "./TeamStepInspector"
@@ -85,6 +87,8 @@ export interface TeamThreadsViewProps {
   roleLevel?: number | null
   renderChannel?: (props: TeamChannelProps) => ReactNode
   review?: boolean
+  /** The run's Checks tab (PR threads): findings on its pending drafts. */
+  checks?: boolean
 }
 
 function TeamEmptyState({ projectId, t }: { projectId: string; t: TFunction }) {
@@ -127,6 +131,7 @@ export function TeamThreadsView({
   roleLevel,
   renderChannel,
   review = false,
+  checks = false,
 }: TeamThreadsViewProps) {
   const { t } = useI18n()
   const { session } = useFrontierSession()
@@ -206,6 +211,9 @@ export function TeamThreadsView({
     () => (runs ?? []).find((run) => runThreadId(run.runId) === selectedId) ?? null,
     [runs, selectedId],
   )
+  // Pending drafts + findings for the open run: header counts, which passages
+  // stay open in the timeline, and the Checks tab.
+  const runReview = useRunReview(projectId, openRun)
 
   // A conversation that left the list (answered questions, run paged out)
   // has nothing to show — fall back to Team chat rather than a blank pane.
@@ -386,7 +394,7 @@ export function TeamThreadsView({
   const isEmpty = channelItems.length === 0 && state.runs.length === 0 && openCount === 0
   // The questions conversation hides the composer: DecisionCard owns its own
   // Answer input, and a second box would be two ways to say one thing.
-  const showComposer = !review && selectedId !== QUESTIONS_CONVERSATION && (Boolean(openRun) || !renderChannel)
+  const showComposer = !review && !checks && selectedId !== QUESTIONS_CONVERSATION && (Boolean(openRun) || !renderChannel)
   const channelProps: TeamChannelProps = {
     items: channelItems,
     titleFor,
@@ -485,12 +493,16 @@ export function TeamThreadsView({
         fileName={runTitle(openRun)}
         onBack={() => setSelected(selectedId)}
         onReviewed={retry}
+        initialCellId={searchParams.get("cell")}
       />
     )
+  } else if (openRun && checks) {
+    conversation = <RunChecks projectId={projectId} run={openRun} review={runReview} />
   } else if (openRun) {
     conversation = (
       <TeamThreadDetail
         run={openRun}
+        review={runReview}
         projectId={projectId}
         feed={feed}
         feedLoading={activityLoading}
@@ -520,6 +532,7 @@ export function TeamThreadsView({
         activePersonas={activePersonas}
         projectId={projectId}
         actions={<>{nextPassageControl}{modeControl}</>}
+        findings={openRun ? runReview : undefined}
       />}
       <div className="flex min-h-0 flex-1">
         <div

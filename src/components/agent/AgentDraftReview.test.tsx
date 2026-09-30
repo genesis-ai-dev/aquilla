@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { AgentDraftReview } from "./AgentDraftReview"
 import {
   attachContextualDrafts, getContextualDrafts, hydrateContextualDrafts, resetContextualDraftsStore,
@@ -508,5 +508,55 @@ describe("AgentDraftReview", () => {
     expect(screen.getByText("Another contributor is editing this segment.")).toBeInTheDocument()
     act(() => { mocks.ws.onMessage?.({ t: "lock.released", cellId: "c1@lane:fr", by: { userId: "bob", ts: 1 } }) })
     expect(screen.getByRole("button", { name: "Use this translation" })).toBeEnabled()
+  })
+
+  // ── Files changed (PR threads spec §4) ─────────────────────────────────
+  describe("as Files changed", () => {
+    const flag = (id: string, verdicts: Record<string, string>) => {
+      drafts = drafts.map((d) => (d.id === id ? { ...d, verdicts } : d))
+    }
+
+    it("lists every pending draft with its findings, and shows them as comments on the selected one", async () => {
+      flag("d2", { unsupported: "flag", _triage: "human", _severity: "3", _decidedBy: "model" })
+      show()
+      await loaded()
+      const overview = screen.getByTestId("draft-review-overview")
+      expect(within(overview).getAllByRole("button")).toHaveLength(3)
+      expect(within(overview).getAllByText("No findings")).toHaveLength(2)
+      expect(within(overview).getByText("Needs you")).toBeInTheDocument()
+      expect(screen.queryByTestId("draft-review-comments")).not.toBeInTheDocument()
+
+      fireEvent.click(within(overview).getAllByRole("button")[1])
+      expect(screen.getByTestId("draft-review-source")).toHaveTextContent("Full source c2")
+      expect(screen.getByTestId("draft-review-comments")).toHaveTextContent("Wording not found in the sources")
+    })
+
+    it("opens on the cell the Checks tab linked to", async () => {
+      render(<AgentDraftReview projectId="project-1" run={activeRun} onBack={vi.fn()} initialCellId="c3" />)
+      await loaded("Suggestion 3")
+      expect(screen.getByTestId("draft-review-source")).toHaveTextContent("Full source c3")
+    })
+
+    // The merge button must never approve something a check flagged: those
+    // drafts stay pending for one-by-one review.
+    it("approves only drafts without findings, and leaves flagged ones pending", async () => {
+      flag("d2", { "lint:term-x": "flag", _triage: "advisory", _severity: "2", _decidedBy: "heuristic" })
+      const { onReviewed } = show()
+      await loaded()
+      fireEvent.click(screen.getByRole("button", { name: "Approve 2 drafts without findings" }))
+      await waitFor(() => expect(drafts.map((d) => d.id)).toEqual(["d2"]))
+      await waitFor(() => expect(screen.getByText(/^1 pending draft/)).toBeInTheDocument())
+      expect(screen.queryByTestId("approve-clean")).not.toBeInTheDocument()
+      expect(onReviewed).toHaveBeenCalled()
+    })
+
+    it("stops at the first draft it cannot approve and says which", async () => {
+      writeOutcome = "rejected"
+      show()
+      await loaded()
+      fireEvent.click(screen.getByRole("button", { name: "Approve 3 drafts without findings" }))
+      expect(await screen.findByRole("alert")).toHaveTextContent(/^Stopped at /)
+      expect(drafts).toHaveLength(3)
+    })
   })
 })

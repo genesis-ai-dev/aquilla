@@ -26,7 +26,8 @@ import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { agentConversationHref } from "@/lib/agent/workspace-location"
 import { runThreadId } from "@/lib/agent/team-channel"
 import { AGENT_PERSONAS } from "@/lib/agent/personas"
-import { groupRunFeed, type TeamFeedMessage } from "@/lib/agent/social-feed"
+import { groupFeedByPassage, groupRunFeed, type TeamFeedMessage, type TeamFeedPassage } from "@/lib/agent/social-feed"
+import type { RunReview } from "@/hooks/useRunReview"
 import { feedMessageText } from "@/lib/agent/team-channel"
 import type { ContextualRunRecord } from "@/lib/contextual/transport"
 import { PersonaAvatar } from "./PersonaAvatar"
@@ -165,6 +166,142 @@ function RoutineUpdates({
   )
 }
 
+interface FeedWiring {
+  reviewHref: string
+  inspectedId?: string | null
+  inspectorId?: string
+  onInspect?: (message: TeamFeedMessage, trigger: HTMLButtonElement) => void
+}
+
+/** Persona-attributed groups for one passage (or the run-level messages). */
+function FeedGroups({ messages, wiring }: { messages: TeamFeedMessage[]; wiring: FeedWiring }) {
+  const { locale, t } = useI18n()
+  const { reviewHref, inspectedId, inspectorId, onInspect } = wiring
+  return (
+    <>
+      {groupRunFeed(messages).map((group) => (
+        <div
+          key={group.id}
+          role="group"
+          aria-label={t(AGENT_PERSONAS[group.persona].nameKey)}
+          className="flex items-start gap-2.5"
+          data-persona-group={group.persona}
+        >
+          <PersonaAvatar personaId={group.persona} className="mt-0.5" />
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <div className="flex items-baseline gap-2 px-1.5">
+              <span className="text-xs font-medium text-foreground">
+                {t(AGENT_PERSONAS[group.persona].nameKey)}
+              </span>
+              {group.at && (
+                <time dateTime={group.at} className="text-[10px] text-muted-foreground">
+                  {new Date(group.at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}
+                </time>
+              )}
+            </div>
+            {group.parts.map((part) => part.kind === "activity" ? (
+              <RoutineUpdates
+                key={part.id}
+                messages={part.messages}
+                reviewHref={reviewHref}
+                inspectedId={inspectedId}
+                inspectorId={inspectorId}
+                onInspect={onInspect}
+              />
+            ) : (
+              <FeedMessageRow
+                key={part.message.id}
+                message={part.message}
+                reviewHref={reviewHref}
+                inspected={inspectedId === part.message.id}
+                inspectorId={inspectorId}
+                onInspect={onInspect ? (trigger) => onInspect(part.message, trigger) : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
+/** The Reviewer's per-passage review entry, like a pull-request review. */
+function PassageReview({ span, flagged, needsHuman, checksHref }: {
+  span: string
+  flagged: number
+  needsHuman: number
+  checksHref: string
+}) {
+  const t = useT()
+  return (
+    <div className="flex items-start gap-2.5" data-testid="passage-review" role="group" aria-label={t(AGENT_PERSONAS.reviewer.nameKey)}>
+      <PersonaAvatar personaId="reviewer" className="mt-0.5" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border border-border/60 px-2.5 py-1.5">
+        <p className="text-sm">
+          {t("agent.pr.review", { span, count: flagged })}
+          {needsHuman > 0 && <> · <span className="font-medium">{t("agent.pr.reviewNeedsYou", { count: needsHuman })}</span></>}
+        </p>
+        <Link to={checksHref} className="w-fit text-xs font-medium underline underline-offset-2 hover:text-foreground">
+          {t("agent.pr.viewChecks")}
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+/** One passage: open when notable, otherwise folded to a one-line summary. */
+function PassageSection({ section, wiring, findings, checksHref }: {
+  section: TeamFeedPassage
+  wiring: FeedWiring
+  findings: { flagged: number; needsHuman: number } | undefined
+  checksHref: string
+}) {
+  const t = useT()
+  const contentId = useId()
+  const [expanded, setExpanded] = useState<boolean | null>(null)
+  // A folded passage still opens for the step the inspector is showing.
+  const holdsInspected = section.messages.some((m) => m.id === wiring.inspectedId)
+  const review = section.spanLabel && findings && findings.flagged > 0 ? (
+    <PassageReview span={section.spanLabel} flagged={findings.flagged} needsHuman={findings.needsHuman} checksHref={checksHref} />
+  ) : null
+  if (section.notable) {
+    return (
+      <div className="flex flex-col gap-4" data-passage={section.spanLabel ?? "run"} data-notable="true">
+        <FeedGroups messages={section.messages} wiring={wiring} />
+        {review}
+      </div>
+    )
+  }
+  const open = expanded ?? holdsInspected
+  return (
+    <div data-passage={section.spanLabel ?? "run"} data-notable="false">
+      <Collapsible open={open} onOpenChange={setExpanded} className="flex min-w-0 flex-col gap-2">
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="justify-start px-1.5"
+            aria-expanded={open}
+            aria-controls={open ? contentId : undefined}
+          >
+            <ChevronRight aria-hidden data-icon="inline-start" className={cn(open && "rotate-90")} />
+            <span className="truncate text-xs text-muted-foreground">
+              {t("agent.pr.passageSummary", { span: section.spanLabel ?? "", count: section.drafts })}
+            </span>
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div id={contentId} className="flex flex-col gap-4">
+            <FeedGroups messages={section.messages} wiring={wiring} />
+            {review}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  )
+}
+
 export interface TeamThreadDetailProps {
   run: ContextualRunRecord
   projectId: string
@@ -174,6 +311,9 @@ export interface TeamThreadDetailProps {
   inspectedId?: string | null
   inspectorId?: string
   onInspect?: (message: TeamFeedMessage, trigger: HTMLButtonElement) => void
+  /** Pending drafts and their findings (useRunReview): which passages stay
+   *  open, and the Reviewer's per-passage review entries. */
+  review?: RunReview
 }
 
 export function TeamThreadDetail({
@@ -184,10 +324,21 @@ export function TeamThreadDetail({
   inspectedId,
   inspectorId,
   onInspect,
+  review,
 }: TeamThreadDetailProps) {
-  const { locale, t } = useI18n()
+  const t = useT()
   const reviewHref = agentConversationHref(projectId, runThreadId(run.runId), "review")
-  const groups = groupRunFeed(feed)
+  const checksHref = agentConversationHref(projectId, runThreadId(run.runId), "checks")
+  const sections = groupFeedByPassage(feed, review?.needsHumanSpans ?? new Set())
+  const findingsBySpan = new Map<string, { flagged: number; needsHuman: number }>()
+  for (const draft of review?.drafts ?? []) {
+    if (!draft.spanLabel || !draft.review?.findings.length) continue
+    const entry = findingsBySpan.get(draft.spanLabel) ?? { flagged: 0, needsHuman: 0 }
+    entry.flagged += 1
+    if (draft.review.triage === "human") entry.needsHuman += 1
+    findingsBySpan.set(draft.spanLabel, entry)
+  }
+  const wiring: FeedWiring = { reviewHref, inspectedId, inspectorId, onInspect }
   return (
     // Stick-to-bottom feed — same contract as TeamChannel: follow while at the
     // bottom, break on upward scroll, ArrowDown re-engages.
@@ -205,47 +356,14 @@ export function TeamThreadDetail({
             <p className="text-xs text-muted-foreground">{t("agent.team.threadEmpty")}</p>
           )
         ) : (
-          groups.map((group) => (
-            <div
-              key={group.id}
-              role="group"
-              aria-label={t(AGENT_PERSONAS[group.persona].nameKey)}
-              className="flex items-start gap-2.5"
-              data-persona-group={group.persona}
-            >
-              <PersonaAvatar personaId={group.persona} className="mt-0.5" />
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <div className="flex items-baseline gap-2 px-1.5">
-                  <span className="text-xs font-medium text-foreground">
-                    {t(AGENT_PERSONAS[group.persona].nameKey)}
-                  </span>
-                  {group.at && (
-                    <time dateTime={group.at} className="text-[10px] text-muted-foreground">
-                      {new Date(group.at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}
-                    </time>
-                  )}
-                </div>
-                {group.parts.map((part) => part.kind === "activity" ? (
-                  <RoutineUpdates
-                    key={part.id}
-                    messages={part.messages}
-                    reviewHref={reviewHref}
-                    inspectedId={inspectedId}
-                    inspectorId={inspectorId}
-                    onInspect={onInspect}
-                  />
-                ) : (
-                  <FeedMessageRow
-                    key={part.message.id}
-                    message={part.message}
-                    reviewHref={reviewHref}
-                    inspected={inspectedId === part.message.id}
-                    inspectorId={inspectorId}
-                    onInspect={onInspect ? (trigger) => onInspect(part.message, trigger) : undefined}
-                  />
-                ))}
-              </div>
-            </div>
+          sections.map((section) => (
+            <PassageSection
+              key={section.id}
+              section={section}
+              wiring={wiring}
+              findings={section.spanLabel ? findingsBySpan.get(section.spanLabel) : undefined}
+              checksHref={checksHref}
+            />
           ))
         )}
           </MessageScrollerContent>

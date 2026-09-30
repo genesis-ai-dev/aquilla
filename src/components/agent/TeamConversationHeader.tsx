@@ -21,6 +21,8 @@ export interface TeamConversationHeaderProps {
   /** Controls at the end of the header row (v3: the agent-mode dial and the
    *  next-passage affordance on a stopped run). */
   actions?: ReactNode
+  /** Verifier findings on the run's pending drafts (useRunReview). */
+  findings?: { flagged: number; needsHuman: number }
 }
 
 export function TeamConversationHeader({
@@ -31,6 +33,7 @@ export function TeamConversationHeader({
   openQuestionCount = 0,
   questionsHref,
   actions,
+  findings,
 }: TeamConversationHeaderProps) {
   const t = useT()
   const pendingDrafts = run?.proposedDrafts ?? 0
@@ -85,6 +88,12 @@ export function TeamConversationHeader({
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <p role="status" aria-atomic="true" className="text-sm font-medium tabular-nums">
             {attention}
+            {run && findings && findings.flagged > 0 && (
+              <span className="font-normal text-muted-foreground" data-testid="run-findings-summary">
+                {" · "}{t("agent.pr.stats.flagged", { count: findings.flagged })}
+                {findings.needsHuman > 0 && <>{" · "}<span className="font-medium text-foreground">{t("agent.pr.stats.needsYou", { count: findings.needsHuman })}</span></>}
+              </span>
+            )}
           </p>
           {actionHref && (
             <Link to={actionHref} replace={!run} className={buttonVariants({ size: "sm" })}>

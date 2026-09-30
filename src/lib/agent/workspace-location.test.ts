@@ -28,4 +28,13 @@ describe("agent workspace location", () => {
     expect(href).toBe("/project/p1/agent?conversation=run%3Aone")
     expect(readAgentWorkspaceView(new URL(href, "https://local.test").searchParams)).toBe("conversation")
   })
+
+  // Checks is a run's PR tab. On Team chat there is nothing to check, so the
+  // URL must never land a person on an empty view.
+  it("keeps the Checks view to run conversations", () => {
+    expect(readAgentWorkspaceView(new URLSearchParams("conversation=run%3Ar1&view=checks"))).toBe("checks")
+    expect(readAgentWorkspaceView(new URLSearchParams("view=checks"))).toBe("conversation")
+    expect(agentConversationHref("p", "run:r1", "checks")).toContain("view=checks")
+    expect(agentConversationHref("p", undefined, "checks")).not.toContain("view=")
+  })
 })

@@ -231,3 +231,52 @@ export function groupRunFeed(feed: readonly TeamFeedMessage[]): TeamFeedGroup[] 
   }
   return groups
 }
+
+export interface TeamFeedPassage {
+  id: string
+  /** null for run-level messages outside any passage. */
+  spanLabel: string | null
+  messages: TeamFeedMessage[]
+  /** Drafts staged in this passage (sum of draftsStaged counts). */
+  drafts: number
+  outcome: "done" | "partial" | "failed" | null
+  /** Rendered expanded. False only for a finished passage with nothing a
+   *  person needs to see (PR threads spec §3). */
+  notable: boolean
+}
+
+/**
+ * Split the run's feed into passages for the PR-style timeline: one section
+ * per passage holding ALL its messages, ordered by the passage's first
+ * appearance. Waves draft 2–3 passages concurrently, so their events
+ * interleave; grouping only adjacent messages would chop them into many tiny
+ * alternating sections. Run-level messages (no passage) share one section.
+ * `needsHumanSpans` are passages with a draft triaged "needs you".
+ */
+export function groupFeedByPassage(
+  feed: readonly TeamFeedMessage[],
+  needsHumanSpans: ReadonlySet<string>,
+): TeamFeedPassage[] {
+  const byKey = new Map<string, TeamFeedPassage>()
+  for (const message of feed) {
+    const span = message.body.spanLabel
+    const key = span ?? "\u0000run"
+    let section = byKey.get(key)
+    if (!section) {
+      section = { id: message.id, spanLabel: span, messages: [], drafts: 0, outcome: null, notable: true }
+      byKey.set(key, section)
+    }
+    section.messages.push(message)
+    if (message.body.kind === "draftsStaged") section.drafts += message.body.count ?? 0
+    if (message.body.kind === "outcome") section.outcome = message.body.status
+  }
+  const sections = [...byKey.values()]
+  for (const section of sections) {
+    section.notable =
+      section.spanLabel === null ||
+      section.outcome === null ||
+      section.outcome !== "done" ||
+      needsHumanSpans.has(section.spanLabel)
+  }
+  return sections
+}

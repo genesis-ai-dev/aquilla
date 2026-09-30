@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom"
 import { buildRunFeed } from "@/lib/agent/social-feed"
 import type { ContextualActivityEvent, ContextualRunRecord } from "@/lib/contextual/transport"
 import { TeamThreadDetail } from "./TeamThreadDetail"
+import { runReviewOf } from "@/hooks/useRunReview"
 
 const spanLabel = "MRK 4:1–4:8"
 const run: ContextualRunRecord = {
@@ -39,11 +40,14 @@ const first: ContextualActivityEvent = {
   details: { step: "first" },
   createdAt: "2026-08-28T12:00:01Z",
 }
+// Same passage as `first`: routine updates fold per passage (a passage is one
+// PR-timeline section), so two updates must share a passage to share a
+// disclosure. A different region (same Drafter persona), because repeats of
+// one region collapse.
 const second: ContextualActivityEvent = {
   ...first,
-  id: "read-2",
-  spanId: "s2",
-  spanLabel: "MRK 4:9–4:12",
+  id: "draft-2",
+  phase: "drafting",
   details: { step: "second" },
   createdAt: "2026-08-28T12:00:02Z",
 }
@@ -122,12 +126,12 @@ describe("TeamThreadDetail activity groups", () => {
 
     view.rerender(detail([{ ...first }, { ...second }]))
     expect(screen.getByRole("button", { name: "Hide 2 activity updates" })).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getAllByText(/Reading the situation/)).toHaveLength(2)
+    expect(document.querySelectorAll('[data-feed-kind="phase"]')).toHaveLength(2)
 
     view.rerender(detail([
       first,
       second,
-      { ...first, id: "draft-1", phase: "drafting", createdAt: "2026-08-28T12:00:03Z" },
+      { ...first, id: "read-3", createdAt: "2026-08-28T12:00:03Z" },
     ]))
     expect(screen.getByRole("button", { name: "Hide 3 activity updates" })).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText(/Drafting MRK/)).toBeVisible()
@@ -160,5 +164,53 @@ describe("TeamThreadDetail activity groups", () => {
     const trigger = screen.getByRole("button", { name: /^Hide details: Reading the situation around MRK 4:1/ })
     expect(trigger).toHaveAttribute("aria-expanded", "true")
     expect(trigger).toHaveAttribute("aria-controls", "step-inspector")
+  })
+})
+
+describe("TeamThreadDetail as a PR timeline", () => {
+  const passage = (span: string, id: string, outcome: "complete" | "failed"): ContextualActivityEvent[] => [
+    { ...first, id: `${id}-start`, kind: "span_started", phase: undefined, spanId: id, spanLabel: span, createdAt: "2026-08-28T12:00:01Z" },
+    { ...first, id: `${id}-staged`, kind: "drafts_staged", phase: undefined, spanId: id, spanLabel: span, details: { count: 3 }, createdAt: "2026-08-28T12:00:02Z" },
+    { ...first, id: `${id}-out`, kind: "span_outcome", phase: undefined, spanId: id, spanLabel: span, status: outcome, details: {}, createdAt: "2026-08-28T12:00:03Z" },
+  ]
+  const withReview = (events: ContextualActivityEvent[], review: ReturnType<typeof runReviewOf>) => (
+    <MemoryRouter>
+      <TeamThreadDetail
+        projectId="p1"
+        run={run}
+        feed={buildRunFeed({ events, sceneBriefs: [] })}
+        feedLoading={false}
+        review={{ ...review, loading: false }}
+      />
+      <LocationProbe />
+    </MemoryRouter>
+  )
+
+  // The point of the PR view: a long run's finished, clean passages fold to
+  // one line each, so the passage that needs a person is what you see.
+  it("folds a finished clean passage and keeps one that needs you open, with the Reviewer's review", () => {
+    const events = [...passage("MRK 1:1–1:8", "p1", "complete"), ...passage("MRK 1:9–1:15", "p2", "complete")]
+    const review = runReviewOf([{
+      draftId: "d1", runId: run.runId, cellId: "c9", text: "t", spanLabel: "MRK 1:9–1:15",
+      review: { findings: [{ code: "unsupported", kind: "unsupported", detail: null }], triage: "human", severity: 3 },
+    }])
+    render(withReview(events, review))
+
+    const clean = document.querySelector('[data-passage="MRK 1:1–1:8"]')
+    expect(clean).toHaveAttribute("data-notable", "false")
+    expect(screen.getByRole("button", { name: /MRK 1:1–1:8 · 3 drafts · no issues/ })).toHaveAttribute("aria-expanded", "false")
+
+    const flagged = document.querySelector('[data-passage="MRK 1:9–1:15"]')
+    expect(flagged).toHaveAttribute("data-notable", "true")
+    const entry = screen.getByTestId("passage-review")
+    expect(entry).toHaveTextContent("Reviewed MRK 1:9–1:15: 1 finding · 1 needs you")
+    fireEvent.click(screen.getByRole("link", { name: "View checks" }))
+    expect(screen.getByTestId("location")).toHaveTextContent("view=checks")
+  })
+
+  it("keeps a failed passage open even with nothing flagged", () => {
+    render(withReview(passage("MRK 2:1–2:4", "p3", "failed"), runReviewOf([])))
+    expect(document.querySelector('[data-passage="MRK 2:1–2:4"]')).toHaveAttribute("data-notable", "true")
+    expect(screen.queryByTestId("passage-review")).not.toBeInTheDocument()
   })
 })

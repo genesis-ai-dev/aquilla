@@ -84,6 +84,11 @@ export function runThreadId(runId: string): string {
   return `run:${runId}`
 }
 
+/** True for a run's conversation id (the PR-style thread). */
+export function isRunThreadId(id: string): boolean {
+  return id.startsWith("run:")
+}
+
 export function decisionThreadId(decisionId: string): string {
   return `decision:${decisionId}`
 }

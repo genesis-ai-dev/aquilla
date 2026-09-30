@@ -1,0 +1,52 @@
+// RunChecks — the run's Checks tab (PR threads spec §4). A reviewer opens it
+// to find what needs them: those findings come first, most severe first, and
+// every row goes straight to that cell in Files changed.
+
+import { describe, expect, it } from "vitest"
+import { render, screen, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { RunChecks } from "./RunChecks"
+import { runReviewOf } from "@/hooks/useRunReview"
+import type { ContextualDraftRecord, ContextualRunRecord } from "@/lib/contextual/transport"
+
+const run = { runId: "run-1", fileId: "f1" } as ContextualRunRecord
+
+const draft = (cellId: string, triage: "human" | "advisory" | null, severity = 0): ContextualDraftRecord => ({
+  draftId: `d-${cellId}`, runId: "run-1", cellId, text: `text ${cellId}`, spanLabel: "MRK 1:1–1:8",
+  review: {
+    findings: triage ? [{ code: triage === "human" ? "unsupported" : "lint:term-x", kind: triage === "human" ? "unsupported" : "lint", detail: triage === "human" ? null : "term-x" }] : [],
+    triage, severity,
+  },
+})
+
+function view(drafts: ContextualDraftRecord[]) {
+  return render(
+    <MemoryRouter>
+      <RunChecks projectId="p1" run={run} review={{ ...runReviewOf(drafts), loading: false }} />
+    </MemoryRouter>,
+  )
+}
+
+describe("RunChecks", () => {
+  it("lists needs-you findings first, then advisory, and leaves clean drafts out", () => {
+    view([draft("a", "advisory", 2), draft("b", "human", 3), draft("c", null)])
+    const needs = screen.getByTestId("checks-needs-you")
+    const advisory = screen.getByTestId("checks-advisory")
+    expect(needs.compareDocumentPosition(advisory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(needs).getByText("Wording not found in the sources")).toBeInTheDocument()
+    expect(within(advisory).getByText("Project rule: term-x")).toBeInTheDocument()
+    expect(screen.queryByText("text c")).not.toBeInTheDocument()
+  })
+
+  it("links each finding to its cell in Files changed", () => {
+    view([draft("b", "human", 3)])
+    const link = screen.getByRole("link", { name: "Open MRK 1:1–1:8 · b in Files changed" })
+    expect(link.getAttribute("href")).toContain("view=review")
+    expect(link.getAttribute("href")).toContain("cell=b")
+  })
+
+  it("says so plainly when every pending draft passed cleanly", () => {
+    view([draft("c", null)])
+    expect(screen.getByText("No findings. Every pending draft passed its checks cleanly.")).toBeInTheDocument()
+  })
+})

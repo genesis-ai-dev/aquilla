@@ -25,6 +25,8 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { focusLockKey } from "@/hooks/useFocusLock"
 import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { getOutboxRecords } from "@/lib/sync/outbox"
+import { DraftFindingChips } from "./DraftFindingChips"
+import { DraftReviewOverview } from "./DraftReviewOverview"
 import {
   acceptDraftReview,
   DraftReviewError,
@@ -39,6 +41,8 @@ interface AgentDraftReviewProps {
   fileName?: string
   onBack: () => void
   onReviewed?: () => void
+  /** Open on this cell's draft (the Checks tab links here with `&cell=`). */
+  initialCellId?: string | null
 }
 
 /** An isolated task surface, not an editor mode or an editor-preference write. */
@@ -46,7 +50,7 @@ export function AgentDraftReview(props: AgentDraftReviewProps) {
   return <DraftReviewSession key={`${props.projectId}:${props.run.runId}:${props.run.fileId}:${props.run.targetLang ?? ""}`} {...props} />
 }
 
-function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: AgentDraftReviewProps) {
+function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, initialCellId }: AgentDraftReviewProps) {
   const t = useT()
   const lane = run.targetLang ?? ""
   const drafts = useContextualDrafts()
@@ -59,7 +63,9 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: Ag
   const [loadError, setLoadError] = useState<unknown>(null)
   const [writeError, setWriteError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
-  const [cursor, setCursor] = useState<string | null>(null)
+  const [cursor, setCursor] = useState<string | null>(initialCellId ?? null)
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  const [bulkError, setBulkError] = useState<{ ref: string; message: string } | null>(null)
   const previousIds = useRef<string[]>([])
   const [edits, setEdits] = useState<Record<string, string>>({})
   const queued = useRef(new Map<string, DraftReviewCommit>())
@@ -184,7 +190,9 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: Ag
 
   useEffect(() => {
     previousIds.current = ids
-    if (selectedId !== cursor) setCursor(selectedId)
+    // While drafts are still loading there is nothing to select; keep the
+    // cursor so a linked cell (`initialCellId`) survives the first load.
+    if (ids.length > 0 && selectedId !== cursor) setCursor(selectedId)
   }, [ids, selectedId, cursor])
 
   const errorText = (error: unknown) => {
@@ -201,42 +209,100 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: Ag
     return error instanceof Error ? error.message : String(error)
   }
 
+  type PendingDraft = (typeof pending)[number]
+  type ReviewCell = NonNullable<typeof cell>
+
+  /** One guarded accept — the same path for the selected cell and for each
+   *  cell of the bulk approve. Throws nothing; reports through `onError`. */
+  const acceptOne = async (
+    draft: PendingDraft,
+    target: ReviewCell,
+    text: string,
+    onError: (error: unknown) => void,
+  ): Promise<boolean> => {
+    const scope = scopeRef.current
+    try {
+      await acceptDraftReview({
+        projectId, run, draft: { ...draft, runId: run.runId }, cell: target, text,
+        queued: queued.current.get(draft.draftId),
+        onQueued: (commit) => {
+          queued.current.set(draft.draftId, commit)
+          setQueuedVersion((version) => version + 1)
+        },
+        checkLock: () => locks.current.has(focusLockKey(draft.cellId, lane)),
+        isCurrent: () => scope !== null && scope === scopeRef.current,
+      })
+      queued.current.delete(draft.draftId)
+      setQueuedVersion((version) => version + 1)
+      return true
+    } catch (error) {
+      const commit = queued.current.get(draft.draftId)
+      if (commit && error instanceof DraftReviewError && (error.code === "stale" || error.code === "rejected")) {
+        const stillQueued = await getOutboxRecords([commit.eventId, ...(commit.validationEventId ? [commit.validationEventId] : [])])
+        if (stillQueued.length === 0) {
+          queued.current.delete(draft.draftId)
+          setQueuedVersion((version) => version + 1)
+        }
+      }
+      onError(error)
+      return false
+    }
+  }
+
   const accept = async (text: string): Promise<boolean> => {
     if (!selected || !cell || busyRef.current || !canWrite) return false
-    const scope = scopeRef.current
     busyRef.current = true
     setBusy(true)
     setWriteError(null)
     try {
-      await acceptDraftReview({
-        projectId, run, draft: { ...selected, runId: run.runId }, cell, text,
-        queued: queued.current.get(selected.draftId),
-        onQueued: (commit) => {
-          queued.current.set(selected.draftId, commit)
-          setQueuedVersion((version) => version + 1)
-        },
-        checkLock: () => locks.current.has(focusLockKey(selected.cellId, lane)),
-        isCurrent: () => scope !== null && scope === scopeRef.current,
-      })
-      queued.current.delete(selected.draftId)
-      setQueuedVersion((version) => version + 1)
-      await refresh()
-      reviewedRef.current?.()
-      return true
-    } catch (error) {
-      const commit = queued.current.get(selected.draftId)
-      if (commit && error instanceof DraftReviewError && (error.code === "stale" || error.code === "rejected")) {
-        const stillQueued = await getOutboxRecords([commit.eventId, ...(commit.validationEventId ? [commit.validationEventId] : [])])
-        if (stillQueued.length === 0) {
-          queued.current.delete(selected.draftId)
-          setQueuedVersion((version) => version + 1)
-        }
+      const ok = await acceptOne(selected, cell, text, setWriteError)
+      if (ok) {
+        await refresh()
+        reviewedRef.current?.()
       }
-      setWriteError(error)
-      return false
+      return ok
     } finally {
       busyRef.current = false
       setBusy(false)
+    }
+  }
+
+  const reviewByDraft = new Map((snapshot?.drafts ?? []).map((d) => [d.draftId, d.review]))
+  const cleanDrafts = pending.filter((d) => (reviewByDraft.get(d.draftId)?.findings.length ?? 0) === 0)
+
+  /** "Merge" for the clean part of the change: approve every draft with no
+   *  findings, one guarded accept at a time; stop at the first problem and
+   *  leave the rest pending. Drafts with findings are never bulk-approved. */
+  const approveClean = async () => {
+    if (!snapshot || busyRef.current || !canWrite) return
+    const batch = cleanDrafts.slice()
+    busyRef.current = true
+    setBusy(true)
+    setWriteError(null)
+    setBulkError(null)
+    setBulk({ done: 0, total: batch.length })
+    let approved = 0
+    try {
+      for (const draft of batch) {
+        const target = snapshot.cells.get(draft.cellId)
+        const ref = target?.cellLabel || draft.cellId
+        if (!target?.sourceEventId || locks.current.has(focusLockKey(draft.cellId, lane))) {
+          setBulkError({ ref, message: t(target?.sourceEventId ? "agentDraftReview.locked" : "agentDraftReview.sourceMissing") })
+          break
+        }
+        const ok = await acceptOne(draft, target, draft.text, (error) => setBulkError({ ref, message: errorText(error) }))
+        if (!ok) break
+        approved += 1
+        setBulk({ done: approved, total: batch.length })
+      }
+    } finally {
+      setBulk(null)
+      busyRef.current = false
+      setBusy(false)
+      if (approved > 0) {
+        await refresh()
+        reviewedRef.current?.()
+      }
     }
   }
 
@@ -266,6 +332,27 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: Ag
       {snapshot && !loading && !loadError && pending.length === 0 ? (
         <EmptyState title={t("agentDraftReview.empty")} description={t("agentDraftReview.emptyHelp")} />
       ) : null}
+      {snapshot && pending.length > 0 ? (
+        <DraftReviewOverview
+          rows={pending.map((d) => ({
+            draftId: d.draftId,
+            cellId: d.cellId,
+            label: snapshot.cells.get(d.cellId)?.cellLabel || d.cellId,
+            review: reviewByDraft.get(d.draftId),
+          }))}
+          selectedCellId={selectedId}
+          disabled={busy}
+          onSelect={(cellId) => { setWriteError(null); setCursor(cellId) }}
+        />
+      ) : null}
+      {canWrite && snapshot && cleanDrafts.length > 0 ? (
+        <Button className="w-fit" size="sm" disabled={busy || loading} onClick={() => void approveClean()} data-testid="approve-clean">
+          {bulk
+            ? t("agentDraftReview.approveCleanProgress", bulk)
+            : t("agentDraftReview.approveClean", { count: cleanDrafts.length })}
+        </Button>
+      ) : null}
+      {bulkError ? <p role="alert">{t("agentDraftReview.approveCleanStopped", bulkError)}</p> : null}
       {selected && snapshot ? (
         <>
           <nav aria-label={t("agentDraftReview.title")} className="flex flex-wrap items-center justify-between gap-2">
@@ -301,6 +388,12 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed }: Ag
               <Card>
                 <CardHeader><CardTitle>{t("agentDraftReview.suggestion")}</CardTitle></CardHeader>
                 <CardContent className="flex flex-col gap-3">
+                  {reviewByDraft.get(selected.draftId)?.findings.length ? (
+                    <div className="flex flex-col gap-1.5 rounded-md border border-border/60 p-2" data-testid="draft-review-comments">
+                      <p className="text-xs font-medium">{t("agentDraftReview.comments")}</p>
+                      <DraftFindingChips review={reviewByDraft.get(selected.draftId)} />
+                    </div>
+                  ) : null}
                   <ContextualDraftCard
                     key={draftKey} projectId={projectId} fileId={run.fileId} targetLang={lane}
                     cellId={selected.cellId} editable={ready && edits[draftKey] === undefined}

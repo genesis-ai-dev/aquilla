@@ -140,6 +140,19 @@ describe("POST /api/v1/ai/agent/internal/draft-cells", () => {
     expect(events?.n).toBe(0)
   })
 
+  it("drafts into a named lane (AQU-1447) and rejects an empty laneId", async () => {
+    await seedProject({ roleLevel: 400 })
+    mockDraftModel(["Entwurf eins", "Entwurf zwei"])
+
+    const ok = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: "ab12cd34" })
+    expect(ok.status).toBe(200)
+    const body = (await ok.json()) as { drafts: { value: string }[] }
+    expect(body.drafts.map((d) => d.value)).toEqual(["Entwurf eins", "Entwurf zwei"])
+
+    const empty = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: "" })
+    expect(empty.status).toBe(400)
+  })
+
   it("denies a caller below the contributor floor without spending", async () => {
     await seedProject({ roleLevel: 100 })
     const calls = mockDraftModel(["never"])

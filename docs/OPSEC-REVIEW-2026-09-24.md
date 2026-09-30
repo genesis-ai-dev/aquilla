@@ -3,7 +3,7 @@
 _Continues the standing series. Most recent entries: `docs/OPSEC-REVIEW-2026-09-23.md`
 (OPS-35…OPS-36, input validation & injection) and `docs/OPSEC-REVIEW-2026-09-17.md`
 (OPS-33…OPS-34, API security & data exposure). New finding continues the **OPS-n**
-series at **OPS-37** — see the numbering note in `docs/OPSEC.md` if this collides with
+series at **OPS-39** — see the numbering note in `docs/OPSEC.md` if this collides with
 another concurrent pass; merge order wins, no finding is lost by a renumber.
 
 **Scope for this pass: API security & data exposure**, the seventh pass on this theme in
@@ -26,7 +26,7 @@ test at this commit) or **JUDGMENT** (reasoned inference).
 
 ## Findings
 
-### OPS-37 — Comment `@mention` notifications resolved emails with no project-membership check — **FIXED** [FACT]
+### OPS-39 — Comment `@mention` notifications resolved emails with no project-membership check — **FIXED** [FACT]
 
 `sync-worker/src/notification-email.ts`'s `sendCommentNotifications` (wired from every
 `comment.create` event in `events/route.ts:1743`, including comments an external agent
@@ -116,7 +116,7 @@ in behavior at all.
 
 | ID | Finding | Likelihood | Impact | Risk | State |
 |---|---|---|---|---|---|
-| OPS-37 | `@mention` comment notifications resolved emails with no project-membership check | High — reachable by any project contributor (or an agent) via an ordinary comment, no special access or timing required | Medium — discloses comment excerpt + project name to an outsider's inbox (not account takeover), plus a username-enumeration/spam primitive | **Medium** | Fixed |
+| OPS-39 | `@mention` comment notifications resolved emails with no project-membership check | High — reachable by any project contributor (or an agent) via an ordinary comment, no special access or timing required | Medium — discloses comment excerpt + project name to an outsider's inbox (not account takeover), plus a username-enumeration/spam primitive | **Medium** | Fixed |
 
 ## Countermeasures applied in this change
 

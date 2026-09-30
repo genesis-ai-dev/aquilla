@@ -4422,6 +4422,7 @@ export const ms: Catalog = {
   "knowledgeBase.status.pending": "Sedang mengindeks…",
   "knowledgeBase.status.ready": "Telah diindeks",
   "knowledgeBase.status.failed": "Pengindeksan gagal",
+  "knowledgeBase.status.stalled": "Pengindeksan terhenti",
   "knowledgeBase.open": "Lihat dokumen",
   "knowledgeBase.openOriginal": "Buka dokumen asal",
   "knowledgeBase.reindex": "Cuba indeks semula",

@@ -207,7 +207,7 @@ describe("translate over a count-governed key", () => {
   })
 
   it("never renders a raw key for any base key, at any count, in any locale", () => {
-    for (const locale of ["en", "th", "my", "ms", "ar"]) {
+    for (const locale of ["en", "th", "my", "ms", "ar", "ru"]) {
       for (const k of Object.keys(en) as (keyof typeof en)[]) {
         for (const count of [0, 1, 2, 3, 11]) {
           const out = translate({}, k, { count, total: count }, locale)

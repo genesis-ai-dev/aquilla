@@ -33,6 +33,41 @@ export type KnowledgeScope =
   | { kind: "project"; id: string }
   | { kind: "org"; id: number }
 
+/**
+ * AQU-1376: how long a doc may sit at `pending` before we call it stalled.
+ *
+ * Indexing is a fire-and-forget `waitUntil` job in auth-worker; nothing revisits
+ * the row afterwards. If the worker is evicted mid-job — or the compensating
+ * `index_status = 'failed'` write is itself what failed — the row stays
+ * `pending` forever, and "Indexing…" becomes a lie no reload will correct. Past
+ * this window the job cannot still be running, so the read side says so and
+ * offers a retry instead.
+ *
+ * Deliberately well above the worker's own enrichment ceiling
+ * (`KB_INDEX_FETCH_TIMEOUT_MS`, 60s, in
+ * auth-worker/src/lib/knowledge/index-doc.ts) so a job still inside its budget
+ * is never flagged: a real run either finishes or self-aborts long before this.
+ * Keep the two in step if either moves.
+ */
+export const KB_INDEX_STALE_MS = 5 * 60_000
+
+/**
+ * True when `doc` is pending but too old for its job to still be alive. Only
+ * `pending` can stall — `ready` and `failed` are terminal, and `failed` already
+ * has its own badge and retry.
+ */
+export function isKnowledgeIndexStalled(
+  doc: Pick<KnowledgeDocument, "indexStatus" | "updatedAt">,
+  now: number = Date.now(),
+): boolean {
+  if (doc.indexStatus !== "pending") return false
+  const updatedAt = Date.parse(doc.updatedAt)
+  // An unparseable timestamp is a server contract break, not evidence of a
+  // stall — don't offer a retry on a guess.
+  if (Number.isNaN(updatedAt)) return false
+  return now - updatedAt > KB_INDEX_STALE_MS
+}
+
 export class KnowledgeBaseApiError extends Error {
   readonly status: number
 

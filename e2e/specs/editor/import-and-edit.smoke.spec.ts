@@ -18,7 +18,6 @@ test("imported video keeps its authenticated picture and range seeking after rel
   const ws = new Workspace(alice)
   const fixture = path.resolve(__dirname, "../../fixtures/tone-picture.mp4")
   await ws.importMediaFile(fixture)
-  await ws.declineWhisperDownload()
   await ws.openFileBySubstring("tone-picture.mp4")
   await ws.waitForEditor()
   await alice.getByRole("tab", { name: "Media", exact: true }).click()

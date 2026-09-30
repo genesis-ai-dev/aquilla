@@ -211,9 +211,11 @@ export async function resolveFileByBook(
 export async function selectCellPairs(
   db: AquillaDb,
   projectId: string,
-  scope: { fileId: string; range?: RefRange; targetLang?: string },
+  scope: { fileId: string; range?: RefRange; targetLang: string },
 ): Promise<CellPair[]> {
-  const lanePredicate = scope.targetLang === undefined ? "" : " AND t.target_lang = ?"
+  // Lane is required ('' = default lane). This ensures no caller accidentally
+  // pairs source cells from one lane with target rows from ALL lanes.
+  const lanePredicate = " AND t.target_lang = ?"
   const { results } = await db
     .prepare(
       `SELECT s.cell_id, s.canonical_ref, s.sequence_index, s.anchor_cell_id,
@@ -235,9 +237,7 @@ export async function selectCellPairs(
          -- file neither reports nor drafts it.
          AND ${visibleSourceSql('s')}`,
     )
-    .bind(...(scope.targetLang === undefined
-      ? [projectId, scope.fileId]
-      : [scope.targetLang, projectId, scope.fileId]))
+    .bind(scope.targetLang, projectId, scope.fileId)
     .all<PairRow>()
 
   let pairs: CellPair[] = results.map((r) => ({

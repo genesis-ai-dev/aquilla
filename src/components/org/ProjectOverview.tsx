@@ -42,6 +42,7 @@ import {
 } from "@/lib/offline/download"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
@@ -423,11 +424,11 @@ export function ProjectOverview() {
     )
     return [
       "",
-      ...(project?.targetLanes ?? []).filter(
-        (lane) => lane.trim() !== "" && !archived.has(lane.trim().toLowerCase()),
+      ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
+        (lane) => !archived.has(lane.trim().toLowerCase()),
       ),
     ]
-  }, [project?.targetLanes, project?.archivedLanes])
+  }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
   // AQU-656: originals live on `file_source_blobs`, not the plan. The files
   // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
   // PM download gallery is this compact list — only files that have a blob.
@@ -1038,8 +1039,10 @@ export function ProjectOverview() {
    * which only lists lanes that already have progress in them — a lane added
    * this morning has none, and the inspector's "audio is shared by every
    * language" note is exactly as true on the day a second lane is created.
+   * The primary language is the default lane even when it also sits in
+   * targetLanes (AQU-1473).
    */
-  const planLaneCount = (project?.targetLanes?.length ?? 0) + 1
+  const planLaneCount = extraRegistryLanes(project?.targetLanes, project?.targetLanguage).length + 1
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -1084,7 +1087,7 @@ export function ProjectOverview() {
       projectId: id,
       activeFileId: selectedUnitFileId,
       files: (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
-      targetLanes: project?.targetLanes ?? [],
+      targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1101,7 +1104,7 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, project?.files, project?.targetLanes,
-    project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
+    project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
     orgSettings.assignmentMinRole, handleAssigned,
   ])
 
@@ -1999,7 +2002,7 @@ export function ProjectOverview() {
                   lanes={activeProjectLanes}
                   archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
-                  extraLanes={project?.targetLanes ?? []}
+                  extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
                   files={project?.files ?? []}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}

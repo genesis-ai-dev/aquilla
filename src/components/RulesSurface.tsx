@@ -25,6 +25,7 @@ import { OrgRulesPanel } from "@/components/rules/OrgRulesPanel"
 import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
@@ -98,7 +99,7 @@ export function RulesSurface({
 
   // AQU-609: lane scope for PROJECT rules. Named lanes come from the project
   // record; `''` (the default lane) is labeled with the base target language.
-  const projectLanes = project.targetLanes ?? []
+  const projectLanes = extraRegistryLanes(project.targetLanes, project.targetLanguage)
   const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
   const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
   const defaultLaneLabel = defaultLaneRow?.name || project.targetLanguage || undefined

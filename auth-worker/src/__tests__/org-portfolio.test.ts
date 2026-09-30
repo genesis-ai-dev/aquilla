@@ -203,6 +203,49 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
   })
 
+  it("AQU-1473: the primary language stored in targetLanes is the default lane, not a second one", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    // Create writes the primary into both targetLanguage and the complete registry.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "Spanish", targetLanes: ["Spanish", "French"] })).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Spanish', '')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
+    ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; name?: string | null }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "French"])
+    expect(pa.lanes.find((l) => l.lane === "")?.name).toBe("Spanish")
+  })
+
+  })
+
+  it("AQU-1473: a primary stored as a language code still collapses onto the default lane", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "es", targetLanes: ["Spanish"] })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes?: Array<{ lane: string }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes ?? []).toEqual([])
+  })
+
   it("AQU-490: validatedAudioCells counts votes against the threshold, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

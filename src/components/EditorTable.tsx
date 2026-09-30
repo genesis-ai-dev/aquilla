@@ -5290,6 +5290,7 @@ function EditorRow({
       cellId: cell.id,
       ruleId: input.ruleId,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
       void onCellCommitted?.(cell.id)
@@ -5299,7 +5300,7 @@ function EditorRow({
       // didn't persist locally — silent failure is the worst failure mode.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const handleUnwaive = useCallback((ruleId: string) => {
     setOpenRuleId(null)
@@ -5309,6 +5310,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId,
+      ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
       void onCellCommitted?.(cell.id)
@@ -5317,7 +5319,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const sourceRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
@@ -6484,9 +6486,9 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
-  // AQU-490: the audio twin of emitValidationChange above. No lane — a
-  // recording is shared by every target language, so a vote on it is not
-  // per-lane and the wire carries none.
+  // AQU-490: the audio twin of emitValidationChange above. The vote itself is
+  // shared across languages. AQU-1462 stamps the lane the member is in so an
+  // archived lane can refuse it; the default lane omits the tag.
   const emitAudioValidationChange = async (audioId: string, validated: boolean) => {
     const kind = validated ? "cell.audio.validate" : "cell.audio.unvalidate"
     if (!canPerform(kind, project.syncRole?.level ?? null)) {
@@ -6504,6 +6506,7 @@ function EditorRow({
         fileId: cell.fileId,
         cellId: cell.id,
         audioId,
+        ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
@@ -6849,6 +6852,7 @@ function EditorRow({
               voices={audioLens.voices}
               session={audioLens.session}
               username={audioLens.username}
+              targetLang={activeLane || undefined}
               onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
@@ -7637,6 +7641,7 @@ function EditorRow({
                   username={username}
                   disabled={!editable}
                   onTakeSaved={onTakeSaved}
+                  targetLang={activeLane || undefined}
                 />
               )}
 
@@ -7933,6 +7938,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -7958,6 +7964,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -7980,6 +7987,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -8001,6 +8009,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}

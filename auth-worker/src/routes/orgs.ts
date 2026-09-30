@@ -1067,6 +1067,19 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
     : invite.role_level
 
   try {
+    // [Pen test 2026-09-29] Claim the single-use invite (CAS) BEFORE granting
+    // membership so concurrent redeemers can't both be admitted.
+    if (!invite.used_at) {
+      const claim = await c.env.AQUILLA_PG.prepare(
+        `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
+         WHERE token = ? AND used_at IS NULL`,
+      )
+        .bind(user.id, token)
+        .run()
+      if (claim.meta.changes === 0) {
+        return c.json({ error: "Invite already used" }, 410)
+      }
+    }
     await c.env.AQUILLA_PG.prepare(
       `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
@@ -1076,13 +1089,6 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
          granted_at = CURRENT_TIMESTAMP`,
     )
       .bind(invite.org_id, user.id, finalRole, invite.created_by)
-      .run()
-    // Atomic stamp: only the first concurrent redeemer wins.
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
-       WHERE token = ? AND used_at IS NULL`,
-    )
-      .bind(user.id, token)
       .run()
   } catch (err) {
     console.error("[org-invites] accept failed:", err)

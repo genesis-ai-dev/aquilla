@@ -43,12 +43,19 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
  *    Playwright intercepts as a download event, named after the source file.
  *  - A DOCX source artifact is persisted atomically and can be downloaded in
  *    its original structure without a missing-source error.
- *  - Download original (AQU-656) returns the imported USFM bytes; Export source
- *    injects the committed translation into the same file.
+ *  - The three USFM downloads are three different files, and each is the side it
+ *    claims to be: Download original (AQU-656) is the imported bytes, the export
+ *    dialog's primary action is the translation round-trip, and Export source
+ *    (AQU-1449) is the curated SOURCE with no translation in it.
  *
  * What this does NOT cover:
- *  - USFM/PPTX reconstructed round-trips other than the original-vs-injected
- *    identity check below (need extra fixtures + server code path).
+ *  - USFM/PPTX reconstructed round-trips other than the three-way side identity
+ *    check below (need extra fixtures + server code path).
+ *  - The source overlay's edit / hide / add matrix. That is server-side plan +
+ *    serializer behaviour with no second layer in it, and lives against a real
+ *    Postgres in `sync-worker/src/__tests__/export-route-source-side.test.ts`.
+ *    What crosses layers here — and is the lie worth a browser — is a menu item
+ *    that promises the source and hands over the target.
  *  - Format conversions (covered by export-format-switch.smoke.spec.ts).
  *  - Project-scope zip (different code path; covered by manual verification).
  */
@@ -125,7 +132,7 @@ test("DOCX import records its source and downloads the original structure", asyn
   await expect(dialog.getByText(/Downloaded roundtrip-source\.docx/i)).toBeVisible()
 })
 
-test("Download original returns imported USFM bytes, not the translation-injected export", async ({ alice }) => {
+test("each USFM download is the side it claims: original bytes, translation round-trip, curated source", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Original USFM ${Date.now()}`
@@ -153,12 +160,33 @@ test("Download original returns imported USFM bytes, not the translation-injecte
   expect(originalText).toContain("In the beginning God created the heavens and the earth.")
   expect(originalText).not.toContain(marker)
 
+  // The export dialog's primary action is the TARGET side: the committed
+  // translation injected into the same file. Unchanged by AQU-1449.
+  await ws.openExportDialog()
+  const dialog = alice.getByRole("dialog")
+  const primary = dialog.getByRole("button", { name: /^Download sample\.usfm$/i })
+  await expect(primary).toBeVisible()
+  const [injectedDownload] = await Promise.all([
+    alice.waitForEvent("download", { timeout: 15_000 }),
+    primary.click(),
+  ])
+  const injectedPath = await injectedDownload.path()
+  expect(injectedPath).not.toBeNull()
+  expect(await readFile(injectedPath!, "utf8")).toContain(marker)
+  await alice.keyboard.press("Escape")
+  await expect(dialog).not.toBeVisible()
+
+  // AQU-1449: "Export source" is the SOURCE side. The verse above is translated,
+  // so a file carrying that translation is the target side under the wrong name —
+  // which is exactly what this menu item used to return.
   const [sourceDownload] = await Promise.all([
     alice.waitForEvent("download", { timeout: 15_000 }),
     ws.clickExportSource(),
   ])
   const sourcePath = await sourceDownload.path()
   expect(sourcePath).not.toBeNull()
-  const injected = await readFile(sourcePath!, "utf8")
-  expect(injected).toContain(marker)
+  const curatedSource = await readFile(sourcePath!, "utf8")
+  expect(curatedSource).not.toContain(marker)
+  // Nobody edited this verse's source, so it comes back as the upload wrote it.
+  expect(curatedSource).toContain("In the beginning God created the heavens and the earth.")
 })

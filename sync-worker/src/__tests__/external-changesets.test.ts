@@ -673,6 +673,56 @@ describe('changesets — target-language lanes', () => {
     expect(body.error.message).toContain('UpdateProjectSettings')
   })
 
+  it('rejects a SetTranslation naming an archived lane, and still accepts a sibling (AQU-1462)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es', 'fr'])
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, archived_at)
+       VALUES ('eslane01', $1, 'target', 'Spanish', 'es', now())`,
+      [PROJECT],
+    )
+    await tdb.pg.query(
+      `UPDATE project_settings
+          SET settings = jsonb_set(settings::jsonb, '{archivedLanes}', '["es"]'::jsonb)
+        WHERE project_id = $1`,
+      [PROJECT],
+    )
+
+    const archived = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    expect(archived.res.status).toBe(400)
+    expect(archived.body.error.code).toBe('validation_failed')
+    expect(archived.body.error.message).toContain("lane 'Spanish' is archived")
+
+    const sibling = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'bonjour', laneId: 'fr' },
+    ])
+    expect(sibling.res.status).toBe(200)
+  })
+
+  it('refuses a changeset that was staged before the lane was archived (AQU-1462)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es'])
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    expect(prep.changeset.id).toBeTruthy()
+
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, archived_at)
+       VALUES ('eslane01', $1, 'target', 'Spanish', 'es', now())`,
+      [PROJECT],
+    )
+    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string; message: string; details?: unknown } }
+    expect(body.error.code).toBe('permission_denied')
+    expect(JSON.stringify(body)).toContain("lane 'Spanish' is archived")
+  })
+
   it('does not echo an ungranted lane in the unregistered-lane error', async () => {
     const env = { ...makeEnv(tdb.db), LANE_READ_WALL: '1' }
     const token = await credToken(tdb, contributorCred())

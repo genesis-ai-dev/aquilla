@@ -562,18 +562,18 @@ export const projectSettings = defineNamespace({
       "empty to allow anyone who meets the minimum role above.",
 
     // ── DecaySettingsSection.tsx ──
-    "projectSettings.decay.summary": "Retrieval support",
+    "projectSettings.decay.summary": "Health",
     "projectSettings.decay.description":
-      "This support signal measures proximity to approved neighboring cells in the " +
+      "This health signal measures proximity to approved neighboring cells in the " +
       "retrieval graph. It can prioritize review, but it is not a translation-quality " +
       "score and never removes the human-review requirement.",
     "projectSettings.decay.maxHopsLabel": "Max hops",
     "projectSettings.decay.maxHopsDescription":
-      "Propagation radius from approved cells. Larger values let support ripple " +
+      "Propagation radius from approved cells. Larger values let health ripple " +
       "further through the retrieval graph. Default {defaultValue}.",
     "projectSettings.decay.attentionThresholdLabel": "Attention threshold",
     "projectSettings.decay.attentionThresholdDescription":
-      "Low support beyond this threshold shows the cell's review-priority marker " +
+      "Low health beyond this threshold shows the cell's review-priority marker " +
       "(0–1). Default {defaultValue}.",
 
     // ── AudioMediaStrategySection.tsx ──
@@ -1280,13 +1280,13 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.decay.maxHopsDescription": {
-        description: "Help text under the 'Max hops' input on the Retrieval support (decay) panel.",
+        description: "Help text under the 'Max hops' input on the Health (decay) panel.",
         placeholders: {
           defaultValue: "The default max-hops value as a plain number (data), e.g. '4'.",
         },
       },
       "projectSettings.decay.attentionThresholdDescription": {
-        description: "Help text under the 'Attention threshold' input on the Retrieval support (decay) panel.",
+        description: "Help text under the 'Attention threshold' input on the Health (decay) panel.",
         placeholders: {
           defaultValue: "The default threshold value as a plain number (data), e.g. '0.4'.",
         },

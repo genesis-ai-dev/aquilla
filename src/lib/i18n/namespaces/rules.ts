@@ -165,10 +165,22 @@ export const rules = defineNamespace({
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
-    "rules.surface.laneFilterAriaLabel": "Filter rules by lane",
-    "rules.surface.laneFilter.all": "All rules",
-    "rules.surface.laneFilter.projectWide": "Project-wide",
-    "rules.surface.laneFilterNoMatches": "No rules match this filter.",
+    "rules.surface.laneScope.ariaLabel": "Lane scope",
+    "rules.surface.laneScope.viewingLabel": "Viewing lane",
+    "rules.surface.laneScope.chooseLaneAriaLabel": "Viewing lane: {lane}. Choose another lane",
+    "rules.surface.laneScope.explainer":
+      "Rules marked All lanes, org rules and built-in checks apply in every lane. Rules marked This lane apply only in {lane}.",
+    "rules.surface.laneScope.sharedWithEditor": "Switching lanes here also switches the editor.",
+    "rules.surface.laneScope.badgeAll": "All lanes",
+    "rules.surface.laneScope.badgeThis": "This lane: {lane}",
+    "rules.surface.laneScope.badgeOther": "Other lane: {lane}",
+    "rules.surface.laneScope.notAppliedHere": "Not applied in {lane}.",
+    "rules.surface.laneScope.showOtherLanes": plural({
+      one: "Show {count} rule from other lanes",
+      other: "Show {count} rules from other lanes",
+    }),
+    "rules.surface.laneScope.hideOtherLanes": "Hide rules from other lanes",
+    "rules.surface.laneScope.noRulesInLane": "No project rules apply in {lane}.",
     "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
     "rules.surface.addOrgRuleButton": "Add Org Rule",
     // "Read-only" permission badge → common.readOnly (identical text)
@@ -263,6 +275,8 @@ export const rules = defineNamespace({
     "rules.editor.laneLabel": "Applies to",
     "rules.editor.lane.allLanes": "All lanes",
     "rules.editor.lane.defaultLane": "Default lane",
+    "rules.editor.lane.summaryAll": "This rule will apply in every lane.",
+    "rules.editor.lane.summaryOne": "This rule will apply only in {lane}. Other lanes ignore it.",
     "rules.editor.severityLabel": "Severity",
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
@@ -585,9 +599,41 @@ export const rules = defineNamespace({
           calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
         },
       },
-      "rules.surface.laneFilterAriaLabel": {
+      "rules.surface.laneScope.ariaLabel": {
+        description: "Accessible name of the lane-scope panel at the top of the Rules page (multi-lane projects).",
+      },
+      "rules.surface.laneScope.chooseLaneAriaLabel": {
+        description: "Accessible label of the button that opens the lane chooser on the Rules page.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.notAppliedHere": {
+        description: "Note under a rule that belongs to another lane, shown when rules from other lanes are revealed.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.showOtherLanes": {
+        description: "Button on the Project Rules card that reveals rules belonging to lanes other than the one being viewed.",
+        placeholders: { count: "How many rules belong to other lanes." },
+      },
+      "rules.surface.laneScope.noRulesInLane": {
+        description: "Shown in the Project Rules card when no project rule applies in the lane being viewed.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.editor.lane.summaryOne": {
+        description: "Line beside the Save button of the rule editor when the rule is limited to one lane.",
+        placeholders: { lane: "The name of the lane the rule will apply in." },
+      },
+      "rules.surface.laneScope.explainer": {
         description:
-          "Accessible label for the lane-filter dropdown on the Project Rules card (multi-lane projects). Filters the listed rules by target-language lane.",
+          "Scope panel at the top of the Rules page (multi-lane projects). \"All lanes\" and \"This lane\" must match the badge texts rules.surface.laneScope.badgeAll / badgeThis.",
+        placeholders: { lane: "The name of the lane being viewed, e.g. \"French\"." },
+      },
+      "rules.surface.laneScope.badgeThis": {
+        description: "Badge on a rule that applies only in the lane being viewed.",
+        placeholders: { lane: "The lane name." },
+      },
+      "rules.surface.laneScope.badgeOther": {
+        description: "Badge on a rule that applies only in a different lane from the one being viewed.",
+        placeholders: { lane: "The name of the rule's own lane." },
       },
       "rules.surface.orgRulesCardTitle": {
         description: "Card heading for the org-scoped rules list.",

@@ -138,12 +138,17 @@ interface LivingMemoryPageProps {
   project?: ProjectRecord | null
   refreshProject?: () => void
   projectSettings?: UseProjectSettings
+  /** AQU-1509: the editor's active lane, shared with the Rules section. */
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function LivingMemoryPage({
   project: workspaceProject,
   refreshProject: workspaceRefreshProject,
   projectSettings: workspaceProjectSettings,
+  activeLane,
+  onActiveLaneChange,
 }: LivingMemoryPageProps = {}) {
   const { locale } = useI18n()
   const t = useT()
@@ -432,6 +437,8 @@ export function LivingMemoryPage({
                   refreshProject={refreshProject}
                   patchSettings={patchSettings}
                   roleLevel={roleLevel}
+                  activeLane={activeLane}
+                  onActiveLaneChange={onActiveLaneChange}
                 />
               </section>
             ) : null}

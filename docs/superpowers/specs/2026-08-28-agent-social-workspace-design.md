@@ -314,13 +314,26 @@ qualifying events in a discourse file with no active/recent reaction run),
 then START a contextual run `initiatedBy: "reaction"` anchored at the
 affected cells, seeded with an auto-steering direction naming the trigger
 ("Reacting to N human edits in <refs>; scope qa → verify and report, do not
-redraft unless a check fails"). Premise from the meeting: "anytime you have
+redraft unless a check fails"). Existing-run etiquette (shipped): a BUSY run
+(running/pausing/waiting) defers the reaction; a PAUSED run is never
+overridden — a person asked for quiet; a PARKED run with remaining work is
+WOKEN with the reaction steering (continuing its own conversation); an
+EXHAUSTED parked run is retired and replaced by a fresh reaction run over the
+file's current state. *(2026-09-30 port onto dev: "parked" and "exhausted" are
+dev's AQU-1300 `park_reason` values — `awaiting_input` is woken after the same
+capped input grant a draft review buys, `work_exhausted` is retired. Signals
+and run states are keyed per (file, lane); the reaction drafts in the lane the
+human edited.)* Premise from the meeting: "anytime you have
 human expert data injected, there are implications of that." Anti-noise: a
 reaction is a THREAD, not notifications — debounce, one open reaction per
 file, cooldown between reactions. Never throw into the cron.
 
-**Next step only**: the start route accepts `spanLimit` (run parks after N
-spans) — the "translate the next passage, then I look" button.
+**Next step only**: *(superseded 2026-09-30)* the planned `spanLimit` was
+dropped in favour of dev's AQU-1300 trust gate, which already starts every
+run at one passage and parks it `awaiting_input`. The Team's "Next passage"
+button continues a run parked awaiting input, restarts a failed or stopped
+one (a fresh start is already one passage), and is absent on finished,
+work-exhausted, or running runs.
 
 **UI**: mode control (switches + presets + graph) in the Team surface header,
 gated by an `agentModes` experimental flag; reaction conversations badge in

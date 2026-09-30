@@ -163,7 +163,6 @@ export const th: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "ร่างทั้งหมด",
   "nav.workspaceActions.batchValidate.label": "ตรวจสอบเป็นชุด…",
   "nav.workspaceActions.batchValidate.title": "ตรวจสอบเป็นชุด",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"การดำเนินการนี้จะทำเครื่องหมายเซลล์ที่มนุษย์เขียนหรือแก้ไขซึ่งมีสิทธิ์ว่าผ่านการตรวจสอบแล้วในชื่อของคุณ ร่างจาก AI ที่ยังไม่ถูกแก้ไขจะไม่รวมอยู่ด้วยและยังต้องตรวจทานเป็นรายฉบับ ({unvalidated} เซลล์ยังไม่ผ่านการตรวจสอบในขณะนี้)"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" สูงสุด {cap} เซลล์ที่มีสิทธิ์จะถูกตรวจสอบต่อครั้ง (ขนาดชุดของโปรเจกต์) เรียกใช้อีกครั้งเพื่อดำเนินการต่อ"},"countVar":"cap"},
   "nav.workspaceActions.export": "ส่งออก",
   "nav.workspaceActions.importIntoFile": "นำเข้าฉบับแปลเข้าไฟล์นี้",

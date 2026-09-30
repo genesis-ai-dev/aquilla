@@ -129,21 +129,29 @@ export const nav = defineNamespace({
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
     }),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
-    "nav.workspaceActions.batchValidate.description": plural(
+    // AQU-1507: the old `…batchValidate.description` promised the file's whole
+    // unvalidated count — untranslated cells, untouched AI drafts and cells
+    // already signed off by the reader included — while the run validates only
+    // what `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: these
+    // two keys state what THIS run will do, and the skipped cells are named by
+    // the shared `editor.batchValidate.skip.*` clauses after them.
+    "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cell is currently unvalidated.)",
+          "This validates {count} eligible cell under your name — human-authored " +
+          "or human-edited text you have not signed off yet.",
         other:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cells are currently unvalidated.)",
+          "This validates {count} eligible cells under your name — human-authored " +
+          "or human-edited text you have not signed off yet.",
       },
-      "unvalidated",
+      "count",
     ),
-    // Optional trailing clause (AQU-586 per-run cap), concatenated after the
-    // description above — same composition as moreAfterThis.
+    "nav.workspaceActions.batchValidate.nothingToValidate":
+      "Nothing in this file can be batch-validated right now.",
+    // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
+    // confirmation body built from the two keys above — same composition as
+    // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
         one:
@@ -769,22 +777,33 @@ export const nav = defineNamespace({
         description: "Heading of the confirmation dialog for the action above.",
         maxLength: 24,
       },
-      "nav.workspaceActions.batchValidate.description": {
+      "nav.workspaceActions.batchValidate.willValidate": {
         description:
-          "Body of the confirmation dialog above. nav.workspaceActions." +
-          "batchValidate.capNote (if the project caps per-run batch size) is " +
-          "concatenated directly after this string with no added space — end this " +
-          "string with its own closing parenthesis and no trailing space.",
+          "First sentence of the confirmation body above, stating how many cells " +
+          "this run will actually sign off — NOT how many the file has left " +
+          "unvalidated (AQU-1507: they differ whenever a cell is untranslated, an " +
+          "untouched AI draft, outside the reader's assignment, or already theirs). " +
+          "A skipped-cells clause and then batchValidate.capNote are concatenated " +
+          "after it, each with its own leading space, so end this string with a " +
+          "period and no trailing space.",
         placeholders: {
-          unvalidated: "How many cells in the file are not yet validated.",
+          count: "How many cells this run will validate. Selects the plural form.",
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.nothingToValidate": {
+        description:
+          "Stands in for willValidate when the run would validate nothing at all, " +
+          "so the dialog never opens with a promise it cannot keep. Neutral, not " +
+          "an error — the reasons follow in the skipped clause after it. Ends with " +
+          "a period and no trailing space.",
+        maxLength: 160,
+      },
       "nav.workspaceActions.batchValidate.capNote": {
         description:
-          "Optional clause appended after nav.workspaceActions.batchValidate." +
-          "description (see that key's note) when the project caps how many " +
-          "cells one batch-validate run processes. Leading space is intentional.",
+          "Optional clause appended last in that confirmation body when the " +
+          "project caps how many cells one batch-validate run processes. Leading " +
+          "space is intentional.",
         placeholders: {
           cap: "The project's configured per-run validation cap.",
         },

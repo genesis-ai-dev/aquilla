@@ -9011,6 +9011,24 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
+  /**
+   * AQU-1507: the eligibility split for the OPEN file, computed exactly as
+   * `runBatchValidate` computes it, so the confirmation dialog promises the
+   * number the run will deliver. Lazy on purpose — it walks every cell, and the
+   * dialog it feeds is opened far less often than this context is rebuilt.
+   */
+  const batchValidateSummary = useCallback(() => summarizeBatchValidate(
+    project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+    {
+      username: currentUsername,
+      myScopes,
+      activeLane,
+      cap: project?.completionSettings?.validationBatchSize,
+      canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
+      hasTarget: Boolean(project?.id && activeFileId),
+    },
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -9019,7 +9037,8 @@ export function ProjectWorkspace() {
     // The registry reads one shape; the two halves are counted apart only
     // because they read different maps (see validatableTakes above).
     audioCounts: { ...audioCounts, validatableTakes },
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes])
+    batchValidateSummary,
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -9104,29 +9123,21 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       // AQU-1503: this handler used to bail on FOUR branches with a bare
       // `return` and raise no toast on any path, success included. The
-      // confirmation dialog counts every unvalidated cell in the file, while
+      // confirmation dialog counted every unvalidated cell in the file, while
       // the run below drops untouched AI drafts, out-of-scope cells and cells
       // already signed off by this reader — so a file whose unvalidated cells
-      // are all AI drafts promised "12 cells" and then did nothing at all: no
+      // were all AI drafts promised "12 cells" and then did nothing at all: no
       // events, no error, and no telemetry to prove the click had happened.
       //
       // Every branch now ends in a visible message and one PostHog event.
       // `summarizeBatchValidate` owns the eligibility split so this path and
       // the selection toolbar's button report the same counts in the same
       // words (lib/review/batch-validate-summary.ts).
-      const candidates = project?.id && activeFileId
-        ? cellSummaries.filter((c) => c.fileId === activeFileId)
-        : []
-      const summary = summarizeBatchValidate(candidates, {
-        username: currentUsername,
-        myScopes,
-        activeLane,
-        // AQU-586: cap how many eligible cells one batch-validate processes.
-        // 0/undefined = validate all eligible (unchanged default behavior).
-        cap: project?.completionSettings?.validationBatchSize,
-        canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
-        hasTarget: Boolean(project?.id && activeFileId),
-      })
+      //
+      // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
+      // so the number the dialog promised is by construction the number this
+      // loop validates — the divergence was the rest of the reported bug.
+      const summary = batchValidateSummary()
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -9333,7 +9344,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate, batchValidateSummary])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -13891,7 +13902,7 @@ export function ProjectWorkspace() {
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t)}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}

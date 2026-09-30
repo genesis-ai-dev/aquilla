@@ -163,7 +163,6 @@ export const zh_Hant: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "全部草擬",
   "nav.workspaceActions.batchValidate.label": "批次驗證…",
   "nav.workspaceActions.batchValidate.title": "批次驗證",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"這會以您的名義將符合條件的人工撰寫或人工編輯的單元格標記為已驗證。未經修改的 AI 草稿不包含在內，仍需逐一審閱。（目前有 {unvalidated} 個單元格尚未驗證。）"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" 每次執行最多驗證 {cap} 個符合條件的單元格（依專案批次大小）；請再次執行以繼續。"},"countVar":"cap"},
   "nav.workspaceActions.export": "匯出",
   "nav.workspaceActions.importIntoFile": "將目標語言譯文匯入此檔案",

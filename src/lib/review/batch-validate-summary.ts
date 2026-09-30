@@ -217,13 +217,20 @@ export function batchValidateSkipClauses(
   summary: BatchValidateSummary,
   t: Translate,
   clauseOrder: readonly BatchValidateSkipReason[] = BATCH_VALIDATE_SKIP_REASONS,
+  /**
+   * AQU-1507: false where the surface explains the per-run cap in its own
+   * words. The confirmation dialog does — it carries the cap note, which says
+   * the same thing and says why — and a clause repeating it there would read as
+   * two different facts about the same cells.
+   */
+  includeCappedOut = true,
 ): string[] {
   const clauses: string[] = []
   for (const reason of clauseOrder) {
     const count = summary.skips[reason]
     if (count > 0) clauses.push(t(SKIP_MESSAGE_KEY[reason], { count }))
   }
-  if (summary.cappedOut > 0) {
+  if (includeCappedOut && summary.cappedOut > 0) {
     clauses.push(t("editor.batchValidate.skip.cappedOut", { count: summary.cappedOut }))
   }
   return clauses
@@ -287,4 +294,77 @@ export function batchValidateToast(
         title: t("editor.selection.validatedToast", { count: summary.validatable.length }),
       }
   }
+}
+
+/**
+ * AQU-1507: the confirmation body for the "Batch validate text…" workspace
+ * action, built from the SAME summary the run consumes.
+ *
+ * The dialog used to promise the file's unvalidated count (`total - validated`,
+ * straight off file progress) while the run filtered with
+ * `isBulkValidatableByMe`. On the reported file that read "83 cells are
+ * currently unvalidated" and then validated zero, because 79 cells were
+ * untranslated and the remaining 4 were untouched AI drafts. Both numbers were
+ * honest about different questions; only one of them is the question a
+ * confirmation dialog is asking.
+ *
+ * So the dialog now states what THIS run will do and names everything it will
+ * leave alone, using the same clauses as the toast. The invariant that makes
+ * the two numbers checkable:
+ *
+ *     validatable.length + skippedTotal + cappedOut === candidates.length
+ *
+ * `cap` is passed separately from the summary because the cap NOTE has to
+ * appear whenever the project configures a cap — explaining why a second run
+ * may be needed — even on a run the cap happens not to trim.
+ */
+export function batchValidateConfirmDescription(
+  summary: BatchValidateSummary,
+  t: Translate,
+  joinList: JoinList,
+  cap?: number | null,
+): string {
+  // The dead-end outcomes borrow the toast's wording rather than mint a second
+  // phrasing for "your role cannot do this" in the nav namespace.
+  switch (summary.outcome) {
+    case "no-target":
+      return t("editor.batchValidate.noTarget")
+    case "no-permission":
+      return t("editor.batchValidate.noPermission")
+    case "no-candidates":
+      return t("editor.batchValidate.noCandidates")
+    default:
+      break
+  }
+
+  // Cells the CAP held back are left out of this clause and accounted for by
+  // the cap note below instead — they are deferred, not skipped, and the note
+  // is where the dialog explains that running again picks them up.
+  const clauses = batchValidateSkipClauses(summary, t, BATCH_VALIDATE_SKIP_REASONS, false)
+  const skippedClause =
+    clauses.length > 0
+      // `skippedSummary` is a toast description and ends without punctuation;
+      // here it is a sentence in the middle of a paragraph, so it is terminated
+      // on composition rather than by duplicating the string with a period.
+      ? " " + t("editor.batchValidate.skippedSummary", {
+        count: summary.skippedTotal,
+        reasons: joinList(clauses),
+      }) + "."
+      : ""
+
+  if (summary.outcome === "nothing-eligible") {
+    // No cap note here: a cap that trims nothing from an empty eligible set is
+    // not why this run will do nothing, and saying so would read as the reason.
+    return t("nav.workspaceActions.batchValidate.nothingToValidate") + skippedClause
+  }
+
+  const capNote =
+    typeof cap === "number" && cap > 0
+      ? t("nav.workspaceActions.batchValidate.capNote", { cap })
+      : ""
+  return (
+    t("nav.workspaceActions.batchValidate.willValidate", { count: summary.validatable.length })
+    + skippedClause
+    + capNote
+  )
 }

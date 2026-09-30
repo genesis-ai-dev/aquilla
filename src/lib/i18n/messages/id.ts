@@ -183,7 +183,6 @@ export const id: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "Buat draf semua",
   "nav.workspaceActions.batchValidate.label": "Validasi massal…",
   "nav.workspaceActions.batchValidate.title": "Validasi massal",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"Ini menandai sel yang memenuhi syarat — yang ditulis atau diedit manusia — sebagai tervalidasi atas nama Anda. Draf AI yang belum disentuh dikecualikan dan tetap perlu ditinjau satu per satu. ({unvalidated} sel saat ini belum tervalidasi.)"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" Maksimal {cap} sel yang memenuhi syarat divalidasi per proses (ukuran batch proyek); jalankan lagi untuk melanjutkan."},"countVar":"cap"},
   "nav.workspaceActions.export": "Ekspor",
   "nav.workspaceActions.importIntoFile": "Impor terjemahan target ke file ini",

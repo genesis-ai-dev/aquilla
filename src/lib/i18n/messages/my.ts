@@ -163,7 +163,6 @@ export const my: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "အားလုံး မူကြမ်းဆွဲရန်",
   "nav.workspaceActions.batchValidate.label": "အစုလိုက် စိစစ်ရန်…",
   "nav.workspaceActions.batchValidate.title": "အစုလိုက် စိစစ်ခြင်း",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"ဤလုပ်ဆောင်ချက်သည် သင့်အမည်ဖြင့် ဖြည့်စွက်နိုင်သော လူဖြင့်ရေးသား သို့မဟုတ် လူတည်းဖြတ်ထားသည့် ဆဲလ်များကို စိစစ်ပြီးအဖြစ် အမှတ်အသားပြုပေးပါမည်။ မထိတွေ့ရသေးသော AI မူကြမ်းများ ပါဝင်မည်မဟုတ်ဘဲ တစ်ခုချင်းစိစစ်ရန် လိုအပ်ဆဲဖြစ်သည်။ (လောလောဆယ် ဆဲလ် {unvalidated} ခု စိစစ်ရန်ကျန်နေပါသည်။)"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" အကြိမ်တိုင်းတွင် အရည်အချင်းပြည့်ဆဲလ် {cap} ခုသာ အများဆုံး စိစစ်ပေးမည် (ပရောဂျက်၏ အစုအရွယ်အစား)။ ဆက်လက်လုပ်ဆောင်ရန် နောက်တစ်ကြိမ် ထပ်မံလုပ်ဆောင်ပါ။"},"countVar":"cap"},
   "nav.workspaceActions.export": "ထုတ်ယူရန်",
   "nav.workspaceActions.importIntoFile": "ဘာသာပြန်စာသားများကို ဤဖိုင်သို့ တင်သွင်းရန်",

@@ -180,7 +180,6 @@ export const ms: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "Draf Semua",
   "nav.workspaceActions.batchValidate.label": "Sahkan Berkumpulan…",
   "nav.workspaceActions.batchValidate.title": "Sahkan Berkumpulan",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"Ini menandakan sel yang layak, ditulis atau disunting oleh manusia, sebagai disahkan di bawah nama anda. Draf AI yang tidak disentuh dikecualikan dan masih memerlukan semakan individu. ({unvalidated} sel kini belum disahkan.)"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" Paling banyak {cap} sel layak disahkan setiap larian (saiz pakej projek); jalankan semula untuk teruskan."},"countVar":"cap"},
   "nav.workspaceActions.export": "Eksport",
   "nav.workspaceActions.importIntoFile": "Import terjemahan sasaran ke dalam fail ini",

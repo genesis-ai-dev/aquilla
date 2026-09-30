@@ -17,6 +17,17 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+import { toast } from "@/components/ui/toast"
+import posthog from "@/lib/posthog"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+
+// AQU-1503: posthog-js is never init'd under happy-dom, so the real module's
+// `capture` is not a spyable property. Stub the app's wrapper instead — these
+// tests care that the batch-validate event FIRES, which is precisely what the
+// surface could not previously prove.
+vi.mock("@/lib/posthog", () => ({
+  default: { capture: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
+}))
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
@@ -408,6 +419,85 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
 
     expect(emitCellValidate).not.toHaveBeenCalled()
     expect(onValidationCommitted).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-1503 — the bulk validate must SAY what it did, including what it left
+ * alone. The old loop reported exactly one class of skip ("already
+ * validated"); an untouched AI draft, an out-of-scope cell or an unsaved edit
+ * dropped out of the count with nothing said, so a user who selected five
+ * cells and watched two change had no way to learn why.
+ */
+describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", () => {
+  function renderFor(cells: CellData[], myScopes: MemberScope[] = []) {
+    return renderBar(makeProject(ROLE.CONTRIBUTOR), cells, myScopes, "", {
+      onValidationCommitted: vi.fn(),
+    })
+  }
+
+  it("validates the eligible cells and names EVERY reason the rest were skipped", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
+      new Set(["ok-1", "ok-2", "draft", "empty", "mine"]),
+    )
+    renderFor([
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "empty", translated: "" }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(2)
+    const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
+    expect(description).toMatch(/untouched AI draft/i)
+    expect(description).toMatch(/still needs? a translation/i)
+    expect(description).toMatch(/already validated/i)
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("says nothing extra when every selected cell was validated", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1"]))
+    renderFor([makeCell({ id: "ok-1", translated: "bonjour" })])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    const call = added.mock.calls.at(-1)?.[0]
+    expect(call?.type).toBe("success")
+    expect(call?.description).toBeUndefined()
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("reports every attempt to PostHog with its cell count and outcome", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const captured = vi.mocked(posthog.capture)
+    captured.mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "draft"]))
+    renderFor([
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    // The surface used to emit NOTHING of its own, which is why the original
+    // repro could only be argued from an absence of events.
+    const batch = captured.mock.calls.find(([name]) => name === BATCH_VALIDATE_ATTEMPTED)
+    expect(batch?.[1]).toMatchObject({
+      source: "selection",
+      outcome: "partial",
+      validated_count: 1,
+      skipped_ai_draft: 1,
+    })
     vi.restoreAllMocks()
   })
 })

@@ -97,3 +97,18 @@ export const OUTBOX_QUARANTINED = "outbox record quarantined"
  * mirror), not on the runtime remap that still covers unread copies.
  */
 export const OMNIVOICE_VOICES_MIGRATED = "omnivoice voices migrated"
+
+// ── Batch text validation (AQU-1503) ──────────────────────────────────────
+
+/**
+ * A bulk text-validation was ATTEMPTED — from the selection toolbar's
+ * "Validate text" button or the "Batch validate text…" workspace action.
+ *
+ * Fires on EVERY attempt, including the ones that validate nothing. That is
+ * the whole point: the surface used to bail silently on four branches, and the
+ * only way the 2026-09-30 repro could be characterised at all was by the
+ * *absence* of events, which cannot distinguish "the click did nothing" from
+ * "nobody clicked". Properties carry the cell count and an outcome class
+ * (`batchValidateTelemetry` in lib/review/batch-validate-summary.ts).
+ */
+export const BATCH_VALIDATE_ATTEMPTED = "batch validate attempted"

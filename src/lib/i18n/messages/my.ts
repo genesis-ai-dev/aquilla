@@ -4423,6 +4423,7 @@ export const my: Catalog = {
   "knowledgeBase.status.pending": "အညွှန်းပြုစုနေသည်…",
   "knowledgeBase.status.ready": "အညွှန်းပြုစုပြီး",
   "knowledgeBase.status.failed": "အညွှန်းပြုစုမှု မအောင်မြင်ပါ",
+  "knowledgeBase.status.stalled": "အညွှန်းပြုစုမှု ရပ်တန့်နေသည်",
   "knowledgeBase.open": "စာရွက်စာတမ်း ကြည့်ရန်",
   "knowledgeBase.openOriginal": "မူရင်းကို ဖွင့်ရန်",
   "knowledgeBase.reindex": "အညွှန်းပြန်ပြုစုရန်",

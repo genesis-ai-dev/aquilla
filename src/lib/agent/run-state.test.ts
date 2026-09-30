@@ -73,6 +73,19 @@ describe("reduceRunFrame", () => {
     })
   })
 
+  // AQU-1468: a failed read that asks "which file?" keeps its candidates.
+  it("keeps file candidates on a failed tool item", () => {
+    const candidates = [
+      { id: "f1", name: "Practice_Notes" },
+      { id: "f2", name: "Practice1_Come_Before_God_Today" },
+    ]
+    const run = fold([
+      { type: "code_start", step: 1, kind: "read", summary: "practice · all" },
+      { type: "code_result", step: 1, ok: false, summary: "error: ...", data: { candidates } },
+    ])
+    expect(run.items[0]).toMatchObject({ kind: "tool", ok: false, data: { candidates } })
+  })
+
   it("places proposals in the timeline where they arrived and exposes them via proposalsOf", () => {
     const proposal = { proposalId: "p1", runId: "r1", events: [], summary: "Draft 2 cells" }
     const run = fold([

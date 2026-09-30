@@ -17,7 +17,7 @@ import {
   type CellPair,
   type RefRange,
 } from "./select-cells"
-import type { PassageRow, ToolOutcome } from "./types"
+import type { FileCandidate, PassageRow, ToolOutcome } from "./types"
 
 export interface ReadArgs {
   fileId?: unknown
@@ -134,6 +134,14 @@ function groupDocuments(files: FileRow[]): FileRow[] {
   return out
 }
 
+/** AQU-1468: the files an ask-the-user error offers, as the client's buttons. */
+function toCandidates(files: FileRow[]): FileCandidate[] {
+  return files.map((f) => ({ id: f.id, name: f.name }))
+}
+
+/** A scope failure; `candidates` is set when the agent must ask which file. */
+export type ScopeFailure = { ok: false; error: string; candidates?: FileCandidate[] }
+
 function describeFiles(files: FileRow[]): string {
   return files.map((f) => `"${f.name}" (id ${f.id})`).join(", ")
 }
@@ -149,7 +157,7 @@ async function resolveFileByName(
   db: AquillaDb,
   projectId: string,
   query: string,
-): Promise<{ ok: true; fileId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; fileId: string } | ScopeFailure> {
   const documents = groupDocuments(await listCandidateFiles(db, projectId))
   if (documents.length === 0) return { ok: false, error: "this project has no files yet" }
   const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !NAME_NOISE.has(w))
@@ -176,12 +184,14 @@ async function resolveFileByName(
       return {
         ok: false,
         error: `"${query}" matches more than one file — ASK THE USER which one, quoting these exact names, and stop. Matches: ${describeFiles(hits)}`,
+        candidates: toCandidates(hits),
       }
     }
   }
   return {
     ok: false,
     error: `no file in this project is named like "${query}". The project's files are: ${describeFiles(documents)}. Ask the user which one they mean; do NOT guess a book code.`,
+    candidates: toCandidates(documents),
   }
 }
 
@@ -194,7 +204,7 @@ async function resolveFileByName(
 async function resolveUnfocusedScope(
   db: AquillaDb,
   projectId: string,
-): Promise<{ ok: true; fileId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; fileId: string } | ScopeFailure> {
   const files = await listCandidateFiles(db, projectId)
   if (files.length === 0) return { ok: false, error: "this project has no files yet" }
   const documents = groupDocuments(files)
@@ -204,6 +214,7 @@ async function resolveUnfocusedScope(
     error:
       "no file is open and this request does not name one — ASK THE USER which file to work in and stop; do NOT pick one yourself, and do NOT try a book code the project may not contain. Files: " +
       describeFiles(documents),
+    candidates: toCandidates(documents),
   }
 }
 
@@ -212,7 +223,7 @@ export async function resolveScope(
   db: AquillaDb,
   args: { fileId?: unknown; ref?: unknown },
   ctx: ReadContext,
-): Promise<{ ok: true; fileId: string; range?: RefRange; notice?: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; fileId: string; range?: RefRange; notice?: string } | ScopeFailure> {
   let range: RefRange | undefined
   let refUnparseable = false
   if (args.ref !== undefined) {
@@ -284,6 +295,7 @@ export async function resolveScope(
           `no file with book code ${range.book} in this project. Files: ${describeFiles(documents)}.` +
           (codes.length > 0 ? ` Book codes in this project: ${codes.join(", ")}.` : " These files record no book code.") +
           " ASK THE USER which file they mean, or omit ref and pass that file's name or id to work through it in order.",
+        candidates: toCandidates(documents),
       }
     }
     fileId = file.id
@@ -344,7 +356,13 @@ export function pairToRow(pair: CellPair, fileId: string): PassageRow {
 
 export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContext): Promise<ToolOutcome> {
   const scope = await resolveScope(db, args, ctx)
-  if (!scope.ok) return { ok: false, text: `error: ${scope.error}` }
+  if (!scope.ok) {
+    return {
+      ok: false,
+      text: `error: ${scope.error}`,
+      ...(scope.candidates ? { data: { candidates: scope.candidates } } : {}),
+    }
+  }
 
   const filter = typeof args.filter === "string" ? args.filter : "all"
   if (!FILTERS.has(filter)) {

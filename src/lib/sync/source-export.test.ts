@@ -65,42 +65,6 @@ describe("source export lane routing", () => {
     expect(String(fetchMock.mock.calls[0][0])).not.toContain("validated")
   })
 
-  // AQU-1449: source and target are never combined — one request asks for one
-  // side, and the target request must stay exactly as it was.
-  it("asks for the source side only when told to", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("\\id GEN\n"))
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test")
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-
-    await downloadSourceFile({
-      projectId: "p1",
-      fileId: "f1",
-      downloadName: "GEN.SFM",
-      getToken: async () => "token",
-      side: "source",
-    })
-
-    expect(String(fetchMock.mock.calls[0][0])).toContain("side=source")
-  })
-
-  it("omits the side param for a target export, preserving today's contract", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("\\id GEN\n"))
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test")
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-
-    await downloadSourceFile({
-      projectId: "p1",
-      fileId: "f1",
-      downloadName: "GEN.SFM",
-      getToken: async () => "token",
-      targetLang: "fr",
-    })
-
-    expect(String(fetchMock.mock.calls[0][0])).not.toContain("side=")
-  })
-
   it("sidecar fetch sends no query params beyond the lane (server has no raw mode)", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

@@ -86,7 +86,14 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked, createProjectLane, renameProjectLane, setProjectLaneArchived } from "@/lib/sync/project-settings"
+import {
+  resolveTimingLocked,
+  createProjectLane,
+  renameProjectLane,
+  setProjectLaneArchived,
+  fetchLaneLastChange,
+  type LaneLastChangeResult,
+} from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
@@ -463,6 +470,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     await refreshSharedSettings()
     return true
   }, [session?.jwt, id, refreshSharedSettings])
+
+  // AQU-1464: the archive confirmation asks when the lane was last translated in.
+  // No session or project id means we genuinely cannot answer — report that as an
+  // error so the dialog says "unavailable" instead of implying the lane is idle.
+  const loadLaneLastChange = useCallback(
+    async (laneId: string): Promise<LaneLastChangeResult> => {
+      const jwt = session?.jwt
+      if (!jwt || !id) return { kind: "error", message: "no session" }
+      return fetchLaneLastChange(jwt, id, laneId)
+    },
+    [session?.jwt, id],
+  )
   const {
     metrics: postEditMetrics,
     isLoading: metricsLoading,
@@ -1832,6 +1851,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
+            onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
           />
         )}
 

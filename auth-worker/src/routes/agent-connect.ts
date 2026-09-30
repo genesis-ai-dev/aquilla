@@ -13,7 +13,6 @@ import { countRecentEvents, recordAuthEvent, ipIdentifier, userIdentifier } from
 const routes = new Hono<AuthHonoEnv>()
 const CLIENT_ID = "aquilla-agent"
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
-const TOKEN_SECONDS = 30 * 24 * 60 * 60
 const codeSchema = z.string().regex(/^[A-Z2-9]{4}-?[A-Z2-9]{4}$/)
 const startSchema = z.object({
   client_id: z.literal(CLIENT_ID),
@@ -66,7 +65,7 @@ routes.get("/", (c) => c.json({
   token_endpoint: "token",
   grant_types_supported: [GRANT_TYPE],
   scopes_supported: ["ask", "act"],
-  instructions: "POST client_id, agent_name, optional project_id and scope (default ask) as JSON or form data to device_authorization. Keep device_code private. Show verification_uri_complete and user_code to the human. They must confirm the code and approve in their browser; never approve for them. Poll token with client_id, grant_type and device_code at interval seconds. On slow_down add 5 seconds. Stop on access_denied or expired_token. If your polling stops early (for example a tool timeout), keep device_code and wait: after approving, the human pastes you a message saying so, and one token request then returns the credential right away. Store access_token in your credential store, never chat or logs. Use it as a Bearer token with the existing Agent API or MCP transport.",
+  instructions: "Send a descriptive User-Agent header on every request; some HTTP libraries' default user agents are blocked. POST client_id, agent_name, optional project_id and scope (default ask) as JSON or form data to device_authorization. Keep device_code private. Show verification_uri_complete and user_code to the human. They must confirm the code and approve in their browser; never approve for them. Poll token with client_id, grant_type and device_code at interval seconds. On slow_down add 5 seconds. Stop on access_denied or expired_token. If your polling stops early (for example a tool timeout), keep device_code and wait: after approving, the human pastes you a message saying so, and one token request then returns the credential right away. Store access_token in your credential store, never chat or logs. It does not expire; it works until the human revokes it in Aquilla. Register it once as a persistent remote MCP server in your own client config (Bearer header, owner-only file) so every future session can use it, or use it as a Bearer token with the Agent API.",
 }))
 routes.post("/device_authorization", async (c) => {
   const parsed = startSchema.safeParse(await body(c.req.raw))
@@ -117,8 +116,7 @@ routes.post("/request", authMiddleware, async (c) => {
   ).bind(await sha256Hex(normalizeCode(parsed.data.user_code))).first<Grant>()
   if (!row) return c.json({ error: "expired_token" }, 400)
   return c.json({ agentName: row.agent_name, mode: row.mode,
-    requestedProjectId: row.requested_project_id, expiresAt: row.expires_at,
-    tokenExpiresIn: TOKEN_SECONDS })
+    requestedProjectId: row.requested_project_id, expiresAt: row.expires_at })
 })
 
 routes.post("/decision", authMiddleware, async (c) => {
@@ -222,6 +220,8 @@ routes.post("/token", async (c) => {
   const minted = await mintApiToken()
   const id = crypto.randomUUID()
   // Consume and mint in ONE Postgres statement. Failure rolls back both.
+  // No expires_at: the credential lasts until revoked on the API tokens page
+  // (which shows last_used_at), so an agent's MCP setup never silently breaks.
   const credential = await c.env.AQUILLA_PG.prepare(
     `WITH claimed AS (
        UPDATE agent_authorizations SET status = 'consumed'
@@ -229,12 +229,12 @@ routes.post("/token", async (c) => {
        RETURNING user_id, agent_name, mode, org_id, project_id
      ) INSERT INTO api_credentials
        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at)
-       SELECT ?, user_id, agent_name, ?, ?, mode, org_id, project_id,
-         now() + interval '30 days' FROM claimed RETURNING id`,
+       SELECT ?, user_id, agent_name, ?, ?, mode, org_id, project_id, NULL
+       FROM claimed RETURNING id`,
   ).bind(hash, id, minted.tokenPrefix, minted.tokenHash).first()
   if (!credential) return c.json({ error: "expired_token" }, 400)
   return c.json({ access_token: minted.token, token_type: "Bearer",
-    expires_in: TOKEN_SECONDS, scope: grant.mode, project_id: grant.project_id,
+    scope: grant.mode, project_id: grant.project_id,
     org_id: grant.org_id, credential_id: id })
 })
 export default routes

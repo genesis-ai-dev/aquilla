@@ -3094,7 +3094,7 @@ export const id: Catalog = {
   "onboarding.connect.unverified": "Nama ini disediakan oleh agen dan tidak terverifikasi. Setujui hanya permintaan yang baru saja Anda mulai.",
   "onboarding.connect.ask": "Membaca data proyek dan menyiapkan perubahan. Menerapkan perubahan memerlukan persetujuan Anda secara terpisah.",
   "onboarding.connect.act": "Membaca data proyek dan menerapkan perubahan langsung, tanpa persetujuan lebih lanjut.",
-  "onboarding.connect.expiry": "Akses kedaluwarsa setelah 30 hari. Anda dapat mencabutnya dari Token API kapan saja.",
+  "onboarding.connect.expiry": "Akses tidak kedaluwarsa. Anda dapat melihat kapan terakhir digunakan dan mencabutnya dari Token API kapan saja.",
   "onboarding.connect.project": "Proyek",
   "onboarding.connect.choose": "Pilih sebuah proyek",
   "onboarding.connect.noProjects": "Anda tidak punya akses yang diperlukan ke proyek mana pun yang tersedia.",

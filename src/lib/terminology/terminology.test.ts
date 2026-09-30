@@ -96,6 +96,38 @@ describe("compileConceptsToRules", () => {
     expect(targetPatterns.some((p) => p.includes("specter"))).toBe(true)
   })
 
+  // AQU-764: the flag-vs-auto-replace question the team could not answer from
+  // anywhere. The answer is documented in docs/UI-GLOSSARY.md "Terminology
+  // enforcement — flag, never auto-replace"; these guard it.
+  it("flags rather than rewrites: no compiled terminology rule carries an autofix", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "aliento", status: "admitted" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    expect(rules.length).toBeGreaterThan(0)
+    for (const rule of rules) {
+      expect(rule.autofix).toBeUndefined()
+    }
+  })
+
+  it("grades a missing approved rendering minor and a forbidden rendering major", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    const approvedRule = rules.find((r) => r.check.type === "source-requires-target")
+    const forbiddenRule = rules.find((r) => r.check.type === "target-forbids")
+    expect(approvedRule?.severity).toBe("minor")
+    expect(forbiddenRule?.severity).toBe("major")
+  })
+
   it("violation detected: preferred rendering missing from target (source contains term)", () => {
     // Verify the compiled rules produce the expected check shape so the rule-engine
     // will flag the violation (rule-engine itself has its own tests).

@@ -38,6 +38,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  probeMediaDurationMs,
   importEBible,
   importObs,
   importHelloao,
@@ -64,6 +65,9 @@ import {
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
+import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
+import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
+import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
@@ -1102,6 +1106,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  const [mediaReview, setMediaReview] = useState<{
+    id: string
+    mediaName: string
+    durationMs?: number
+    sources: MediaTextSourceOption[]
+  } | null>(null)
+  const mediaReviewResolver = useRef<((source: MediaTextSource | undefined | null) => void) | null>(null)
   // AQU-823: per-file Drive provenance (normalized name → origin), set by the
   // gdrive variant just before handleFiles and stamped into importManifest.
   const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
@@ -1110,7 +1121,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     refs: FileReference[]
     skipped?: { book: string; reason: string }[]
   } | null>(null)
-  useEffect(() => () => parseAbortRef.current?.abort(), [])
+  useEffect(() => () => {
+    parseAbortRef.current?.abort()
+    mediaReviewResolver.current?.(null)
+    mediaReviewResolver.current = null
+  }, [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1188,7 +1203,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       }
 
       // Parse text files client-side for the preview.
-      const allParsedResults: ImportResult[] = []
       const preparedByFile = new Map<File, PreparedImportFile>()
       if (textFiles.length > 0 && onPreview) {
         parseAbortRef.current?.abort()
@@ -1214,7 +1228,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               excludeFrontMatter,
             })
             preparedByFile.set(file, prepared)
-            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
           if (parseController.signal.aborted) return
@@ -1235,9 +1248,34 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         setImporting(false)
         setPhase("")
 
+        const reviewed = await reviewMediaCompanions(list, async file => {
+          const prepared = preparedByFile.get(file)
+          const format = detectFileType(file.name)
+          if (!prepared || (format !== "vtt" && format !== "srt" && format !== "sbv")) {
+            throw new Error(t("importExport.upload.parseFailed"))
+          }
+          return {
+            cues: prepared.results.flatMap(result => result.strings),
+            artifact: { name: file.name, format,
+              bytes: prepared.results[0]?.rawBytes ?? await file.arrayBuffer() },
+          }
+        }, async (media, sources) => {
+          const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+          return new Promise(resolve => {
+            mediaReviewResolver.current = resolve
+            setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
+          })
+        })
+        if (reviewed === null) return
+        const remainingResults = reviewed.files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+        if (remainingResults.length === 0 && reviewed.sources.size > 0) {
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
+          return
+        }
+
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
-        onPreview(allParsedResults, async (options) => {
+        onPreview(remainingResults, async (options) => {
           if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
             for (const [file, prepared] of preparedByFile) {
               preparedByFile.set(file, {
@@ -1251,7 +1289,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               })
             }
           }
-          await doCommit(list, preparedByFile, reimportFileIds)
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
         })
         return
       }
@@ -1269,6 +1307,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       list: File[],
       preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
       reimportFileIds?: ReadonlyMap<string, string>,
+      mediaSources?: ReadonlyMap<File, MediaTextSource>,
     ) => {
       setImporting(true)
       setProgress(null)
@@ -1341,6 +1380,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
@@ -1472,6 +1512,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
   // AQU-823: Google Drive variant — same panel state machine (importing,
   // progress, error, Paratext choice above), different file source.
+  if (mediaReview) {
+    const finishReview = (source: MediaTextSource | undefined | null) => {
+      const resolve = mediaReviewResolver.current
+      mediaReviewResolver.current = null
+      setMediaReview(null)
+      resolve?.(source)
+    }
+    return <MediaImportPreviewDialog key={mediaReview.id}
+      mediaName={mediaReview.mediaName} sources={mediaReview.sources}
+      durationMs={mediaReview.durationMs}
+      onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
+  }
   if (variant === "gdrive" && !importing) {
     return (
       <div>

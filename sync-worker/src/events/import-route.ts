@@ -39,6 +39,7 @@ import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } f
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
+import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -173,6 +174,7 @@ interface ImportAudioAttachment {
   trimStartMs?: number
   trimEndMs?: number
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
+  transcription?: string
 }
 
 interface ImportBody {
@@ -201,6 +203,8 @@ interface ImportBody {
   publishEventId?: string
   /** Media metadata persisted atomically with the reveal event. */
   attachments?: ImportAudioAttachment[]
+  /** Attach a staged hidden caption file to this parent media timeline. */
+  trackPublication?: ImportedTrackPublication
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -352,6 +356,36 @@ export async function handleBulkImportRequest(
       : `user:${auth.claims.userId}`
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
 
+  if (body.trackPublication !== undefined) {
+    if (!body.complete || body.file || body.cells.length || body.targets?.length
+      || body.attachments?.length || !body.publishEventId) {
+      return withCors(new Response('text track publication requires an empty completion request', {
+        status: 400,
+      }), request)
+    }
+    try {
+      const result = await publishImportedTrack(db, {
+        projectId: body.projectId, fileId: body.fileId, author,
+        role: auth.claims.role, clientTs, publishEventId: body.publishEventId,
+        publication: body.trackPublication,
+      })
+      if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
+      if (env.ProjectSync) {
+        const notify = notifyProjectDoFileProgressChanged(
+          env, body.projectId, body.fileId, true,
+        ).catch(err => console.warn('[import] track publication notify failed:', err))
+        if (ctx) ctx.waitUntil(notify)
+        else await notify
+      }
+      return withCors(Response.json({ accepted: 0, fileId: body.fileId }), request)
+    } catch (err) {
+      console.error('[import] text track publication failed:', err)
+      return withCors(Response.json({ error: 'Text track publication failed' }, {
+        status: 500,
+      }), request)
+    }
+  }
+
   // The browser sends this empty, authenticated marker only after every
   // concurrent data chunk has settled. Source chunks intentionally perform no
   // full-file scans; finalize all derived counters exactly once here. The
@@ -390,6 +424,8 @@ export async function handleBulkImportRequest(
           || !optionalFiniteNonNegative(attachment.trimStartMs)
           || !optionalFiniteNonNegative(attachment.trimEndMs)
           || !validImportTimings(attachment.timings)
+          || (attachment.transcription !== undefined &&
+            (typeof attachment.transcription !== 'string' || attachment.slot !== 'recording'))
           || (
             attachment.trimStartMs !== undefined
             && attachment.trimEndMs !== undefined
@@ -418,6 +454,7 @@ export async function handleBulkImportRequest(
             ...(attachment.trimStartMs !== undefined ? { trimStartMs: attachment.trimStartMs } : {}),
             ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
             ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
+            ...(attachment.transcription !== undefined ? { transcription: attachment.transcription } : {}),
           },
           clientTs,
           serverTs: eventTs++,

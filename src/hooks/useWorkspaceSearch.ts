@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchProjectSearch, fetchParallelPassages } from "@/lib/sync/search-read"
 import type { ParallelPassageResult, SearchResult } from "@/lib/sync/search-read-types"
 import type { MatchField } from "@/lib/search/workspace-index"
-import { isAudioCueFile, type FileReference } from "@/lib/parsers/types"
+import { isHiddenTimelineFile, type FileReference } from "@/lib/parsers/types"
 
 export type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -73,7 +73,7 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
 function audioCueFileIds(files: FileReference[] | undefined): ReadonlySet<string> {
   const ids = new Set<string>()
   for (const f of files ?? []) {
-    if (isAudioCueFile(f)) ids.add(f.id)
+    if (isHiddenTimelineFile(f)) ids.add(f.id)
   }
   return ids
 }

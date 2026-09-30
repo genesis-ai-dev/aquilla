@@ -62,7 +62,7 @@ import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { isAudioCueFile, type ProjectRecord } from "@/lib/parsers/types"
+import { isHiddenTimelineFile, type ProjectRecord } from "@/lib/parsers/types"
 
 interface GlossaryEditorProps {
   /** Workspace-authoritative files include optimistic imports before the
@@ -137,7 +137,7 @@ export function GlossaryEditor({
   // terms" would otherwise mine as if it were translatable text.
   const projectFiles = useMemo(
     () =>
-      (workspaceFiles ?? (project?.files ?? []).filter((f) => !isAudioCueFile(f)))
+      (workspaceFiles ?? (project?.files ?? []).filter((f) => !isHiddenTimelineFile(f)))
         .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files, workspaceFiles],
   )

@@ -860,6 +860,7 @@ export interface FileTrackSetInput {
     /** Which track's cells an added track's chips line up with. Set once, at
      *  creation; the server refuses it on a reserved (derived) track id. */
     sourceTrackId?: string | null
+    contentFileId?: string | null
   } | null
   author: string
   clientTs?: number

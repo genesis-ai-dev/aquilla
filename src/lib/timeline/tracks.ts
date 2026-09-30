@@ -88,6 +88,8 @@ export interface TimelineTrack {
    *  on added tracks only: a derived row's alignment comes from the file, so
    *  there is nothing here to override. */
   sourceTrackId?: string | null
+  /** Hidden cue file owned by this timeline. Each text track has its own content. */
+  contentFileId?: string
 }
 
 /**
@@ -115,6 +117,7 @@ export interface PersistedTrackPatch {
    *  newer client that wrote it still sees what it meant. */
   color?: string
   sourceTrackId?: string
+  contentFileId?: string
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
@@ -383,6 +386,8 @@ export function mergeTrackOverrides(
       // track anyone will recolour.
       const color = overrideString(patch.color)
       if (color !== null) target.color = color
+      const contentFileId = overrideContentFileId(patch.contentFileId)
+      if (contentFileId !== undefined) target.contentFileId = contentFileId
       continue
     }
     // A reserved id the caller left out of `defaults` stays reserved — a delta
@@ -415,10 +420,17 @@ export function mergeTrackOverrides(
       // exists, it just aligns to nothing, which is exactly how a groupId
       // naming a track this build cannot see already behaves.
       sourceTrackId: overrideString(patch.sourceTrackId) === id ? null : overrideString(patch.sourceTrackId),
+      ...(overrideContentFileId(patch.contentFileId) !== undefined
+        ? { contentFileId: overrideContentFileId(patch.contentFileId) } : {}),
     })
   }
 
   return tracks.sort(compareTracksBySeat(seats, userSeat))
+}
+
+function overrideContentFileId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value)
+    ? value : undefined
 }
 
 /** The tracks to draw for a file: the rows its context derives, patched with

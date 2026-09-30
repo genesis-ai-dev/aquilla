@@ -1775,6 +1775,57 @@ describe("TimelineEditor — rows come from the track model", () => {
 
   const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
 
+  it("renders each caption track's own cells and seeks using their timings", () => {
+    const seek = vi.fn()
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      captions: { kind: "source-subtitles", name: "New captions", contentFileId: "cue-file" },
+      other: { kind: "source-subtitles", name: "Other captions", contentFileId: "other-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      tracks={tracks} onRetimeSubtitle={() => {}} onSeekToTime={seek}
+      textTrackCells={{
+        "cue-file": [cell({ id: "new-cue", original: "Attached wording", startTime: 2, endTime: 5 })],
+        "other-file": [cell({ id: "other-cue", original: "Other wording", startTime: 6, endTime: 8 })],
+      }} />)
+    expect(screen.getByTestId("tl-card-new-cue")).toHaveTextContent("Attached wording")
+    expect(screen.getByTestId("tl-card-other-cue")).toHaveTextContent("Other wording")
+    fireEvent.click(screen.getByTestId("tl-card-new-cue"))
+    expect(seek).toHaveBeenLastCalledWith(2)
+  })
+
+  it("opens caption attachment from Sources", () => {
+    const attach = vi.fn()
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}} onRequestImportCaptions={attach} />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Attach captions" }))
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("never fills a loading caption track with the parent file's wording", () => {
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      "source-subtitles": { contentFileId: "cue-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable
+      cells={[cell({ id: "old-cue", original: "Old wording", startTime: 0, endTime: 5 })]}
+      tracks={tracks} onRetimeSubtitle={() => {}} textTrackCells={{}} />)
+    expect(screen.queryByTestId("tl-card-old-cue")).not.toBeInTheDocument()
+  })
+
+  it("shows a failed caption read and retries the exact content file", () => {
+    const retry = vi.fn()
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      captions: { kind: "source-subtitles", name: "Captions", contentFileId: "cue-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      tracks={tracks} onRetimeSubtitle={() => {}} textTrackCells={{}}
+      textTrackErrors={{ "cue-file": new Error("Captions could not load") }}
+      onRetryTextTrack={retry} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Captions could not load")
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Retry" }))
+    expect(retry).toHaveBeenCalledWith("cue-file")
+  })
+
   // The gutter carries no testid of its own, and must not grow one: this
   // refactor's whole contract is that it renders exactly the DOM the hardcoded
   // rows did. It is the grid column before the scrolling track.

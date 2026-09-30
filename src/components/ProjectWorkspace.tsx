@@ -80,7 +80,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -109,6 +109,9 @@ import {
 } from "./pending-cell-scroll"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
+import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
+import { importTimelineTextTrack } from "@/lib/import/timeline-text"
+import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
@@ -300,6 +303,7 @@ import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
+import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
 // AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
 // several of them depend on which sections are collapsed, and the stored sizes
@@ -709,8 +713,8 @@ export function ProjectWorkspace() {
     // hydratedProject.files`, which is what lets the `project` memo hand the
     // hydrated record straight back instead of respreading it.
     const rawFiles = hydratedProject?.files ?? []
-    const serverFiles = rawFiles.some((f) => isAudioCueFile(f))
-      ? rawFiles.filter((f) => !isAudioCueFile(f))
+    const serverFiles = rawFiles.some((f) => isHiddenTimelineFile(f))
+      ? rawFiles.filter((f) => !isHiddenTimelineFile(f))
       : rawFiles
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
@@ -2807,7 +2811,7 @@ export function ProjectWorkspace() {
       if (!held || f.id > held.id) siblingFor.set(f.anchorFileId, f)
     }
     return all
-      .filter((f) => !isAudioCueFile(f))
+      .filter((f) => !isHiddenTimelineFile(f))
       .map((f) => {
         const sibling = siblingFor.get(f.id)
         return {
@@ -2826,6 +2830,7 @@ export function ProjectWorkspace() {
     siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
+  const timelineTextRefreshRef = useRef<(fileId: string) => void>(() => {})
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
   // chips too, not only the subtitle rows — Sam's original ruling on the lock.
   // Same event the re-import reconcile emits (`cell.retime` against the hidden
@@ -2998,6 +3003,7 @@ export function ProjectWorkspace() {
    *  looks like the matcher did nothing. */
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
+  const [captionDialogFileId, setCaptionDialogFileId] = useState<string | null>(null)
   const [importCharactersOpen, setImportCharactersOpen] = useState(false)
   const [characterCheckOpen, setCharacterCheckOpen] = useState(false)
   /**
@@ -3020,6 +3026,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     closeCueLinkDrawer()
     setCharacterCheckOpen(false)
+    setCaptionDialogFileId(null)
   }, [activeFileId, closeCueLinkDrawer])
   /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
    *  a mode — three at once would be a mess nobody asked for. */
@@ -6584,6 +6591,9 @@ export function ProjectWorkspace() {
           },
           onMessage(msg) {
             if (msg.t === "event.applied") {
+              if (msg.project === pid && msg.file && msg.cell) {
+                timelineTextRefreshRef.current(msg.file)
+              }
               if (msg.file && msg.project === pid && (
                 msg.kind?.startsWith('source.cell.') ||
                 msg.kind?.startsWith('target.cell.') ||
@@ -7966,7 +7976,7 @@ export function ProjectWorkspace() {
     // function's server ids are what reconcile the optimistic rows away, and
     // thinning them there would strand any row it dropped. (`role` arrives
     // nullable off the server read, hence the coalesce.)
-    const isDocument = (f: FileSummary) => !isAudioCueFile({ role: f.role ?? undefined })
+    const isDocument = (f: FileSummary) => !isHiddenTimelineFile({ role: f.role ?? undefined })
     for (const f of deletedFiles) if (isDocument(f)) byId.set(f.fileId, f)
     for (const f of optimisticTrash) {
       if (isDocument(f) && !byId.has(f.fileId)) byId.set(f.fileId, f)
@@ -9536,6 +9546,41 @@ export function ProjectWorkspace() {
     () => deriveTracksForFile(activeFile, trackContext),
     [activeFile, trackContext],
   )
+  const timelineText = useTimelineTextCells({
+    projectId: project?.id ?? null,
+    fileIds: serverTimelineTracks.flatMap(track => track.contentFileId ? [track.contentFileId] : []),
+    getToken: getTokenForFile,
+    enabled: editorFirstPaint && lens === "audio",
+  })
+  timelineTextRefreshRef.current = timelineText.refresh
+  const handleRetimeTextTrack = useCallback(async (
+    contentFileId: string, cellId: string, startSec: number, endSec: number,
+  ) => {
+    if (!project?.id || isReadOnly || timingLocked
+      || !timelineText.cellsByFile[contentFileId]?.some(cell => cell.id === cellId)) return
+    timelineText.patchTiming(contentFileId, cellId, startSec, endSec)
+    try {
+      const eventId = await emitCellRetime({
+        projectId: project.id, fileId: contentFileId, cellId,
+        startMs: Math.round(startSec * 1000), endMs: Math.round(endSec * 1000),
+        author: currentUsername,
+      })
+      let refusal: string | undefined
+      const result = await flushOutboxUntilSettled([eventId], {
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: entries => { refusal = entries.find(entry => entry.id === eventId)?.reason },
+        onForbidden: entries => { refusal = entries.find(entry => entry.id === eventId)?.reason },
+      })
+      if (refusal || !result.settled || result.networkError || result.authError) {
+        throw new Error(refusal ?? "Couldn't save caption timing.")
+      }
+    } catch (cause) {
+      toast.add({ type: "error", title: cause instanceof Error ? cause.message : "Couldn't move that caption." })
+    } finally {
+      timelineText.refresh(contentFileId)
+    }
+  }, [project?.id, isReadOnly, timingLocked, currentUsername, getTokenForProjectFile,
+    timelineText.cellsByFile, timelineText.patchTiming, timelineText.refresh])
   /**
    * A drag the server has not confirmed yet, as `trackId → new order`.
    *
@@ -9611,6 +9656,15 @@ export function ProjectWorkspace() {
   // clearance alone. That split is why the editor takes `onRenameTrack` as its
   // own prop instead of folding it into `trackEditing`.
   const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const captionMediaDurationMs = useMemo(() => {
+    if (videoDurationForTable !== null && videoDurationForTable > 0) return videoDurationForTable * 1000
+    const durations = audioMergedCells.flatMap(cell => {
+      const clip = sourceClipAudioForCell(cell)
+      const duration = clip ? cell.attachments?.[clip.audioId]?.durationMs : undefined
+      return typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? [duration] : []
+    })
+    return durations.length ? Math.max(...durations) : undefined
+  }, [videoDurationForTable, audioMergedCells])
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
@@ -12222,6 +12276,9 @@ export function ProjectWorkspace() {
                     // button above and for the same reason.
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
                     canImportAudioVtt={canManageSources}
+                    onRequestImportCaptions={canManageSources && activeFile
+                      ? () => setCaptionDialogFileId(activeFile.id) : undefined}
+                    canImportCaptions={canEditTracks}
                     // Writes cell metadata rather than creating cells, so it
                     // sits at the contributor floor `cast.assign` requires.
                     onRequestImportCharacters={() => setImportCharactersOpen(true)}
@@ -12252,6 +12309,10 @@ export function ProjectWorkspace() {
                     onScrubStart={handleTimelineScrubStart}
                     onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
+                    textTrackCells={timelineText.cellsByFile}
+                    textTrackErrors={timelineText.errors}
+                    onRetryTextTrack={timelineText.refresh}
+                    onRetimeTextTrack={handleRetimeTextTrack}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
                     // Hidden rather than gated: gating only the callback would
@@ -13386,6 +13447,28 @@ export function ProjectWorkspace() {
           void handleImportAudioVtt(parsed, sourceFileName, timebase)
         }}
       />
+      {captionDialogFileId && activeFile?.id === captionDialogFileId && project && (
+        <ImportTimelineTextDialog key={captionDialogFileId}
+          projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+          tracks={serverTimelineTracks.filter(track =>
+            track.kind === "source-subtitles" || track.kind === "target-subtitles",
+          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
+            segmentCount: track.contentFileId
+              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+              : cellsLoading ? null : cellSummaries.length,
+          }))}
+          onCancel={() => setCaptionDialogFileId(null)}
+          onConfirm={async input => {
+            if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
+            await importTimelineTextTrack({
+              ...input, projectId: project.id, anchorFileId: captionDialogFileId,
+              durationMs: captionMediaDurationMs, getToken: getTokenForFile,
+            })
+            await refresh()
+          }}
+        />
+      )}
       {project && activeFile && (
         <ImportCharactersDialog
           open={importCharactersOpen}

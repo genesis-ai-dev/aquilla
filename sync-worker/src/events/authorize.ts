@@ -403,6 +403,23 @@ export async function authorize<K extends EventKind>(
     }
   }
 
+  // A content reference grants no access to arbitrary project files. The cue
+  // file must be live, hidden timeline content, and owned by this timeline.
+  if (raw.kind === 'file.track.set') {
+    const patch = (raw.payload as RawEvent<'file.track.set'>['payload'])?.patch
+    const contentFileId = patch?.contentFileId
+    // Malformed values still reach the handler's strict shape validation.
+    if (typeof contentFileId === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(contentFileId)) {
+      if (!db) return { ok: false, status: 500, reason: 'track content ownership is unavailable' }
+      const content = await db.prepare(
+        `SELECT id FROM files
+          WHERE id = ? AND project_id = ? AND anchor_file_id = ?
+            AND role = 'timeline-content' AND deleted_at IS NULL`,
+      ).bind(contentFileId, raw.projectId, raw.fileId).first<{ id: string }>()
+      if (!content) return { ok: false, status: 403, reason: 'track content does not belong to this timeline' }
+    }
+  }
+
   // AQU-553: after the role floor passes, apply ADDITIVE lane/file scopes. An
   // absent `scopes` claim is unscoped (skip). Present scopes gate chain-mutating
   // target.* writes + validate/unvalidate; every other kind falls through.

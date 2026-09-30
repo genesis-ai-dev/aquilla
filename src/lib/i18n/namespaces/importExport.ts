@@ -9,6 +9,37 @@ import { defineNamespace, plural } from "./types"
  */
 export const importExport = defineNamespace({
   keys: {
+    "importExport.captionTrack.attach": "Attach captions",
+    "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
+    "importExport.captionTrack.title": "Attach captions to {name}",
+    "importExport.captionTrack.description": "Add captions as a new text track, or explicitly replace the content in an existing track.",
+    "importExport.captionTrack.file": "Caption file",
+    "importExport.captionTrack.destination": "Destination track",
+    "importExport.captionTrack.new": "New caption track",
+    "importExport.captionTrack.name": "Track name",
+    "importExport.captionTrack.overwrite": plural({
+      one: "{count} segment currently in this track will be overwritten.",
+      other: "{count} segments currently in this track will be overwritten.",
+    }),
+    "importExport.captionTrack.consent": "Overwrite the existing content in this track",
+    "importExport.captionTrack.add": "Add caption track",
+    "importExport.captionTrack.replace": "Overwrite caption track",
+    "importExport.captionTrack.invalidFile": "Choose a VTT, SRT, or SBV caption file.",
+    "importExport.captionTrack.saveFailed": "Couldn't save this caption track.",
+    "importExport.mediaPreview.title": "Import {name}",
+    "importExport.mediaPreview.description": "Review wording and timing before importing. Your original files are preserved.",
+    "importExport.mediaPreview.textSource": "Text source",
+    "importExport.mediaPreview.automatic": "Transcribe audio",
+    "importExport.mediaPreview.automaticHint": "Split the audio at pauses. You can choose automatic transcription after import.",
+    "importExport.mediaPreview.segmentCount": plural({ one: "{count} segment", other: "{count} segments" }),
+    "importExport.mediaPreview.needsAttention": plural({ one: "{count} segment needs attention", other: "{count} segments need attention" }),
+    "importExport.mediaPreview.wording": "Segment {number} wording",
+    "importExport.mediaPreview.start": "Segment {number} start (seconds)",
+    "importExport.mediaPreview.end": "Segment {number} end (seconds)",
+    "importExport.mediaPreview.remove": "Remove segment {number}",
+    "importExport.mediaPreview.confidence": "Alignment confidence: {percent}%",
+    "importExport.mediaPreview.empty": "Choose a text source with at least one segment.",
+    "importExport.mediaPreview.continue": "Continue import",
     // — Import result panel (post-import report; also copied to the clipboard
     //   as plain text, so a couple of these keys render outside any markup) —
     "importExport.result.reportImportedCount": plural({

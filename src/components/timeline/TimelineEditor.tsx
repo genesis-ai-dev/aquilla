@@ -251,6 +251,8 @@ export interface TimelineEditorProps {
    *  workspace for the same reason the link-video one does — it owns the upload
    *  and the refresh. Presence renders the control. */
   onRequestImportAudioVtt?(): void
+  onRequestImportCaptions?(): void
+  canImportCaptions?: boolean
   /** AQU-646 stage 6: the character spreadsheet. */
   onRequestImportCharacters?(): void
   canImportCharacters?: boolean
@@ -457,6 +459,11 @@ export interface TimelineEditorProps {
    *  mount) = the three derived defaults, unchanged from what this editor has
    *  always drawn. */
   tracks?: TimelineTrack[]
+  /** Independently imported text belongs to its referenced hidden cue file. */
+  textTrackCells?: Readonly<Record<string, CellData[]>>
+  textTrackErrors?: Readonly<Record<string, Error>>
+  onRetryTextTrack?(fileId: string): void
+  onRetimeTextTrack?(fileId: string, cellId: string, startSec: number, endSec: number): void
   /**
    * AQU-646 stage 3: give one track a new sort key, because the user dragged
    * its name up or down the gutter (or pressed Alt+Arrow on it). The order is
@@ -1013,6 +1020,8 @@ export function TimelineEditor({
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
+  onRequestImportCaptions,
+  canImportCaptions = true,
   onRequestImportCharacters,
   canImportCharacters = false,
   characterCount = 0,
@@ -1056,6 +1065,10 @@ export function TimelineEditor({
   audioByCellId,
   legacyMeasure,
   tracks = DEFAULT_TRACKS,
+  textTrackCells,
+  textTrackErrors,
+  onRetryTextTrack,
+  onRetimeTextTrack,
   onReorderTrack,
   onRenameTrack,
   trackEditing,
@@ -1734,6 +1747,14 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  const independentTextCells = useMemo(
+    () => Object.values(textTrackCells ?? {}).flat(),
+    [textTrackCells],
+  )
+  const independentTextLayout = useMemo(
+    () => buildTimelineLayout("dubbing", independentTextCells, [], null),
+    [independentTextCells],
+  )
   // WHAT KIND OF FILE THIS IS — not what any row draws. Stage 2 killed the band
   // this flag was born for (it was `drawsSourceBand`) and kept every other
   // reader untouched, because not one of them was ever about the band: a VTT
@@ -1980,6 +2001,16 @@ export function TimelineEditor({
         onClick: onRequestImportAudioVtt,
       })
     }
+    if (onRequestImportCaptions) {
+      items.push({
+        id: "caption-track", label: t("importExport.captionTrack.attach"),
+        icon: ClipboardCheck, disabled: !canImportCaptions,
+        badge: canImportCaptions ? undefined : <span className="text-[11px] text-muted-foreground">
+          {t("importExport.captionTrack.enableTracks")}
+        </span>,
+        onClick: onRequestImportCaptions,
+      })
+    }
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
@@ -2009,6 +2040,7 @@ export function TimelineEditor({
   }, [
     onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
+    onRequestImportCaptions, canImportCaptions, t,
     onRequestImportCharacters, canImportCharacters, characterCount, audioCharacterCount,
     charactersWriting,
   ])
@@ -2269,7 +2301,7 @@ export function TimelineEditor({
     return out
   }
 
-  const durationSec = layout.totalSec
+  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
@@ -2312,8 +2344,9 @@ export function TimelineEditor({
     () =>
       cells.find((c) => c.id === currentCellId) ??
       audioCues?.find((c) => c.id === currentCellId) ??
+      independentTextCells.find((c) => c.id === currentCellId) ??
       null,
-    [cells, audioCues, currentCellId],
+    [cells, audioCues, independentTextCells, currentCellId],
   )
   // AQU-646 stage 6: who speaks the current chip, and whether the camera is on
   // them. Resolved HERE because this is the one place that holds both halves —
@@ -3238,6 +3271,12 @@ export function TimelineEditor({
    * slots, and a folder of recorded tracks collapsed to a blank strip.
    */
   function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
+    if (track.contentFileId) {
+      return (textTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
+        const span = independentTextLayout.spanFor(cell, "subtitle")
+        return span ? [{ startSec: span.start, endSec: span.end }] : []
+      })
+    }
     const fromCells = (cellList: readonly CellData[], lane: "subtitle" | "source"): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const cell of cellList) {
@@ -3292,6 +3331,28 @@ export function TimelineEditor({
   // forgot to pass would be a lane that quietly stopped updating.
   function laneForTrack(row: TrackRow): ReactNode {
     const track = row.track
+    if (track.contentFileId && ["source-subtitles", "target-subtitles"].includes(track.kind)) {
+      const contentFileId = track.contentFileId
+      const contentCells = textTrackCells?.[contentFileId] ?? []
+      const error = textTrackErrors?.[contentFileId]
+      if (error) return <div role="alert" className="flex h-[var(--tl-row-h)] items-center gap-3 px-3 text-sm">
+        <span>{error.message}</span>
+        {onRetryTextTrack && <button type="button" className="underline"
+          onClick={() => onRetryTextTrack(contentFileId)}>{t("common.retry")}</button>}
+      </div>
+      return <TimelineLane
+        key={track.id} cells={contentCells} variant="subtitle"
+        {...laneProps} layout={independentTextLayout}
+        retimable={!timingLocked && Boolean(onRetimeTextTrack)}
+        onRetime={(cellId, start, end) => onRetimeTextTrack?.(contentFileId, cellId, start, end)}
+        onSeek={cellId => {
+          const cell = contentCells.find(c => c.id === cellId)
+          const start = cell ? independentTextLayout.seekSecFor(cell) : null
+          if (start !== null) seekTo(start)
+        }}
+        snapEnabled={snapOn}
+      />
+    }
     switch (track.kind) {
       case "source-subtitles":
         // SUB-53: a subtitle span is expressed against the original's clock,

@@ -73,6 +73,48 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /** Review companion captions before publishing the media file. */
+  async previewMediaWithCaptions(
+    media: FilePayload,
+    captions: FilePayload,
+  ): Promise<void> {
+    await this.chooseImportFiles([media, captions])
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmMediaPreview(mediaName: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Continue import", exact: true }).click()
+    // Existing sidebar rows cannot prove this import completed.
+    await expect(this.page.getByTestId("shell-dock")
+      .getByRole("button", { name: mediaName, exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await expect(this.page.getByRole("dialog")).toHaveCount(0)
+  }
+
+  sourceAudioClips(): Locator {
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+  }
+
+  async previewCaptionTrack(captions: FilePayload): Promise<void> {
+    await this.page.getByTestId("tl-sources-menu").click()
+    await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmCaptionTrack(overwrite = false): Promise<void> {
+    await this.page.getByRole("button", {
+      name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
+    }).click()
+    await expect(this.page.getByRole("dialog")).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async zoomTimelineIn(): Promise<void> {
+    await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  }
+
   /** Select and commit one translation through the eBible corpus picker. */
   async importEBibleCorpus(translationTitle: string): Promise<void> {
     await this.dismissSetupChecklist()
@@ -185,7 +227,9 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+  private async chooseImportFiles(
+    filePath: string | FilePayload | string[] | FilePayload[],
+  ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text

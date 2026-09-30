@@ -196,6 +196,7 @@ describe('POST /import — server_seq is race-safe', () => {
           durationMs: 1200,
           trimStartMs: 0,
           trimEndMs: 1200,
+          transcription: 'The supplied wording.',
         }],
       }),
     })
@@ -206,6 +207,8 @@ describe('POST /import — server_seq is race-safe', () => {
       body: JSON.stringify({ accepted: 0, fileId: FILE_ID }),
     })
     expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect((await rows<any>('cells')).find(cell => cell.target_lang === ''))
+      .toMatchObject({ transcription: 'The supplied wording.' })
     expect(await rows('cell_audio')).toHaveLength(1)
     expect((await rows<any>('cell_audio'))[0]).toMatchObject({
       cell_id: 'media-cell-1',
@@ -257,7 +260,11 @@ describe('POST /import — server_seq is race-safe', () => {
     expect(await rows('cell_audio')).toHaveLength(0)
   })
 
-  it('rejects malformed media timing metadata before revealing the staged file', async () => {
+  it.each([
+    { timings: [{ word: 'bad', t0: 2, t1: 1, start: 0, end: 3 }] },
+    { transcription: 42 },
+    { slot: 'generatedVoice', transcription: 'Source wording' },
+  ])('rejects malformed media metadata %j before revealing the staged file', async invalidMetadata => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
     expect((await handleBulkImportRequest(new Request('https://worker/import', {
@@ -287,12 +294,13 @@ describe('POST /import — server_seq is race-safe', () => {
           audioId: 'audio-3.wav',
           url: 'frontier-audio://audio-3.wav',
           slot: 'recording',
-          timings: [{ word: 'bad', t0: 2, t1: 1, start: 0, end: 3 }],
+          ...invalidMetadata,
         }],
       }),
     }), makeEnv(db))
 
     expect(response?.status).toBe(400)
+    expect(await response?.text()).toBe('invalid media attachment')
     expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
     expect(await rows('cell_audio')).toHaveLength(0)
   })

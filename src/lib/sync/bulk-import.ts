@@ -15,6 +15,7 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
 import { v7 as uuidv7 } from "uuid"
+import type { ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
   sourceArtifactDescriptor,
   type SourceArtifactFormat,
@@ -156,12 +157,16 @@ export interface StagedAudioAttachment {
   trimStartMs?: number
   trimEndMs?: number
   timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  /** Supplied wording for a source media segment. */
+  transcription?: string
 }
 
 export interface PublishStagedImportArgs {
   projectId: string
   fileId: string
   attachments?: StagedAudioAttachment[]
+  /** Parent-scoped publication of a separate hidden caption file. */
+  trackPublication?: Omit<ImportedTrackPublication, "eventId">
   getToken: (fileId: string) => Promise<string | null>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -324,6 +329,9 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     publishEventId: uuidv7(),
     ...(args.attachments?.length ? {
       attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),
+    } : {}),
+    ...(args.trackPublication ? {
+      trackPublication: { ...args.trackPublication, eventId: uuidv7() },
     } : {}),
     clientTs: Date.now(),
   })

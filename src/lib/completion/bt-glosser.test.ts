@@ -603,3 +603,58 @@ describe("AQU-207 — seeds reach the n-grams the decoder actually consults", ()
     expect(gloss).toContain("the garden")
   })
 })
+
+// ── Pointed scripts (AQU-1190) ───────────────────────────────────────────────
+
+describe("buildGlosser — pointed scripts tokenize at word level (AQU-1190)", () => {
+  // Genesis 1:1, Macula/OSHB pointing. Each word carries its vowels as
+  // combining marks; the old `[\p{L}\p{N}]+` tokenizer cut at every one of
+  // them, so the model's source vocabulary was single consonants.
+  const HEBREW = "בְּרֵאשִׁית בָּרָא אֱלֹהִים"
+  const [BERESHIT, BARA, ELOHIM] = HEBREW.split(" ")
+
+  it("glosses a pointed-Hebrew target one word per word, not one per consonant", () => {
+    const glosser = buildGlosser([
+      { source: "in the beginning", target: BERESHIT },
+      { source: "created", target: BARA },
+      { source: "God", target: ELOHIM },
+    ])
+    // Shredding the target produced a gloss token per consonant — five for
+    // these two words — so the assertion that matters is the exact string.
+    expect(glosser.gloss(`${BARA} ${ELOHIM}`)).toBe("created god")
+  })
+
+  it("keeps a pointed source word whole, so the gloss is a word and not a consonant", () => {
+    // Source-side shredding was the real damage: with the old tokenizer the
+    // model learned "א"/"ל"/"ה" as separate source words, so the gloss for
+    // "Dieu" came back as a bare consonant rather than אֱלֹהִים.
+    const glosser = buildGlosser([
+      { source: HEBREW, target: "Au commencement Dieu créa" },
+      { source: ELOHIM, target: "Dieu" },
+    ])
+    const gloss = glosser.gloss("Dieu")
+    expect(gloss).toBe(ELOHIM)
+    // The fragments the defect produced must not be glossable words.
+    expect(gloss).not.toBe("א")
+    expect(gloss.length).toBeGreaterThan(1)
+  })
+
+  it("passes an unknown pointed word through whole instead of shredding it", () => {
+    // With no corpus the glosser echoes its tokenization, which makes the
+    // token boundaries directly observable.
+    expect(buildGlosser([]).gloss(HEBREW)).toBe(HEBREW.toLowerCase())
+  })
+
+  it("does the same for Arabic, which points its vowels the same way", () => {
+    const BISMILLAH = "بِسْمِ اللَّهِ"
+    expect(buildGlosser([]).gloss(BISMILLAH)).toBe(BISMILLAH.toLowerCase())
+  })
+
+  it("leaves unpointed scripts exactly as before", () => {
+    // Latin, precomposed-accent Greek and CJK were never affected; pin that
+    // the widened class did not change their boundaries either.
+    expect(buildGlosser([]).gloss("In the beginning")).toBe("in the beginning")
+    expect(buildGlosser([]).gloss("Ἐν ἀρχῇ ἦν ὁ λόγος")).toBe("ἐν ἀρχῇ ἦν ὁ λόγος")
+    expect(buildGlosser([]).gloss("起初 神创造")).toBe("起初 神创造")
+  })
+})

@@ -20,6 +20,7 @@ import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../l
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { makeAgentTelemetry } from "../lib/agent/telemetry"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -623,13 +624,24 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     sessionId: body.sessionId ?? null,
   })
 
+  // Telemetry flush outlives the response: hand it to the Worker so the SSE
+  // stream closes without waiting on PostHog. The test harness has no real
+  // ExecutionContext and the getter throws, so fall back to a bare promise.
+  const waitUntil = (p: Promise<unknown>) => {
+    try {
+      c.executionCtx.waitUntil(p)
+    } catch {
+      void p
+    }
+  }
+
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -706,9 +718,29 @@ interface LoopArgs {
   send: (frame: AgentFrame) => void
   /** Weekly-allowance meter; undefined when metering is off. */
   usage?: AgentUsageMeter
+  /** Keeps the telemetry flush alive past the response. */
+  waitUntil?: (p: Promise<unknown>) => void
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage }: LoopArgs): Promise<void> {
+function parseToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(raw || "{}")
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Telemetry lane: a `targetLang`/`lane` string in the call args wins over the
+ *  project's target language. */
+function pickLane(rawArgs: string, projectTarget: string | undefined): string | undefined {
+  const args = parseToolArgs(rawArgs)
+  if (typeof args.targetLang === "string") return args.targetLang
+  if (typeof args.lane === "string") return args.lane
+  return projectTarget
+}
+
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -833,6 +865,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // draft tool's internal model call, and each tool invocation, so the ACU
   // breakdown shows where an agent run's compute actually goes.
   const meter = makeCostMeter(env, env.AQUILLA_PG)
+  // PostHog events (AQU-1467): counts only, one batch POST at the end of the run.
+  const telemetry = makeAgentTelemetry(env, { runId, projectId: body.projectId, userId: user.id, orgId, model })
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
@@ -934,6 +968,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         stepRequestId = admission.requestId
       }
       const turnStartedAt = Date.now()
+      const promptChars = JSON.stringify(convo).length
       let upstream: Response
       try {
         upstream = await fetch(resolveOpenRouterUrl(env), {
@@ -972,6 +1007,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
         })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
+        })
         send({ type: "error", message: `openrouter_error ${upstream.status}: ${text.slice(0, 500)}` })
         status = "error"
         break
@@ -1001,6 +1044,18 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - turnStartedAt,
           ok: turn.usage !== undefined,
         })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          promptTokens: turn.usage?.prompt_tokens ?? 0,
+          completionTokens: turn.usage?.completion_tokens ?? 0,
+          costUsd: turn.usage?.cost ?? 0,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: turn.usage !== undefined,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
+          outputChars: typeof message.content === "string" ? message.content.length : 0,
+        })
       } catch (err) {
         meter.add({
           surface: "agent",
@@ -1011,6 +1066,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           model,
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
+        })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
         })
         send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
@@ -1057,12 +1120,23 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         }
         steps++
         const toolStartedAt = Date.now()
+        // Capture this call's last code_result (ok + data) for telemetry
+        // without touching each tool runner; then forward unchanged.
+        let resultOk: boolean | undefined
+        let resultData: ToolResultData | undefined
+        const callSend = (frame: AgentFrame) => {
+          if (frame.type === "code_result") {
+            resultOk = frame.ok
+            resultData = frame.data
+          }
+          send(frame)
+        }
         const result = await executeToolCall(call, {
           env,
           aliases,
           sqlVars,
           stageCtx,
-          send,
+          send: callSend,
           step: steps,
           signal,
           draft: {
@@ -1092,6 +1166,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
               promptTokens: u.prompt_tokens ?? 0,
               completionTokens: u.completion_tokens ?? 0,
               costCents: (u.cost ?? 0) * 100,
+              ok: true,
+            })
+            telemetry.generation({
+              span: `tool-model:${call.function.name}`,
+              model: draftModel,
+              promptTokens: u.prompt_tokens ?? 0,
+              completionTokens: u.completion_tokens ?? 0,
+              costUsd: u.cost ?? 0,
               ok: true,
             })
           },
@@ -1131,6 +1213,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - toolStartedAt,
           ok: toolOk,
         })
+        telemetry.toolRun({
+          tool: call.function.name,
+          args: parseToolArgs(call.function.arguments),
+          lane: pickLane(call.function.arguments, languages.targetLanguage),
+          ok: resultOk ?? toolOk,
+          data: resultData,
+          resultText: result,
+          latencyMs: Date.now() - toolStartedAt,
+        })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
 
@@ -1160,6 +1251,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   // Drain the cost ledger. After `done` so it never delays the client's frame.
   await meter.flush()
+
+  // Not awaited when the Worker gives us waitUntil: the flush is bounded by a
+  // 3 s timeout and must not hold the stream open. Without it, await.
+  const flushed = telemetry.flush(status)
+  if (waitUntil) waitUntil(flushed)
+  else await flushed
 
   try {
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })

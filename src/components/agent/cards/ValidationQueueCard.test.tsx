@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { v7 as uuidv7 } from "uuid"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 import type { ApplyContext } from "@/lib/agent/apply"
 
@@ -69,6 +70,35 @@ describe("ValidationQueueCard", () => {
     // The second row still awaits its own click.
     expect(screen.getByRole("button", { name: "Validate MRK 4:2" })).toBeInTheDocument()
     expect(screen.getByText("1/2 confirmed")).toBeInTheDocument()
+  })
+
+  // AQU-1069: cells with no canonical ref fall back to a truncated cell id.
+  // Cell ids are UUIDv7, whose LEADING digits are the millisecond clock — so
+  // front-truncating made every cell of one import render the identical "id",
+  // which is what was reported as duplicate cell ids in the agent view.
+  it("labels ref-less rows with cell ids that stay distinct across one import", () => {
+    const cellIds = Array.from({ length: 5 }, () => uuidv7())
+    // Precondition: these really do share a front slice, so the test would
+    // fail against the old behaviour rather than passing for free.
+    expect(new Set(cellIds.map((id) => id.slice(0, 8))).size).toBe(1)
+
+    const refless: AgentProposal = {
+      ...proposal,
+      events: cellIds.map((cellId, i) => ({
+        kind: "cell.validate" as const,
+        fileId: "f1",
+        cellId,
+        payload: { editEventId: `e${i}` },
+        display: { before: `строка ${i}` },
+      })),
+    }
+    render(<ValidationQueueCard proposal={refless} applyContext={ctx} canValidate />)
+
+    const labels = screen.getAllByRole("button", { name: /^Validate / }).map((b) =>
+      b.getAttribute("aria-label")!.replace(/^Validate /, ""),
+    )
+    expect(labels).toHaveLength(cellIds.length)
+    expect(new Set(labels).size).toBe(cellIds.length)
   })
 
   it("disables Validate below the role floor", () => {

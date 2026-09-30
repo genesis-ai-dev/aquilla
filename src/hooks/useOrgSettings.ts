@@ -97,6 +97,12 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+
+// AQU-581: allowScopedLaneAssignment rides the SAME OWNER-only write gate as
+// allowSelfAssignment above (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) — both are
+// the org deciding who may write `assignment.create` below the assignment
+// floor — and shares its safe default of `false`.
+const DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT = false
 const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
 const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
@@ -224,6 +230,15 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-581: effective lane-delegate assignment authority — true when a
+   * lane-scoped member below the assignment floor may create assignments for
+   * OTHER people inside the lanes they are scoped to. Explicit org setting,
+   * or `false` when unset. Server-enforced; see
+   * `resolveAllowScopedLaneAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowScopedLaneAssignment: boolean
+  /**
    * AQU-1083: do chapter headings and section titles count as translatable
    * content in this org's progress numbers? Explicit org setting, or TRUE when
    * unset — which is what every project did before the setting existed, so
@@ -240,6 +255,11 @@ export interface UseOrgSettings {
    * everything, which is why zero suppresses the prompt entirely.
    */
   countStructuralOverrides: number
+  /**
+   * AQU-1391: the org default for repetition auto-propagation. ON unless the
+   * org opts out; a project may still override it in either direction.
+   */
+  autoPropagateRepetitions: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -456,9 +476,20 @@ export function useOrgSettings(
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
   const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
+  // and only an explicit opt-out turns repetition propagation off org-wide.
+  const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
+  // AQU-581: effective lane-delegate assignment authority — explicit org
+  // setting, or false when unset. Rides the SAME OWNER-only write gate as
+  // allowSelfAssignment (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) and shares its
+  // safe default of `false`.
+  const allowScopedLaneAssignment = server?.settings?.allowScopedLaneAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT
 
   const assignmentMinRole = (() => {
     const raw = server?.settings?.assignmentMinRole
@@ -591,8 +622,10 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    allowScopedLaneAssignment,
     countStructuralCells,
     countStructuralOverrides,
+    autoPropagateRepetitions,
     resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,

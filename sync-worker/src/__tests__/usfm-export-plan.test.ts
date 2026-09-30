@@ -16,7 +16,9 @@ const LANE = ""
 
 let t: TestDb
 
-beforeAll(async () => { t = await makeTestDb() })
+beforeAll(async () => {
+  t = await makeTestDb()
+})
 afterAll(async () => { await t.close() })
 beforeEach(async () => { await t.reset() })
 
@@ -28,6 +30,16 @@ async function verse(cellId: string, ref: string, anchor: string | null = null):
     `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, anchor_cell_id, event_id, last_edit_at)
      VALUES ($1, $2, $3, 'source', '', 'source text', $4, $5, $6, 1)`,
     [PROJECT, FILE, cellId, ref, anchor, `head-${cellId}`],
+  )
+}
+
+/** A verse imported CONTENT-ONLY by the Agent API: markers are out of `value`
+ *  and the notes are parked in metadata (AQU-1283). */
+async function contentOnlyVerse(cellId: string, ref: string, metadata: unknown): Promise<void> {
+  await t.pg.query(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, metadata, event_id, last_edit_at)
+     VALUES ($1, $2, $3, 'source', '', 'source text', $4, $5, $6, 1)`,
+    [PROJECT, FILE, cellId, ref, JSON.stringify(metadata), `head-${cellId}`],
   )
 }
 
@@ -45,6 +57,16 @@ async function translation(cellId: string, value: string, lane = LANE, validated
     `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, validated, event_id, last_edit_at)
      VALUES ($1, $2, $3, 'target', $4, $5, $6, $7, 1)`,
     [PROJECT, FILE, cellId, lane, value, validated ? 1 : 0, `tgt-${cellId}-${lane}`],
+  )
+}
+
+/** AQU-1422's "Hide cell": the source row is still there, with `hidden_at`
+ *  stamped. Source side only — hiding is per cell, not per lane. */
+async function hide(cellId: string): Promise<void> {
+  await t.pg.query(
+    `UPDATE cells SET hidden_at = 1
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+    [PROJECT, FILE, cellId],
   )
 }
 
@@ -90,6 +112,93 @@ describe("buildUsfmExportPlan — translations", () => {
 
     const scoped = await buildUsfmExportPlan(t.db, PROJECT, FILE, "fr-CA")
     expect(scoped.overrides.get("GEN 1:4")).toBe("canadien")
+  })
+})
+
+describe("buildUsfmExportPlan — notes parked by a content-only import (AQU-1295)", () => {
+  const FOOTNOTE = {
+    kind: "footnote",
+    caller: "+",
+    ref: "1:4",
+    text: "Или: « Однажды, собрав их… »",
+    raw: "\\f + \\fr 1:4 \\ft Или: « Однажды, собрав их… »\\f*",
+  }
+
+  it("re-attaches a translated verse's notes, so export cannot drop them", async () => {
+    // The whole point of the ticket: substituting the translation replaces the
+    // verse span, notes included, and nothing downstream reads usfmNotes.
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    const { overrides } = await plan()
+    expect(overrides.get("ACT 1:4")).toBe(`Un jour, il leur ordonna. ${FOOTNOTE.raw}`)
+  })
+
+  it("restores the note byte-for-byte from `raw` rather than rebuilding it", async () => {
+    // A file's own \fq/\fk sub-markers are flattened into `text` at import, so
+    // a rebuild is faithful in content but not in bytes. `raw` is why the
+    // importer keeps the original span.
+    const nested = {
+      kind: "footnote",
+      caller: "+",
+      ref: "1:4",
+      text: "wait for the promise",
+      raw: "\\f + \\fr 1:4 \\fk promise \\ft wait for the \\fq promise\\fq*\\f*",
+    }
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [nested] })
+    await translation("c4", "Attendez la promesse.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(`Attendez la promesse. ${nested.raw}`)
+  })
+
+  it("rebuilds a note recorded before `raw` was captured", async () => {
+    // Files imported before this change have records with no raw span. They
+    // must still round-trip — rebuilt from the parsed fields.
+    const { raw: _raw, ...legacy } = FOOTNOTE
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [legacy] })
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(
+      `Un jour, il leur ordonna. \\f + \\fr 1:4 \\ft ${FOOTNOTE.text}\\f*`,
+    )
+  })
+
+  it("keeps several notes on one verse in document order", async () => {
+    const second = { kind: "xref", caller: "-", ref: "1:5", text: "Мк. 1:8", raw: "\\x - \\xo 1:5 \\xt Мк. 1:8\\x*" }
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE, second] })
+    await translation("c4", "Un jour.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe(`Un jour. ${FOOTNOTE.raw} ${second.raw}`)
+  })
+
+  it("leaves an UNTRANSLATED verse alone — its original span already has the notes", async () => {
+    // Re-attaching here would double every note: with no override the
+    // serializer emits the client's own verse text verbatim.
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "")
+
+    expect((await plan()).overrides.size).toBe(0)
+  })
+
+  it("does not duplicate notes a translator already carried across", async () => {
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: [FOOTNOTE] })
+    await translation("c4", "Un jour. \\f + \\fr 1:4 \\ft Note traduite\\f*")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour. \\f + \\fr 1:4 \\ft Note traduite\\f*")
+  })
+
+  it("leaves a lossless (in-app) import untouched — it carries no usfmNotes", async () => {
+    await verse("c4", "ACT 1:4")
+    await translation("c4", "Un jour, il leur ordonna.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour, il leur ordonna.")
+  })
+
+  it("survives metadata that is not a note list rather than failing the export", async () => {
+    await contentOnlyVerse("c4", "ACT 1:4", { usfmNotes: "not-a-list", aquillaOrigin: { kind: "import" } })
+    await translation("c4", "Un jour.")
+
+    expect((await plan()).overrides.get("ACT 1:4")).toBe("Un jour.")
   })
 })
 
@@ -288,5 +397,141 @@ describe("buildUsfmExportPlan — validated-only (AQU-1148)", () => {
     await deleteEvent("c4", { cellId: "c4", value: "x", canonicalRef: "GEN 1:4" })
 
     expect([...((await validatedPlan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+  })
+})
+
+// AQU-1423: a hidden cell is indistinguishable from an untranslated one from
+// here — both simply have no translation to write — so without this the hide is
+// silently undone at export and the parked verse ships in the SOURCE language.
+// That is the bug, and it is invisible: the file is valid and looks finished.
+describe("buildUsfmExportPlan — verses the editor HID (AQU-1423)", () => {
+  it("removes a hidden verse from the file, marker and all", async () => {
+    await verse("c4", "GEN 1:4")
+    await verse("c5", "GEN 1:5")
+    await hide("c4")
+
+    expect([...((await plan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+  })
+
+  it("removes it even when it HAS a translation", async () => {
+    // The dangerous case, and the reason `remove` rather than a blank override:
+    // an absent or empty override is the serializer's "fall back to the
+    // client's original words" signal, so there is no value that means
+    // "emit nothing". The serializer tests `remove` BEFORE the override lookup.
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Traduction terminée.")
+    await hide("c4")
+
+    const { overrides, edits } = await plan()
+    expect([...(edits.remove ?? [])]).toEqual(["GEN 1:4"])
+    // The override may still be present — `remove` wins — but if that ordering
+    // ever changes, this is the assertion that says which one moved.
+    expect(overrides.get("GEN 1:4")).toBe("Traduction terminée.")
+  })
+
+  it("leaves the verses around it alone", async () => {
+    await verse("c4", "GEN 1:4")
+    await verse("c5", "GEN 1:5")
+    await verse("c6", "GEN 1:6")
+    await translation("c5", "Cinq.")
+    await hide("c4")
+    await hide("c6")
+
+    const { overrides, edits } = await plan()
+    expect([...(edits.remove ?? [])].sort()).toEqual(["GEN 1:4", "GEN 1:6"])
+    expect(overrides.get("GEN 1:5")).toBe("Cinq.")
+  })
+
+  it("carries deleted AND hidden verses together", async () => {
+    // Independent lists that mean the same thing to the serializer. A change
+    // that replaced one with the other would silently undo every deletion the
+    // moment anybody hid a cell.
+    await verse("c5", "GEN 1:5")
+    await hide("c5")
+    await deleteEvent("c4", { cellId: "c4", value: "x", canonicalRef: "GEN 1:4" })
+
+    expect([...((await plan()).edits.remove ?? [])].sort()).toEqual(["GEN 1:4", "GEN 1:5"])
+  })
+
+  it("keeps a hidden ADDED cell out of the additions", async () => {
+    // An added cell has no verse address, so there is nothing for `remove` to
+    // drop — nothing else would stop its text being written into the verse it
+    // follows, and it would arrive in the delivered file as finished content.
+    await verse("c4", "GEN 1:4")
+    await addedCell("a1", "c4")
+    await addedCell("a2", "c4")
+    await translation("a1", "Ligne visible.")
+    await translation("a2", "Ligne masquée.")
+    await hide("a2")
+
+    expect((await plan()).edits.appendAfter?.get("GEN 1:4")).toEqual(["Ligne visible."])
+  })
+
+  it("still places an addition that FOLLOWS a hidden added cell", async () => {
+    // The anchor chain walks through the hidden cell to reach the verse. Losing
+    // that would silently drop the visible addition too — a different bug, with
+    // the same symptom (content missing from the export).
+    await verse("c4", "GEN 1:4")
+    await addedCell("a1", "c4")
+    await addedCell("a2", "a1")
+    await translation("a1", "Masquée.")
+    await translation("a2", "Visible.")
+    await hide("a1")
+
+    expect((await plan()).edits.appendAfter?.get("GEN 1:4")).toEqual(["Visible."])
+  })
+
+  it("brings the verse back when the cell is shown again", async () => {
+    // Reversibility is the whole design of "Hide cell", and it has to reach the
+    // delivered file — otherwise a hide is a one-way door in the export.
+    await verse("c4", "GEN 1:4")
+    await hide("c4")
+    expect([...((await plan()).edits.remove ?? [])]).toEqual(["GEN 1:4"])
+
+    await t.pg.query(
+      `UPDATE cells SET hidden_at = NULL
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c4' AND side = 'source'`,
+      [PROJECT, FILE],
+    )
+    expect((await plan()).edits.remove).toBeUndefined()
+  })
+
+  it("leaves a file with nothing hidden exactly as it was", async () => {
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Quatre.")
+
+    const { overrides, edits } = await plan()
+    expect([...overrides]).toEqual([["GEN 1:4", "Quatre."]])
+    expect(edits.remove).toBeUndefined()
+    expect(edits.appendAfter).toBeUndefined()
+  })
+
+  it("does not read a hide off a TARGET row", async () => {
+    // Hiding is per cell, not per lane: the flag lives on the shared source row.
+    // A target row created AFTER a hide carries no flag of its own, so a plan
+    // that consulted target rows would let exactly the row that must stay
+    // parked reappear — and, here, would park a visible one.
+    await verse("c4", "GEN 1:4")
+    await translation("c4", "Quatre.")
+    await t.pg.query(
+      `UPDATE cells SET hidden_at = 1
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c4' AND side = 'target'`,
+      [PROJECT, FILE],
+    )
+
+    const { overrides, edits } = await plan()
+    expect(edits.remove).toBeUndefined()
+    expect(overrides.get("GEN 1:4")).toBe("Quatre.")
+  })
+
+  it("does not reach into another file or project", async () => {
+    await verse("c4", "GEN 1:4")
+    await t.pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, hidden_at, event_id, last_edit_at)
+       VALUES ($1, 'other-file', 'c4', 'source', '', 's', 'GEN 1:4', 1, 'h-other', 1)`,
+      [PROJECT],
+    )
+
+    expect((await plan()).edits.remove).toBeUndefined()
   })
 })

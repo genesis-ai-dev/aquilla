@@ -38,6 +38,17 @@ export const settings = defineNamespace({
     "settings.notifications.section.title": "Notifications",
     "settings.notifications.section.description":
       "Choose when Aquilla emails you about comments.",
+    "settings.transcription.title": "Transcription",
+    "settings.transcription.scope":
+      "This choice applies to your account in this browser.",
+    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hostedDescription":
+      "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
+    "settings.transcription.local": "Local Whisper in this browser",
+    "settings.transcription.localDescription":
+      "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
+    "settings.transcription.capacityExceeded":
+      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
 
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
@@ -65,6 +76,17 @@ export const settings = defineNamespace({
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
 
+    // ── RepetitionPropagationSection (AQU-1391) ──
+    "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "settings.autoPropagateRepetitions.description":
+      "When on, validating a cell copies its translation into every other cell " +
+      "in the same file whose source text is identical. The filled-in cells are " +
+      "left unvalidated so someone still checks them in context. Individual " +
+      "projects can override this.",
+    "settings.autoPropagateRepetitions.saveFailed": "Save failed",
+    "settings.autoPropagateRepetitions.blocked":
+      "Only org maintainers and owners can change this default.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
@@ -76,6 +98,14 @@ export const settings = defineNamespace({
       "for themselves from the assign-work picker — they still can't assign " +
       "work to anyone else. Leads and maintainers can always assign, to " +
       "anyone, regardless of this setting.",
+    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.description":
+      "When on, a member (contributor and above) who has been restricted to " +
+      "specific target languages can assign work to other people — but only " +
+      "within those languages. Give a mentor or coordinator the languages they " +
+      "look after under Members, and they can hand out chapters there without " +
+      "any other admin rights. Members with no language restriction are " +
+      "unaffected by this setting.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",

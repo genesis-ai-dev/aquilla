@@ -131,7 +131,7 @@ describe("RichMessage", () => {
     )
     expect(screen.getByTestId("count").tagName).toBe("SPAN")
     // Singular, because 1 reached plural selection despite not being interpolated.
-    expect(screen.getByTestId("line").textContent).toBe("1 endorsement · support 40%")
+    expect(screen.getByTestId("line").textContent).toBe("1 endorsement · health 40%")
   })
 
   it("still interpolates {count} as text when values does not render it", () => {
@@ -142,6 +142,6 @@ describe("RichMessage", () => {
         </p>
       </I18nProvider>,
     )
-    expect(screen.getByTestId("line").textContent).toBe("2 endorsements · support 40%")
+    expect(screen.getByTestId("line").textContent).toBe("2 endorsements · health 40%")
   })
 })

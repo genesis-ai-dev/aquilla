@@ -64,6 +64,31 @@ export function psalmsVerse(
   )
 }
 
+/**
+ * One paragraph holding the last verse of a chapter and the first of the next,
+ * with the drop cap between them — the straddle that made notes bleed across
+ * the boundary in LAM 1:22 → 2:1 and NEH 8.
+ */
+export function chapterStraddle(
+  self: string,
+  first: { chapter: string; verse: string; body: string },
+  second: { chapter: string; verse: string; body: string },
+): string {
+  return paragraph(
+    self,
+    "cv%3ap",
+    run("cv%3av1", first.verse)
+      + run("meta%3av", first.verse)
+      + run(PLAIN, first.body)
+      + run("meta%3av", first.verse)
+      + run("cv%3adc", second.chapter)
+      + run("cv%3av1", second.verse)
+      + run("meta%3av", second.verse)
+      + run(PLAIN, second.body)
+      + run("meta%3av", second.verse),
+  )
+}
+
 /** A verse whose closing `meta:v` bookend is missing, so it runs on. */
 export function openVerse(self: string, verse: string, body: string, chapter?: string): string {
   return paragraph(
@@ -183,6 +208,24 @@ export const SAMPLE_NOTES = {
 } as const
 
 /**
+ * The verses `biblicaSampleStory` sets, in document order. Named because three
+ * layers now assert on them: the selector's verse keys, the importer's cells,
+ * and the exporter's round-trip.
+ */
+export const SAMPLE_SCRIPTURE = {
+  /** GEN 1:1, opened by a `cv:dc` drop cap. */
+  genesisOneOne: "In the beginning God created the heavens and the earth.",
+  /** GEN 2:5, whose body runs on past the paragraph the drop cap opens. */
+  genesisTwoFive: "No shrub had yet appeared,",
+  /** The rest of GEN 2:5, in the paragraph that closes its bookend. */
+  genesisTwoFiveContinued: " and no one was working the ground.",
+  /** GEN 2:6, which carries the chapter over with no anchor of its own. */
+  genesisTwoSix: "But streams came up from the earth.",
+  /** GEN 3:1, opened by the next drop cap. */
+  genesisThreeOne: "Now the serpent was more crafty than any other.",
+} as const
+
+/**
  * A book whose notes exercise every label case: a preface before any verse, a
  * single-chapter range, a multi-chapter range, a chapter-label heading, a
  * line-broken reference list, and a multi-sentence note block.
@@ -190,12 +233,12 @@ export const SAMPLE_NOTES = {
 export const biblicaSampleStory: readonly string[] = [
   paragraph("p-bk", "meta%3abk", run(PLAIN, "GEN")),
   note("p-pref", SAMPLE_NOTES.preface),
-  closedVerse("p-v1", "1", "In the beginning God created the heavens and the earth.", "1"),
+  closedVerse("p-v1", "1", SAMPLE_SCRIPTURE.genesisOneOne, "1"),
   note("p-n1", SAMPLE_NOTES.afterChapterOne, "intro%3aipi"),
-  openVerse("p-v2", "5", "No shrub had yet appeared,", "2"),
-  verseContinuation("p-v2b", "5", " and no one was working the ground."),
-  closedVerse("p-v3", "6", "But streams came up from the earth."),
-  closedVerse("p-v4", "1", "Now the serpent was more crafty than any other.", "3"),
+  openVerse("p-v2", "5", SAMPLE_SCRIPTURE.genesisTwoFive, "2"),
+  verseContinuation("p-v2b", "5", SAMPLE_SCRIPTURE.genesisTwoFiveContinued),
+  closedVerse("p-v3", "6", SAMPLE_SCRIPTURE.genesisTwoSix),
+  closedVerse("p-v4", "1", SAMPLE_SCRIPTURE.genesisThreeOne, "3"),
   note("p-n2", SAMPLE_NOTES.afterChaptersTwoToThree, "intro%3aipi"),
   // Running header: not scripture, not a note.
   paragraph("p-rh", "meta%3arh", run(PLAIN, "GENESIS 2")),

@@ -1545,7 +1545,7 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
-    selectCellPairs(db, projectId, { fileId }),
+    selectCellPairs(db, projectId, { fileId, targetLang: "" }),
   ])
   const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
@@ -1600,7 +1600,7 @@ contextual.put(
     // 'auto'/'fixed' do not need them, so only pay for the read when they do.
     const orderedCellIds =
       input.strategy === "explicit"
-        ? (await selectCellPairs(db, projectId, { fileId })).map((p) => p.cellId)
+        ? (await selectCellPairs(db, projectId, { fileId, targetLang: "" })).map((p) => p.cellId)
         : []
     const checked = validateSegmentationInput(input, orderedCellIds)
     if (!checked.ok) {
@@ -1698,7 +1698,7 @@ contextual.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    const pairs = await selectCellPairs(db, projectId, { fileId })
+    const pairs = await selectCellPairs(db, projectId, { fileId, targetLang: "" })
     if (pairs.length === 0) {
       const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
       return c.json(body, status)

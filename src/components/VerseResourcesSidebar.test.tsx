@@ -14,6 +14,9 @@ vi.mock("@/lib/aquifer/passage-resources", async () => {
     ...actual,
     loadPassageEntities: vi.fn(),
     loadEntityDetail: vi.fn(),
+    // The AQU-843 neighbour preload is covered in passage-resources.test.ts;
+    // left real it would fetch the adjacent verses over the network.
+    prefetchPassageEntities: vi.fn(),
   }
 })
 

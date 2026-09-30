@@ -62,6 +62,7 @@ import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { createScopedRibbonCache } from "@/lib/health/scoped-ribbon"
 import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
+import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -190,6 +191,7 @@ import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
@@ -260,6 +262,10 @@ type EditorGridCols =
   | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
   | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+/** AQU-1191: low-memory mode renders the viewport and nothing beyond it, so a
+ *  constrained device holds one screen of rows instead of one screen plus two
+ *  overscan bands. Costs some blank-on-fast-scroll; buys the tab. */
+const LOW_MEMORY_DRAW_DISTANCE_PX = 0
 
 /**
  * 2026-08-07 (wire c): vertical follow for the stacked media lens — the table
@@ -1382,6 +1388,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const ribbonInputCache = useMemo(() => createScopedRibbonCache(), [cellStore])
   const ribbonIndexById = useMemo(() => new Map(displayCellIds.map((id, index) => [id, index])), [displayCellIds])
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
+  // AQU-1191: the list's off-screen overscan is one of the two render costs
+  // this mode dials back (the rows' presence overlay is the other — see
+  // EditorRow, which reads the same store rather than taking a prop, so the
+  // flag stays off MemoizedRow's compare surface).
+  const lowMemoryActive = useLowMemoryActive()
   const healthRibbonByCellId = useMemo(() =>
     !healthCalculationsEnabled ? EMPTY_RIBBON :
     readAtVersion(cellStoreVersion, () => ribbonInputCache.read<CellData>(displayCellIds, ribbonIndexById, {
@@ -2811,7 +2822,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             extraData={listExtraData}
             keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
-            drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
+            drawDistance={lowMemoryActive ? LOW_MEMORY_DRAW_DISTANCE_PX : LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
             maintainVisibleContentPosition
             onScroll={handleListScroll}
@@ -4846,7 +4857,13 @@ function EditorRow({
   const videoSoundingCellId = useVideoSoundingCellId()
   const rowMediaSyncActive = useMediaSyncActive()
   const isQueueRow = (isQueueCurrentCell || videoSoundingCellId === cell.id) && rowMediaSyncActive
-  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
+  // AQU-1191: in low-memory mode a row stops subscribing to per-cell presence,
+  // so the peer badges and the mirrored remote draft go with it. Display only —
+  // the advisory focus lock still supplies "X is editing" (`lockHolderLabel`),
+  // and AQU-1154 already took presence out of the write path, so nothing about
+  // who may commit changes with the mode.
+  const lowMemoryActive = useLowMemoryActive()
+  const remoteCellPresence = useCellPresence(lowMemoryActive ? null : presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
   const remoteDraftText = useMemo(() => {
@@ -5273,6 +5290,7 @@ function EditorRow({
       cellId: cell.id,
       ruleId: input.ruleId,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
       void onCellCommitted?.(cell.id)
@@ -5282,7 +5300,7 @@ function EditorRow({
       // didn't persist locally — silent failure is the worst failure mode.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const handleUnwaive = useCallback((ruleId: string) => {
     setOpenRuleId(null)
@@ -5292,6 +5310,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId,
+      ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
       void onCellCommitted?.(cell.id)
@@ -5300,7 +5319,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const sourceRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
@@ -6467,9 +6486,9 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
-  // AQU-490: the audio twin of emitValidationChange above. No lane — a
-  // recording is shared by every target language, so a vote on it is not
-  // per-lane and the wire carries none.
+  // AQU-490: the audio twin of emitValidationChange above. The vote itself is
+  // shared across languages. AQU-1462 stamps the lane the member is in so an
+  // archived lane can refuse it; the default lane omits the tag.
   const emitAudioValidationChange = async (audioId: string, validated: boolean) => {
     const kind = validated ? "cell.audio.validate" : "cell.audio.unvalidate"
     if (!canPerform(kind, project.syncRole?.level ?? null)) {
@@ -6487,6 +6506,7 @@ function EditorRow({
         fileId: cell.fileId,
         cellId: cell.id,
         audioId,
+        ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
@@ -6832,6 +6852,7 @@ function EditorRow({
               voices={audioLens.voices}
               session={audioLens.session}
               username={audioLens.username}
+              targetLang={activeLane || undefined}
               onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
@@ -7097,6 +7118,29 @@ function EditorRow({
               </AppTooltip>
             )}
             <CellPresenceBadges peers={remoteCellPresence} />
+            {/* AQU-1191: low-memory mode drops the presence badges above, which
+                were the ONLY thing naming who holds a cell — `heldByLabel` just
+                makes the editor read-only, it renders no label (see
+                TranslatedEditor.commit.test.tsx). Without this the mode hands a
+                translator a silently uneditable cell. So when the badges are
+                suppressed, the focus lock names the holder itself: one static
+                string off a prop the row already has, no subscription, no
+                timer.
+
+                No `dir="ltr"` here, unlike the badges above: those are initials
+                chips plus a lowercase state word, while this is a translated
+                sentence that must follow the UI direction (the app ships Arabic).
+                The name is bidi-isolated instead — `translate()` does not do that
+                for placeholder values — so a Latin-script name dropped into an
+                RTL sentence cannot reorder it. */}
+            {lowMemoryActive && lockHolderLabel && (
+              <span
+                data-cell-lock-holder
+                className="ms-auto inline-flex shrink-0 items-center text-[10px] leading-none text-muted-foreground"
+              >
+                {t("editor.presence.heldBy", { name: bidiIsolate(lockHolderLabel) })}
+              </span>
+            )}
             {/* AQU-1041: no AI-draft tag here. The cell header renders the same
                 for a machine draft as for a human-typed one. The underlying
                 `cell.aiDrafted` provenance stays — the org overview's AI-drafted
@@ -7597,6 +7641,7 @@ function EditorRow({
                   username={username}
                   disabled={!editable}
                   onTakeSaved={onTakeSaved}
+                  targetLang={activeLane || undefined}
                 />
               )}
 
@@ -7893,6 +7938,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -7918,6 +7964,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -7940,6 +7987,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -7961,6 +8009,7 @@ function EditorRow({
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
+                      targetLang={activeLane || undefined}
                       session={rowSession}
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}

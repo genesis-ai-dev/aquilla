@@ -19,6 +19,8 @@ export interface SearchArgs {
 export interface SearchContext {
   projectId: string
   focusedFileId?: string
+  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  lane: string
   aliases: AliasMap
 }
 
@@ -44,7 +46,8 @@ async function searchCells(
 ): Promise<SearchHit[]> {
   // AQU-1424: parked cells are not searchable. The anti-join rather than a bare
   // hidden_at IS NULL, because this query matches EITHER side and the flag lives
-  // only on the shared source row.
+  // only on the shared source row. When searching target cells, scope to the
+  // active lane only.
   const conditions = [
     "project_id = ?",
     "value_tsv @@ websearch_to_tsquery('simple', ?)",
@@ -54,6 +57,16 @@ async function searchCells(
   if (side !== "both") {
     conditions.push("side = ?")
     binds.push(side)
+  }
+  if (side === "target") {
+    conditions.push("target_lang = ?")
+    binds.push(ctx.lane)
+  } else if (side === "both") {
+    // Source rows are stored once at target_lang = '', so only target rows are
+    // scoped to the lane. A bare target_lang filter would drop every source hit
+    // in any non-default lane.
+    conditions.push("(side = 'source' OR target_lang = ?)")
+    binds.push(ctx.lane)
   }
   if (fileId) {
     conditions.push("file_id = ?")

@@ -622,6 +622,24 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    // — AQU-1451: which SIDE the export writes. Target is today's output;
+    //   Source writes the curated source (edits applied, hidden cells gone) and
+    //   no translation. Never both in one action — the bilingual formats carry
+    //   both by definition and say so on the format option instead. —
+    "importExport.dialog.sideLegend": "Side",
+    "importExport.dialog.sideGroupAriaLabel": "Which side to export",
+    "importExport.dialog.sideTarget": "Target",
+    "importExport.dialog.sideSource": "Source",
+    "importExport.dialog.sideTargetHint":
+      "The translation in the active lane — the file this project produces.",
+    "importExport.dialog.sideSourceHint":
+      "The source text as it stands now: your source edits applied, hidden cells left out, " +
+      "and no translation written. Import it to start another project from this curated source.",
+    "importExport.dialog.sideSourcePendingHint":
+      "Source is not available for this format yet — it is built from your original uploaded " +
+      "document, which is still being wired up.",
+    "importExport.dialog.bilingualBadge": "source + target",
+
     // — AQU-1148: what the exported file is allowed to contain. The hints say
     //   exactly what lands in the file, because "approved text" was being
     //   claimed for output that mixed validated text, unreviewed drafts and
@@ -1573,6 +1591,22 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.sideGroupAriaLabel": {
+        description:
+          "Accessible name for the Source/Target toggle on the Export dialog — the control that chooses which side of the project the downloaded file contains (AQU-1451).",
+      },
+      "importExport.dialog.sideTarget": {
+        description:
+          "Label for the Target option of the export Side toggle. 'Target' is this app's term for the translation lane being worked in.",
+      },
+      "importExport.dialog.sideSource": {
+        description:
+          "Label for the Source option of the export Side toggle. 'Source' is this app's term for the text being translated FROM.",
+      },
+      "importExport.dialog.bilingualBadge": {
+        description:
+          "Badge on a format option (TSV, CSV, XLIFF, TMX) whose file holds the source text and the translation side by side, so it offers no Source/Target choice.",
       },
       "importExport.dialog.contentModeAriaLabel": {
         description:

@@ -389,6 +389,10 @@ export const editor = defineNamespace({
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.lowMemory": "Low-memory mode",
+    "editor.view.lowMemoryAuto": "Auto",
+    "editor.view.lowMemoryOn": "On",
+    "editor.view.lowMemoryOff": "Off",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -556,6 +560,8 @@ export const editor = defineNamespace({
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
+    "editor.selection.translateNoPermission":
+      "You need contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
@@ -1106,6 +1112,28 @@ export const editor = defineNamespace({
     // sentence in the audio-VTT removal and in both character clears.
     "editor.timeline.keepThem": "Keep them",
 
+    // — Extract subtitles dialog (AQU-1139) ————————————————————
+    "editor.timeline.subtitleSourceTitle": "Extract subtitles",
+    "editor.timeline.subtitleSourceDescription":
+      "Read the subtitle text and timings out of a sidecar file into " +
+      "\"{fileName}\", so the clip already on it has something to translate.",
+    "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
+    "editor.timeline.subtitleSourcePickHint":
+      "The .vtt, .srt or .sbv file that came with the clip.",
+    "editor.timeline.subtitleSourceCueSummary": "{count} cues, {span}",
+    "editor.timeline.subtitleSourceCueSummaryUntimed":
+      "{count} cues, none of them timed.",
+    "editor.timeline.subtitleSourceRepairedShortForm":
+      "{count} short-form timestamps read as minutes and seconds.",
+    "editor.timeline.subtitleSourceDroppedCues":
+      "{count} lines carried no usable text and were skipped.",
+    "editor.timeline.subtitleSourceUntimedCues":
+      "{count} cues carry no timing and won't appear on the timeline.",
+    "editor.timeline.subtitleSourceImport": "Extract cues",
+    "editor.timeline.subtitleSourceImportCues": "Extract {count} cues",
+    "editor.timeline.subtitleSourceDone": "Extracted {count} cues into \"{fileName}\".",
+    "editor.timeline.subtitleSourceFailed": "Couldn't extract those subtitles: {reason}",
+
     // — Import characters dialog ——————————————————————————————
     "editor.timeline.charactersTitle": "Characters",
     "editor.timeline.charactersImportTitle": "Import characters",
@@ -1386,6 +1414,7 @@ export const editor = defineNamespace({
     "editor.presence.viewing": "viewing",
     "editor.presence.editing": "editing",
     "editor.presence.typing": "typing…",
+    "editor.presence.heldBy": "{name} is editing",
     "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
     "editor.row.selectAria": "Select cell. Drag to select a range.",
     "editor.state.empty": "empty",
@@ -3169,6 +3198,30 @@ export const editor = defineNamespace({
           "lightens the editor on very large files. Applies to this browser only.",
         maxLength: 32,
       },
+      "editor.view.lowMemory": {
+        description:
+          "Section heading for the setting that strips the editor back on a " +
+          "device short of memory — health indicators, peer-presence overlays, " +
+          "and off-screen rows. Three options follow it. Applies to this " +
+          "browser only.",
+        maxLength: 28,
+      },
+      "editor.view.lowMemoryAuto": {
+        description:
+          "Option that lets the device's own reported memory decide whether the " +
+          "editor runs stripped back. The default.",
+        maxLength: 16,
+      },
+      "editor.view.lowMemoryOn": {
+        description:
+          "Option that always runs the editor stripped back, whatever the device reports.",
+        maxLength: 16,
+      },
+      "editor.view.lowMemoryOff": {
+        description:
+          "Option that always runs the full editor, whatever the device reports.",
+        maxLength: 16,
+      },
       "editor.view.targetKeyTerms": {
         description:
           "Section heading for the setting that controls subtle highlights on approved " +
@@ -3931,6 +3984,13 @@ export const editor = defineNamespace({
           "Tooltip when the bulk-translate button is disabled because the project " +
           "has no AI model configured. A state, with the implied fix being project " +
           "settings.",
+      },
+      "editor.selection.translateNoPermission": {
+        description:
+          "Tooltip when the bulk-translate button is disabled because the user's " +
+          "project role cannot save target text — a reviewer/validator can sign off " +
+          "on translations but not write them. 'Contributor' is a role name in this " +
+          "app.",
       },
       "editor.selection.allTranslated": {
         description:
@@ -5104,6 +5164,17 @@ export const editor = defineNamespace({
         description:
           "Tiny lowercase state word after a collaborator's name on a cell row while " +
           "their live draft text is changing (last change within ~2 seconds).",
+      },
+      "editor.presence.heldBy": {
+        description:
+          "Whole sentence on a cell row naming the collaborator who holds the edit " +
+          "lock, so the reader knows why the cell is read-only. Used in low-memory " +
+          "mode, where the peer chips that normally carry this are switched off — so " +
+          "this string stands alone and must name the person, not just the state.",
+        maxLength: 28,
+        placeholders: {
+          name: "The lock holder's display name, e.g. \"Alice\".",
+        },
       },
       "editor.row.selectedAria": {
         description:
@@ -6317,6 +6388,72 @@ export const editor = defineNamespace({
           "Inline refusal shown in the dialog when the picked text file is over " +
           "the size limit. '10 MB' is a unit and a number; keep it as it is.",
         placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
+      },
+      "editor.timeline.subtitleSourceDescription": {
+        description:
+          "Explanatory line under the Extract subtitles dialog's title: where the " +
+          "cues come from (a sidecar file that shipped with the clip) and which " +
+          "file they will land on.",
+        placeholders: {
+          fileName: "Name of the time-ordered file the cues will be written to, e.g. 'survival-ep1'. Content — never translate it.",
+        },
+      },
+      "editor.timeline.subtitleSourceCueSummary": {
+        description:
+          "One line under the picked file's name summarising what was read out of " +
+          "it: how many cues, and the stretch of the clip they cover. Not a sentence.",
+        placeholders: {
+          count: "Number of cues found in the sidecar file.",
+          span: "The stretch the cues cover, already formatted as two clock times joined by an en dash, e.g. '0:00 – 45:12'.",
+        },
+      },
+      "editor.timeline.subtitleSourceCueSummaryUntimed": {
+        description:
+          "The same summary line for a sidecar whose cues carry no timings at all, " +
+          "so there is no stretch of the clip to name.",
+        placeholders: { count: "Number of cues found in the sidecar file." },
+      },
+      "editor.timeline.subtitleSourceRepairedShortForm": {
+        description:
+          "Note under the file summary: some timestamps were written in a short " +
+          "form and were read as minutes and seconds rather than hours and minutes.",
+        placeholders: { count: "Number of timestamps that were read that way." },
+      },
+      "editor.timeline.subtitleSourceDroppedCues": {
+        description:
+          "Note under the file summary: some lines looked like a cue but had no " +
+          "text under them, so nothing was imported for them.",
+        placeholders: { count: "Number of lines skipped." },
+      },
+      "editor.timeline.subtitleSourceUntimedCues": {
+        description:
+          "Note under the file summary: some cues have no timing, so they import " +
+          "as translatable rows but cannot be placed on the timeline.",
+        placeholders: { count: "Number of cues with no timing." },
+      },
+      "editor.timeline.subtitleSourceImportCues": {
+        description:
+          "Confirm button of the Extract subtitles dialog once a file is picked, " +
+          "naming how many cues will be written. Short — it sits beside Cancel.",
+        maxLength: 24,
+        placeholders: { count: "Number of cues that will be written." },
+      },
+      "editor.timeline.subtitleSourceDone": {
+        description:
+          "Success toast after the cues have been written, naming how many landed " +
+          "and on which file.",
+        placeholders: {
+          count: "Number of cues written.",
+          fileName: "Name of the file they landed on. Content — never translate it.",
+        },
+      },
+      "editor.timeline.subtitleSourceFailed": {
+        description:
+          "Failure toast when writing the cues did not finish. Ends with the " +
+          "underlying error, which is not translated.",
+        placeholders: {
+          reason: "The underlying error message, in English. Never translate the substituted value.",
+        },
       },
       "editor.timeline.charactersSubtitleLines": {
         description:

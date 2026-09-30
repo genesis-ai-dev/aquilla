@@ -2,6 +2,11 @@
 // heuristics (markdown headings, else paragraph blocks), the LLM only writes
 // summaries — one Haiku call per document, made async from the upload route
 // via ctx.waitUntil. Failure is non-fatal: docs stay string-searchable.
+//
+// AQU-1376: this job is the only thing that moves a row off `pending`, and
+// nothing revisits it afterwards — no cron, no retry. So every exit has to be
+// terminal (`ready` or `failed`) and every failure has to be *loggable*:
+// a silent exit strands the doc at "Indexing…" forever with no recovery UI.
 import type { AquillaDb } from "../../../../db/shim/postgres"
 import {
   getDocText, setIndexResult, type KnowledgeNode,
@@ -12,6 +17,14 @@ export interface KbIndexEnv {
   OPENROUTER_BASE_URL?: string
   KB_INDEX_MODEL?: string
 }
+
+/** AQU-1376: hard ceiling on the enrichment round-trip. Without it a hung
+ *  upstream response has nothing to abort it, the waitUntil task never settles,
+ *  and the row stays `pending` for good. Must stay comfortably *below* the
+ *  read-side staleness window (`KB_INDEX_STALE_MS` in
+ *  src/lib/frontier/knowledge-base.ts) so a job still inside its own budget is
+ *  never shown as stalled. */
+export const KB_INDEX_FETCH_TIMEOUT_MS = 60_000
 
 const MAX_NODES = 200
 const MAX_DEPTH = 3
@@ -132,28 +145,55 @@ function openRouterUrl(env: KbIndexEnv): string {
 }
 
 /** Build + persist the index for one doc. Never throws — any failure lands as
- *  index_status='failed' (the doc remains string-searchable, spec §Error handling). */
-export async function indexKnowledgeDoc(env: KbIndexEnv, db: AquillaDb, docId: string): Promise<void> {
+ *  index_status='failed' (the doc remains string-searchable, spec §Error handling).
+ *
+ *  `timeoutMs` overrides KB_INDEX_FETCH_TIMEOUT_MS; tests use it to exercise the
+ *  abort path without waiting a minute. */
+export async function indexKnowledgeDoc(
+  env: KbIndexEnv,
+  db: AquillaDb,
+  docId: string,
+  { timeoutMs = KB_INDEX_FETCH_TIMEOUT_MS }: { timeoutMs?: number } = {},
+): Promise<void> {
   try {
     const doc = await getDocText(db, docId)
     if (!doc) return
     const nodes = segmentText(doc.text)
     if (!env.OPENROUTER_API_KEY) throw new Error("no OPENROUTER_API_KEY")
-    const res = await fetch(openRouterUrl(env), {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL,
-        messages: [{ role: "user", content: buildEnrichmentPrompt(doc.meta.name, doc.text, nodes) }],
-        response_format: { type: "json_object" },
-      }),
-    })
-    if (!res.ok) throw new Error(`openrouter ${res.status}`)
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    // The signal has to outlive the fetch itself: reading the body can hang
+    // just as easily as opening the connection, so it stays armed until the
+    // JSON is in hand (AQU-1376).
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
+    let body: { choices?: { message?: { content?: string } }[] }
+    try {
+      const res = await fetch(openRouterUrl(env), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL,
+          messages: [{ role: "user", content: buildEnrichmentPrompt(doc.meta.name, doc.text, nodes) }],
+          response_format: { type: "json_object" },
+        }),
+        signal: abort.signal,
+      })
+      if (!res.ok) throw new Error(`openrouter ${res.status}`)
+      body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    } finally {
+      clearTimeout(timer)
+    }
     const content = body.choices?.[0]?.message?.content ?? ""
     const { tree, docSummary } = applyEnrichment(nodes, content)
     await setIndexResult(db, docId, "ready", tree, docSummary)
-  } catch {
-    await setIndexResult(db, docId, "failed", null, null).catch(() => {})
+  } catch (err) {
+    // Log before the compensating write, so the original cause survives even
+    // when that write is what fails.
+    console.error(`[knowledge] indexing doc ${docId} failed:`, err)
+    await setIndexResult(db, docId, "failed", null, null).catch((writeErr) => {
+      // The row is now stuck at `pending` with no job left to move it. Nothing
+      // here can fix that; the log is what makes it diagnosable, and the
+      // read-side staleness window is what gives the owner a retry.
+      console.error(`[knowledge] could not mark doc ${docId} failed:`, writeErr)
+    })
   }
 }

@@ -205,6 +205,7 @@ interface ImportBody {
   attachments?: ImportAudioAttachment[]
   /** Attach a staged hidden caption file to this parent media timeline. */
   trackPublication?: ImportedTrackPublication
+  video?: { id: string; coreMediaUrl: string }
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -483,6 +484,33 @@ export async function handleBulkImportRequest(
         if (new Set(artifacts.results.map((row) => row.audio_id)).size !== audioIds.length) {
           return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
         }
+      }
+      if (body.video !== undefined) {
+        const video = body.video
+        if (
+          !video || typeof video.id !== 'string'
+          || video.id.length === 0 || video.id.length > 255
+          || typeof video.coreMediaUrl !== 'string'
+          || !(body.attachments ?? []).some((attachment) =>
+            attachment.url === video.coreMediaUrl,
+          )
+          || !body.publishEventId
+        ) {
+          return withCors(new Response('invalid imported video', { status: 400 }), request)
+        }
+        finalizeEvents.push({
+          id: video.id,
+          schemaVersion: 1,
+          projectId: body.projectId,
+          fileId: body.fileId,
+          cellId: null,
+          parentId: null,
+          kind: 'file.video.set',
+          author,
+          payload: { coreMediaUrl: video.coreMediaUrl },
+          clientTs,
+          serverTs: eventTs++,
+        } as PersistedEvent<'file.video.set'>)
       }
       if (body.publishEventId) {
         const restoreEvent: PersistedEvent<'file.restore'> = {

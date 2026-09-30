@@ -170,6 +170,8 @@ export interface PublishStagedImportArgs {
   /** Parent-scoped publication of a separate hidden caption file. */
   trackPublication?: Omit<ImportedTrackPublication, "eventId">
     & Partial<Pick<ImportedTrackPublication, "eventId">>
+  /** Stable uploaded clip reference; the player resolves its signed URL. */
+  coreMediaUrl?: string
   getToken: (fileId: string) => Promise<string | null>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -330,6 +332,9 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     cells: [],
     complete: true,
     publishEventId: args.publishEventId ?? uuidv7(),
+    ...(args.coreMediaUrl ? {
+      video: { id: uuidv7(), coreMediaUrl: args.coreMediaUrl },
+    } : {}),
     ...(args.attachments?.length ? {
       attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),
     } : {}),

@@ -41,6 +41,8 @@ import {
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
 import { videoSyncAction } from "./video-sync"
@@ -89,6 +91,8 @@ const VIDEO_READY_TIMEOUT_MS = 4000
 
 export interface MediaVideoPaneProps {
   src: string
+  projectId?: string
+  session?: FrontierSession | null
   /** The file the picture belongs to — the key the mute preference is stored
    *  under. Required rather than optional on purpose: an absent id would seed
    *  nothing and mute nothing, silently, and the compiler catching a caller
@@ -145,7 +149,9 @@ export interface MediaVideoPaneProps {
 }
 
 export function MediaVideoPane({
-  src,
+  src: storedSrc,
+  projectId,
+  session,
   fileId,
   cells,
   seekSec,
@@ -177,6 +183,9 @@ export function MediaVideoPane({
   /** Bumped by "Try again", and by the stall ladder's last rung, so the element
    *  is rebuilt against the same URL. */
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const src = useMediaPictureUrl({
+    src: storedSrc, projectId, fileId, session, retryKey: loadAttempt,
+  }) ?? ""
   /**
    * The player. These films are HLS playlists rather than files, which only
    * Safari can open on its own — so without this the picture, and the
@@ -1026,7 +1035,7 @@ export function MediaVideoPane({
           // NO `src` WHERE THE STREAMING PLAYER IS DRIVING. It attaches its own
           // buffered source to the element, and an address sitting in `src`
           // beside it is a second source for the same picture.
-          src={pipeline === "hls" ? undefined : src}
+          src={pipeline === "hls" ? undefined : src || undefined}
           data-testid="video-pane-media"
           data-video-pipeline={pipeline}
           aria-label={t("editor.timeline.videoPaneLinked")}
@@ -1075,7 +1084,7 @@ export function MediaVideoPane({
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
             // to a video that will not load is worse than one sized to the cues.
-            onVideoDuration?.(src, null)
+            onVideoDuration?.(storedSrc, null)
           }}
           onLoadedMetadata={(e) => {
             setMediaEpoch((n) => n + 1)
@@ -1083,7 +1092,7 @@ export function MediaVideoPane({
             // rather than the assumed 16:9.
             const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
             if (real != null) setAspect(real)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
             // A reload or a rebuild left the picture at the start of the film.
             // Put it back where the stall caught it, and start it again if that
             // is still what the transport wants — otherwise recovering from a
@@ -1102,7 +1111,7 @@ export function MediaVideoPane({
           }}
           onDurationChange={(e) => {
             setMediaEpoch((n) => n + 1)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
           }}
           onTimeUpdate={
             slaved

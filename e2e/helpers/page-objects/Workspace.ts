@@ -119,6 +119,43 @@ export class Workspace {
     await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
   }
 
+  async declineWhisperDownload(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Whisper/i })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+
+  linkedVideo(): Locator {
+    return this.page.getByTestId("video-pane-media")
+  }
+
+  async playMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: /Play all/i }).click()
+  }
+
+  async pauseMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Pause", exact: true }).click()
+  }
+
+  async waitForLinkedVideo(): Promise<void> {
+    await expect(this.linkedVideo()).toBeVisible()
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement) =>
+      element.readyState), { timeout: EDITOR_READY_TIMEOUT_MS }).toBeGreaterThanOrEqual(2)
+  }
+
+  async seekLinkedVideo(seconds: number): Promise<void> {
+    const duration = await this.linkedVideo().evaluate((element: HTMLVideoElement) => element.duration)
+    const slider = this.page.getByRole("slider", { name: "Seek", exact: true })
+    const bounds = await slider.boundingBox()
+    expect(bounds).not.toBeNull()
+    await slider.click({ position: { x: bounds!.width * seconds / duration,
+      y: bounds!.height / 2 } })
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement, time) =>
+      element.seeking ? 1 : Math.abs(element.currentTime - time), seconds))
+      .toBeLessThan(0.05)
+  }
+
   /** Select and commit one translation through the eBible corpus picker. */
   async importEBibleCorpus(translationTitle: string): Promise<void> {
     await this.dismissSetupChecklist()

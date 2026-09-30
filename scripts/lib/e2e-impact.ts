@@ -90,6 +90,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
+    source: /^(?:src\/hooks\/useMediaPictureUrl\.|src\/lib\/sync\/bulk-import\.|sync-worker\/src\/events\/import-route\.)/,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
     // `parsers`/`biblica` are the importer's own reading layer — a change there
     // only reaches a user through an import, so it selects the import sentinel
     // rather than falling through to the generic shared-runtime one.

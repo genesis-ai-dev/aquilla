@@ -521,6 +521,7 @@ describe("bulkUploadSource", () => {
     const publishing = publishStagedImport({
       projectId: "p1",
       fileId: "f1",
+      coreMediaUrl: "frontier-audio://audio-1.wav",
       attachments: [{
         cellId: "cell-0",
         audioId: "audio-1.wav",
@@ -536,6 +537,10 @@ describe("bulkUploadSource", () => {
 
     expect(bodies).toHaveLength(2)
     expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0].video).toEqual({
+      id: expect.any(String),
+      coreMediaUrl: "frontier-audio://audio-1.wav",
+    })
     expect(bodies[0]).toMatchObject({
       complete: true,
       publishEventId: expect.any(String),

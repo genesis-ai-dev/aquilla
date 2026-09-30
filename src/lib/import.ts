@@ -1903,6 +1903,7 @@ export async function emitMediaFile(
   await publishStagedImport({
     projectId: ctx.projectId,
     fileId,
+    ...(fileType === "video" ? { coreMediaUrl: upload.url } : {}),
     attachments: specs.map((s) => ({
       cellId: s.cellId,
       audioId: `${upload.audioId}.${upload.ext}`,

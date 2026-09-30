@@ -3,9 +3,51 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { readFile } from "node:fs/promises"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+test("imported video keeps its authenticated picture and range seeking after reload", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `Imported picture ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+  const ws = new Workspace(alice)
+  const fixture = path.resolve(__dirname, "../../fixtures/tone-picture.mp4")
+  await ws.importMediaFile(fixture)
+  await ws.declineWhisperDownload()
+  await ws.openFileBySubstring("tone-picture.mp4")
+  await ws.waitForEditor()
+  await alice.getByRole("tab", { name: "Media", exact: true }).click()
+  await ws.waitForLinkedVideo()
+  await alice.reload()
+  await ws.waitForEditor()
+  await ws.waitForLinkedVideo()
+  const video = ws.linkedVideo()
+  expect(await video.evaluate((element: HTMLVideoElement) => element.videoWidth)).toBe(160)
+  const src = await video.evaluate((element: HTMLVideoElement) => element.currentSrc)
+  const response = await alice.request.get(src, { headers: { Range: "bytes=0-127" } })
+  expect(response.status()).toBe(206)
+  expect(response.headers()["content-range"]).toMatch(/^bytes 0-127\//)
+  expect(await response.body()).toEqual((await readFile(fixture)).subarray(0, 128))
+  const unsigned = new URL(src)
+  unsigned.search = ""
+  expect((await alice.request.get(unsigned.toString(), {
+    headers: { Range: "bytes=0-127" },
+  })).status()).toBe(401)
+  await ws.playMedia()
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime))
+    .toBeGreaterThan(0.15)
+  await ws.pauseMedia()
+  await ws.seekLinkedVideo(0.75)
+  await ws.playMedia()
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime))
+    .toBeGreaterThan(0.9)
+  await ws.pauseMedia()
+  await alice.screenshot({ path: "/private/tmp/aquilla-imported-video-reload.png" })
+})
 
 test("alice imports markdown, edits a cell, and the edit persists across reload", async ({ alice }) => {
   const dash = new Dashboard(alice)

@@ -186,6 +186,10 @@ describe('POST /import — server_seq is race-safe', () => {
         cells: [],
         complete: true,
         publishEventId: 'file-media-publish-1',
+        video: {
+          id: 'media-video-1',
+          coreMediaUrl: 'frontier-audio://audio-1.wav',
+        },
         attachments: [{
           id: 'media-attach-1',
           cellId: 'media-cell-1',
@@ -209,6 +213,9 @@ describe('POST /import — server_seq is race-safe', () => {
     expect((await rows<any>('files'))[0].deleted_at).toBeNull()
     expect((await rows<any>('cells')).find(cell => cell.target_lang === ''))
       .toMatchObject({ transcription: 'The supplied wording.' })
+    expect(JSON.parse((await rows<any>('files'))[0].meta).coreMediaUrl).toBe(
+      'frontier-audio://audio-1.wav',
+    )
     expect(await rows('cell_audio')).toHaveLength(1)
     expect((await rows<any>('cell_audio'))[0]).toMatchObject({
       cell_id: 'media-cell-1',
@@ -219,6 +226,9 @@ describe('POST /import — server_seq is race-safe', () => {
     expect((await handleBulkImportRequest(retry, makeEnv(db)))?.status).toBe(200)
     expect(await rows('cell_audio')).toHaveLength(1)
     expect((await rows<any>('events')).filter((event) => event.id === 'media-attach-1')).toHaveLength(1)
+    expect((await rows<any>('events')).filter((event) =>
+      event.id === 'media-video-1' && event.kind === 'file.video.set',
+    )).toHaveLength(1)
   })
 
   it('does not reveal staged media when the attachment has no matching artifact', async () => {

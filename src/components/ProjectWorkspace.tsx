@@ -12490,6 +12490,8 @@ export function ProjectWorkspace() {
                     <MediaVideoPane
                       key={activeFile.id}
                       src={activeFile.coreMediaUrl}
+                      projectId={project.id}
+                      session={frontierSession}
                       // AQU-646 stage 2: the pane's header now carries the
                       // film's mute button, and audibility is stored per file.
                       fileId={activeFile.id}

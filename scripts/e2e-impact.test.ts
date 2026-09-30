@@ -61,6 +61,14 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/editor/import-and-edit.smoke.spec.ts",
     )
   })
+  it("maps imported video producers and picture resolution to the import journey", () => {
+    for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
+      "sync-worker/src/events/import-route.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
+  })
   it("keeps comment coverage when its no-hover entry point changes", () => {
     expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
       "e2e/specs/editor/comments.smoke.spec.ts",

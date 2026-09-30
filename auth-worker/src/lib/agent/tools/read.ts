@@ -223,9 +223,13 @@ async function resolveUnfocusedScope(
 /** Resolve {fileId?, ref?} to a concrete file id (+ parsed range). */
 export async function resolveScope(
   db: AquillaDb,
-  args: { fileId?: unknown; ref?: unknown },
+  rawArgs: { fileId?: unknown; ref?: unknown },
   ctx: ReadContext,
 ): Promise<{ ok: true; fileId: string; range?: RefRange; notice?: string } | ScopeFailure> {
+  // The model fills an optional argument it has nothing to say for with "" or
+  // null. Either names no file and no ref, the same as leaving it out.
+  const given = (v: unknown) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v)
+  const args = { fileId: given(rawArgs.fileId), ref: given(rawArgs.ref) }
   let range: RefRange | undefined
   let refUnparseable = false
   if (args.ref !== undefined) {
@@ -241,7 +245,10 @@ export async function resolveScope(
   if (args.fileId !== undefined) {
     if (typeof args.fileId !== "string") return { ok: false, error: "fileId must be a string" }
     if (args.fileId === ":file") {
-      if (!ctx.focusedFileId) return { ok: false, error: ":file is not bound (no focused file)" }
+      // AQU-1455: the model reaches for :file even when nothing is open. An
+      // unbound :file names no file, so it takes the unfocused path below (one
+      // document resolves, several return the candidates) rather than an
+      // error that leaves the user with nothing to choose from.
       fileId = ctx.focusedFileId
     } else if (AliasMap.isAlias(args.fileId)) {
       const resolved = ctx.aliases.resolve(args.fileId)

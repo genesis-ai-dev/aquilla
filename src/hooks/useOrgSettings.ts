@@ -255,6 +255,11 @@ export interface UseOrgSettings {
    * everything, which is why zero suppresses the prompt entirely.
    */
   countStructuralOverrides: number
+  /**
+   * AQU-1391: the org default for repetition auto-propagation. ON unless the
+   * org opts out; a project may still override it in either direction.
+   */
+  autoPropagateRepetitions: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -471,6 +476,9 @@ export function useOrgSettings(
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
   const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
+  // and only an explicit opt-out turns repetition propagation off org-wide.
+  const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -617,6 +625,7 @@ export function useOrgSettings(
     allowScopedLaneAssignment,
     countStructuralCells,
     countStructuralOverrides,
+    autoPropagateRepetitions,
     resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,

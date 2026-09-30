@@ -234,6 +234,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowSelfAssignment: false,
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
+  autoPropagateRepetitions: true,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
@@ -1379,6 +1380,48 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+  })
+
+  it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      lanes: [
+        { lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW },
+        { lane: "sw", name: "Swahili", totalCells: 100, filledCells: 20, validatedCells: 8, lastEditAt: NOW, archived: true, position: 1 },
+        { lane: "fr", name: "French", totalCells: 100, filledCells: 10, validatedCells: 4, lastEditAt: NOW, archived: true, position: 2 },
+      ],
+    })])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).getByTestId("overview-lane-row-default")).toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-row-sw")).not.toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+
+    const toggle = within(table).getByTestId("overview-lane-archived-toggle")
+    expect(toggle).toHaveTextContent("Archived (2)")
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    const sw = within(table).getByTestId("overview-lane-archived-row-sw")
+    const fr = within(table).getByTestId("overview-lane-archived-row-fr")
+    expect(sw).toHaveTextContent("Swahili")
+    expect(sw).toHaveTextContent("Archived")
+    expect(sw).toHaveTextContent("20%")
+    expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+  })
+
+  it("does not render an archived group when every lane is active", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
   it("does not render the lane table (or tabs) for a single-lane project", async () => {

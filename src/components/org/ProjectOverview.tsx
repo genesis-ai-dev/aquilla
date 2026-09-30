@@ -42,6 +42,7 @@ import {
 } from "@/lib/offline/download"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
@@ -423,11 +424,11 @@ export function ProjectOverview() {
     )
     return [
       "",
-      ...(project?.targetLanes ?? []).filter(
-        (lane) => lane.trim() !== "" && !archived.has(lane.trim().toLowerCase()),
+      ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
+        (lane) => !archived.has(lane.trim().toLowerCase()),
       ),
     ]
-  }, [project?.targetLanes, project?.archivedLanes])
+  }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
   // AQU-656: originals live on `file_source_blobs`, not the plan. The files
   // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
   // PM download gallery is this compact list — only files that have a blob.
@@ -1038,8 +1039,10 @@ export function ProjectOverview() {
    * which only lists lanes that already have progress in them — a lane added
    * this morning has none, and the inspector's "audio is shared by every
    * language" note is exactly as true on the day a second lane is created.
+   * The primary language is the default lane even when it also sits in
+   * targetLanes (AQU-1473).
    */
-  const planLaneCount = (project?.targetLanes?.length ?? 0) + 1
+  const planLaneCount = extraRegistryLanes(project?.targetLanes, project?.targetLanguage).length + 1
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -1084,7 +1087,7 @@ export function ProjectOverview() {
       projectId: id,
       activeFileId: selectedUnitFileId,
       files: (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
-      targetLanes: project?.targetLanes ?? [],
+      targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1101,7 +1104,7 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, project?.files, project?.targetLanes,
-    project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
+    project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
     orgSettings.assignmentMinRole, handleAssigned,
   ])
 
@@ -1194,16 +1197,22 @@ export function ProjectOverview() {
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
   const projectLanes: PortfolioLane[] = audio?.lanes ?? []
-  const showLaneTabs = projectLanes.length > 1
+  // AQU-1458: an archived lane is not another active language. The progress
+  // tabs stay hidden for a single active lane, and the Languages section
+  // still renders when an archived lane needs a place to live.
+  const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
+  const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
+  const showLaneTabs = activeProjectLanes.length > 1
+  const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
   const laneTabOptions = [
     { label: t("org.orgHome.statusFilter.all"), value: LANE_TAB_ALL },
-    ...projectLanes.map((l) => ({
+    ...activeProjectLanes.map((l) => ({
       label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
       value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
     })),
   ]
   const activeLane: PortfolioLane | null =
-    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+    selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
   /**
    * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
    * board's own picker. The plan is one language's answer — "All" has no
@@ -1213,7 +1222,7 @@ export function ProjectOverview() {
    * page's single lane selection, so the Progress card above agrees with it.
    */
   const planLaneOptions = useMemo(
-    () => projectLanes.map((l) => ({
+    () => projectLanes.filter((l) => l.archived !== true).map((l) => ({
       tag: l.lane,
       label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
     })),
@@ -1982,17 +1991,18 @@ export function ProjectOverview() {
                 </div>
               )}
 
-              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
-              {/* Rendered only when the project has more than one target
-                  language lane — N=1 projects are byte-identical to before. */}
-              {showLaneTabs && audio && (
+              {/* ── Languages / lane table (AQU-538 §3.3, AQU-1458) ── */}
+              {/* Hidden for a single active lane with nothing archived.
+                  An archived lane keeps the section visible so it can be found. */}
+              {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
                   orgId={portfolioOrgId}
                   jwt={jwt}
-                  lanes={projectLanes}
+                  lanes={activeProjectLanes}
+                  archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
-                  extraLanes={project?.targetLanes ?? []}
+                  extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
                   files={project?.files ?? []}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}

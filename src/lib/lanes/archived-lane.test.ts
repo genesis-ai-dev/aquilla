@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest"
+import {
+  archivedLaneReason,
+  archivedTagsFromSettings,
+  laneTagForArchiveCheck,
+  type ArchiveLaneRow,
+} from "./archived-lane"
+
+const spanish: ArchiveLaneRow = {
+  id: "eslane01",
+  name: "Spanish",
+  legacyTag: "es",
+  archivedAt: "2026-09-29T00:00:00.000Z",
+}
+const french: ArchiveLaneRow = {
+  id: "frlane01",
+  name: "French",
+  legacyTag: "fr",
+  archivedAt: null,
+}
+const defaultLane: ArchiveLaneRow = {
+  id: "default1",
+  name: "English",
+  legacyTag: "",
+  archivedAt: null,
+}
+
+describe("laneTagForArchiveCheck", () => {
+  it("treats an omitted targetLang on a target commit as the default lane", () => {
+    expect(laneTagForArchiveCheck("target.cell.commit", { value: "hi" })).toBe("")
+    expect(laneTagForArchiveCheck("cell.validate", {})).toBe("")
+    expect(laneTagForArchiveCheck("target.cell.repin", { targetLang: "es" })).toBe("es")
+  })
+
+  it("ignores audio, waivers, and back-translations that do not name a lane", () => {
+    expect(laneTagForArchiveCheck("cell.audio.attach", { audioId: "a" })).toBeNull()
+    expect(laneTagForArchiveCheck("cell.waive", { ruleId: "r", targetLang: "" })).toBeNull()
+    expect(laneTagForArchiveCheck("cell.backtranslation.set", { targetLang: "es" })).toBe("es")
+    expect(laneTagForArchiveCheck("cell.lane.retime", { targetLang: "es" })).toBe("es")
+  })
+
+  it("does not freeze source edits, comments, file ops, cell.retime, or assignments", () => {
+    expect(laneTagForArchiveCheck("source.cell.commit", { targetLang: "es" })).toBeNull()
+    expect(laneTagForArchiveCheck("comment.create", { targetLang: "es" })).toBeNull()
+    expect(laneTagForArchiveCheck("file.delete", {})).toBeNull()
+    expect(laneTagForArchiveCheck("cell.retime", { targetLang: "es" })).toBeNull()
+    expect(laneTagForArchiveCheck("assignment.create", { targetLang: "es" })).toBeNull()
+  })
+})
+
+describe("archivedLaneReason", () => {
+  const lanes = [defaultLane, spanish, french]
+
+  it("refuses a write that names an archived lane, by tag or by name", () => {
+    expect(archivedLaneReason({ tag: "es", lanes, archivedTags: [] })).toBe("lane 'Spanish' is archived")
+    expect(archivedLaneReason({ tag: "Spanish", lanes, archivedTags: [] })).toBe("lane 'Spanish' is archived")
+  })
+
+  it("refuses a tag that is only in settings.archivedLanes, including a different case", () => {
+    expect(archivedLaneReason({ tag: "sw", lanes, archivedTags: ["SW"] })).toBe("lane 'sw' is archived")
+  })
+
+  it("allows the default lane, an active sibling, and a restored lane", () => {
+    expect(archivedLaneReason({ tag: "", lanes, archivedTags: ["", "es"] })).toBeNull()
+    expect(archivedLaneReason({ tag: "fr", lanes, archivedTags: ["es"] })).toBeNull()
+    const restored = [{ ...spanish, archivedAt: null }]
+    expect(archivedLaneReason({ tag: "es", lanes: restored, archivedTags: [] })).toBeNull()
+  })
+
+  it("still refuses when the row was restored but settings still lists the lane", () => {
+    const restored = [{ ...spanish, archivedAt: null }]
+    expect(archivedLaneReason({ tag: "es", lanes: restored, archivedTags: ["es"] })).toBe(
+      "lane 'Spanish' is archived",
+    )
+  })
+})
+
+describe("archivedTagsFromSettings", () => {
+  it("keeps only non-empty strings", () => {
+    expect(archivedTagsFromSettings({ archivedLanes: ["es", "", 1, "fr"] })).toEqual(["es", "fr"])
+    expect(archivedTagsFromSettings(null)).toEqual([])
+    expect(archivedTagsFromSettings({})).toEqual([])
+  })
+})

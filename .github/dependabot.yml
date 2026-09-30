@@ -12,6 +12,23 @@ version: 2
 # `interval: monthly` + `open-pull-requests-limit: 2` are a separate, deliberate
 # PR-volume control — the cooldown is a floor on a release's age, not a cap on
 # how late a bump may land. Don't conflate the two when tuning either.
+
+# agent-worker's npm deps and its Dockerfile base image ride ONE pull request.
+# The Sandbox SDK client (@cloudflare/sandbox) and the container it drives
+# (docker.io/cloudflare/sandbox:<version>-python) must be the exact same
+# version: the SDK logs `version_mismatch` on startup otherwise, and
+# agent-worker/test/runtime-policy.test.ts fails. An npm-only group bumped the
+# SDK twice (0.7.0 -> 0.12.5, 0.12.5 -> 0.12.9) and left the Dockerfile behind
+# both times, because a single-ecosystem PR cannot touch a Dockerfile.
+# Cloudflare publishes both artifacts together and both entries share the same
+# 7-day cooldown, so they resolve to the same release; if a PR ever pairs
+# different versions, align them by hand before merging.
+multi-ecosystem-groups:
+  agent-worker:
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+
 updates:
   # Root SPA + shared packages (packages/*, worker/, scripts/)
   - package-ecosystem: npm
@@ -65,17 +82,26 @@ updates:
   # ecosystem entry covered, so a CVE in its dependencies — it shares hono with
   # the other two — would have gone unflagged. Partially addresses OPS-6 of
   # docs/OPSEC-REVIEW-2026-08-10.md ("no dependency-vulnerability step in CI").
+  #
+  # Schedule and PR limit live on the `agent-worker` multi-ecosystem group
+  # above; `patterns` replaces the old single-ecosystem `groups` entry.
   - package-ecosystem: npm
     directory: "/agent-worker"
-    schedule:
-      interval: monthly
+    multi-ecosystem-group: agent-worker
+    patterns:
+      - "*"
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 2
-    groups:
-      agent-worker-deps:
-        patterns:
-          - "*"
+
+  # The Dockerfile's FROM tag. Dependabot keeps the `-python` suffix when it
+  # picks a newer tag.
+  - package-ecosystem: docker
+    directory: "/agent-worker"
+    multi-ecosystem-group: agent-worker
+    patterns:
+      - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: cargo
     directory: "/src-tauri"

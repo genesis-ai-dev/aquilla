@@ -332,6 +332,37 @@ describe("resolveScope — file names and non-canonical books (AQU-1455)", () =>
     expect(out.data?.candidates).toHaveLength(2)
   })
 
+  // The model passes fileId ":file" out of habit with nothing open. That used
+  // to end in ":file is not bound", which carries no candidates, so the chat
+  // asked "which file?" with no buttons and a one-document project never
+  // resolved.
+  it("treats an unbound :file as no file named: one document resolves", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    const scope = await resolveScope(env.AQUILLA_PG, { fileId: ":file" }, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  // Seen live: the model sent fileId "" on a one-file project and was told
+  // `no file … is named like ""`, so it asked which file anyway.
+  it.each([[""], ["  "], [null]])("treats a blank fileId (%j) as no file named", async (blank) => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    const scope = await resolveScope(env.AQUILLA_PG, { fileId: blank, ref: blank }, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+    expect(scope.ok && scope.notice).toBeUndefined()
+  })
+
+  it("treats an unbound :file as no file named: several documents return the candidates", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const out = await executeRead(env.AQUILLA_PG, { fileId: ":file" }, noFocus())
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain("ASK THE USER which file to work in and stop")
+    expect(out.data?.candidates).toHaveLength(2)
+  })
+
   describe("name lookup", () => {
     const PRACTICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     async function seedNamed() {

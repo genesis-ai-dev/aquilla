@@ -3,6 +3,7 @@ import {
   archivedLaneReason,
   archivedTagsFromSettings,
   laneTagForArchiveCheck,
+  LANE_DOES_NOT_EXIST_REASON,
   type ArchiveLaneRow,
 } from "./archived-lane"
 
@@ -72,6 +73,53 @@ describe("archivedLaneReason", () => {
     expect(archivedLaneReason({ tag: "es", lanes: restored, archivedTags: ["es"] })).toBe(
       "lane 'Spanish' is archived",
     )
+  })
+
+  it("hides the name and the archived state from a caller who cannot know the lane", () => {
+    const german: ArchiveLaneRow = {
+      id: "delane01",
+      name: "German",
+      legacyTag: "de",
+      archivedAt: "2026-09-29T00:00:00.000Z",
+    }
+    const hidden = archivedLaneReason({
+      tag: "German",
+      lanes: [german],
+      archivedTags: ["de"],
+      visibleLaneIds: new Set(),
+    })
+    expect(hidden).toBe(LANE_DOES_NOT_EXIST_REASON)
+    expect(hidden).not.toContain("German")
+    expect(hidden).not.toContain("archived")
+
+    const byTag = archivedLaneReason({
+      tag: "de",
+      lanes: [german],
+      archivedTags: [],
+      visibleLaneIds: new Set(["frlane01"]),
+    })
+    expect(byTag).toBe(LANE_DOES_NOT_EXIST_REASON)
+    expect(byTag).not.toContain("German")
+    expect(byTag).not.toContain("archived")
+  })
+
+  it("still names an archived lane the caller is allowed to know", () => {
+    expect(
+      archivedLaneReason({
+        tag: "es",
+        lanes,
+        archivedTags: [],
+        visibleLaneIds: new Set(["eslane01"]),
+      }),
+    ).toBe("lane 'Spanish' is archived")
+    expect(
+      archivedLaneReason({
+        tag: "sw",
+        lanes,
+        archivedTags: ["SW"],
+        visibleLaneIds: new Set(["eslane01"]),
+      }),
+    ).toBe(LANE_DOES_NOT_EXIST_REASON)
   })
 })
 

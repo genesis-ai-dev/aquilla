@@ -14,7 +14,9 @@ import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { visibleLaneTags } from '../../../src/lib/lanes/read-wall'
 import { laneTagForArchiveCheck } from '../../../src/lib/lanes/archived-lane'
+import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane } from './archived-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
@@ -207,6 +209,32 @@ export function isAuthorizedEvent<K extends EventKind = EventKind>(
   return x instanceof AuthorizedEvent && (x as { [AUTHORIZED]?: true })[AUTHORIZED] === true
 }
 
+const externalGrantsByCache = new WeakMap<RequestCache, Map<string, Promise<Array<{ lane: string; level: number }>>>>()
+
+/**
+ * Lane grants for an external commit token, which does not carry `laneGrants`.
+ * Memoized on the request cache so a batch pays for the lookup once.
+ */
+async function laneGrantsForExternalToken(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  cache: RequestCache,
+): Promise<Array<{ lane: string; level: number }>> {
+  let byCaller = externalGrantsByCache.get(cache)
+  if (!byCaller) {
+    byCaller = new Map()
+    externalGrantsByCache.set(cache, byCaller)
+  }
+  const key = `${projectId}\0${userId}`
+  let pending = byCaller.get(key)
+  if (!pending) {
+    pending = loadLaneGrants(db, projectId, userId)
+    byCaller.set(key, pending)
+  }
+  return pending
+}
+
 /**
  * The ONLY function that mints AuthorizedEvent instances. Every event handler
  * accepts AuthorizedEvent and TypeScript prevents bypass (the symbol-branded
@@ -348,9 +376,32 @@ export async function authorize<K extends EventKind>(
   // on. The default lane is not archivable. Kinds that are not stored per
   // lane (audio, waivers, back-translations, lane retimes) are frozen only
   // when the event carries that lane's tag.
+  //
+  // Someone who is not allowed to know the lane exists does not hear its
+  // name or that it is archived. The read wall decides that: wall off,
+  // platform, and Maintainer+ may know every lane; below that, only a grant
+  // at Viewer or above reveals the lane. An external commit token omits
+  // laneGrants (the SPA token carries them), so those grants are read here
+  // and are not handed to the write wall below.
   const archiveTag = laneTagForArchiveCheck(raw.kind, raw.payload)
+  const wallOn = laneReadWallEnabled(laneReadWall)
   if (db != null && settings && archiveTag) {
-    const archived = await refusalForArchivedLane(db, raw.projectId, archiveTag, settings)
+    let laneGrants = tokenClaims.laneGrants
+    if (
+      wallOn &&
+      tokenClaims.src === 'external' &&
+      tokenClaims.role < ROLE.MAINTAINER &&
+      laneGrants == null
+    ) {
+      laneGrants = await laneGrantsForExternalToken(db, raw.projectId, tokenClaims.userId, settings)
+    }
+    const visible = visibleLaneTags({
+      enabled: wallOn,
+      role: tokenClaims.role,
+      src: tokenClaims.src,
+      laneGrants,
+    })
+    const archived = await refusalForArchivedLane(db, raw.projectId, archiveTag, settings, visible)
     if (archived) return { ok: false, status: 403, reason: archived }
   }
 
@@ -362,7 +413,6 @@ export async function authorize<K extends EventKind>(
       ? await resolveAssignmentAuthority(db, raw.projectId, settings)
       : null
   const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
-  const wallOn = laneReadWallEnabled(laneReadWall)
 
   // AQU-1415: when the write wall is on, a grant can elevate the caller
   // inside one lane, and the absence of a grant denies the write even when

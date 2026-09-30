@@ -8,7 +8,13 @@
 //   (b) pass audioId as sourceAudioId to /api/v1/voice/convert (use case 3).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
-import { errorFromHostedTts } from "@/lib/audio/tts-engine-error"
+import { timeoutSignal } from "./fetch-timeout"
+import {
+  TTS_REQUEST_TIMEOUT_MS,
+  errorFromHostedTts,
+  errorFromTtsTimeout,
+  isAbortTimeout,
+} from "@/lib/audio/tts-engine-error"
 import { parseInworldSupportedLanguages } from "@/lib/audio/inworld-supported-languages"
 import type { SyncTokenForFile } from "../audio/upload"
 
@@ -75,14 +81,25 @@ export async function synthesizeCellTts(
   if (args.deliveryMode !== undefined) body.deliveryMode = args.deliveryMode
   if (args.audioQuality !== undefined) body.audioQuality = args.audioQuality
 
-  const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  })
+  // AQU-1156: bounded. `timeoutSignal` is the shared older-WebKit guard (see
+  // fetch-timeout.ts) — where AbortSignal.timeout is missing it returns
+  // undefined and we degrade to the browser socket timeout rather than losing
+  // the request entirely.
+  let res: Response
+  try {
+    res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: timeoutSignal(TTS_REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) throw errorFromTtsTimeout("Inworld TTS", TTS_REQUEST_TIMEOUT_MS)
+    throw err
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")

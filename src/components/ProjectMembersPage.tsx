@@ -4,8 +4,8 @@
 //
 // This module keeps the pieces still reused elsewhere:
 //   - InviteLinkTab / RevokeAllDialog — settings MembersSection
-//   - MembersTab — still the list/add/revoke building block (settings owns
-//     the product surface; overview no longer embeds it)
+//   - MembersTab — list/add/revoke building block kept for tests and SharePanel.
+//     Project Overview embeds MembersSection (the settings roster), not this tab.
 
 import { useState, useCallback, useEffect, useMemo } from "react"
 import {
@@ -70,8 +70,8 @@ const DEFAULT_EXPIRY_DAYS = 7
 // Members tab
 //
 // List / add / change-role / revoke building block. The product surface is
-// Project Settings → Team members (MembersSection). Keep this export for
-// tests and any remaining embed; overview no longer mounts it.
+// Project Settings → Team members (MembersSection), which Project Overview
+// also embeds. Keep this export for tests and SharePanel.
 // ──────────────────────────────────────────────────────────────────────────
 
 export function MembersTab({

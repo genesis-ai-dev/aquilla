@@ -349,3 +349,101 @@ describe("MultiProjectInviteDialog long project names (AQU-1152)", () => {
     expect(nameButton("Mark")).not.toHaveClass("w-full")
   })
 })
+
+// AQU-1151: the checklist virtualizes above a row threshold so a large org does
+// not mount every project row. The risk virtualization introduces is not layout
+// but STALENESS — LegendList re-renders a mounted row only when `extraData`
+// changes, so a value the row reads that never travels there would leave a
+// checked row looking unchecked. These tests pin the switch-over and the fact
+// that selection still round-trips on the virtualized path.
+//
+// "Only visible rows are in the DOM" is not assertable here: happy-dom has no
+// layout engine, so the global LegendList mock in src/test-setup.ts paints
+// every item. What is assertable is that the virtualized container is the one
+// rendering them — the browser-side row count is the QA check on the issue.
+describe("MultiProjectInviteDialog list virtualization (AQU-1151)", () => {
+  const manyProjects = Array.from({ length: 300 }, (_, i) => ({
+    id: `p${i}`,
+    name: `Project ${i}`,
+  })) as CloudProjectSummary[]
+
+  const searchBox = () => screen.getByRole("textbox", { name: "Search projects" })
+
+  function renderMany() {
+    return render(
+      <MultiProjectInviteDialog open={true} onOpenChange={() => {}} projects={manyProjects} />,
+    )
+  }
+
+  it("virtualizes a 300-project list", () => {
+    renderMany()
+    expect(screen.getByTestId("project-checklist-virtualized")).toBeInTheDocument()
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+  })
+
+  it("keeps the plain list for a small org, so the box keeps its natural height", () => {
+    render(<MultiProjectInviteDialog open={true} onOpenChange={() => {}} projects={projects} />)
+    expect(screen.queryByTestId("project-checklist-virtualized")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("checkbox")).toHaveLength(projects.length)
+  })
+
+  it("drops back to the plain list when a filter narrows the list below the threshold", () => {
+    renderMany()
+    fireEvent.change(searchBox(), { target: { value: "Project 29" } })
+    // "Project 29" plus "Project 290".."Project 299" — 11 rows, under the cap.
+    expect(screen.queryByTestId("project-checklist-virtualized")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("checkbox")).toHaveLength(11)
+  })
+
+  it("shows the checked state and the role picker on a virtualized row", () => {
+    renderMany()
+    const row = screen.getByRole("checkbox", { name: "Select Project 250" })
+    expect(row).toHaveAttribute("aria-checked", "false")
+    expect(screen.queryByRole("combobox", { name: "Role for Project 250" })).not.toBeInTheDocument()
+
+    fireEvent.click(row)
+    // The state the row reads lives in the dialog, and only reaches a mounted
+    // LegendList row through `extraData` — this is that wire.
+    expect(screen.getByRole("checkbox", { name: "Select Project 250" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    expect(screen.getByRole("combobox", { name: "Role for Project 250" })).toBeInTheDocument()
+    expect(screen.getByText(/1 project selected/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Project 250" }))
+    expect(screen.getByRole("checkbox", { name: "Select Project 250" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    )
+    expect(screen.queryByRole("combobox", { name: "Role for Project 250" })).not.toBeInTheDocument()
+  })
+
+  it("grants the projects picked on the virtualized path", async () => {
+    vi.mocked(lookupUser).mockResolvedValue({ id: 7, username: "bob" })
+    renderMany()
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Project 3" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Project 299" }))
+    fireEvent.change(screen.getByLabelText("recipient-input"), { target: { value: "bob" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add to projects" }))
+
+    await waitFor(() => expect(addProjectMember).toHaveBeenCalledTimes(2))
+    expect(addProjectMember).toHaveBeenCalledWith("jwt", "p3", "bob", 400)
+    expect(addProjectMember).toHaveBeenCalledWith("jwt", "p299", "bob", 400)
+  })
+
+  it("surfaces a per-project failure on a virtualized row", async () => {
+    vi.mocked(lookupUser).mockResolvedValue({ id: 7, username: "bob" })
+    vi.mocked(addProjectMember).mockRejectedValueOnce(new Error("nope"))
+    renderMany()
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Project 120" }))
+    fireEvent.change(screen.getByLabelText("recipient-input"), { target: { value: "bob" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add to projects" }))
+
+    // The error text also only reaches the row through `extraData`.
+    await waitFor(() => expect(addProjectMember).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText(/nope|couldn't|could not/i)).toBeInTheDocument()
+  })
+})

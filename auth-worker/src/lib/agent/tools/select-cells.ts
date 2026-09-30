@@ -7,6 +7,8 @@
 // scope by a human ref range ("MRK 4", "MRK 4:1-20"). Encoding it here means
 // it is correct on every call instead of re-derived (or fumbled) per run.
 
+import { visibleSourceSql } from '../../hidden-cells-scope'
+
 export interface CellPair {
   cellId: string
   canonicalRef: string | null
@@ -33,7 +35,7 @@ export function statusOf(pair: CellPair): CellStatus {
   return "translated"
 }
 
-// ── Ref-range grammar: "MRK", "MRK 4", "MRK 4:5", "MRK 4:1-20" ─────────────
+// ── Ref-range grammar: "<BOOK>", "<BOOK> 4", "<BOOK> 4:5", "<BOOK> 4:1-20" ───
 
 export interface RefRange {
   book: string
@@ -47,7 +49,12 @@ export function parseRefRange(ref: string): RefRange | null {
     .trim()
     .toUpperCase()
     .match(/^([1-3]?[A-Z]{2,4})(?:\s+(\d+)(?::(\d+)(?:\s*[-–]\s*(\d+))?)?)?$/)
-  if (!m) return null
+  if (!m) {
+    // AQU-1455: non-scripture USFM books carry markers instead of chapters
+    // ("XXB:h:1"). Read the book code and scope to the whole book/file.
+    const marker = ref.trim().toUpperCase().match(/^([1-3]?[A-Z]{2,4}):\S/)
+    return marker ? { book: marker[1] } : null
+  }
   const range: RefRange = { book: m[1] }
   if (m[2]) range.chapter = Number(m[2])
   if (m[3]) {
@@ -66,6 +73,8 @@ function parseCanonical(ref: string | null): { book: string; chapter: number; ve
 }
 
 function inRange(ref: string | null, range: RefRange): boolean {
+  // A whole-book scope also takes refs with no chapter number ("XXB:h:1").
+  if (range.chapter === undefined && ref && new RegExp(`^${range.book}[\\s:]`, "i").test(ref.trim())) return true
   const c = parseCanonical(ref)
   if (!c) return false
   if (c.book !== range.book) return false
@@ -150,7 +159,8 @@ interface PairRow {
  * is authoritative when set, but the current import pipeline never populates
  * it, so fall back to (a) a file NAMED like the book ("MRK", "MRK.usfm",
  * "Mark of MRK"), then (b) the file whose cells actually carry "MRK …"
- * canonical refs — that one always works for imported scripture.
+ * canonical refs ("MRK 1:1" or, for non-scripture books, "XXB:h:1") — that
+ * one always works for imported scripture.
  */
 export async function resolveFileByBook(
   db: AquillaDb,
@@ -185,11 +195,11 @@ export async function resolveFileByBook(
            SELECT 1 FROM cells c
            WHERE c.project_id = f.project_id AND c.file_id = f.id
              AND c.side = 'source'
-             AND upper(c.canonical_ref) LIKE ?
+             AND (upper(c.canonical_ref) LIKE ? OR upper(c.canonical_ref) LIKE ?)
          )
        LIMIT 1`,
     )
-    .bind(projectId, `${code} %`)
+    .bind(projectId, `${code} %`, `${code}:%`)
     .first<{ id: string; name: string }>()
   return byRefs ?? null
 }
@@ -201,9 +211,11 @@ export async function resolveFileByBook(
 export async function selectCellPairs(
   db: AquillaDb,
   projectId: string,
-  scope: { fileId: string; range?: RefRange; targetLang?: string },
+  scope: { fileId: string; range?: RefRange; targetLang: string },
 ): Promise<CellPair[]> {
-  const lanePredicate = scope.targetLang === undefined ? "" : " AND t.target_lang = ?"
+  // Lane is required ('' = default lane). This ensures no caller accidentally
+  // pairs source cells from one lane with target rows from ALL lanes.
+  const lanePredicate = " AND t.target_lang = ?"
   const { results } = await db
     .prepare(
       `SELECT s.cell_id, s.canonical_ref, s.sequence_index, s.anchor_cell_id,
@@ -216,11 +228,16 @@ export async function selectCellPairs(
          ON t.project_id = s.project_id AND t.file_id = s.file_id
         AND t.cell_id = s.cell_id AND t.side = 'target'${lanePredicate}
        WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-         AND s.target_lang = ''`,
+         AND s.target_lang = ''
+         -- AQU-1424: a parked cell is not work, and THIS is the one selector both
+         -- the autopilot tick and the agent's read/draft tools go through, so the
+         -- predicate belongs here rather than at each caller's status filter.
+         -- Autopilot never returns to a hidden cell, Draft-all spends no credits
+         -- on it, and an agent asked to translate everything untranslated in this
+         -- file neither reports nor drafts it.
+         AND ${visibleSourceSql('s')}`,
     )
-    .bind(...(scope.targetLang === undefined
-      ? [projectId, scope.fileId]
-      : [scope.targetLang, projectId, scope.fileId]))
+    .bind(scope.targetLang, projectId, scope.fileId)
     .all<PairRow>()
 
   let pairs: CellPair[] = results.map((r) => ({

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, BookOpen, Search, Cloud, CloudDownload,
+  BookImage, BookA, BookOpen, Search, Cloud, CloudDownload, Video,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -114,6 +114,7 @@ import {
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
+import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
@@ -121,7 +122,7 @@ import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube"
 
 interface ImportDialogProps {
   open: boolean
@@ -473,6 +474,7 @@ export function ImportDialog({
                   label={t("importExport.dialog.backToImportTypes")}
                 />
                 {screen === "upload" ? t("importExport.landing.upload.title")
+                  : screen === "youtube" ? t("importExport.landing.youtube.title")
                   : screen === "gdrive" ? t("importExport.landing.gdrive.title")
                   : screen === "helloao" ? t("importExport.dialog.titleHelloao")
                   : screen === "obs" ? t("importExport.landing.obs.title")
@@ -502,6 +504,14 @@ export function ImportDialog({
               }
               setScreen(s)
             }}
+          />
+        )}
+
+        {screen === "youtube" && (
+          <YouTubeImportPanel
+            ctx={{ projectId, author: username, sourceLanguage,
+              targetLanguage, targetLang, getToken }}
+            onImported={handleChildImported}
           />
         )}
 
@@ -857,6 +867,8 @@ type ImportOption = {
 }
 
 const POPULAR_OPTIONS: ImportOption[] = [
+  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
+    descriptionKey: "importExport.landing.youtube.description" },
   { id: "upload", titleKey: "importExport.landing.upload.title", icon: Upload,
     descriptionKey: "importExport.landing.upload.description" },
   { id: "gdrive", titleKey: "importExport.landing.gdrive.title", hintKey: "importExport.landing.gdrive.hint", icon: CloudDownload, badge: "beta",

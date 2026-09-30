@@ -26,6 +26,7 @@
 // role-policy.ts). Author is bound to the token, never the request body.
 
 import { verifyTokenForDoc } from '../auth'
+import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
 import {
@@ -205,6 +206,7 @@ interface ImportBody {
   attachments?: ImportAudioAttachment[]
   /** Attach a staged hidden caption file to this parent media timeline. */
   trackPublication?: ImportedTrackPublication
+  /** Linked picture, committed with the staged file reveal. */
   video?: { id: string; coreMediaUrl: string }
 }
 
@@ -217,6 +219,7 @@ function isImportBody(x: unknown): x is ImportBody {
     Array.isArray(b.cells) &&
     (b.targets === undefined || Array.isArray(b.targets)) &&
     (b.attachments === undefined || Array.isArray(b.attachments)) &&
+    (b.video === undefined || (b.video !== null && typeof b.video === 'object' && !Array.isArray(b.video))) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
@@ -257,6 +260,26 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+  if (body.video !== undefined) {
+    const video = body.video
+    const videoId = typeof video.coreMediaUrl === 'string' ? youTubeVideoId(video.coreMediaUrl) : null
+    const linkedYouTube = videoId !== null
+      && video.coreMediaUrl === `https://www.youtube.com/watch?v=${videoId}`
+    // Uploaded pictures must share a source attachment. The completion path
+    // also verifies that attachment's artifact belongs to this file.
+    const uploadedClip = typeof video.coreMediaUrl === 'string'
+      && video.coreMediaUrl.startsWith('frontier-audio://')
+      && (body.attachments ?? []).some(attachment => attachment?.url === video.coreMediaUrl)
+    if (!body.complete || body.file || body.cells.length !== 0
+      || body.targets?.length || 'trackPublication' in body
+      || typeof body.publishEventId !== 'string' || !body.publishEventId
+      || body.publishEventId.length > 255
+      || typeof video.id !== 'string' || !video.id || video.id.length > 255
+      || video.id === body.publishEventId
+      || (!linkedYouTube && !uploadedClip)) {
+      return withCors(new Response('invalid linked picture publication', { status: 400 }), request)
+    }
   }
   if (body.cells.length > MAX_CELLS_PER_REQUEST) {
     return withCors(
@@ -485,32 +508,14 @@ export async function handleBulkImportRequest(
           return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
         }
       }
-      if (body.video !== undefined) {
-        const video = body.video
-        if (
-          !video || typeof video.id !== 'string'
-          || video.id.length === 0 || video.id.length > 255
-          || typeof video.coreMediaUrl !== 'string'
-          || !(body.attachments ?? []).some((attachment) =>
-            attachment.url === video.coreMediaUrl,
-          )
-          || !body.publishEventId
-        ) {
-          return withCors(new Response('invalid imported video', { status: 400 }), request)
-        }
+      if (body.video) {
         finalizeEvents.push({
-          id: video.id,
-          schemaVersion: 1,
-          projectId: body.projectId,
-          fileId: body.fileId,
-          cellId: null,
-          parentId: null,
-          kind: 'file.video.set',
-          author,
-          payload: { coreMediaUrl: video.coreMediaUrl },
-          clientTs,
-          serverTs: eventTs++,
-        } as PersistedEvent<'file.video.set'>)
+          id: body.video.id, schemaVersion: 1, projectId: body.projectId,
+          fileId: body.fileId, cellId: null, parentId: null,
+          kind: 'file.video.set', author,
+          payload: { coreMediaUrl: body.video.coreMediaUrl },
+          clientTs, serverTs: eventTs++,
+        })
       }
       if (body.publishEventId) {
         const restoreEvent: PersistedEvent<'file.restore'> = {
@@ -544,7 +549,11 @@ export async function handleBulkImportRequest(
           serverTs: event.serverTs,
           serverSeq: seqBase + index,
         }))))
-        for (const event of finalizeEvents) buildEventProjectionStmts(db, event, finalizeStmts)
+        finalizeEvents.forEach((event, index) => {
+          buildEventProjectionStmts(db, event, finalizeStmts, {
+            importPublicationSeq: seqBase + index,
+          })
+        })
         finalizeStmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
       }
       await runImportBatch(db, finalizeStmts)

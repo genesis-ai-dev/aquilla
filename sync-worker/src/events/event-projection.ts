@@ -530,6 +530,9 @@ export function buildEventProjectionStmts(
   stmts: AquillaStatement[],
   opts?: {
     deferFileCounters?: boolean
+    /** Picture/reveal publication projects only events inserted at this sequence.
+     * A duplicate request must not overwrite subsequent user edits. */
+    importPublicationSeq?: number
     /**
      * AD-2 atomic arbitration (RACE-2): when set, every chain-advancing
      * `cells` write is gated on this event holding the chain_claims row for
@@ -2025,14 +2028,21 @@ case 'cell.audio.attach': {
       if (!event.fileId) {
         throw new Error(`file.restore event ${event.id} is missing fileId`)
       }
+      const insertedSeq = opts?.importPublicationSeq
+      const guard = insertedSeq === undefined ? '' : ` AND EXISTS (
+        SELECT 1 FROM events WHERE id = ? AND project_id = ? AND file_id = ?
+          AND kind = 'file.restore' AND server_seq = ?
+      )`
+      const guardBinds = insertedSeq === undefined
+        ? [] : [event.id, event.projectId, event.fileId, insertedSeq]
       stmts.push(
         db
           .prepare(
             `UPDATE files
                 SET deleted_at = NULL, updated_at = (extract(epoch from now()) * 1000)::bigint
-              WHERE id = ? AND project_id = ? AND deleted_at IS NOT NULL`,
+              WHERE id = ? AND project_id = ? AND deleted_at IS NOT NULL${guard}`,
           )
-          .bind(event.fileId, event.projectId),
+          .bind(event.fileId, event.projectId, ...guardBinds),
       )
       return ['files']
     }
@@ -2530,7 +2540,10 @@ case 'cell.audio.attach': {
       if (!event.fileId) {
         throw new Error(`file.video.set event ${event.id} is missing fileId`)
       }
-      stmts.push(buildFileVideoSetStmt(db, event.projectId, event.fileId, event.id, p.coreMediaUrl))
+      stmts.push(buildFileVideoSetStmt(
+        db, event.projectId, event.fileId, event.id, p.coreMediaUrl,
+        opts?.importPublicationSeq,
+      ))
       return ['files']
     }
 
@@ -2981,26 +2994,33 @@ export function buildFileVideoSetStmt(
   fileId: string,
   eventId: string,
   coreMediaUrl: string | null,
+  insertedSeq?: number,
 ): AquillaStatement {
   const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const guard = insertedSeq === undefined ? '' : ` AND EXISTS (
+    SELECT 1 FROM events WHERE id = ? AND project_id = ? AND file_id = ?
+      AND kind = 'file.video.set' AND server_seq = ?
+  )`
+  const guardBinds = insertedSeq === undefined
+    ? [] : [eventId, projectId, fileId, insertedSeq]
   if (coreMediaUrl == null) {
     return db
       .prepare(
         `UPDATE files
             SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'coreMediaUrl')::text,
                 event_id = ?, updated_at = ${NOW}
-          WHERE id = ? AND project_id = ?`,
+          WHERE id = ? AND project_id = ?${guard}`,
       )
-      .bind(eventId, fileId, projectId)
+      .bind(eventId, fileId, projectId, ...guardBinds)
   }
   return db
     .prepare(
       `UPDATE files
           SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('coreMediaUrl', ?::text))::text,
               event_id = ?, updated_at = ${NOW}
-        WHERE id = ? AND project_id = ?`,
+        WHERE id = ? AND project_id = ?${guard}`,
     )
-    .bind(coreMediaUrl, eventId, fileId, projectId)
+    .bind(coreMediaUrl, eventId, fileId, projectId, ...guardBinds)
 }
 
 /**

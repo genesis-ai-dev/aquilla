@@ -40,6 +40,8 @@ import {
   useVideoSoundingCellId,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
+import { youTubeVideoId } from "@/lib/video/youtube"
+import { YouTubePicture } from "./YouTubePicture"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -207,7 +209,8 @@ export function MediaVideoPane({
   useEffect(() => {
     setAudioLanguage(readFilmAudioLanguage(src))
   }, [src])
-  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage })
+  const youTube = useMemo(() => youTubeVideoId(src) != null, [src])
+  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage, enabled: !youTube })
   const pipeline = stream.pipeline
   const chooseAudioLanguage = useCallback(
     (lang: string) => {
@@ -999,6 +1002,7 @@ export function MediaVideoPane({
     )
   }
 
+  const Picture = youTube ? YouTubePicture : "video"
   return (
     <div
       data-testid="tl-video-pane"
@@ -1027,7 +1031,7 @@ export function MediaVideoPane({
         className={cn("relative", picture ? "" : "aspect-video w-full")}
         style={picture ? { width: `${picture.width}px`, height: `${picture.height}px` } : undefined}
       >
-        <video
+        <Picture
           ref={videoRef}
           // The pipeline is part of the identity: switching players has to
           // start from a clean element, never one holding the other's buffer.

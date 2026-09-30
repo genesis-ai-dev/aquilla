@@ -49,6 +49,20 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importYouTubeCaptions(url: string, payload: FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video and captions/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Your caption export").setInputFiles(payload)
+    await dialog.getByRole("button", { name: "Preview captions" }).click()
+    await expect(dialog.getByRole("button", { name: "Import captions" }))
+      .toBeEnabled({ timeout: 10_000 })
+    await dialog.getByRole("button", { name: "Import captions" }).click()
+    await this.waitForImportSettled()
+  }
+
   async importPayload(payload: FilePayload): Promise<void> {
     await this.previewImportPayload(payload)
     await this.confirmImportPreview()
@@ -299,11 +313,11 @@ export class Workspace {
     const importError = this.page.getByText(/^Import failed:/i).first()
     let outcome = "pending"
     await expect.poll(async () => {
-      if (await importError.isVisible().catch(() => false)) {
+      if (await importError.isVisible()) {
         outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
         return "settled"
       }
-      if (await fileActions.isVisible().catch(() => false)) {
+      if (await fileActions.isVisible()) {
         outcome = "success"
         return "settled"
       }
@@ -480,6 +494,21 @@ export class Workspace {
     await expect(firstCell).toBeVisible({
       timeout: EDITOR_READY_TIMEOUT_MS,
     })
+  }
+
+  async showFilesSidebar(): Promise<void> {
+    const files = this.page.getByRole("button", { name: "Files", exact: true })
+    await expect(files).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Media view selects Voices; ensure Files without toggling an open panel.
+    if (await files.getAttribute("aria-pressed") !== "true") await files.click()
+    await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  async openMediaView(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "Media", exact: true })
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   cellRow(index = 0): Locator {

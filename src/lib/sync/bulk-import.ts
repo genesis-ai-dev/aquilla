@@ -172,6 +172,8 @@ export interface PublishStagedImportArgs {
     & Partial<Pick<ImportedTrackPublication, "eventId">>
   /** Stable uploaded clip reference; the player resolves its signed URL. */
   coreMediaUrl?: string
+  /** Preview-owned picture receipt survives caller retries. */
+  videoEventId?: string
   getToken: (fileId: string) => Promise<string | null>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -333,7 +335,7 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     complete: true,
     publishEventId: args.publishEventId ?? uuidv7(),
     ...(args.coreMediaUrl ? {
-      video: { id: uuidv7(), coreMediaUrl: args.coreMediaUrl },
+      video: { id: args.videoEventId ?? uuidv7(), coreMediaUrl: args.coreMediaUrl },
     } : {}),
     ...(args.attachments?.length ? {
       attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),

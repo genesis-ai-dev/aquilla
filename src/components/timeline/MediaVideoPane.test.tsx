@@ -40,6 +40,20 @@ vi.mock("@/lib/audio/play-queue", () => ({
   setQueueAudibility: () => {},
 }))
 
+vi.mock("youtube-video-element", () => {
+  class FakeYouTubeVideo extends HTMLElement {
+    paused = true
+    currentTime = 0
+    readyState = 0
+    muted = false
+    play() { return Promise.resolve() }
+    pause() {}
+    load() {}
+  }
+  if (!customElements.get("youtube-video")) customElements.define("youtube-video", FakeYouTubeVideo)
+  return {}
+})
+
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
 import {
   getVideoBuffering,
@@ -953,5 +967,31 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     } finally {
       mockQueue = { ...mockQueue, active: false, playing: false, kind: "idle" }
     }
+  })
+})
+
+describe("a YouTube link", () => {
+  const YT = "https://youtu.be/dQw4w9WgXcQ?si=share"
+
+  it("plays through the YouTube element, not a <video>", () => {
+    const { container } = renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media")
+    expect(media.tagName.toLowerCase()).toBe("youtube-video")
+    expect(media.getAttribute("src")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    expect(container.querySelector("video")).toBeNull()
+  })
+
+  it("still hears the element's media events", () => {
+    const onVideoDuration = vi.fn()
+    renderPane({ src: YT, onVideoDuration })
+    const media = screen.getByTestId("video-pane-media")
+    Object.defineProperty(media, "duration", { value: 212, configurable: true })
+    act(() => { media.dispatchEvent(new Event("durationchange")) })
+    expect(onVideoDuration).toHaveBeenCalledWith(YT, 212)
+  })
+
+  it("a direct media file still uses <video>", () => {
+    renderPane({ src: "https://cdn/episode.mp4" })
+    expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
   })
 })

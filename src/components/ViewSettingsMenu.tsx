@@ -28,6 +28,11 @@ import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
+import {
+  setLowMemoryMode,
+  useLowMemoryMode,
+  type LowMemoryMode,
+} from "@/lib/perf/low-memory"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -124,6 +129,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const splitByMilestone = useMilestoneSplit()
+  const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -425,6 +431,25 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               explicit={targetFontSizeExplicit}
               onChange={onTargetFontSizeChange}
               onReset={onTargetFontSizeReset}
+            />
+          </div>
+
+          {/* AQU-1191: a device setting, not a file one — it stays usable with
+              no file open, and it is stored per browser like the rest of this
+              popover. */}
+          <Separator />
+          <div className="flex flex-col gap-2">
+            <SectionLabel>{t("editor.view.lowMemory")}</SectionLabel>
+            <SegmentTabs<LowMemoryMode>
+              value={lowMemoryMode}
+              onValueChange={setLowMemoryMode}
+              aria-label={t("editor.view.lowMemory")}
+              listClassName="w-full"
+              options={[
+                { label: t("editor.view.lowMemoryAuto"), value: "auto" },
+                { label: t("editor.view.lowMemoryOn"), value: "on" },
+                { label: t("editor.view.lowMemoryOff"), value: "off" },
+              ]}
             />
           </div>
         </PopoverContent>

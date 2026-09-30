@@ -29,6 +29,7 @@ not a micro-spec farm.
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
+| Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
@@ -93,6 +94,14 @@ the covered outcome actually is rather than what it was meant to be.
 Rows 1 and 3 are the cheapest to add next: both reuse the existing seeded
 file and need no second identity or media fixture.
 
+## Adversarial journeys (deployed dev, advisory)
+
+Jev attacks the deployed dev build under hostile conditions, red-team goals,
+and reworded goals; a snapshot oracle over every touched project decides.
+Findings file as Linear Triage tickets under AQU-1330. A model-free canary
+gates each run. See [the adversarial suite](../smart-tests/adversarial/README.md).
+The catalogue lives in `smart-tests/adversarial/attacks.ts`.
+
 ## Journeys moved to another repository
 
 | Area | Journey | Current owner |
@@ -141,6 +150,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
 | Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
+| Repetition auto-propagation: typing a translation into a repeated segment (validated by the edit itself) fills the file's other identical-source rows once the cell is left; filled rows stay unvalidated; the projection and a cold reload agree (AQU-1484 — not smoke: a regression leaves rows unfilled, it loses nothing. The settle-on-leave timing, the mid-typing hold and the self-validation-off gate are covered in RTL, `EditorTable.repetitionTrigger.test.tsx`; the per-cell chain/pin planning in `repetition-propagation.test.ts`) | `e2e/specs/validation/repetition-propagation.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
@@ -164,7 +174,13 @@ UI chrome that used to be one smoke file per click is covered under
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
-- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
+- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
+  copy with word-for-word identical wording whichever datastore reserved the identity,
+  and the Sign in action carries the typed identifier into the login field
+  (`FrontierSignupForm.identityTaken.test.tsx`, `FrontierLoginForm.prefill.test.tsx`).
+  The migration itself on that subsequent login is unchanged by that work and stays
+  covered where it already was.
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
@@ -176,6 +192,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- Chapter audio stitch (AQU-1201): concatenate a chapter's verse recordings into one continuous WAV. A checkbox includes chapter-heading takes in that file; the choice is remembered in export-dialog localStorage — RTL in `audio-chapter.group.test.ts`, `audio-chapter.export.test.ts`, `ExportDialog.audio-chapter.test.tsx`, `export-dialog-memory.test.ts`. Existing by-character / by-line exports stay on their own tests.
 - New-voice leftover Kokoro project defaults remap to Inworld; picker offers Inworld / Gemini / MMS (`NewVoiceModal.test.tsx`)
 - Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
@@ -183,6 +200,32 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
+  Project Lead, including on a DCS-pinned project where a refusal reason exists),
+  the DCS-pinned disabled reason, the IDML row that is parkable although its text
+  is not editable, the Show-cell wording flip, and the dimmed eye-off row —
+  covered in RTL (`EditorTable.hiddenCells.test.tsx`). The display-list rule that
+  drops a parked cell from the text table, the media lens and the chapter counts
+  together, and the list-version bumps a live hide/show depends on, are in
+  `useActiveCellStore.hiddenCells.test.ts`. The durable contract is a worker unit
+  test, not a smoke: `sync-worker/src/__tests__/hidden-cells-projection.test.ts`
+  drives the real projection against real Postgres and reads it back out through
+  the real cells read route, which is the producer/consumer seam that would
+  otherwise fail silently. The emit contract (non-chain-mutating, PROJECT_LEAD
+  floor) is in `src/lib/sync/events-emit.hiddenCells.test.ts`.
+- Hidden cells leave every export (AQU-1423). The existing export smoke
+  (`e2e/specs/editor/export.smoke.spec.ts`, row 38 above) already crosses the
+  layers this touches, and hiding adds no new cross-layer contract — it adds a
+  predicate to a scoping step that journey already exercises. So the coverage is
+  narrower and closer to the failure: `src/lib/export/validation-scope.test.ts`
+  for the predicate, `src/lib/export/hidden-cells-export.test.ts` for the
+  producer/consumer seam (real cells through the real scoping step into the REAL
+  text exporters, asserting the parked line is absent in BOTH languages — the
+  failure here is not a missing line but a present one in the source language),
+  `src/components/ExportDialog.hiddenCells.test.tsx` for the round-trip formats
+  and the dialog's per-format note, and
+  `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
+  plan against real Postgres.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

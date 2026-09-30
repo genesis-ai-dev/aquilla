@@ -16,6 +16,7 @@ import {
   normalizeRepetitionSource,
   type PropagationSegment,
 } from "./autopropagation"
+import { isVisibleCell } from "@/lib/cells/hidden"
 
 /**
  * The slice of a cell view this planner reads. Structurally satisfied by
@@ -33,6 +34,25 @@ export interface RepetitionCell {
   targetEventId?: string
   /** AD-9 staleness pin for this cell's source row. */
   sourceEventId?: string
+  /** AQU-1422: true while the cell is parked with "Hide cell". The store's
+   *  `getAllCellViews()` still returns parked cells, so the planner has to
+   *  drop them itself — see `repetitionSet`. Absent on a visible cell. */
+  hidden?: boolean
+}
+
+/**
+ * The cells repetition handling may look at: everything that is not parked.
+ *
+ * AQU-1424 made a hidden cell stop being WORK — it leaves drafting, search and
+ * every other place the app automates a write, because rewriting text nobody
+ * can see is the bug. Propagation is one more automated write, so a parked
+ * cell neither receives a translation, nor seeds one, nor counts toward the
+ * "Repetition ×N" badge (which promises "you will meet this string N times" —
+ * a translator never meets a parked row). One filter for all three so the
+ * badge cannot disagree with what propagates.
+ */
+function repetitionSet<T extends RepetitionCell>(cells: readonly T[]): T[] {
+  return cells.filter(isVisibleCell)
 }
 
 /** One `target.cell.commit` to emit, already pinned to its own cell's chain. */
@@ -83,8 +103,8 @@ function parentIdFor(
  * Plan the commits that carry a newly validated cell's translation to every
  * repeated source segment in the same file.
  *
- * Returns `[]` when nothing should move — unknown cell, empty source, empty
- * translation, or no eligible repetitions. Callers emit nothing and show no
+ * Returns `[]` when nothing should move — unknown or hidden cell, empty source,
+ * empty translation, or no eligible repetitions. Callers emit nothing and show no
  * toast in that case.
  */
 export function planRepetitionPropagation({
@@ -92,12 +112,13 @@ export function planRepetitionPropagation({
   cells,
   resolveParentId,
 }: PlanRepetitionPropagationInput): RepetitionCommit[] {
-  const confirmed = cells.find((c) => c.id === confirmedCellId)
+  const visible = repetitionSet(cells)
+  const confirmed = visible.find((c) => c.id === confirmedCellId)
   if (!confirmed) return []
 
   // Same file only. The store holds the active file, but a caller that hands
   // us a wider set must not silently write across files in v1.
-  const sameFile = cells.filter((c) => c.fileId === confirmed.fileId)
+  const sameFile = visible.filter((c) => c.fileId === confirmed.fileId)
   const byId = new Map(sameFile.map((c) => [c.id, c]))
 
   const segments: PropagationSegment[] = sameFile.map((c) => ({
@@ -139,11 +160,12 @@ export function planRepetitionPropagation({
  *
  * Counts every cell with that source, INCLUDING validated ones: the badge
  * answers "how often does this text occur", which is true regardless of who
- * may still receive a propagation.
+ * may still receive a propagation. Hidden cells are the exception — they are
+ * not in the repetition set at all (see `repetitionSet`).
  */
 export function buildRepetitionCounts(cells: RepetitionCell[]): Map<string, number> {
   const byKey = new Map<string, string[]>()
-  for (const cell of cells) {
+  for (const cell of repetitionSet(cells)) {
     const key = normalizeRepetitionSource(cell.original)
     if (!key) continue
     const bucket = byKey.get(key)

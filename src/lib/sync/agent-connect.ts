@@ -18,6 +18,14 @@ export async function connectionRequest<T>(jwt: string, path: string, body: obje
   return response.json() as Promise<T>
 }
 
+/** Shown after approval for the human to paste back to an agent whose polling
+ * gave up. Carries only the (already used) user code and the public endpoint;
+ * the agent redeems with the device_code it kept, so no secret crosses chat. */
+export function buildApprovedMessage(authBase: string, userCode: string): string {
+  const token = `${authBase.replace(/\/+$/, "")}/api/v2/agent-connect/token`
+  return `I approved your Aquilla connection request (code ${userCode}). Collect the credential now with one POST to ${token} using client_id "aquilla-agent", grant_type "urn:ietf:params:oauth:grant-type:device_code", and the device_code you kept. Store access_token privately, then GET /me on the Agent API to verify.`
+}
+
 /** Safe to paste into any agent chat: no token, user code, or session data. */
 export function buildConnectionInstructions(authBase: string, syncOrigin: string): string {
   const connect = `${authBase.replace(/\/+$/, "")}/api/v2/agent-connect`
@@ -32,7 +40,7 @@ If you know the project ID, include project_id. Otherwise I will choose the proj
 
 Keep device_code private in your runtime. Show me verification_uri_complete and user_code so I can open Aquilla, compare the code, and approve access. Open that link in my browser if possible. Never approve the connection or confirm the code on my behalf.
 
-Poll ${connect}/token with client_id "aquilla-agent", grant_type "urn:ietf:params:oauth:grant-type:device_code", and device_code. Wait the returned interval between polls. On authorization_pending continue; on slow_down increase the interval by 5 seconds; stop on access_denied or expired_token. The request expires after 10 minutes.
+Poll ${connect}/token with client_id "aquilla-agent", grant_type "urn:ietf:params:oauth:grant-type:device_code", and device_code. Wait the returned interval between polls. On authorization_pending continue; on slow_down increase the interval by 5 seconds; stop on access_denied or expired_token. The request expires after 10 minutes. Run the polling loop in the background if your tool calls time out. If polling stops before I approve, keep device_code and wait: after approving I will paste you a message saying so, and one token request will then return the credential.
 
 Store access_token directly in your secure credential store or a local file readable only by its owner. Do not print it, paste it into chat, put it in command arguments, or ask me to configure an environment variable. If you cannot securely store and use credentials, explain that limitation before requesting access. Credentials expire after 30 days; reconnect when needed.
 

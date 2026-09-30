@@ -116,6 +116,29 @@ describe("planRepetitionPropagation", () => {
     expect(commits).toEqual([])
   })
 
+  // AQU-1424 (landed on dev after this planner was written): a parked cell is
+  // not work. The store still hands hidden cells to the planner, so the planner
+  // is where they have to be dropped.
+  it("never writes into a hidden cell", () => {
+    const commits = planRepetitionPropagation({
+      confirmedCellId: "c1",
+      cells: [
+        confirmed,
+        cell({ id: "parked", status: "empty", sourceEventId: "s2", hidden: true }),
+        cell({ id: "eligible", status: "empty", sourceEventId: "s3" }),
+      ],
+    })
+    expect(commits.map((c) => c.cellId)).toEqual(["eligible"])
+  })
+
+  it("does not propagate out of a hidden cell", () => {
+    const commits = planRepetitionPropagation({
+      confirmedCellId: "c1",
+      cells: [{ ...confirmed, hidden: true }, cell({ id: "c2", status: "empty", sourceEventId: "s2" })],
+    })
+    expect(commits).toEqual([])
+  })
+
   it("returns nothing for an unknown cell, an empty source, or an empty translation", () => {
     expect(planRepetitionPropagation({ confirmedCellId: "nope", cells: [confirmed] })).toEqual([])
     expect(
@@ -147,5 +170,20 @@ describe("buildRepetitionCounts", () => {
     expect(counts.get("c")).toBe(3)
     expect(counts.has("unique")).toBe(false)
     expect(counts.has("blank")).toBe(false)
+  })
+
+  it("leaves hidden cells out of the count, so the badge matches what propagates", () => {
+    const counts = buildRepetitionCounts([
+      cell({ id: "a" }),
+      cell({ id: "b" }),
+      cell({ id: "parked", hidden: true }),
+    ])
+    expect(counts.get("a")).toBe(2)
+    expect(counts.get("b")).toBe(2)
+    expect(counts.has("parked")).toBe(false)
+
+    // Two occurrences, one parked: nothing a translator can see repeats.
+    const lone = buildRepetitionCounts([cell({ id: "a" }), cell({ id: "parked", hidden: true })])
+    expect(lone.size).toBe(0)
   })
 })

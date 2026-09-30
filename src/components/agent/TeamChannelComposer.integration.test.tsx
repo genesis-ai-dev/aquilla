@@ -17,6 +17,14 @@ const run: ContextualRunRecord = {
 const runs = [run]
 const sessionState = { runs: [], queued: [], isStreaming: false }
 const send = vi.fn()
+// The v3 agent-mode dial reads project settings on mount; keep it on-machine.
+vi.mock("@/lib/agent/agent-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent/agent-mode")>(
+    "@/lib/agent/agent-mode",
+  )
+  return { ...actual, fetchAgentMode: vi.fn(async () => null), patchAgentMode: vi.fn() }
+})
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" }, loading: false }),
 }))

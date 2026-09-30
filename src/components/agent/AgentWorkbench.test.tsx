@@ -18,6 +18,14 @@ import type { AgentFrame } from "@/lib/agent/protocol"
 
 // Stub the chat rail but keep the workbench seam: render each proposal
 // through renderProposalOverride so the RECEIPT (counters + Undo) is real.
+// The v3 agent-mode dial reads project settings on mount; keep it on-machine.
+vi.mock("@/lib/agent/agent-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent/agent-mode")>(
+    "@/lib/agent/agent-mode",
+  )
+  return { ...actual, fetchAgentMode: vi.fn(async () => null), patchAgentMode: vi.fn() }
+})
+
 vi.mock("./AgentDockView", async () => {
   const { agentSessionStore: storeOf } = await import("@/lib/agent/session-store")
   const { proposalsOf } = await import("@/lib/agent/run-state")

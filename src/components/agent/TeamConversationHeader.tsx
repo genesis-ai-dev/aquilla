@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { buttonVariants } from "@/components/ui/button"
 import { agentConversationHref } from "@/lib/agent/workspace-location"
@@ -17,6 +18,9 @@ export interface TeamConversationHeaderProps {
   openQuestionCount?: number
   /** Omitted when the questions conversation is already open. */
   questionsHref?: string
+  /** Controls at the end of the header row (v3: the agent-mode dial and the
+   *  next-passage affordance on a stopped run). */
+  actions?: ReactNode
 }
 
 export function TeamConversationHeader({
@@ -26,6 +30,7 @@ export function TeamConversationHeader({
   run,
   openQuestionCount = 0,
   questionsHref,
+  actions,
 }: TeamConversationHeaderProps) {
   const t = useT()
   const pendingDrafts = run?.proposedDrafts ?? 0
@@ -74,6 +79,7 @@ export function TeamConversationHeader({
             </li>
           ))}
         </ul>
+        {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
       </div>
       {attention && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">

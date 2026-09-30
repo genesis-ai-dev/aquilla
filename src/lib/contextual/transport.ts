@@ -805,7 +805,62 @@ export async function startFileContextualRun(
   fileId: string,
   targetLang = "",
 ): Promise<{ runId: string }> {
+  // No budget flag: the server's trust-gated default (AQU-1300) drafts one
+  // passage and parks to ask — which is exactly "the next passage".
   return realContextualTransport.start(projectId, fileId, undefined, targetLang)
+}
+
+/** Give a run parked `awaiting_input` another passage batch (AQU-1300), by id —
+ *  the Team surface continues runs other than the run-store's current one.
+ *  Those runs come from the run LIST, which never went through start/snapshot,
+ *  so the project is recorded here before the command resolves it. */
+export function continueFileContextualRun(projectId: string, runId: string): Promise<void> {
+  runProjects.set(runId, projectId)
+  return realContextualTransport.continueRun(runId, "batch")
+}
+
+/** One reaction the react-check started, or one file it deliberately passed on. */
+export interface ContextualReactCheckResult {
+  reactions: { fileId: string; runId: string }[]
+  skipped: { fileId: string; reason: string }[]
+}
+
+/**
+ * "Check for updates now" — the manual sibling of the server's 5-minute react
+ * sweep, for when waiting for the cron is the wrong answer. CONTRIBUTOR+.
+ *
+ * Returns `null` (rather than throwing) when the server predates the route,
+ * so an older backend disables the button with an explanation instead of
+ * making the whole mode control look broken.
+ */
+export async function requestReactCheck(
+  projectId: string,
+): Promise<ContextualReactCheckResult | null> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/react-check`,
+    { method: "POST", headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return null
+  if (!res.ok) return throwFromResponse(res, "check for updates failed")
+  const body = objectValue(await res.json())
+  const reactions = Array.isArray(body?.reactions) ? body.reactions : []
+  const skipped = Array.isArray(body?.skipped) ? body.skipped : []
+  return {
+    reactions: reactions.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      const runId = stringValue(row?.runId)
+      if (!fileId || !runId) return []
+      runProjects.set(runId, projectId)
+      return [{ fileId, runId }]
+    }),
+    skipped: skipped.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      return fileId ? [{ fileId, reason: stringValue(row?.reason) }] : []
+    }),
+  }
 }
 
 /** `continue` grants the run a batch of spans and resumes it; `continue-all`

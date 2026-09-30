@@ -48,14 +48,19 @@ import { useTeamConversations } from "@/lib/agent/team-conversations"
 import { normalizePhase } from "@/lib/contextual/process-graph"
 import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
+  continueFileContextualRun,
   fetchContextualRunActivity,
+  startFileContextualRun,
   type ContextualRunActivity,
   type ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { getProject } from "@/lib/store/project-index"
 import { humanPassageLabel } from "../../../shared/span-label"
 import { AgentCardTrigger } from "./AgentCard"
 import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
 import { AgentDraftReview } from "./AgentDraftReview"
+import { AgentModeControl } from "./AgentModeControl"
 import { TeamChannelComposer } from "./TeamChannelComposer"
 import { TeamConversationHeader } from "./TeamConversationHeader"
 import { TeamStepInspector } from "./TeamStepInspector"
@@ -151,8 +156,27 @@ export function TeamThreadsView({
     [setSearchParams],
   )
 
+  // The agentModes experiment is DEVICE-LOCAL (it lives on the IDB project
+  // record, never in shared settings), so it is read straight from IDB rather
+  // than threaded down from ProjectWorkspace — mirrors ExperimentalFlagsSection.
+  const [agentModesEnabled, setAgentModesEnabled] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    void getProject(projectId).then((local) => {
+      if (disposed) return
+      setAgentModesEnabled(isFlagEnabled(local ?? {}, "agentModes"))
+    })
+    return () => {
+      disposed = true
+    }
+  }, [projectId])
+
   const [activity, setActivity] = useState<ContextualRunActivity | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
+  // "Next passage": one span, then a park. Per-conversation, so switching
+  // conversations never shows a stale failure from another run.
+  const [nextPassageBusy, setNextPassageBusy] = useState(false)
+  const [nextPassageFailed, setNextPassageFailed] = useState(false)
   // Step inspector (the optional third column) — per selected conversation.
   const [inspectedId, setInspectedId] = useState<string | null>(null)
   const inspectorId = useId()
@@ -168,6 +192,7 @@ export function TeamThreadsView({
   useEffect(() => {
     setInspectedId(null)
     inspectorTriggerRef.current = null
+    setNextPassageFailed(false)
   }, [selectedId])
 
   const openDecisions = useMemo(() => decisions?.decisions ?? [], [decisions])
@@ -254,9 +279,14 @@ export function TeamThreadsView({
     return active
   }, [runs])
 
+  // `spanLabel` can be an opaque cell/span id when the server had no human ref
+  // to name the wave by — humanPassageLabel rejects those, so a conversation
+  // title is never a raw UUID (the "no raw ids anywhere user-facing" fix).
   const runTitle = useCallback(
     (run: ContextualRunRecord) =>
-      fileNames?.get(run.fileId) ?? run.spanLabel ?? t("agent.team.unnamedThread"),
+      fileNames?.get(run.fileId)
+      ?? humanPassageLabel(run.spanLabel)
+      ?? t("agent.team.unnamedThread"),
     [fileNames, t],
   )
   const titleFor = useCallback(
@@ -274,6 +304,39 @@ export function TeamThreadsView({
   )
 
   const canStartRuns = (roleLevel ?? 0) >= ROLE.CONTRIBUTOR
+
+  // A run that has stopped — finished, failed, stopped, or parked between
+  // waves — is exactly where "just do the next bit, then I'll look" belongs.
+  // A run still working already has momentum; another button would only race it.
+  // v3 "one more passage", on dev's trust gate (AQU-1300): a run parked
+  // awaiting input is continued (the server grants budget before resuming);
+  // a failed or stopped run is restarted, and a fresh start already means one
+  // passage then park. A finished or work-exhausted run has nothing left.
+  const nextPassageMode: "continue" | "restart" | null =
+    !agentModesEnabled || !canStartRuns || openRun === null
+      ? null
+      : openRun.status === "parked" && openRun.parkReason === "awaiting_input"
+        ? "continue"
+        : openRun.status === "failed" || openRun.status === "terminated"
+          ? "restart"
+          : null
+
+  const startNextPassage = useCallback(() => {
+    if (!openRun || !nextPassageMode) return
+    setNextPassageBusy(true)
+    setNextPassageFailed(false)
+    const request = nextPassageMode === "continue"
+      ? continueFileContextualRun(projectId, openRun.runId).then(() => openRun.runId)
+      : startFileContextualRun(projectId, openRun.fileId, openRun.targetLang ?? "").then(({ runId }) => runId)
+    void request
+      .then((runId) => {
+        retry()
+        setSelected(runThreadId(runId))
+      })
+      .catch(() => setNextPassageFailed(true))
+      .finally(() => setNextPassageBusy(false))
+  }, [openRun, nextPassageMode, projectId, retry, setSelected])
+
   const composerThread = openRun
     ? {
         runId: openRun.runId,
@@ -294,6 +357,30 @@ export function TeamThreadsView({
             : undefined,
       }
     : null
+
+  const nextPassageControl = nextPassageMode ? (
+    <>
+      {nextPassageFailed && (
+        <span role="alert" className="text-[11px] text-destructive">
+          {t("agent.team.nextPassageFailed")}
+        </span>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        data-testid="team-next-passage"
+        disabled={nextPassageBusy}
+        onClick={startNextPassage}
+      >
+        {nextPassageBusy ? t("agent.team.nextPassageStarting") : t("agent.team.nextPassage")}
+      </Button>
+    </>
+  ) : null
+
+  const modeControl = agentModesEnabled ? (
+    <AgentModeControl projectId={projectId} jwt={sessionJwt} roleLevel={roleLevel} />
+  ) : null
 
   const loading = runs === null && !loadFailed
   const isEmpty = channelItems.length === 0 && state.runs.length === 0 && openCount === 0
@@ -338,6 +425,7 @@ export function TeamThreadsView({
           title={t("agent.team.teamChat")}
           activePersonas={activePersonas}
           projectId={projectId}
+          actions={modeControl}
         />}
         {renderChannel ? renderChannel(channelProps) : <TeamEmptyState projectId={projectId} t={t} />}
         {showComposer && (
@@ -431,6 +519,7 @@ export function TeamThreadsView({
         questionsHref={questionsHref}
         activePersonas={activePersonas}
         projectId={projectId}
+        actions={<>{nextPassageControl}{modeControl}</>}
       />}
       <div className="flex min-h-0 flex-1">
         <div

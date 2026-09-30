@@ -229,6 +229,10 @@ describe("worker/index — security headers", () => {
     expect(enforced).not.toContain("script-src")
     expect(enforced).not.toContain("connect-src")
     expect(reportOnly).toContain("script-src 'self' 'wasm-unsafe-eval'")
+    const scripts = reportOnly.split("; ").find(part =>
+      part.startsWith("script-src "),
+    )
+    expect(scripts?.split(" ")).toContain("https://www.youtube.com")
     expect(reportOnly).toContain("connect-src")
     expect(reportOnly).toContain("default-src 'self'")
   })

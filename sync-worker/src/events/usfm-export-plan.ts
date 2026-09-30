@@ -193,6 +193,23 @@ async function resolveAdditions(
   const rows = (added.results ?? []).filter(
     (r) => (r.value ?? '').trim() !== '' && !hiddenIds.has(r.cell_id),
   )
+  return placeAdditions(db, projectId, fileId, rows)
+}
+
+/**
+ * Group added cells under the verse each one ultimately follows.
+ *
+ * Shared by the target-side and source-side plans: which VALUE an addition
+ * carries differs between them (a translation vs. the curated source text), but
+ * where it lands does not — the anchor chain is source-side structure and has
+ * one answer per file.
+ */
+async function placeAdditions(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  rows: readonly AddedCellRow[],
+): Promise<Map<string, readonly string[]>> {
   if (rows.length === 0) return new Map()
 
   // Resolve each addition's anchor to a verse. One hop is the common case, but
@@ -263,4 +280,128 @@ async function resolveAdditions(
     appendAfter.set(ref, list.map((e) => e.value))
   }
   return appendAfter
+}
+
+// ---------------------------------------------------------------------------
+// AQU-1449: the SOURCE side of the same three questions.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a source-side USFM export needs to know about one file.
+ *
+ * Same shape as the target plan and fed to the same serializer, but every part
+ * is answered from the source side:
+ *
+ *   - OVERRIDES are verses whose source text was EDITED in the app, and only
+ *     those. A verse nobody touched contributes no override, which is what
+ *     keeps its original span byte-identical — footnotes, character markers and
+ *     poetry included. Overlaying every verse with its projected `value` would
+ *     rewrite the whole file as plain text and strip all of that, so "was this
+ *     edited?" has to be answered exactly rather than guessed at.
+ *
+ *     The answer is the cell's CHAIN HEAD: the projection writes the winning
+ *     event's id to `cells.event_id`, so a head of kind `source.cell.commit`
+ *     means the live text came from an edit (the editor's "Edit text", or a DCS
+ *     re-pin to a newer upstream release), and a head of `source.cell.create`
+ *     means it came from the import untouched. Reading the head rather than
+ *     merely asking whether a commit event EXISTS matters: a commit that lost
+ *     its AD-2 head compare-and-swap applied nothing, and treating that as an
+ *     edit would strip the markers off a verse nobody changed.
+ *
+ *   - REMOVALS are exactly the target plan's: deleted and hidden verses leave
+ *     the file, marker included.
+ *
+ *   - ADDITIONS are cells added in the app that carry SOURCE text, placed under
+ *     the verse they follow by the same anchor chain.
+ *
+ * No lane and no validation threshold: the source side has neither, so the
+ * output is the same whichever lane the exporting client happens to be on.
+ */
+export async function buildUsfmSourceExportPlan(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+): Promise<UsfmExportPlan> {
+  // A hidden verse is REMOVED below, so it must not also arrive as an override:
+  // an override is the serializer's "write this text here" and would put the
+  // parked verse back. The removal is tested first there, but leaving the two
+  // consistent costs nothing and keeps the plan honest on its own.
+  const edited = await db
+    .prepare(
+      `SELECT c.canonical_ref AS canonical_ref, c.value AS value
+         FROM cells c
+         JOIN events e ON e.id = c.event_id
+        WHERE c.project_id = ?
+          AND c.file_id    = ?
+          AND c.side       = 'source'
+          AND c.target_lang = ''
+          AND c.canonical_ref IS NOT NULL
+          AND c.hidden_at IS NULL
+          AND c.value <> ''
+          AND e.kind = 'source.cell.commit'`,
+    )
+    .bind(projectId, fileId)
+    .all<{ canonical_ref: string; value: string }>()
+
+  const overrides = new Map<string, string>()
+  for (const row of edited.results ?? []) overrides.set(row.canonical_ref, row.value)
+
+  const edits: UsfmEdits = {}
+
+  const hiddenCells = await hiddenCellsForFile(db, projectId, fileId)
+
+  // Best-effort, exactly as on the target side: a failure here degrades to a
+  // correct file missing the added content rather than losing the download.
+  try {
+    const hiddenIds = new Set(hiddenCells.map((c) => c.cellId))
+    const appendAfter = await resolveSourceAdditions(db, projectId, fileId, hiddenIds)
+    if (appendAfter.size > 0) edits.appendAfter = appendAfter
+  } catch {
+    // leave additions out
+  }
+
+  const removedRefs = new Set<string>()
+  for (const removed of await removedCellsForFile(db, projectId, fileId)) {
+    if (removed.canonicalRef) removedRefs.add(removed.canonicalRef)
+  }
+  for (const hidden of hiddenCells) {
+    if (hidden.canonicalRef) removedRefs.add(hidden.canonicalRef)
+  }
+  if (removedRefs.size > 0) edits.remove = removedRefs
+
+  return { overrides, edits }
+}
+
+/**
+ * Added cells that carry source text, grouped under the verse each follows.
+ *
+ * The source-side twin of `resolveAdditions`: one query rather than a join,
+ * because the value wanted is the added cell's OWN text. An added cell with no
+ * source text contributes nothing, and a hidden one contributes nothing either —
+ * the same two exclusions the target side applies.
+ */
+async function resolveSourceAdditions(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  hiddenIds: ReadonlySet<string> = new Set(),
+): Promise<Map<string, readonly string[]>> {
+  const added = await db
+    .prepare(
+      `SELECT cell_id, anchor_cell_id, value
+         FROM cells
+        WHERE project_id = ?
+          AND file_id    = ?
+          AND side       = 'source'
+          AND target_lang = ''
+          AND canonical_ref IS NULL
+          AND (metadata::jsonb)->'aquillaOrigin'->>'kind' = 'user-insert'`,
+    )
+    .bind(projectId, fileId)
+    .all<AddedCellRow>()
+
+  const rows = (added.results ?? []).filter(
+    (r) => (r.value ?? '').trim() !== '' && !hiddenIds.has(r.cell_id),
+  )
+  return placeAdditions(db, projectId, fileId, rows)
 }

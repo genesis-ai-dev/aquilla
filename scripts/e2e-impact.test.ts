@@ -128,6 +128,34 @@ describe("changed-file E2E impact selection", () => {
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
   })
 
+  it("maps the share / invite surfaces to the share-invite journey (AQU-1153)", () => {
+    // PR #882 restyled UsernameTypeahead's mode switch as tabs and merged with a
+    // stale button locator in share-invite.smoke: none of these files carried a
+    // domain keyword, so the push gate ran only the core sentinels.
+    const available = [...specs, "e2e/specs/projects/share-invite.smoke.spec.ts"]
+    for (const file of [
+      "src/components/UsernameTypeahead.tsx",
+      "src/components/MemberMultiAddRow.tsx",
+      "src/components/MultiProjectInviteDialog.tsx",
+      "src/components/ProjectMembersPage.tsx",
+      "src/components/ProjectSettings/AddProjectMemberDialog.tsx",
+      "src/components/SharePanel.tsx",
+      "src/components/JoinPage.tsx",
+      "src/hooks/useUserSearch.ts",
+      "src/lib/sync/invites.ts",
+      "auth-worker/src/routes/invites.ts",
+      "auth-worker/src/services/invite-scopes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], available).specs, file).toContain(
+        "e2e/specs/projects/share-invite.smoke.spec.ts",
+      )
+    }
+    // A matched domain rule replaces the core-sentinel fallback outright.
+    expect(selectAffectedE2E(["src/components/UsernameTypeahead.tsx"], available).specs).toEqual([
+      "e2e/specs/projects/share-invite.smoke.spec.ts",
+    ])
+  })
+
   it("maps app font-size preference and boot script to preferences persist-reload", () => {
     for (const file of [
       "src/branding/FontSize.tsx",

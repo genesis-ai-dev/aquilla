@@ -27,6 +27,7 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
@@ -129,7 +130,7 @@ export function buildBulkTargetCellCommitStmt(
       canonical_ref, anchor_cell_id, event_id, source_event_id,
       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
-    ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+    ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
       value = excluded.value,
       value_html = excluded.value_html,
       event_id = excluded.event_id,
@@ -248,6 +249,24 @@ function fileCountersSql(scope: FileCountersScope): string {
                 (SELECT COUNT(*) FROM (
                    SELECT 1 FROM cells
                     WHERE project_id = f.project_id AND file_id = f.id
+                      -- AQU-1424: a cell parked with Hide cell is not work, so it
+                      -- leaves the file's denominator. It reads the SHARED SOURCE ROW's
+                      -- flag rather than each row's own: the flag lives only there
+                      -- (hiding is per cell, not per lane), and a target row created
+                      -- after the hide carries none of its own.
+                      --
+                      -- The SET form, not a correlated NOT EXISTS, and the difference is
+                      -- load-bearing: this GROUP BY is under the plan-shape guardrail in
+                      -- hot-query-plans.test.ts and must stay Sort-free. NOT EXISTS makes
+                      -- the planner sort the inner side. See visibleCellIdSql.
+                      -- Unqualified cell_id, like the two predicates above it: this
+                      -- subquery's only FROM relation is cells, so it resolves there
+                      -- unambiguously. A cells-qualified column would be equally valid
+                      -- SQL, but it trips the guard in event-projection.test.ts that
+                      -- catches a cells column pasted into a statement whose own FROM has
+                      -- no cells — a real bug (AQU-1068, it broke removal outright) worth
+                      -- keeping a blunt check for.
+                      AND ${visibleCellIdSql('cell_id', 'f.project_id', 'f.id')}
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
@@ -283,6 +302,16 @@ function fileCountersSql(scope: FileCountersScope): string {
             AND s.cell_id = c.cell_id
             AND s.side = 'source'
           WHERE f.project_id = ?${narrow}
+            -- AQU-1424: every FILTERed counter above is gated here once rather than
+            -- one by one. Alias s IS the shared source row, so its hidden_at answers for
+            -- the whole cell; c.hidden_at would let every target row of a parked cell
+            -- through, since the flag never lands on a target row.
+            --
+            -- IS NULL is doing double duty on purpose, and the LEFT JOINs need it to: an
+            -- absent s reads as VISIBLE, which keeps both the source-less rows AQU-1068
+            -- creates and the all-null row of an empty file. That empty row is what
+            -- drives the counters to 0 instead of leaving them stale.
+            AND ${visibleSourceSql('s')}
           GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,
@@ -443,7 +472,7 @@ export function buildBulkSourceCellCreateStmt(
         medium, sequence_index, transcription, camera_state, metadata,
         lane_id
       ) VALUES ${placeholders}
-      ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+      ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
         side           = excluded.side,
         value          = excluded.value,
         value_html     = excluded.value_html,
@@ -469,7 +498,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -680,7 +709,7 @@ export function buildEventProjectionStmts(
               medium, sequence_index, transcription, camera_state, metadata,
               lane_id
             ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
-            ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
               value_html     = excluded.value_html,
@@ -809,6 +838,48 @@ export function buildEventProjectionStmts(
       return ['cells']
     }
 
+    case 'source.cell.visibility.set': {
+      const p = event.payload as EventPayloads['source.cell.visibility.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (typeof p.hidden !== 'boolean') {
+        throw new Error(`${event.kind} event ${event.id} requires a boolean payload.hidden`)
+      }
+      // AQU-1422: park (or un-park) ONE cell. Like source.cell.reanchor this is
+      // non-chain-mutating by design — it moves only `hidden_at` and never
+      // advances `cells.event_id`, because hiding a cell changes nothing about
+      // its text and must NOT make every lane's translation go stale (AD-9
+      // compares the target's pin against the source head). It also replays
+      // unconditionally on rebuild in seq order, so the last hide/show wins.
+      //
+      // Written to the SHARED SOURCE ROW ONLY. Hiding is per cell, not per lane:
+      // every consumer resolves a cell's visibility from this one row. Writing
+      // it per row would leave a target row created AFTER the hide — the
+      // collaborator's in-flight translation the AC insists must survive — with
+      // the flag unset, and that is exactly the row that must not reappear.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET hidden_at = ?
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(
+            p.hidden ? event.serverTs : null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      // A hidden cell stops being work (AQU-1424 builds on this), so the file's
+      // counters have to recompute even though no text changed. Reported as a
+      // `files` touch so the caller's coalesced recompute picks the file up.
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']
@@ -858,7 +929,7 @@ export function buildEventProjectionStmts(
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
               ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
-              ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
                 event_id          = excluded.event_id,
@@ -1292,9 +1363,9 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
-      // AQU-538: the lane this validation addresses. Absent/'' = default lane
-      // (byte-identical for N=1). A user's standing validation is per-lane —
-      // the cell_validators PK carries target_lang — so validating a cell in
+      // AQU-538 / AQU-1420: the lane this validation addresses. Absent/'' is the
+      // default lane's legacy tag. A user's standing validation is per lane —
+      // the cell_validators primary key is lane_id — so validating a cell in
       // lane A leaves lane B's validators (and validated flag) untouched.
       const lane =
         typeof (p as { targetLang?: unknown }).targetLang === 'string'
@@ -1313,7 +1384,7 @@ export function buildEventProjectionStmts(
               `INSERT INTO cell_validators (
                 project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
               ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
+              ON CONFLICT(project_id, file_id, cell_id, lane_id, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
                 decided_ts = excluded.decided_ts,
@@ -1847,6 +1918,70 @@ case 'cell.audio.attach': {
           .bind(event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.attachment.add': {
+      // AQU-777. The R2 object is already written by the time this lands (the
+      // client PUTs the bytes, then emits), so the row it inserts always points
+      // at something readable.
+      const p = event.payload as EventPayloads['cell.attachment.add']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            // PROJECT-SCOPED conflict target, per the AQU-1296 lesson on
+            // `comments`: a per-project id conflicted on globally means the
+            // first project to claim it owns the only row that can exist.
+            // Same-project replay stays a no-op, which is what makes a
+            // re-delivered outbox event harmless.
+            `INSERT INTO cell_attachments (
+              project_id, attachment_id, file_id, cell_id, object_name, name,
+              mime_type, size_bytes, author_id, author_label, created_at,
+              deleted_at, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(project_id, attachment_id) DO NOTHING`,
+          )
+          .bind(
+            event.projectId,
+            p.attachmentId,
+            event.fileId,
+            event.cellId,
+            p.objectName,
+            p.name,
+            p.mimeType ?? null,
+            p.sizeBytes ?? null,
+            event.author,
+            event.author,
+            event.serverTs,
+            event.id,
+          ),
+      )
+      return ['cell_attachments']
+    }
+
+    case 'cell.attachment.remove': {
+      // Soft-delete, matching `comment.delete` and `cell.audio.remove`: the row
+      // survives so the removal replays from the log and the R2 key stays
+      // discoverable for a later orphan sweep.
+      //
+      // NO author gate, deliberately — unlike comment.delete, which pairs a
+      // self floor with a higher foreign one. An attachment is shared working
+      // context for the cell, not someone's utterance: AQU-777 asks for it to
+      // be removable by "a user with edit access to the project", and a
+      // contributor who cannot clear a teammate's wrong screenshot off a cell
+      // is stuck. CONTRIBUTOR (role-policy.ts) is the whole bar.
+      const p = event.payload as EventPayloads['cell.attachment.remove']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_attachments SET deleted_at = ?
+              WHERE project_id = ? AND attachment_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.projectId, p.attachmentId),
+      )
+      return ['cell_attachments']
     }
 
     case 'cell.audio.validate':
@@ -2629,7 +2764,7 @@ case 'cell.audio.attach': {
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 upstream_event_id, upstream_seq, tombstoned_at, lane_id
               ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
-              ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+              ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
@@ -2663,6 +2798,17 @@ case 'cell.audio.attach': {
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
+      // AQU-1453: mirror the upstream's visibility, but only when the mirror
+      // event actually carries it. An absent `hidden` must leave the downstream
+      // row's own `hidden_at` alone — every text mirror would otherwise un-park
+      // the cell it touched, and every mirror event written before this field
+      // existed would do the same on a projection rebuild. That is why the ON
+      // CONFLICT assignment below is composed rather than unconditional: there
+      // is no single value for `excluded.hidden_at` that means "don't change
+      // this", since NULL is itself the "visible" state.
+      const hiddenProvided = typeof p.hidden === 'boolean'
+      const hiddenAt = hiddenProvided && p.hidden ? event.serverTs : null
+      const hiddenAtAssign = hiddenProvided ? 'hidden_at         = excluded.hidden_at,' : ''
       stmts.push(
         db
           .prepare(
@@ -2671,13 +2817,14 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at, lane_id
+              upstream_event_id, upstream_seq, tombstoned_at, hidden_at, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL, ${laneIdResolveSql('source')}
+              ?, ?, NULL, ?, ${laneIdResolveSql('source')}
             )
-            ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+            ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
+              ${hiddenAtAssign}
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),
@@ -2724,6 +2871,7 @@ case 'cell.audio.attach': {
             p.metadata != null ? JSON.stringify(p.metadata) : null,
             p.upstream.eventId,
             upstreamSeq,
+            hiddenAt,
             ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )

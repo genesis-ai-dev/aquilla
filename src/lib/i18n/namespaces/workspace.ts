@@ -246,6 +246,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    // AQU-1405. Painted over the page for the moment between a stale-chunk
+    // failure and the automatic reload that recovers from it.
+    "workspace.updateNotice.reloading": "Updating {app}…",
 
     // -- GenerateOverwriteDialog --
     "workspace.generateOverwrite.dontAskAgain": "Don't ask again when replacing a translation",
@@ -308,6 +311,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -692,20 +697,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },
@@ -1209,6 +1214,16 @@ export const workspace = defineNamespace({
           "that reloads the page.",
       },
 
+      "workspace.updateNotice.reloading": {
+        description:
+          "Full-screen status message shown for the moment between a stale " +
+          "code-chunk load failure (a new version was deployed while this tab " +
+          "was open) and the automatic reload that recovers from it.",
+        placeholders: {
+          app: "The product name for the current brand (e.g. 'Aquilla'), never translated.",
+        },
+      },
+
       "workspace.generateOverwrite.dontAskAgain": {
         description:
           "Checkbox label in the confirm dialog shown before an AI draft " +
@@ -1361,6 +1376,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +

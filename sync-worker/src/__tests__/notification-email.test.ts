@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   extractMentions,
   deriveRecipientUsernames,
+  filterUsernamesWithProjectAccess,
   sendCommentNotifications,
   sendNotificationEmail,
   type EmailService,
@@ -217,6 +218,102 @@ describe('sendNotificationEmail', () => {
   })
 })
 
+// ── filterUsernamesWithProjectAccess ──────────────────────────────────────
+//
+// [Pen test 2026-09-24] API security & data exposure: @mention notifications
+// used to resolve emails globally with no project-membership check, letting
+// any contributor leak a comment excerpt to an arbitrary registered username
+// with no role on the project. These tests cover every grant path this
+// filter accepts, plus the no-grant rejection.
+
+describe('filterUsernamesWithProjectAccess', () => {
+  it('drops a mentioned username with no grant on the project', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'outsider', 'outsider@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['outsider'])
+    expect(result).toEqual([])
+  })
+
+  it('keeps a direct project_members grant', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'member', 'member@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-1', 1, 100)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['member'])
+    expect(result).toEqual(['member'])
+  })
+
+  it('keeps the project creator', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'creator', 'creator@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['creator'])
+    expect(result).toEqual(['creator'])
+  })
+
+  it('rejects a sub-maintainer org membership (below the org-path floor)', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'contributor', 'contributor@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'MyOrg', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-1', 'MyProject', 1, 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (1, 1, 400)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['contributor'])
+    expect(result).toEqual([])
+  })
+
+  it('keeps a maintainer-level org membership', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'maintainer', 'maintainer@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'MyOrg', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-1', 'MyProject', 1, 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (1, 1, 600)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['maintainer'])
+    expect(result).toEqual(['maintainer'])
+  })
+
+  it('returns an empty array for an empty username list without querying', async () => {
+    const { db } = await makeTestDb()
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', [])
+    expect(result).toEqual([])
+  })
+})
+
 // ── sendCommentNotifications — send failure never propagates ─────────────
 
 describe('sendCommentNotifications', () => {
@@ -284,6 +381,29 @@ describe('sendCommentNotifications', () => {
     expect(msg.to).toEqual(['bob@example.com'])
     expect(msg.subject).toContain('alice')
     expect(msg.subject).toContain('MyProject')
+  })
+
+  it('does not email a mentioned username with no grant on the project', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'outsider', 'outsider@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+
+    const email = makeEmailBinding()
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'Hello @outsider, check this out',
+      parentCommentId: null,
+    })
+
+    expect(email.send).not.toHaveBeenCalled()
   })
 
   it('does not send to the comment author even if self-mentioned', async () => {

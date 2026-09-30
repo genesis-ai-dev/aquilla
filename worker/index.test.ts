@@ -147,6 +147,34 @@ describe("worker/index — routing", () => {
     const res = await fetchWorker("/__dev/login")
     expect(await res.text()).toBe("served:/__dev/login")
   })
+
+  // AQU-1405: a chunk from a build that has been replaced must not come back as
+  // the SPA shell with a 200 — the browser would try to parse HTML as a module
+  // (and may cache it under the .js URL). The mock env answers text/html for
+  // every path, which is exactly what the SPA fallback does for a missing one.
+  it("GET a replaced /assets/ chunk 404s instead of serving the SPA shell", async () => {
+    const res = await fetchWorker("/assets/app-chunk-BfoUWN3w.js")
+    expect(res.status).toBe(404)
+    expect(res.headers.get("Content-Type")).toContain("text/plain")
+    expect(res.headers.get("Cache-Control")).toBe("no-store")
+    expect(await res.text()).not.toContain("<html")
+  })
+
+  it("GET an /assets/ file that exists is served untouched", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("console.log(1)", {
+            status: 200,
+            headers: { "Content-Type": "application/javascript" },
+          }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/assets/app-chunk-live.js"), env)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe("console.log(1)")
+  })
 })
 
 describe("worker/index — non-canonical host noindex (SEO)", () => {

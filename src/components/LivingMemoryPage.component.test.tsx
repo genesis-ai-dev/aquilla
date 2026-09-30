@@ -191,6 +191,21 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
+  // AQU-912: Mariette (Biblica GP, 2026-08-12) and Josseline (ETT, 2026-08-13)
+  // each read the translation brief and the AI instructions as the same thing,
+  // one day apart, and ETT writes no briefs at all. This index is where the two
+  // sit side by side, so it is where the distinction has to be legible without
+  // support: the brief row says it is OPTIONAL and describes the translation's
+  // purpose; the instructions row says it governs how the AI drafts.
+  it("distinguishes the optional brief from the AI instructions", () => {
+    renderPage()
+
+    expect(
+      screen.getByText(/optional — who this translation is for and what it must achieve/i),
+    ).toBeTruthy()
+    expect(screen.getByText(/how the AI should behave when drafting/i)).toBeTruthy()
+  })
+
   it("does not load the complete cell corpus before Examples is opened", () => {
     renderPage()
 

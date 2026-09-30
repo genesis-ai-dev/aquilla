@@ -551,6 +551,41 @@ Gotchas:
 - A lane that gains a translation between prepare and commit makes the plan stale rather than silently leaving an orphan.`,
   },
   {
+    kind: 'HideCell',
+    title: 'Hide cell',
+    oneLiner: 'Park a cell — out of translation and exports, reversibly.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### HideCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with ShowCell (stage the hides and the shows as two plans).
+Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter, at the same PROJECT_LEAD floor the editor's own **Hide cell** menu item uses.
+**This is the REVERSIBLE one.** Hiding takes the row out of the editor for everyone, in every language lane, and out of every export — but deletes NOTHING. The source text, every lane's translation, recordings, comments and validations survive and come back untouched on ShowCell. Reach for this, not DeleteCell, for a stray heading, a marker that bled through an import, or a paragraph the client does not want translated.
+Gotchas:
+- Sugar over EmitEvents: the staged plan you read back holds the equivalent \`source.cell.visibility.set\` events, not a \`HideCell\` entry. Behavior is identical either way. The raw EmitEvents door does NOT accept the kind — these named commands are the way in.
+- Refused at prepare when the cell does not exist, or is ALREADY hidden (a no-op plan is not worth a human's approval). Naming one cell twice in a plan is refused for the same reason.
+- Hiding is per CELL, not per lane: one command hides the row in every target language. There is no per-lane hide.
+- A translation a collaborator saves while the cell is hidden still applies and is there when you show it again — hiding is not a lock.
+- Cell reads carry \`hidden\` so you can tell what is already parked and skip it; a hidden cell is not work.
+Example: \`{ "kind": "HideCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
+    kind: 'ShowCell',
+    title: 'Show cell',
+    oneLiner: 'Bring a hidden cell back with everything it had.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ShowCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with HideCell.
+Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the PROJECT_LEAD floor. The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
+Gotchas:
+- Sugar over EmitEvents, same as HideCell; the staged plan holds \`source.cell.visibility.set\` events.
+- Refused at prepare when the cell does not exist or is NOT currently hidden.
+- Find what to show: list the file's cells and look for \`hidden: true\` (the flag rides the SOURCE row — a target row never carries it).
+Example: \`{ "kind": "ShowCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
     kind: 'SplitCell',
     title: 'Split cell',
     oneLiner: 'Cut one cell’s source text at an offset into two cells.',

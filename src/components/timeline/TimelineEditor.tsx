@@ -21,6 +21,7 @@ import {
 import { createPortal } from "react-dom"
 import {
   AudioLines,
+  Captions,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -255,6 +256,24 @@ export interface TimelineEditorProps {
   canImportCaptions?: boolean
   onRequestAlignScript?(): void
   canAlignScript?: boolean
+  /**
+   * AQU-1139: open the Extract-subtitles dialog — read a clip's sidecar
+   * subtitle file into THIS file's source lane. Lives up in the workspace with
+   * the other two for the same reason: it owns the emit and the refresh.
+   *
+   * Presence renders the row. The workspace withholds it unless the file is
+   * time-ordered and has no source text of its own — extracting over existing
+   * cues is a reconcile, which is `import-file-target.ts`'s job, not this one's.
+   */
+  onRequestExtractSubtitles?(): void
+  /** False disables it. Same floor and same reasoning as the audio-VTT import:
+   *  the extraction creates cells, so a button below `source.cell.create`
+   *  (PROJECT_LEAD) could only mint a 403. */
+  canExtractSubtitles?: boolean
+  /** How many timed source cells this file already has — the Subtitles row's
+   *  state badge, and the reason the row can read "imported" rather than
+   *  offering an extraction that would duplicate them. */
+  subtitleCueCount?: number
   /** AQU-646 stage 6: the character spreadsheet. */
   onRequestImportCharacters?(): void
   canImportCharacters?: boolean
@@ -1026,6 +1045,9 @@ export function TimelineEditor({
   canImportCaptions = true,
   onRequestAlignScript,
   canAlignScript = false,
+  onRequestExtractSubtitles,
+  canExtractSubtitles = true,
+  subtitleCueCount = 0,
   onRequestImportCharacters,
   canImportCharacters = false,
   characterCount = 0,
@@ -2025,6 +2047,26 @@ export function TimelineEditor({
         onClick: onRequestAlignScript,
       })
     }
+    // AQU-1139: between the film and the characters, because that is the order
+    // the work happens in — the clip arrives, then its words, then who says
+    // them. The badge is the state that decides whether the row is worth
+    // clicking: a file that already has its cues needs no extraction.
+    if (onRequestExtractSubtitles) {
+      items.push({
+        id: "subtitles",
+        label: "Subtitles",
+        icon: Captions,
+        disabled: !canExtractSubtitles || subtitleCueCount > 0,
+        badge: (
+          <span className="text-[11px] text-muted-foreground">
+            {subtitleCueCount > 0
+              ? t("editor.timeline.badgeImportedCount", { count: subtitleCueCount })
+              : t("editor.timeline.badgeNotImported")}
+          </span>
+        ),
+        onClick: onRequestExtractSubtitles,
+      })
+    }
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
@@ -2056,6 +2098,7 @@ export function TimelineEditor({
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
     onRequestAlignScript, canAlignScript,
+    onRequestExtractSubtitles, canExtractSubtitles, subtitleCueCount,
     onRequestImportCharacters, canImportCharacters, characterCount, audioCharacterCount,
     charactersWriting,
   ])

@@ -34,7 +34,13 @@ export function ExamplePanel({
           align="start"
           side="bottom"
           sideOffset={6}
-          className="w-80 space-y-2 p-3 text-xs"
+          // `max-h-(--available-height)` + `overflow-y-auto`: the popup is
+          // portalled and position-fixed, so without a height cap long example
+          // pairs run off the viewport with nothing to scroll (AQU-1264). This
+          // is the same affordance Menu/Select/Combobox popups already carry.
+          // `overscroll-contain` stops wheel/trackpad momentum from chaining
+          // into the editor grid behind the panel once the list bottoms out.
+          className="w-80 max-h-(--available-height) space-y-2 overflow-y-auto overscroll-contain p-3 text-xs"
           aria-label={t("search.examples.popoverAriaLabel")}
         >
           {examples.map((ex, i) => {

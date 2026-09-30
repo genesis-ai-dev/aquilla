@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n/standalone"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { buildTranscriptionRequest } from "./transcription-request"
 import type { TranscriptionResult } from "./transcribe"
@@ -17,6 +18,7 @@ export async function transcribeHostedPcm(
       headers: {
         Authorization: `Bearer ${jwt}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
       },
       body: JSON.stringify(await buildTranscriptionRequest(
         pcm.subarray(offset, offset + windowSamples), projectId, language,
@@ -24,6 +26,10 @@ export async function transcribeHostedPcm(
       signal: AbortSignal.timeout(90000),
     })
     if (!response.ok) {
+      const failure = await response.json().catch(() => null) as { error?: string } | null
+      if (["weekly_ai_allowance_exhausted", "credit_cap_exceeded"].includes(failure?.error ?? "")) {
+        throw new Error(t("settings.transcription.capacityExceeded"))
+      }
       throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
     }
     const part = await response.json() as TranscriptionResult

@@ -437,10 +437,17 @@ export function mockTranscription() {
   return { text: "Mock transcription", words: [
     { word: "Mock", start: 0, end: 0.25 },
     { word: "transcription", start: 0.25, end: 0.5 },
-  ] }
+  ], usage: { cost: 0.0001, seconds: 1 } }
 }
 
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && req.url?.endsWith("/models?output_modalities=transcription")) {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: [
+      { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+    ] }))
+    return
+  }
   if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
     req.resume()
     req.on("end", () => {

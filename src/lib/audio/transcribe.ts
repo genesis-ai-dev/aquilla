@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // Main-thread orchestrator: audio bytes → 16kHz Float32 PCM → Whisper worker
 // → word-level timings. No Y.Doc dependency — timings are written back via the
 // Postgres event log (cell.audio.attach with timings payload).
@@ -185,9 +186,9 @@ export async function transcribeAudio(
   bytes: Uint8Array,
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
-  if (opts.session && opts.projectId && navigator.onLine !== false) {
+  if (usesHostedTranscription(opts.session, opts.projectId)) {
     const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
-    return transcribeHostedPcm(pcm, opts.session.jwt, opts.projectId, opts.language)
+    return transcribeHostedPcm(pcm, opts.session!.jwt, opts.projectId!, opts.language)
   }
   const consented = await requestAiModelConsent(WHISPER_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)

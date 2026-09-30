@@ -1,6 +1,7 @@
 // AQU-646: post-import auto-transcription — seed lifecycle, seed-cell
 // synthesis, and the single up-front consent gate.
 
+import { setTranscriptionProvider } from "./transcription-preference"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const requestAiModelConsent = vi.fn(async (_model: unknown) => true)
@@ -21,6 +22,7 @@ import {
 } from "./auto-transcribe"
 
 beforeEach(() => {
+  localStorage.clear()
   requestAiModelConsent.mockClear()
   requestAiModelConsent.mockResolvedValue(true)
   runTranscribeAll.mockClear()
@@ -84,6 +86,17 @@ describe("autoTranscribeImportedMedia", () => {
     })
     expect(requestAiModelConsent).not.toHaveBeenCalled()
     expect(runTranscribeAll).toHaveBeenCalledOnce()
+  })
+
+  it("signed-in local choice requires consent and skips a denied batch", async () => {
+    setTranscriptionProvider("dev", "local")
+    requestAiModelConsent.mockResolvedValue(false)
+    await autoTranscribeImportedMedia({
+      seed, projectId: "p1",
+      session: { jwt: "jwt", username: "dev", createdAt: "2026-09-30" },
+    })
+    expect(requestAiModelConsent).toHaveBeenCalledOnce()
+    expect(runTranscribeAll).not.toHaveBeenCalled()
   })
 
   it("consent granted → runs the batch once with the seed cells + languages", async () => {

@@ -12546,6 +12546,8 @@ export function ProjectWorkspace() {
                 project={project}
                 refreshProject={refresh}
                 projectSettings={projectSettings}
+                activeLane={activeLane}
+                onActiveLaneChange={setActiveLane}
               />
             </Suspense>
           </div>

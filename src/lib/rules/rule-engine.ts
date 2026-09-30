@@ -32,38 +32,16 @@ export function rulesForLane(
 }
 
 /**
- * Distinct lanes currently holding at least one lane-scoped rule, in
- * first-appearance order. Drives the Rules-surface lane filter: a project can
- * carry 150+ target lanes, so the filter lists only lanes that actually have
- * rules (an archived lane with a leftover rule still shows, on purpose).
+ * AQU-1509: a rule's scope relative to the lane being viewed — `"all"` applies
+ * in every lane, `"this"` only in `lane`, `"other"` only in some other lane
+ * (so it is NOT enforced in `lane`). Must agree with `rulesForLane`: a rule is
+ * `"other"` exactly when that filter drops it.
  */
-export function lanesWithRules(rules: TranslationRule[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of rules) {
-    if (r.scope !== "lane") continue
-    const lane = r.lane ?? ""
-    if (seen.has(lane)) continue
-    seen.add(lane)
-    out.push(lane)
-  }
-  return out
-}
+export type RuleLaneScope = "all" | "this" | "other"
 
-/**
- * Apply the Rules-surface lane filter. `"all"` = every rule, `"project"` =
- * only rules that apply in every lane, `"lane:<tag>"` = only that lane's
- * rules (`"lane:"` = the default lane). Display-only — evaluation filtering
- * is `rulesForLane` above.
- */
-export function filterRulesForDisplay(
-  rules: TranslationRule[],
-  filter: string,
-): TranslationRule[] {
-  if (filter === "all") return rules
-  if (filter === "project") return rules.filter((r) => r.scope !== "lane")
-  const lane = filter.slice("lane:".length)
-  return rules.filter((r) => r.scope === "lane" && (r.lane ?? "") === lane)
+export function ruleLaneScope(rule: TranslationRule, lane: string): RuleLaneScope {
+  if (rule.scope !== "lane") return "all"
+  return (rule.lane ?? "") === lane ? "this" : "other"
 }
 
 export function checkRules(

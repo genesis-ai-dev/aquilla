@@ -521,6 +521,8 @@ export const org = defineNamespace({
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
+    "org.projectOverview.membersVisibilityDescription":
+      "Who can see the member roster on this project.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",

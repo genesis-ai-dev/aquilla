@@ -466,6 +466,14 @@ export const editor = defineNamespace({
     "editor.resources.openExternal": "Open the full article",
     "editor.resources.openExternalAria": "Open the full article about {entity}",
     "editor.resources.attribution": "Reference data from the",
+    "editor.resources.tabitha.title": "Translation checks",
+    "editor.resources.tabitha.loading":
+      "Preparing checks for this verse. The first time can take up to a minute.",
+    "editor.resources.tabitha.none": "No translation checks for this verse.",
+    "editor.resources.tabitha.failed": "Couldn't load translation checks.",
+    "editor.resources.tabitha.simpleText": "Simple English",
+    "editor.resources.tabitha.cultural": "Cultural background",
+    "editor.resources.tabitha.translatorNotes": "Translator notes",
 
     // — Shared failure state for the reference side panels (AQU-849) ————————
     "editor.resourcePane.crashed":
@@ -3694,6 +3702,47 @@ export const editor = defineNamespace({
           "is followed immediately by links whose text is each data source's proper " +
           "name, which is not translated — so this string ends mid-phrase on purpose " +
           "and the names cannot be moved in front of it.",
+      },
+      "editor.resources.tabitha.title": {
+        description:
+          "Heading of the verse-resources section listing TaBiThA's checks for the " +
+          "viewed verse: each names a nuance of meaning and asks the translator to " +
+          "check that their translation keeps it. Not spell-checks or QA results.",
+        maxLength: 32,
+      },
+      "editor.resources.tabitha.loading": {
+        description:
+          "Shown under that heading while the checks load. The upstream service " +
+          "prepares a verse the first time anyone asks for it, which can be slow, so " +
+          "this sets the expectation. Full sentences.",
+      },
+      "editor.resources.tabitha.none": {
+        description:
+          "Empty state when the service has no checks for the viewed verse (not every " +
+          "book is covered yet). Nothing is broken and there is no action to take.",
+      },
+      "editor.resources.tabitha.failed": {
+        description:
+          "Error line when the checks could not be loaded (offline or the service is " +
+          "down). The verse and the rest of the panel are unaffected.",
+      },
+      "editor.resources.tabitha.simpleText": {
+        description:
+          "Small label above a plain, simplified English rendering of the verse that " +
+          "the checks are based on. Names the kind of text, not a language setting.",
+        maxLength: 24,
+      },
+      "editor.resources.tabitha.cultural": {
+        description:
+          "Small label above short notes explaining customs, places or objects in the " +
+          "verse that a reader from another culture may not know.",
+        maxLength: 32,
+      },
+      "editor.resources.tabitha.translatorNotes": {
+        description:
+          "Small label above published notes written for Bible translators about this " +
+          "verse (SIL translator's notes).",
+        maxLength: 32,
       },
       "editor.resourcePane.crashed": {
         description:

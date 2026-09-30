@@ -29,6 +29,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { TabithaBriefSection } from "./TabithaBriefSection"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   adjacentPassagePaths,
@@ -399,6 +400,9 @@ function VerseResourcesSidebarBody({
               ))}
             </div>
           )}
+          {debouncedPath && (
+            <TabithaBriefSection projectId={projectId} passagePath={debouncedPath} getJwt={getJwt} />
+          )}
         </div>
 
         {/* Footer: attribution for both upstreams the panel draws from. */}
@@ -413,6 +417,11 @@ function VerseResourcesSidebarBody({
             >
               {/* i18n-exempt: proper-noun name of the external corpus this data is sourced from */}
               Bible Aquifer
+            </a>
+            {" · "}
+            <a href="https://tabitha.bible/" target="_blank" rel="noreferrer" className="underline">
+              {/* i18n-exempt: proper-noun name of the translation-checks data source (CanIL) */}
+              TaBiThA
             </a>
             {" · "}
             <a

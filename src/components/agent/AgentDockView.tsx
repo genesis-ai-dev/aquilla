@@ -48,7 +48,7 @@ export interface AgentDockViewProps {
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
   /** Current file/cell location — automatically sent as run context. */
-  context: { fileId?: string; cellId?: string }
+  context: { fileId?: string; cellId?: string; lane?: string }
   /** Project's active rules for proposal lint. */
   rules: TranslationRule[]
   /** Live cell lookup from useCells. */
@@ -163,7 +163,7 @@ export function AgentDockView({
         jwt,
         request: {
           projectId,
-          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
+          ...(context.fileId || context.cellId || context.lane !== undefined ? { context: { ...context } } : {}),
           ...(translatorProfile ? { translatorProfile } : {}),
           ...(attachments.length > 0 ? { artifacts: attachments } : {}),
         },

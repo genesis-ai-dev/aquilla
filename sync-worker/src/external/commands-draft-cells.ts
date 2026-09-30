@@ -186,6 +186,8 @@ export async function requestDrafts(
     fileId: string
     cellIds: string[]
     instructions?: string
+    /** AQU-1447: target-language lane to draft into; omit for the default lane. */
+    laneId?: string
   },
 ): Promise<{ drafts: GeneratedDraft[]; missed: string[] }> {
   if (!env.AUTH_WORKER_URL || !env.SYNC_SECRET_KEY) {

@@ -481,7 +481,7 @@ const runRequestSchema = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .min(1)
     .max(10),
-  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional() }).optional(),
+  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional(), lane: z.string().max(64).optional() }).optional(),
   translatorProfile: translatorProfileSchema,
   /** AQU-AGENT Wave-2: files the user attached in the composer, already
    *  uploaded as project artifacts (POST /projects/:id/agent-artifacts). The
@@ -754,6 +754,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     roleLevel,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
+    lane: body.context?.lane ?? "",
     aliases,
   }
 
@@ -1401,6 +1402,7 @@ async function runReadTool(args: ReadArgs, t: ToolCallEnv): Promise<string> {
   const outcome = await executeRead(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1418,6 +1420,7 @@ async function runExamplesTool(args: ExamplesArgs, t: ToolCallEnv): Promise<stri
   t.send({ type: "code_start", step: t.step, kind: "examples", summary: seed })
   const outcome = await executeExamples(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1436,6 +1439,7 @@ async function runSearchTool(args: SearchArgs, t: ToolCallEnv): Promise<string> 
   const outcome = await executeSearch(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1466,6 +1470,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
     {
       projectId: t.stageCtx.projectId,
       focusedFileId: t.stageCtx.fileId,
+      lane: t.stageCtx.lane,
       aliases: t.aliases,
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,

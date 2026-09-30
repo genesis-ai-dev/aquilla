@@ -552,6 +552,26 @@ describe("Lane plumbing (AQU-1447)", () => {
     expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "cosas", side: "target" }, toolCtx("")))).toEqual([cellId("c2")])
   })
 
+  it("search side cells keeps source hits in a non-default lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    const hits = async (q: string) =>
+      (await executeSearch(env.AQUILLA_PG, { q, side: "cells" }, toolCtx(laneB))).data?.hits?.map((h) => [h.side, h.ref]) ?? []
+
+    // Source text is shared by every lane; target text is this lane's only
+    expect(await hits("sower")).toEqual([["source", "MRK 4:3"]])
+    expect(await hits("Carril")).toEqual([["target", "MRK 4:1"]])
+    expect(await hits("cosas")).toEqual([])
+  })
+
   it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
     await seedWorld()
     // @ts-expect-error targetLang is required: no caller may leave the lane out

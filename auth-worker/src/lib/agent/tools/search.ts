@@ -58,8 +58,14 @@ async function searchCells(
     conditions.push("side = ?")
     binds.push(side)
   }
-  if (side === "target" || side === "both") {
+  if (side === "target") {
     conditions.push("target_lang = ?")
+    binds.push(ctx.lane)
+  } else if (side === "both") {
+    // Source rows are stored once at target_lang = '', so only target rows are
+    // scoped to the lane. A bare target_lang filter would drop every source hit
+    // in any non-default lane.
+    conditions.push("(side = 'source' OR target_lang = ?)")
     binds.push(ctx.lane)
   }
   if (fileId) {

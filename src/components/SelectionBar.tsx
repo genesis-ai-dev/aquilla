@@ -255,6 +255,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           fileId: target.fileId,
           cellId: target.cellId,
           audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
       }
@@ -270,7 +271,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t])
+  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
 
   /** The opposite action, which the audio side simply did not have. */
   const onUnvalidateAudio = useCallback(async () => {
@@ -280,14 +281,15 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     try {
       for (const target of audioRemoveTargets) {
         // No `targetUsername`: absent means "my own vote", and removing
-        // somebody else's is a maintainer action that lives elsewhere. No
-        // `targetLang` either — a recording is shared by every language, so a
-        // vote on it is not per-lane and the wire carries none.
+        // somebody else's is a maintainer action that lives elsewhere.
+        // AQU-1462 stamps the lane so an archived lane can refuse the vote.
+        // The vote itself stays shared across languages.
         await emitCellAudioUnvalidate({
           projectId: project.id,
           fileId: target.fileId,
           cellId: target.cellId,
           audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
       }
@@ -299,7 +301,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t])
+  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
 
   const onTranslate = useCallback(async () => {
     if (isBusy) return

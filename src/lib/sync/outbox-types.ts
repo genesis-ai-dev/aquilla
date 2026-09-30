@@ -295,9 +295,13 @@ export interface OutboxEventPayloads {
   "cell.waive": {
     ruleId: string
     reason?: string
+    /** AQU-1462: lane the member was working in. Omitted for the default lane. */
+    targetLang?: string
   }
   "cell.unwaive": {
     ruleId: string
+    /** AQU-1462: see `cell.waive`. */
+    targetLang?: string
   }
 
   // Audio attachments. Bytes already live in R2 before these are emitted.
@@ -321,20 +325,28 @@ export interface OutboxEventPayloads {
     /** AQU-646: ASR transcript of the clip's trim window (media source segments
      *  only) — the server lands it on the source cell's `transcription`. */
     transcription?: string
+    /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
+    targetLang?: string
   }
   "cell.audio.select": {
     audioId: string
     /** Scopes the sibling-deselect only; it is never written onto the row, so
      *  select cannot move a clip between slots. Open string — see attach. */
     slot: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   "cell.audio.remove": {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // AQU-646 round 8: rename a take — label only, never selection/trims.
   "cell.audio.rename": {
     audioId: string
     label: string | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * The clip's COMPLETE playback trim window — both ends always stated, null
@@ -347,6 +359,8 @@ export interface OutboxEventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * AQU-646 stage 3: where THIS take sits against the line it performs, as an
@@ -369,6 +383,8 @@ export interface OutboxEventPayloads {
   "cell.audio.place": {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so
@@ -376,6 +392,8 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * AQU-490: one person's vote that this TAKE is good. Presence of the
@@ -384,6 +402,8 @@ export interface OutboxEventPayloads {
    */
   "cell.audio.validate": {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. The vote itself stays shared. */
+    targetLang?: string
   }
   /**
    * Withdrawing a vote. `targetUsername` names WHOSE, for a maintainer
@@ -394,6 +414,8 @@ export interface OutboxEventPayloads {
   "cell.audio.unvalidate": {
     audioId: string
     targetUsername?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue. The subtitle
@@ -444,6 +466,8 @@ export interface OutboxEventPayloads {
     targetEventId: string
     /** True when the LLM polish pass has been applied. */
     polished: boolean
+    /** AQU-1462: lane whose translation this back-translation describes. */
+    targetLang?: string
   }
 
   "file.create": {
@@ -590,6 +614,8 @@ export interface OutboxEventPayloads {
     /** Legacy absolute dub anchor. Still projected so historical events replay
      *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
+    /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
+    targetLang?: string
   }
   // The file's audio timing mode (Original vs Free); null clears back to the
   // project-level default. Maintainer floor — structural, like the setting

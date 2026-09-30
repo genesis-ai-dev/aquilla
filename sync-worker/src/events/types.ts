@@ -419,9 +419,17 @@ export interface EventPayloads {
     ruleId: string
     /** Optional human-entered justification. */
     reason?: string
+    /**
+     * AQU-1462: the lane the member was working in. Omitted for the default
+     * lane and for a shared write. The waiver row itself is not per-lane;
+     * the tag exists so an archived lane can refuse the write.
+     */
+    targetLang?: string
   }
   'cell.unwaive': {
     ruleId: string
+    /** AQU-1462: see `cell.waive`. */
+    targetLang?: string
   }
 
   // ── Cell audio ─────────────────────────────────────────────────────────
@@ -471,17 +479,23 @@ export interface EventPayloads {
      * source.cell.create UPSERT clobbering segment fields.
      */
     transcription?: string
+    /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
+    targetLang?: string
   }
   'cell.audio.select': {
     audioId: string
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // AQU-646 round 8: rename a take — label only, deliberately NOT a
   // re-attach (which would also re-select the clip). null clears.
   'cell.audio.rename': {
     audioId: string
     label: string | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * The clip's COMPLETE playback trim window — both ends, always stated, with
@@ -494,6 +508,8 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * AQU-646 stage 3: where THIS take sits against the line it performs, as an
@@ -516,6 +532,8 @@ export interface EventPayloads {
   'cell.audio.place': {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue.
@@ -552,9 +570,13 @@ export interface EventPayloads {
   'cell.audio.measure': {
     audioId: string
     durationMs: number
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   'cell.audio.remove': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // AQU-490 (was AQU-508): one reviewer's vote on ONE take. A cell counts as
   // audio-validated when every SELECTED, live dub take on it has at least the
@@ -564,9 +586,13 @@ export interface EventPayloads {
   // stamped on the row, so changing it reprojects nothing.
   'cell.audio.validate': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. The vote itself stays shared. */
+    targetLang?: string
   }
   'cell.audio.unvalidate': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
     /**
      * AQU-490: whose vote to remove. Absent — and it always is, unless a
      * maintainer is clearing up after somebody — means the caller's own. The
@@ -729,6 +755,8 @@ export interface EventPayloads {
     targetEventId: string
     /** true = LLM-polished BT; false = statistical-only. */
     polished: boolean
+    /** AQU-1462: lane whose translation this back-translation describes. */
+    targetLang?: string
   }
 
   // ── Assignments (project-level, non-chain-mutating) ─────────────────────
@@ -842,6 +870,8 @@ export interface EventPayloads {
     // — still projected so historical events replay, never written any more.
     targetOffsetMs?: number | null
     targetStartMs?: number | null
+    /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
+    targetLang?: string
   }
   // Set/clear a file's core video URL (timeline preview master clock), stored
   // in files.meta JSON; null clears it. File-level.

@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export interface MemberLaneScopeEditorProps {
@@ -77,7 +78,7 @@ export function MemberLaneScopeEditor({
                   value: "",
                   label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
                 },
-                ...(settings.settings.targetLanes ?? []).map((lane) => ({ value: lane, label: lane })),
+                ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
               ]
             : null,
         )

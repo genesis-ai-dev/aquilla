@@ -5,6 +5,7 @@ import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
 import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
 // instead of re-deriving them server-side. This module keeps everything that
@@ -310,7 +311,7 @@ export function buildBatchPrompt(options: {
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   let user = ""
   // Validated pairs from the project's living memory come first — they are
@@ -341,10 +342,10 @@ export function buildBatchPrompt(options: {
   // single-cell and paragraph recipes.
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\n${precedingContextLabel(ctx)}: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
-  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
+  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${stripTrailingBareMarkers(c.source)}</v${i + 1}>`).join("\n")
   user += `Source:\n${liveSource}\n\nTranslation:\n`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -456,16 +457,16 @@ export function buildParagraphPrompt(options: {
     )
     if (pairs.length) {
       if (targetOnly) {
-        user += pairs.map((p) => `Target: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Target: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       } else {
-        user += pairs.map((p) => `Source: ${p.source}\nTranslation: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Source: ${stripTrailingBareMarkers(p.source)}\nTranslation: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       }
     }
   }
 
   // Retrieved passage examples.
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   for (const ex of options.examples) {
     const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
@@ -484,12 +485,12 @@ export function buildParagraphPrompt(options: {
   if (options.precedingContext?.length) {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
-        user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\nTranslation: ${stripTrailingBareMarkers(ctx.target)}\n\n`
       } else if (ctx.source.trim()) {
         // D4 source-fallback: no committed target yet — surface the preceding
         // source as discourse context WITHOUT a Source/Translation pair the model
         // could mimic by echoing a blank "translation".
-        user += `Preceding (source, not yet translated): ${ctx.source}\n\n`
+        user += `Preceding (source, not yet translated): ${stripTrailingBareMarkers(ctx.source)}\n\n`
       }
     }
   }
@@ -501,7 +502,7 @@ export function buildParagraphPrompt(options: {
       // Encode as a context block so the model sees what comes next without
       // being asked to translate it (it will translate the live paragraph).
       user += `Following context (source only — do not translate this block):\n`
-      user += followingSrc.map((f) => f.source).join("\n") + "\n\n"
+      user += followingSrc.map((f) => stripTrailingBareMarkers(f.source)).join("\n") + "\n\n"
     }
   }
 
@@ -515,8 +516,8 @@ export function buildParagraphPrompt(options: {
   // excludes it, so it's discarded as `extra` (D11) — unchanged.
   const liveSource = options.cells
     .map((c) => (c.lockedTarget !== undefined
-      ? `${c.source} [already translated — do not output: ${c.lockedTarget}]`
-      : `<c id="${c.cellId}">${c.source}</c>`))
+      ? `${stripTrailingBareMarkers(c.source)} [already translated — do not output: ${c.lockedTarget}]`
+      : `<c id="${c.cellId}">${stripTrailingBareMarkers(c.source)}</c>`))
     .join("\n")
   user += `Source paragraph:\n${liveSource}\n\nTranslation paragraph:\n`
 
@@ -586,7 +587,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
   if (await shouldUseLocalLlm()) {
     const text = await completeWithLocalLlm(options.messages, { signal: options.signal })
     options.onChunk?.(text)
-    return text
+    return stripTrailingBareMarkers(text)
   }
 
   const effectiveSettings = resolveEffectiveCompletionSettings(
@@ -671,7 +672,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
     }
 
     const data = await res.json()
-    return data.choices[0]?.message?.content?.trim() || ""
+    return stripTrailingBareMarkers(data.choices[0]?.message?.content?.trim() || "")
   } catch (error) {
     if (request.didTimeout()) {
       throw new Error(t("rules.completion.requestTimedOut"))
@@ -778,10 +779,10 @@ async function consumeStream(
     while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIdx).replace(/\r$/, "")
       buffer = buffer.slice(newlineIdx + 1)
-      if (processLine(line) === "done") return full.trim()
+      if (processLine(line) === "done") return stripTrailingBareMarkers(full.trim())
     }
   }
-  return full.trim()
+  return stripTrailingBareMarkers(full.trim())
 }
 
 async function buildRequestTarget(

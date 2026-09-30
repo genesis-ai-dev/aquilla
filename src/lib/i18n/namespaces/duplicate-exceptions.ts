@@ -296,6 +296,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "name and an item's lifecycle status are different concepts sharing one " +
     "English participle; several languages would render a place-name and a " +
     "state-of-an-item differently.",
+  "org.overviewLaneTable.archivedBadge":
+    "Inline status badge beside one retired target-LANGUAGE LANE in the project " +
+    "overview's collapsed Archived group (AQU-1458) — it says that lane is " +
+    "archived. autopilot.evidence.status.archived is one value of the fixed " +
+    "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
+    "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
+    "org.orgSidebar.archived above names a destination. A language lane and an " +
+    "evidence item are unrelated referents, and where a participle agrees with the " +
+    "noun it describes the two cannot share a form — the ar catalog already gives " +
+    "the evidence state and the sidebar name different genders, and ru renders " +
+    "them as different phrases altogether.",
   "org.membersPage.orgPage.unknownInviter":
     "Lower-case filler substituted into the middle of a byline sentence ('by " +
     "{username}') when the inviter is unavailable — grammatically the object of " +

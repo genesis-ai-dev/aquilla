@@ -26,6 +26,8 @@
 // completion-service.ts re-exports everything here, so every existing call
 // site and test keeps importing from where it always did.
 
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+
 /** One OpenAI-style chat message. The copilot prompt is always exactly two:
  *  a system message then a user message. */
 export interface ChatMessage {
@@ -303,20 +305,22 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
 
   let user = ""
   if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
+    for (const ex of allExamples) user += `Target: ${stripTrailingBareMarkers(ex.target)}\n\n`
   } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+    for (const ex of allExamples) {
+      user += `Source: ${stripTrailingBareMarkers(ex.source)}\nTranslation: ${stripTrailingBareMarkers(ex.target)}\n\n`
+    }
   }
   // Immediately-preceding committed context (discourse window): render after the
   // few-shot examples and just before the live source so it sits closest to what
   // the model is about to translate. Skip blank pairs. (D4)
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\n${precedingContextLabel(ctx)}: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
   if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
+  user += `Source: ${stripTrailingBareMarkers(options.sourceText)}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }

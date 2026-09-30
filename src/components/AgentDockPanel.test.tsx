@@ -6,6 +6,7 @@
  * panel answers "what is the team doing", it does not host a second composer.
  */
 
+import { useEffect } from "react"
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
@@ -80,9 +81,10 @@ function decisionsPage(overrides: Partial<ContextualDecisionsPage> = {}): Contex
 }
 
 let currentPath = ""
+const recordPath = (path: string) => { currentPath = path }
 function LocationProbe() {
   const location = useLocation()
-  currentPath = `${location.pathname}${location.search}`
+  useEffect(() => recordPath(`${location.pathname}${location.search}`), [location])
   return null
 }
 

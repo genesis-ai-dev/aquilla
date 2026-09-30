@@ -728,6 +728,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+    ...(cmd.laneId !== undefined ? { laneId: cmd.laneId } : {}),
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human

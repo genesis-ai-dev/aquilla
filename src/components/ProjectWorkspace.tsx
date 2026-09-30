@@ -12048,6 +12048,7 @@ export function ProjectWorkspace() {
                   context: {
                     fileId: activeFileId ?? undefined,
                     cellId: focusedCellId ?? undefined,
+                    lane: activeLane,
                   },
                   rules,
                   resolveCell: resolveCellById,

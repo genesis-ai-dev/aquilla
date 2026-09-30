@@ -45,6 +45,13 @@ interface AgentDraftReviewProps {
   initialCellId?: string | null
 }
 
+/** How a reviewer names a cell: its label, else its canonical reference
+ *  (`group`), and only then the opaque id — review cells come straight from
+ *  buildCellData, which never sets `cellLabel`. */
+function cellName(cell: { cellLabel?: string; group?: string } | undefined, cellId: string): string {
+  return cell?.cellLabel || cell?.group || cellId
+}
+
 /** An isolated task surface, not an editor mode or an editor-preference write. */
 export function AgentDraftReview(props: AgentDraftReviewProps) {
   return <DraftReviewSession key={`${props.projectId}:${props.run.runId}:${props.run.fileId}:${props.run.targetLang ?? ""}`} {...props} />
@@ -285,7 +292,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
     try {
       for (const draft of batch) {
         const target = snapshot.cells.get(draft.cellId)
-        const ref = target?.cellLabel || draft.cellId
+        const ref = cellName(target, draft.cellId)
         if (!target?.sourceEventId || locks.current.has(focusLockKey(draft.cellId, lane))) {
           setBulkError({ ref, message: t(target?.sourceEventId ? "agentDraftReview.locked" : "agentDraftReview.sourceMissing") })
           break
@@ -337,7 +344,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
           rows={pending.map((d) => ({
             draftId: d.draftId,
             cellId: d.cellId,
-            label: snapshot.cells.get(d.cellId)?.cellLabel || d.cellId,
+            label: cellName(snapshot.cells.get(d.cellId), d.cellId),
             review: reviewByDraft.get(d.draftId),
           }))}
           selectedCellId={selectedId}
@@ -370,7 +377,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
             <Card>
               <CardHeader>
                 <CardTitle>{t("agentDraftReview.source")}</CardTitle>
-                <CardDescription>{cell?.cellLabel || selected.cellId}{selected.spanLabel ? ` · ${selected.spanLabel}` : ""}</CardDescription>
+                <CardDescription>{cellName(cell, selected.cellId)}{selected.spanLabel ? ` · ${selected.spanLabel}` : ""}</CardDescription>
               </CardHeader>
               <CardContent>
                 {cell?.sourceEventId ? <p className="whitespace-pre-wrap break-words" dir={snapshot.file.sourceTextDirection ?? "auto"} data-testid="draft-review-source">

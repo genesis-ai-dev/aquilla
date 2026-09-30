@@ -526,7 +526,10 @@ describe("AgentDraftReview", () => {
       expect(within(overview).getByText("Needs you")).toBeInTheDocument()
       expect(screen.queryByTestId("draft-review-comments")).not.toBeInTheDocument()
 
-      fireEvent.click(within(overview).getAllByRole("button")[1])
+      // Cells are named by reference, never by opaque id.
+      expect(within(overview).getByRole("button", { name: /GEN 1:2/ })).toBeInTheDocument()
+      expect(overview).not.toHaveTextContent(/\bc2\b/)
+      fireEvent.click(within(overview).getByRole("button", { name: /GEN 1:2/ }))
       expect(screen.getByTestId("draft-review-source")).toHaveTextContent("Full source c2")
       expect(screen.getByTestId("draft-review-comments")).toHaveTextContent("Wording not found in the sources")
     })

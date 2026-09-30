@@ -107,7 +107,7 @@ jobs:
       - run: pnpm test
       # Run worker coverage explicitly; pushes use affected browser tests.
       - run: pnpm test:worker
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/playwright-chromium
       - run: pnpm test:idml
 
   tauri-unit:

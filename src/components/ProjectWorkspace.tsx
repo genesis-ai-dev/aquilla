@@ -12482,6 +12482,7 @@ export function ProjectWorkspace() {
                   activeLane={activeLane}
                   myScopes={myScopes}
                   audioByCellId={audioValidationByCellId}
+                  linkedTakesByCell={linkedTakesByCell}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}

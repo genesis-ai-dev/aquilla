@@ -72,7 +72,7 @@ import {
   archivedTagsFromSettings,
   type ArchiveLaneRow,
 } from '../../../src/lib/lanes/archived-lane'
-import { echoableLaneLabels } from '../../../db/shared/lane-visibility'
+import { echoableLaneLabels, visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
@@ -581,7 +581,16 @@ export async function prepareChangesetCore(
         'PlanImport must be the only command in a changeset',
       )
     }
-    return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+    return preparePlanImport(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      planImports[0],
+      env,
+      resolvedRole.level,
+    )
   }
 
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
@@ -619,6 +628,13 @@ export async function prepareChangesetCore(
     )
     const archivedRows = archiveRows(projectSettings.lanes ?? [])
     const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      resolvedRole.level,
+    )
     for (const [index, c] of setCommands.entries()) {
       if (c.laneId && !registeredLanes.has(c.laneId)) {
         const echoable = await echoableLaneLabels(
@@ -638,7 +654,12 @@ export async function prepareChangesetCore(
         )
       }
       if (c.laneId) {
-        const archived = archivedLaneReason({ tag: c.laneId, lanes: archivedRows, archivedTags })
+        const archived = archivedLaneReason({
+          tag: c.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
         if (archived) {
           return errorResponse('validation_failed', `commands[${index}] ${archived}`)
         }
@@ -794,6 +815,7 @@ async function preparePlanImport(
   autonomyMode: 'ask' | 'act',
   cmd: PlanImportCommand,
   env: ExternalEnv,
+  callerRoleLevel: number,
 ): Promise<Response> {
   if (cmd.cells.length === 0) {
     return errorResponse('validation_failed', 'PlanImport.cells must be non-empty')
@@ -877,6 +899,18 @@ async function preparePlanImport(
   )
   const archivedRows = archiveRows(projectSettings.lanes ?? [])
   const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+  const namesALane = cmd.cells.some((cell) => (cell.variants ?? []).some((variant) => variant.laneId))
+  const visibleLaneIds = namesALane
+    ? (
+        await visibleTagsForMember(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          callerRoleLevel,
+        )
+      ).visible
+    : null
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       if (variant.laneId && !registeredLanes.has(variant.laneId)) {
@@ -886,7 +920,12 @@ async function preparePlanImport(
         )
       }
       if (variant.laneId) {
-        const archived = archivedLaneReason({ tag: variant.laneId, lanes: archivedRows, archivedTags })
+        const archived = archivedLaneReason({
+          tag: variant.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
         if (archived) {
           return errorResponse(
             'validation_failed',

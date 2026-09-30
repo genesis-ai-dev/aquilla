@@ -58,6 +58,12 @@ const BANNED_FUNCTIONS = [
   "set_config", "pg_sleep", "pg_sleep_for", "pg_sleep_until", "pg_read_file",
   "pg_read_binary_file", "pg_ls_dir", "pg_terminate_backend", "pg_cancel_backend",
   "pg_notify", "dblink", "lo_import", "lo_export", "pg_reload_conf",
+  // Run an arbitrary query passed as a *string* — the string is masked, so the
+  // guard never inspects (or project-scopes) it.
+  "query_to_xml", "query_to_xml_and_xmlschema", "query_to_xmlschema",
+  "table_to_xml", "table_to_xml_and_xmlschema", "table_to_xmlschema",
+  "cursor_to_xml", "cursor_to_xmlschema", "schema_to_xml", "schema_to_xml_and_xmlschema",
+  "database_to_xml", "database_to_xml_and_xmlschema",
 ] as const
 
 // Columns with no legitimate read use through this tool, banned outright
@@ -417,6 +423,13 @@ export function guardSql(
   // masked copy addresses the same character in `sql`. scanRelations() below
   // depends on that: it finds relation references on the masked text and
   // scopeRelations() rewrites the real statement at those offsets.
+  // Postgres escape-string (E'..\'..') and Unicode-escape (U&'..') literals use
+  // backslash escapes the mask below doesn't model, letting a payload desync
+  // the guard's view of literal boundaries from Postgres's and hide subqueries
+  // (e.g. against `users`) inside a "literal". Reject them outright.
+  if (/(^|[^A-Za-z0-9_$])(?:[eE]|[uU]&)\s*'/.test(sql)) {
+    return { ok: false, error: "E'…' / U&'…' escape string literals are not allowed — use plain '…' literals" }
+  }
   const masked = sql.replace(STRING_LITERAL_RE, (literal) => `'${"s".repeat(literal.length - 2)}'`)
   // An unpaired quote survives masking — reject; the checks below can't be
   // trusted when the literal structure is ambiguous.

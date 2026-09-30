@@ -95,6 +95,10 @@ type NativeTextPlan =
   | { kind: "structured"; format: TextExportFormat; ext: string }
   | { kind: "vtt"; ext: "vtt" }
 
+/** Office packages: the plain /source fetch already returns their stored
+ *  bytes (X-Export-Mode: raw-sidecar), and they ignore `?mode=raw`. */
+const SIDECAR_FILE_TYPES: ReadonlySet<string> = new Set(["docx", "pptx", "idml"])
+
 const NATIVE_TEXT_BY_FILE_TYPE: Partial<Record<string, NativeTextPlan>> = {
   usfm: { kind: "usfm", ext: "usfm" },
   docx: { kind: "sidecar", format: "docx", ext: "docx" },
@@ -484,14 +488,17 @@ export async function buildProjectExport(
           fileId: file.id,
           getToken: deps.getToken,
         }
-        if (file.type === "usfm") {
+        if (!SIDECAR_FILE_TYPES.has(file.type)) {
           // AQU-907: ?mode=raw returns the byte-exact original upload. A
           // sync-worker that predates the mode ignores the param and injects
-          // current default-lane translations — the manifest must say so
-          // rather than present the entry as the original.
+          // current default-lane translations into USFM — the manifest must
+          // say so rather than present the entry as the original.
+          // AQU-1472: plain text now exports translated too, so every
+          // non-Office file asks for raw mode; the route decides by its stored
+          // format, which need not match `file.type`.
           const { bytes, rawOriginal } = await fetchRawSource(fetchArgs)
           pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, bytes)
-          if (!rawOriginal) {
+          if (!rawOriginal && file.type === "usfm") {
             ;(report.notes ??= []).push(
               "source document is the original USFM re-serialized with current default-lane translations injected — the server does not support raw mode yet",
             )

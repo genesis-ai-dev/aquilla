@@ -15,6 +15,11 @@ export type TranscriptVerdict =
    *  words up to the cut, its word positions running past the text's end —
    *  so it needs transcribing again. */
   | { kind: "stale" }
+  /** Transcribed, and the line has no text to compare it with yet. */
+  | { kind: "noText" }
+  /** Transcribed, and there is nothing it can reliably be compared with: a
+   *  heard line that performs one part of a line split across several. */
+  | { kind: "unchecked" }
 
 /** Lower-case words with punctuation dropped — the transcript card's
  *  long-standing "loosely equal" rule, as a word list. */
@@ -42,12 +47,18 @@ export function transcriptVerdict({
   alignedToCellText,
 }: {
   timings: ReadonlyArray<{ word: string; end: number }> | null | undefined
-  cellText: string
+  /** The words the take should say, or null when nothing can say that
+   *  (Sam, 2026-09-30: a part of a split line). */
+  cellText: string | null
   /** Whether the timings' offsets point into the cell text (the heard words
    *  matched its word count). Worked out from the two when not given. */
   alignedToCellText?: boolean
 }): TranscriptVerdict {
   if (!timings || timings.length === 0) return { kind: "none" }
+  if (cellText == null) return { kind: "unchecked" }
+  // "2 words differ" from an empty line said the take was wrong when it was
+  // the text that was missing.
+  if (looseWords(cellText).length === 0) return { kind: "noText" }
   const transcript = timings.map((t) => t.word).join(" ")
   const words = wordDifferences(looseWords(transcript), looseWords(cellText))
   if (words === 0) return { kind: "match" }

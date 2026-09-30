@@ -297,7 +297,23 @@ describe("whose recording it acts on", () => {
   it("opens the recorder on the OWNER's cell from New take", () => {
     const { onOpenRecording } = draw()
     fireEvent.click(screen.getByRole("button", { name: /new take/i }))
-    expect(onOpenRecording).toHaveBeenCalledWith("cue-1")
+    expect(onOpenRecording).toHaveBeenCalledWith("cue-1", "recording")
+  })
+
+  // Sam, 2026-09-30: New take beside a take on an added track recorded onto
+  // the main track — the recorder was opened without saying which.
+  it("records New take onto the track of the take it sits beside", () => {
+    const owner = {
+      id: "c1", fileId: "f1", original: "", translated: "",
+      selectedAudioId: "audio-c1-main.webm",
+      attachments: {
+        "audio-c1-main.webm": { type: "audio", url: "frontier-audio://main", slot: "recording" },
+        "audio-c1-t2.webm": { type: "audio", url: "frontier-audio://t2", slot: "trk-2" },
+      },
+    } as unknown as CellData
+    const { onOpenRecording } = draw({ owner, audioId: "audio-c1-t2.webm" })
+    fireEvent.click(screen.getByRole("button", { name: /new take/i }))
+    expect(onOpenRecording).toHaveBeenCalledWith("c1", "trk-2")
   })
 
   // A take on an added track: the transcriber reads the cell's SELECTED
@@ -322,6 +338,41 @@ describe("whose recording it acts on", () => {
     const { onCommitted } = draw()
     fireEvent.click(screen.getByRole("button", { name: /transcribe/i }))
     await waitFor(() => expect(onCommitted).toHaveBeenCalledWith("cue-1"))
+  })
+})
+
+describe("what its line says (Sam, 2026-09-30)", () => {
+  it("names the track before the take when it is given one", () => {
+    draw({ trackName: "Track" })
+    expect(screen.getByTestId("cell-take-track")).toHaveTextContent("Track·")
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take")
+  })
+
+  it("names no track when it is not given one", () => {
+    draw()
+    expect(screen.queryByTestId("cell-take-track")).toBeNull()
+  })
+
+  // AQU-1217: a trimmed take shows its trimmed length. The line said the whole
+  // file's 2.6s while the timer under it counted the kept 2.1s.
+  it("gives the length that plays, trims taken off", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    Object.assign((owner.attachments as unknown as Record<string, Record<string, unknown>>)[id], {
+      durationMs: 2560, trimStartMs: 256, trimEndMs: 2320,
+    })
+    draw({ owner })
+    expect(screen.getByTestId("cell-take-length")).toHaveTextContent("2.1s")
+  })
+
+  it("says a transcribed take cannot be checked when nothing says what it should say", () => {
+    draw({ cellText: null, timings: [{ word: "some", start: 0, end: 4, t0: 0, t1: 0.4 }] })
+    expect(screen.getByTestId("cell-take-verdict")).toHaveTextContent("Transcribed")
+  })
+
+  it("says there is no text to compare, rather than that every word differs", () => {
+    draw({ cellText: "", timings: [{ word: "some", start: 0, end: 4, t0: 0, t1: 0.4 }] })
+    expect(screen.getByTestId("cell-take-verdict")).toHaveTextContent("No text to compare")
   })
 })
 

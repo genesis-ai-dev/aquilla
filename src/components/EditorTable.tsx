@@ -116,6 +116,7 @@ import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigg
 import { Input } from "@/components/ui/input"
 import { parseTimecode, spanProblem } from "@/lib/timeline/timecode"
 import { fmtClock, fmtDragTime } from "@/components/timeline/format"
+import { takeTrackName } from "@/lib/timeline/take-colors"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   DropdownMenu,
@@ -6743,6 +6744,10 @@ function EditorRow({
       : t("editor.audio.heardLineAt", {
           range: `${fmtClock(cue.startTime ?? 0, true)}–${fmtClock(cue.endTime ?? cue.startTime ?? 0, true)}`,
         }),
+    // Named by THIS row's file's tracks, a heard line's takes too: they live
+    // in the cue sibling, but the tracks are the timeline's.
+    (_owner, slot) =>
+      takeTrackName({ files: project.files, fileId: cell.fileId, slot }) ?? t("editor.recordingTab.addedTrack"),
   )
   // AQU-490: the audio twin of emitValidationChange above. The vote itself is
   // shared across languages. AQU-1462 stamps the lane the member is in so an

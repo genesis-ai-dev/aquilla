@@ -194,6 +194,7 @@ describe("lineValidationTakes — a line and the heard lines performing it", () 
   })
   const row = { id: "line-1", fileId: "subs" }
   const name = (c: { id: string; original?: string }) => `“${c.original ?? c.id}”`
+  const track = (_: unknown, slot: string) => (slot === "recording" ? "Target audio" : slot === "t2" ? "Track" : "?")
 
   it("is the row's own takes, owned by the row, when nothing performs it", () => {
     const own = {
@@ -201,14 +202,14 @@ describe("lineValidationTakes — a line and the heard lines performing it", () 
       attachments: { t1: { slot: "recording" } },
       selectedAudioId: "t1",
     }
-    const { takes, ownerOf } = lineValidationTakes(own, undefined, {}, policy(), reason, name)
+    const { takes, ownerOf } = lineValidationTakes(own, undefined, {}, policy(), reason, name, track)
     expect(takes.map((t) => t.audioId)).toEqual(["t1"])
     expect(ownerOf.get("t1")).toEqual({ fileId: "subs", cellId: "line-1" })
   })
 
   it("takes the heard line's selected take, named by its words, voted on its cue", () => {
     const heard = cue("cue-a", "ta", { validators: ["bo"], original: "Bring back some bread," })
-    const { takes, ownerOf } = lineValidationTakes(row, [{ cell: heard, hasTake: true }], {}, policy(), reason, name)
+    const { takes, ownerOf } = lineValidationTakes(row, [{ cell: heard, hasTake: true }], {}, policy(), reason, name, track)
     expect(takes).toEqual([
       expect.objectContaining({ audioId: "ta", label: "“Bring back some bread,”", validators: ["bo"], canValidate: true }),
     ])
@@ -223,6 +224,7 @@ describe("lineValidationTakes — a line and the heard lines performing it", () 
       policy(),
       reason,
       name,
+      track,
     )
     expect(takes.map((t) => t.audioId)).toEqual(["ta", "unrecorded:cue-b"])
     expect(takes[1]).toMatchObject({
@@ -234,8 +236,44 @@ describe("lineValidationTakes — a line and the heard lines performing it", () 
   it("applies the project's policy to a heard line's take as to the row's own", () => {
     const heard = { ...cue("cue-a", "ta"), attachments: { ta: { slot: "recording", recordedBy: "ana" } } }
     const { takes } = lineValidationTakes(
-      row, [{ cell: heard, hasTake: true }], { allowSelfValidationAudio: false }, policy(), reason, name,
+      row, [{ cell: heard, hasTake: true }], { allowSelfValidationAudio: false }, policy(), reason, name, track,
     )
     expect(takes[0]).toMatchObject({ canValidate: false, blockedReason: "blocked:self" })
+  })
+})
+
+// Sam, 2026-09-30: every track numbers its own takes, so two tracks' takes
+// both read "Take 1" in the hover list.
+describe("lineValidationTakes — takes on more than one track", () => {
+  const name = (c: { id: string; original?: string }) => `“${c.original ?? c.id}”`
+  const track = (_: unknown, slot: string) => (slot === "recording" ? "Target audio" : "Track")
+  const twoTracks = (id: string, fileId: string, original?: string) => ({
+    id, fileId, original,
+    attachments: {
+      a: { slot: "recording", label: "Take 1" },
+      b: { slot: "t2", label: "Take 1" },
+    },
+    selectedBySlot: { recording: "a", t2: "b" },
+    selectedAudioId: "a",
+  })
+
+  it("names a line's own takes by track and take", () => {
+    const { takes } = lineValidationTakes(twoTracks("line-1", "subs"), undefined, {}, policy(), reason, name, track)
+    expect(new Set(takes.map((t) => t.label))).toEqual(new Set(["Target audio · Take 1", "Track · Take 1"]))
+  })
+
+  it("names a heard line's takes by its words, track and take", () => {
+    const heard = twoTracks("cue-a", "cues", "Bring back some bread,")
+    const { takes } = lineValidationTakes({ id: "line-1", fileId: "subs" }, [{ cell: heard, hasTake: true }], {}, policy(), reason, name, track)
+    expect(new Set(takes.map((t) => t.label))).toEqual(new Set([
+      "“Bring back some bread,” · Target audio · Take 1",
+      "“Bring back some bread,” · Track · Take 1",
+    ]))
+  })
+
+  it("keeps a single take's plain name", () => {
+    const one = { id: "line-1", fileId: "subs", attachments: { a: { slot: "recording", label: "Take 3" } }, selectedAudioId: "a" }
+    const { takes } = lineValidationTakes(one, undefined, {}, policy(), reason, name, track)
+    expect(takes[0].label).toBe("Take 3")
   })
 })

@@ -43,6 +43,15 @@ export function TakeTextVerdict({
       </span>
     )
   }
+  if (verdict.kind === "noText" || verdict.kind === "unchecked") {
+    // Transcribed, with nothing to hold it against: no text on the line yet,
+    // or a heard line saying one part of a split line (Sam, 2026-09-30).
+    return (
+      <span data-testid={testId} data-verdict={verdict.kind} className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        {t(verdict.kind === "noText" ? "editor.recordingTab.noTextToCompare" : "editor.recordingTab.transcribedOnly")}
+      </span>
+    )
+  }
   return (
     <span data-testid={testId} data-verdict="none" className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
       {t("editor.recordingTab.notTranscribed")}

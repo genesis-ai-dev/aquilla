@@ -1484,7 +1484,6 @@ export const editor = defineNamespace({
     "editor.audioValidation.readOnlyNote": "Only the take that plays for the line can be validated",
     "editor.audioValidation.readOnlyNone":
       "Nobody has validated this take. Only the take that plays for the line can be validated.",
-    "editor.audio.addedTrackTakeHint": "Take on an added track",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
@@ -1690,6 +1689,9 @@ export const editor = defineNamespace({
     }),
     "editor.recordingTab.stale": "Transcript out of date",
     "editor.recordingTab.notTranscribed": "Not transcribed",
+    "editor.recordingTab.transcribedOnly": "Transcribed",
+    "editor.recordingTab.noTextToCompare": "No text to compare",
+    "editor.recordingTab.addedTrack": "Added track",
     "editor.recordingTab.sourceSection": "Source audio",
     "editor.recordingTab.noTakeYet": "No take yet",
     "editor.recordingTab.nonePlays": "No take plays for this line. Use one below, or make a new one.",
@@ -5597,13 +5599,6 @@ export const editor = defineNamespace({
           "recorded by a person. Such takes are never validated automatically.",
         maxLength: 20,
       },
-      "editor.audio.addedTrackTakeHint": {
-        description:
-          "Header over a take in the Recording tab that lives on an extra "
-          + "target-audio track rather than the line's main track, when the take "
-          + "has no name of its own.",
-        maxLength: 30,
-      },
       "editor.audioValidation.defaultTrack": {
         description:
           "Name of the line's main audio track in the take popover, used when a take " +
@@ -6458,6 +6453,27 @@ export const editor = defineNamespace({
         description:
           "Beside a take in the Recording tab: nobody has transcribed it yet, so there is " +
           "nothing to compare with the text. May be followed by a Transcribe link.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.transcribedOnly": {
+        description:
+          "Beside a take in the Recording tab that has been transcribed but cannot be checked " +
+          "against any text: a heard line (in dubbing, one recorded performance) that says only " +
+          "one part of a subtitle line split across several, so which words it should say is " +
+          "not known.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.noTextToCompare": {
+        description:
+          "Beside a transcribed take in the Recording tab when the line has no translation yet, " +
+          "so there is nothing to compare what the take says with.",
+        maxLength: 26,
+      },
+      "editor.recordingTab.addedTrack": {
+        description:
+          "Name of an audio track a take sits on, when the track has no name this version of " +
+          "the app can read (added by a newer version). Shown before the take's own name, " +
+          "e.g. 'Added track · Take 1'.",
         maxLength: 20,
       },
       "editor.recordingTab.nonePlays": {

@@ -190,6 +190,12 @@ export interface LineValidation {
 
 type OwnedCell = CellLikeAudio & { id: string; fileId: string }
 
+/** The line's own dub track before added ones, as the timeline stacks them. */
+function mainTrackFirst(takes: AudioValidationTake[]): AudioValidationTake[] {
+  const main = (take: AudioValidationTake) => take.slot === "recording" || take.slot === "generatedVoice"
+  return [...takes.filter(main), ...takes.filter((take) => !main(take))]
+}
+
 /**
  * The takes a LINE's audio check stands for, and where each one lives.
  *
@@ -202,6 +208,11 @@ type OwnedCell = CellLikeAudio & { id: string; fileId: string }
  * line's selected take(s) — each named by what the heard line says (`nameOf`),
  * so the hover list can tell two parts of one line apart — and `ownerOf` says
  * which cell a vote on each goes to.
+ *
+ * Takes on more than one track are named by their track AND their own name —
+ * "Target audio · Take 1", "Track · Take 1" — since every track numbers its
+ * own takes and two "Take 1"s told the reader nothing (Sam, 2026-09-30).
+ * `trackNameOf` names the track a take sits on, as the timeline does.
  *
  * A heard line nobody has recorded yet (a line split across two, one of them
  * done) joins the set as an UNRECORDED member. It can take no vote, and it
@@ -222,6 +233,7 @@ export function lineValidationTakes<C extends OwnedCell>(
   policy: AudioValidationPolicy,
   reasonText: (reason: "role" | "allowlist" | "self" | "unrecorded") => string,
   nameOf: (cue: C) => string,
+  trackNameOf: (owner: OwnedCell, slot: string) => string,
 ): LineValidation {
   const takes: AudioValidationTake[] = []
   const ownerOf = new Map<string, TakeOwner>()
@@ -230,8 +242,12 @@ export function lineValidationTakes<C extends OwnedCell>(
     ownerOf.set(take.audioId, { fileId: owner.fileId, cellId: owner.id })
     takes.push(take)
   }
-  for (const take of audioValidationTakes(audioEntryFromCell(cell), project, policy, reasonText)) {
-    add(cell, take)
+  // "Track · Take 1", or just the track for a take with no name of its own.
+  const onTrack = (owner: OwnedCell, take: AudioValidationTake) =>
+    [trackNameOf(owner, take.slot), take.label].filter(Boolean).join(" · ")
+  const own = mainTrackFirst(audioValidationTakes(audioEntryFromCell(cell), project, policy, reasonText))
+  for (const take of own) {
+    add(cell, own.length > 1 ? { ...take, label: onTrack(cell, take) } : take)
   }
   for (const { cell: cue, hasTake } of heardLines ?? []) {
     const name = nameOf(cue)
@@ -249,11 +265,11 @@ export function lineValidationTakes<C extends OwnedCell>(
       })
       continue
     }
-    const own = audioValidationTakes(audioEntryFromCell(cue), project, policy, reasonText)
-    for (const take of own) {
-      // A heard line with a take on more than one track: keep each take's own
-      // name beside the words, or the two would read the same.
-      const label = own.length > 1 && take.label ? `${name} · ${take.label}` : name
+    const heard = mainTrackFirst(audioValidationTakes(audioEntryFromCell(cue), project, policy, reasonText))
+    for (const take of heard) {
+      // A heard line with takes on more than one track: its words, then which
+      // track and which take, or the two would read the same.
+      const label = heard.length > 1 ? `${name} · ${onTrack(cue, take)}` : name
       add(cue, { ...take, label })
     }
   }

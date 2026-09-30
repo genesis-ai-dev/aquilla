@@ -31,6 +31,7 @@ import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
 import { TakeRowWave } from "@/components/audio/TakeRowWave"
 import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -104,8 +105,13 @@ interface Props {
   hide?: readonly string[]
   /** Tab: each take's word timings, for how it compares with the text. */
   timingsFor?: (audioId: string) => ReadonlyArray<{ word: string; end: number }> | null | undefined
-  /** Tab: the line's text those timings are compared with. */
-  cellText?: string
+  /** The file whose timeline these takes are on, for their tracks' colours:
+   *  `fileId` itself, except for a heard line's takes, whose tracks are the
+   *  subtitle file's while they live in its hidden cue sibling. */
+  trackFileId?: string
+  /** Tab: the text those timings are compared with, or null when nothing
+   *  can say what the takes should say (a part of a split line). */
+  cellText?: string | null
   /** The cell's take history, when the caller already read it — the tab reads
    *  it once for the playing take and this list together. */
   history?: ReadonlyMap<string, RecordingTextDrift>
@@ -137,6 +143,7 @@ export function TakesStrip({
   hide,
   timingsFor,
   cellText = "",
+  trackFileId,
   history,
   readOnly = false,
 }: Props) {
@@ -558,7 +565,7 @@ export function TakesStrip({
                   session={session}
                   strategy={project.audioMediaStrategy}
                   generated={isGenerated}
-                  trackVars={takeTrackVars({ files: project.files, fileId, slot: att.slot })}
+                  trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
                 />
               )}
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
@@ -588,7 +595,15 @@ export function TakesStrip({
                       {displayLabel(att)}
                     </span>
                     {att.durationMs != null ? (
-                      <span className="shrink-0 text-muted-foreground/70">{(att.durationMs / 1000).toFixed(1)}s</span>
+                      // The length that plays: a trimmed take's kept part
+                      // (AQU-1217), as the chip and the take on top say it.
+                      <span data-testid={`take-length-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
+                        {((effectiveAttachmentDurationMs({
+                          durationMs: att.durationMs,
+                          trimStartMs: att.trimStartMs ?? undefined,
+                          trimEndMs: att.trimEndMs ?? undefined,
+                        }) ?? att.durationMs) / 1000).toFixed(1)}s
+                      </span>
                     ) : (
                       // SUB-48: no measured length. Say so — a blank space read
                       // as "fine" while the chip was quietly section-width.

@@ -55,6 +55,7 @@ import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -70,15 +71,22 @@ export interface CellTakeBlockProps {
   audioId?: string | null
   /** Word timings for that attachment, when it has been transcribed. */
   timings?: readonly unknown[] | null
-  /** The row's target text — what the transcript is compared against. */
-  cellText: string
+  /**
+   * The words this take should say — what its transcript is compared with:
+   * the row's text for its own take, the text of every line a heard line
+   * performs for that heard line's. Null when nothing can say which words it
+   * should say (a heard line saying one part of a split line).
+   */
+  cellText: string | null
   editable: boolean
   username: string
   session: FrontierSession | null
-  /** Open the recorder on this take's owner. */
-  onOpenRecording?: (cellId: string) => void
-  /** Put the transcript into the ROW's target text (not the owner's). */
-  onUseAsCellText: (transcript: string) => void
+  /** Open the recorder on this take's owner, recording onto `slot`. */
+  onOpenRecording?: (cellId: string, slot?: string) => void
+  /** Put the transcript into the ROW's target text (not the owner's). Absent
+   *  where the take does not say exactly the row's text (a heard line shared
+   *  with other lines, or one part of a split line). */
+  onUseAsCellText?: (transcript: string) => void
   /** Flush + revalidate after a write. Given the OWNER's id. */
   onCommitted?: (cellId: string) => void | Promise<void>
   /** A line above the take saying where it lives. Only a heard line's take
@@ -101,6 +109,18 @@ export interface CellTakeBlockProps {
   /** The owner's last RECORDING was deleted here — the workspace resets the
    *  target row it justified, as it does for a delete in the recorder. */
   onLastTakeRemoved?: (cellId: string) => void
+  /**
+   * The file whose timeline this take is on, for its track's colour. The
+   * owner's own file, except for a heard line's take: that lives in the
+   * hidden audio-cue sibling while its tracks are the subtitle file's.
+   */
+  trackFileId?: string
+  /**
+   * The track this take sits on, named before the take's own name — given
+   * when the line has takes on more than one track, where every track's first
+   * take is a "Take 1" (Sam, 2026-09-30).
+   */
+  trackName?: string | null
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -139,6 +159,8 @@ function CellTakeBlockView({
   targetLang,
   provenance = null,
   onLastTakeRemoved,
+  trackName = null,
+  trackFileId,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -320,11 +342,32 @@ function CellTakeBlockView({
   const label = isSection
     ? t("editor.recordingTab.sourceSection")
     : shownLabel ?? t("audio.takesStrip.takeFallback")
+  // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
+  // length) — the head said the whole file's while the timer under it said
+  // the kept part's.
+  const keptMs = effectiveAttachmentDurationMs(attachment)
+  const trackVars = takeTrackVars({
+    files: project.files,
+    fileId: trackFileId ?? owner.fileId,
+    slot: attachment?.slot,
+    sourceSection: isSection,
+  })
+  // New take records onto THIS take's track (a generated voice's is the main
+  // track, whose recordings share its row). It opened the recorder on the main
+  // track whichever take it sat beside.
+  const newTakeSlot = !attachment?.slot || attachment.slot === GENERATED_VOICE_SLOT ? RECORDING_SLOT : attachment.slot
 
   return (
     <div data-testid="cell-take-block" className="flex flex-col gap-2">
       {header}
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        {trackName && !isSection && (
+          <span data-testid="cell-take-track" className="flex items-center gap-1.5 font-medium">
+            <span aria-hidden className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: trackVars["--tl-track-hue"] }} />
+            {trackName}
+            <span aria-hidden className="font-normal text-muted-foreground">·</span>
+          </span>
+        )}
         {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
         {renaming ? (
           <input
@@ -343,8 +386,8 @@ function CellTakeBlockView({
         ) : (
           <span data-testid="cell-take-label" className="font-medium">{label}</span>
         )}
-        {!isSection && attachment?.durationMs != null && (
-          <span className="tabular-nums text-muted-foreground">{(attachment.durationMs / 1000).toFixed(1)}s</span>
+        {!isSection && keptMs != null && (
+          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{(keptMs / 1000).toFixed(1)}s</span>
         )}
         {provenance && (
           <span
@@ -457,7 +500,7 @@ function CellTakeBlockView({
               size="xs"
               variant="outline"
               data-testid="cell-take-new"
-              onClick={() => onOpenRecording?.(owner.id)}
+              onClick={() => onOpenRecording?.(owner.id, newTakeSlot)}
               disabled={!editable || !onOpenRecording}
             >
               <Mic className="h-3 w-3" />
@@ -493,12 +536,7 @@ function CellTakeBlockView({
         // In its track's colour (Sam, 2026-09-26): a source section in the
         // source row's lighter blue, a take in its own track's.
         kind={isGenerated || isSection ? "generated" : "take"}
-        trackVars={takeTrackVars({
-          files: project.files,
-          fileId: owner.fileId,
-          slot: attachment?.slot,
-          sourceSection: isSection,
-        })}
+        trackVars={trackVars}
         strategy={project.audioMediaStrategy ?? "lazy"}
         trimEditable={editable}
         onCommitTrim={commitTrim}
@@ -508,9 +546,9 @@ function CellTakeBlockView({
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}
           timings={timings as never}
-          cellText={cellText}
+          cellText={cellText ?? ""}
           cellId={owner.id}
-          alignedToCellText={tokenizeWords(cellText).length === timings.length}
+          alignedToCellText={cellText != null && tokenizeWords(cellText).length === timings.length}
           editable={editable}
           {...(readOnlyTranscript
             ? {}

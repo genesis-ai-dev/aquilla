@@ -592,8 +592,8 @@ describe("SelectionBar — Validate recordings", () => {
     } as unknown as CellData
     // One heard line performing BOTH selected lines: one take, one vote.
     const linked = new Map([
-      ["cell-1", [{ cell: heard, sharedWith: 2, hasTake: true }]],
-      ["cell-2", [{ cell: heard, sharedWith: 2, hasTake: true }]],
+      ["cell-1", [{ cell: heard, sharedWith: 2, hasTake: true, performs: ["cell-1", "cell-2"], partOfSplit: false }]],
+      ["cell-2", [{ cell: heard, sharedWith: 2, hasTake: true, performs: ["cell-1", "cell-2"], partOfSplit: false }]],
     ])
     renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: new Map(), linkedTakesByCell: linked })
     const button = screen.getByRole("button", { name: /^validate audio/i })

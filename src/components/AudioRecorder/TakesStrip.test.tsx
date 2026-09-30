@@ -678,3 +678,11 @@ describe("TakesStrip — reporting the last take", () => {
     })
   })
 })
+
+// AQU-1217: a trimmed take shows its trimmed length — in the lists too.
+describe("TakesStrip — length", () => {
+  it("gives a trimmed take the length that plays", () => {
+    render(<TakesStrip {...common} takes={[{ ...take("audio-c1-a.webm", 2560), trimStartMs: 256, trimEndMs: 2320 }]} selectedAudioId={null} />)
+    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.1s")
+  })
+})

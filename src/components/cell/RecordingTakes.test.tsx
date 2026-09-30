@@ -29,6 +29,8 @@ vi.mock("@/lib/sync/events-emit", () => ({
 }))
 
 import { RecordingTakes } from "./RecordingTakes"
+import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -228,5 +230,97 @@ describe("RecordingTakes", () => {
     expect(empty).toHaveTextContent("No take yet")
     within(empty).getByRole("button", { name: /new take/i }).click()
     expect(onOpenRecording).toHaveBeenCalledWith("cue-b")
+  })
+})
+
+// Sam, 2026-09-30, a heard line of a split line with a take on the dub track
+// and one on an added magenta track: both read "Take 1", the magenta one was
+// drawn green, its length was the file's, and it "differed by 2 words" from a
+// line with no translation.
+describe("RecordingTakes — heard lines, tracks and what a take is checked against", () => {
+  // As the workspace hands it over: the hidden cue sibling is NOT in the
+  // file list. The added track is stored on the subtitle file.
+  const dubbing = {
+    ...project,
+    files: [
+      { id: "subs", trackOverrides: { "trk-2": { kind: "audio", name: "Track", color: "magenta", order: 4, sourceTrackId: "source-audio" } } },
+    ],
+  } as unknown as ProjectRecord
+  const heard = (over: Record<string, unknown> = {}) => cell({
+    id: "cue-a", fileId: "cues", startTime: 3, endTime: 5.5, original: "Bring back some bread,",
+    selectedAudioId: "audio-cue-a-1.wav",
+    selectedBySlot: { recording: "audio-cue-a-1.wav", "trk-2": "audio-cue-a-2.wav" },
+    attachments: {
+      "audio-cue-a-1.wav": audio("frontier-audio://1", "recording", { label: "Take 1", durationMs: 1141 }),
+      "audio-cue-a-2.wav": audio("frontier-audio://2", "trk-2", { label: "Take 1", durationMs: 2560, trimStartMs: 256, trimEndMs: 2320 }),
+    },
+    ...over,
+  } as Partial<CellData> & { attachments: Record<string, unknown> })
+  function drawHeard(
+    linked: { cell: CellData; performs: string[]; partOfSplit: boolean },
+    row: CellData = cell({ id: "line-2", fileId: "subs", attachments: {}, startTime: 3 } as Partial<CellData> & { attachments: Record<string, unknown> }),
+    cellText = "Trae pan",
+    others: Record<string, { translated: string; startTime: number }> = {},
+  ) {
+    const cellStore = { getCellView: (id: string) => others[id] ?? null }
+    render(
+      <EditorActionsProvider value={{ cellStore: cellStore as never }}>
+        <RecordingTakes
+          project={dubbing} cell={row}
+          linkedTakes={[{ ...linked, sharedWith: linked.performs.length, hasTake: true }]}
+          cellText={cellText} editable username="dir" session={null}
+          onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+        />
+      </EditorActionsProvider>,
+    )
+  }
+  const blocks = () => screen.getAllByTestId("cell-take-block")
+
+  it("names each take by its track and its name, in its track's colour", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    const [main, added] = blocks()
+    expect(within(main).getByTestId("cell-take-track")).toHaveTextContent("Target audio")
+    expect(within(added).getByTestId("cell-take-track")).toHaveTextContent("Track")
+    expect(within(added).getByTestId("cell-take-label")).toHaveTextContent("Take 1")
+    // The dot wears the added track's magenta, stored on the SUBTITLE file.
+    const dot = within(added).getByTestId("cell-take-track").querySelector("span[aria-hidden]") as HTMLElement
+    const magenta = document.createElement("span")
+    magenta.style.background = trackHueVarsFor("audio", "magenta")["--tl-track-hue"]
+    expect(dot.style.background).toBe(magenta.style.background)
+  })
+
+  it("gives a trimmed take the length that plays", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    expect(within(blocks()[1]).getByTestId("cell-take-length")).toHaveTextContent("2.1s")
+  })
+
+  it("leaves a part of a split line unchecked", () => {
+    const timed = heard({ audioTimings: { "audio-cue-a-2.wav": [{ word: "some", start: 0, end: 4, t0: 1.4, t1: 1.7 }] } })
+    drawHeard({ cell: timed, performs: ["line-2"], partOfSplit: true })
+    expect(within(blocks()[1]).getByTestId("cell-take-verdict")).toHaveTextContent("Transcribed")
+  })
+
+  it("checks a heard line shared with another line against both lines' text", () => {
+    const timed = heard({
+      audioTimings: { "audio-cue-a-1.wav": [
+        { word: "Trae", start: 0, end: 4, t0: 0, t1: 0.3 },
+        { word: "pan", start: 5, end: 8, t0: 0.3, t1: 0.6 },
+        { word: "y", start: 9, end: 10, t0: 0.6, t1: 0.7 },
+        { word: "leche", start: 11, end: 16, t0: 0.7, t1: 1 },
+      ] },
+    })
+    drawHeard(
+      { cell: timed, performs: ["line-2", "line-3"], partOfSplit: false },
+      undefined,
+      "Trae pan",
+      { "line-3": { translated: "y leche", startTime: 5.5 } },
+    )
+    expect(within(blocks()[0]).getByTestId("cell-take-verdict")).toHaveTextContent("Matches the text")
+  })
+
+  it("opens on the heard line, with no empty section of the row's own above it", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    const first = screen.getByTestId("recording-takes").firstElementChild as HTMLElement
+    expect(within(first).getByTestId("cell-linked-take")).toBeInTheDocument()
   })
 })

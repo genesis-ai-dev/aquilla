@@ -300,6 +300,7 @@ function GroupedTakes({
   session,
   onLastTakeRemoved,
   laneTag,
+  trackFileId,
 }: {
   groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
   project: ProjectRecord
@@ -311,6 +312,8 @@ function GroupedTakes({
   onLastTakeRemoved?: (cellId: string) => void
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   laneTag?: string
+  /** The timeline's file, for the takes' track colours. */
+  trackFileId?: string
 }) {
   const showHeadings = groups.length > 1
   return (
@@ -336,6 +339,7 @@ function GroupedTakes({
               projectId={project.id}
               project={project}
               fileId={cell.fileId}
+              trackFileId={trackFileId}
               cellId={cell.id}
               takes={group.takes}
               onLastTakeRemoved={onLastTakeRemoved}
@@ -1751,8 +1755,10 @@ export function AudioRecordingModal({
   // In the colour of the track being recorded onto (Sam, 2026-09-26): the
   // growing take and the preview say which track the take lands on, and the
   // take on the ready screen wears its own track's colour.
-  const recordingTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: targetSlot })
-  const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
+  // The TIMELINE's file names the tracks: on a heard line the take is
+  // written to the hidden cue sibling, whose file knows no added track.
+  const recordingTrackVars = takeTrackVars({ files: project.files, fileId: filmOwnerId, slot: targetSlot })
+  const readyTrackVars = takeTrackVars({ files: project.files, fileId: filmOwnerId, slot: readyAtt?.slot ?? targetSlot })
 
   // ── AQU-1210: FILM PLAY-ALONG ─────────────────────────────────────────────
   // Always on (Sam, 2026-09-28: the switch for it is gone — the film is muted
@@ -2827,6 +2833,7 @@ export function AudioRecordingModal({
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
                   laneTag={laneTag}
+                  trackFileId={filmOwnerId}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">

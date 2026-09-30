@@ -205,14 +205,16 @@ describe("EditorTable — the Recording tab lists added-track takes", () => {
     expect(screen.queryByText(/no audio yet/i)).toBeNull()
   })
 
-  it("heads an unnamed added-track take by its track", async () => {
+  // Sam, 2026-09-30: named by its track before its own name. A track this
+  // build cannot name is still named as a track.
+  it("names the track of a take that lives on an added track", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t2", "track-2")])]])
     renderTable()
     const row = await rowOf("bonjour cell-1")
     fireEvent.click(within(row).getByRole("button", { name: "Open cell details" }))
     const tab = await screen.findByText("Recording")
     fireEvent.click(tab.closest("button") ?? tab)
-    expect(await screen.findByText("Take on an added track")).toBeInTheDocument()
+    expect(await screen.findByTestId("cell-take-track")).toHaveTextContent("Added track")
   })
 })
 
@@ -240,7 +242,7 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
 
   it("draws the heard line's take, and votes on it where it lives", async () => {
     emits.validate.mockClear()
-    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true }]]]))
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
     const row = await rowOf("bonjour cell-1")
     expect(within(row).queryByTestId("audio-validation-unavailable")).toBeNull()
     fireEvent.click(within(row).getByTestId("audio-validation-button"))
@@ -249,7 +251,7 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
   })
 
   it("shows a vote cast on the heard line elsewhere", async () => {
-    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,", ["someone"]), sharedWith: 1, hasTake: true }]]]))
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,", ["someone"]), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
     const row = await rowOf("bonjour cell-1")
     // Validated by another at a threshold of one: the double check, which
     // offers nothing to press.

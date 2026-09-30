@@ -49,7 +49,9 @@ export interface EditorActionsContextValue {
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
+  /** Open the recorder on a line, recording onto `slot` (the main track when
+   *  absent) — the Recording tab's New take names its take's track. */
+  onOpenRecording?: (cellId: string, slot?: string) => void
   /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,

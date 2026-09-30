@@ -26,9 +26,9 @@ import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { groupSelection, groupTakesByTrack, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
-import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
+import { useEditorActions } from "@/context/EditorActionsContext"
 import { fmtClock } from "@/components/timeline/format"
 import { CellTakeBlock } from "@/components/CellTakeBlock"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
@@ -36,12 +36,13 @@ import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 
 interface Shared {
   project: ProjectRecord
-  cellText: string
+  /** What a take is checked against — see CellTakeBlock's `cellText`. */
+  cellText: string | null
   editable: boolean
   username: string
   session: FrontierSession | null
-  onOpenRecording?: (cellId: string) => void
-  onUseAsCellText: (transcript: string) => void
+  onOpenRecording?: (cellId: string, slot?: string) => void
+  onUseAsCellText?: (transcript: string) => void
   onCommitted?: (cellId: string) => void | Promise<void>
   /** AQU-1462: lane the member is working in, stamped on every write here so
    *  an archived lane can refuse it. Omitted for the default lane. */
@@ -55,7 +56,13 @@ export interface RecordingTakesProps extends Shared {
   /** The row's own cell. */
   cell: CellData
   /** Takes that live on the heard lines performing this row (dubbing). */
-  linkedTakes?: ReadonlyArray<{ cell: CellData; sharedWith: number; hasTake?: boolean }>
+  linkedTakes?: ReadonlyArray<{
+    cell: CellData
+    sharedWith: number
+    hasTake?: boolean
+    performs?: readonly string[]
+    partOfSplit?: boolean
+  }>
   /** The row's own players, by the take each plays (AQU-1211): a take the row
    *  plays is played through them here, so the cell's word highlight follows. */
   players?: ReadonlyMap<string, UseCellAudioResult>
@@ -99,8 +106,8 @@ const selectionsOf = (cell: CellData) => ({
 /** One cell's takes: a section per track, playing take above its others. */
 function OwnerTakes({
   owner,
+  trackFileId,
   header,
-  headings = true,
   players,
   offerWhenEmpty = false,
   project,
@@ -108,9 +115,11 @@ function OwnerTakes({
   ...rest
 }: Shared & {
   owner: CellData
+  /** The file whose timeline the takes are on: the ROW's, for a heard line's
+   *  takes too — they live in the hidden cue sibling, but their tracks (names,
+   *  colours, added ones) are the subtitle file's (Sam, 2026-09-30). */
+  trackFileId: string
   header?: React.ReactNode
-  /** Track headings once there is more than one track. */
-  headings?: boolean
   /** The row's players, by take — the row's own cell only. */
   players?: ReadonlyMap<string, UseCellAudioResult>
   /** A heard line nobody has recorded yet: say so and offer New take, rather
@@ -120,8 +129,9 @@ function OwnerTakes({
   const t = useT()
   const shared: Shared = { ...rest, project, session }
   const { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, fileId, id: cellId } = owner
-  const file = project.files?.find((f) => f.id === fileId) ?? null
-  const tracks = useMemo(() => deriveTracksForFile(file), [file])
+  // The timeline's tracks — the row's file's, for a heard line too.
+  const files = project.files
+  const tracks = useMemo(() => tracksForTakesIn(files, trackFileId), [files, trackFileId])
   const takes = useMemo(
     () => takesOfCell(attachments, selectedGeneratedVoiceAudioId),
     [attachments, selectedGeneratedVoiceAudioId],
@@ -153,12 +163,20 @@ function OwnerTakes({
 
   const defaultGroup: TakeGroup | undefined = groups.find((g) => g.trackId === DEFAULT_TARGET_TRACK_ID)
   const defaultPlays = defaultGroup ? playingTakeId(defaultGroup, entry) : null
-  // Headings once there is more than one track to tell apart — or when the
-  // one track is not the line's own dub track, which should not pass as it.
-  const showHeadings = headings && (groups.length > 1 || (groups.length === 1 && groups[0].trackId !== DEFAULT_TARGET_TRACK_ID))
+  // Takes named by their track once there is more than one track to tell
+  // apart — "Target audio · Take 1", "Track · Take 1", since every track
+  // numbers its own takes — or when the one track is not the line's own dub
+  // track, which should not pass as it (Sam, 2026-09-30). The heard line's
+  // takes too: its sections used to carry no track name at all.
+  const showTracks = groups.length > 1 || (groups.length === 1 && groups[0].trackId !== DEFAULT_TARGET_TRACK_ID)
   // Takes, but none chosen — every one set aside. The playing take's line is
   // where New take lives, so without one it needs a line of its own.
   const nonePlays = !sourceClip && groups.length > 0 && groups.every((g) => !playingTakeId(g, entry))
+
+  // Nothing of this cell's to show (a subtitle line whose takes are all on its
+  // heard lines): no section, rather than an empty one opening the tab with a
+  // gap.
+  if (!header && !offerWhenEmpty && groups.length === 0 && !sourceClip) return null
 
   return (
     <div className="flex flex-col gap-3">
@@ -206,20 +224,22 @@ function OwnerTakes({
         const generated = Boolean(playingAtt && (playingAtt.voiceId || playingAtt.slot === GENERATED_VOICE_SLOT))
         return (
           <section key={group.trackId} data-testid={`rec-tab-track-${group.trackId}`} className="flex flex-col gap-2">
-            {showHeadings && (
-              <div className="flex items-center gap-2 text-xs font-medium">
+            {/* A track whose takes are all set aside has no take on top to
+                carry its name, so its list is headed by it. */}
+            {showTracks && !playing && (
+              <div data-testid="rec-tab-track-heading" className="flex items-center gap-2 text-xs font-medium">
                 <span
                   aria-hidden
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{
                     background: takeTrackVars({
                       files: project.files,
-                      fileId: owner.fileId,
+                      fileId: trackFileId,
                       slot: isDefault ? RECORDING_SLOT : group.takes[0]?.slot,
                     })["--tl-track-hue"],
                   }}
                 />
-                {group.name || t("editor.audio.addedTrackTakeHint")}
+                {group.name || t("editor.recordingTab.addedTrack")}
               </div>
             )}
             {playing && (
@@ -232,6 +252,8 @@ function OwnerTakes({
                 readOnlyTranscript={generated}
                 provenance={history.get(playing) ?? null}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
+                trackName={showTracks ? group.name || t("editor.recordingTab.addedTrack") : null}
+                trackFileId={trackFileId}
               />
             )}
             <TakesStrip
@@ -239,6 +261,7 @@ function OwnerTakes({
               projectId={project.id}
               project={project}
               fileId={owner.fileId}
+              trackFileId={trackFileId}
               cellId={owner.id}
               takes={group.takes}
               hide={playing ? [playing] : undefined}
@@ -264,17 +287,47 @@ function OwnerTakes({
 
 export function RecordingTakes({ cell, linkedTakes, players, ...shared }: RecordingTakesProps) {
   const t = useT()
+  const { cellStore } = useEditorActions()
+  /**
+   * What a heard line's take should say (Sam, 2026-09-30). It was checked
+   * against this row's text alone, which is wrong twice over: a heard line
+   * shared with other lines says all of their text, and one that says only
+   * PART of a split line cannot be checked against any text at all — which
+   * part is not written down anywhere — so it is left unchecked.
+   */
+  const textFor = (heard: { performs?: readonly string[]; partOfSplit?: boolean }): string | null => {
+    if (heard.partOfSplit) return null
+    const performs = heard.performs ?? [cell.id]
+    if (performs.length <= 1) return shared.cellText
+    return performs
+      .map((id) => {
+        if (id === cell.id) return { text: shared.cellText ?? "", at: cell.startTime ?? 0 }
+        const other = cellStore?.getCellView(id)
+        return { text: other?.translated ?? "", at: other?.startTime ?? 0 }
+      })
+      .sort((a, b) => a.at - b.at)
+      .map((line) => line.text.trim())
+      .filter(Boolean)
+      .join(" ")
+  }
   return (
     <div data-testid="recording-takes" className="flex flex-col gap-4">
-      <OwnerTakes {...shared} owner={cell} players={players} />
-      {linkedTakes?.map(({ cell: cue, sharedWith }) => (
+      <OwnerTakes {...shared} owner={cell} trackFileId={cell.fileId} players={players} />
+      {linkedTakes?.map((heard) => {
+        const { cell: cue, sharedWith } = heard
+        // Only a heard line performing exactly this line says this line's
+        // text, so only its transcript may be put into it.
+        const own = !heard.partOfSplit && (heard.performs?.length ?? 1) <= 1
+        return (
         <OwnerTakes
           key={cue.id}
           {...shared}
+          cellText={textFor(heard)}
+          onUseAsCellText={own ? shared.onUseAsCellText : undefined}
           owner={cue}
+          trackFileId={cell.fileId}
           // A heard line performs one or more subtitle lines at once; its take
           // is recorded, chosen and validated there.
-          headings={false}
           offerWhenEmpty
           header={
             <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
@@ -300,7 +353,8 @@ export function RecordingTakes({ cell, linkedTakes, players, ...shared }: Record
             </div>
           }
         />
-      ))}
+        )
+      })}
     </div>
   )
 }

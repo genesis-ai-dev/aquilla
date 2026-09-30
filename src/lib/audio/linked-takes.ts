@@ -32,6 +32,15 @@ export interface LinkedTake {
    * that mean "the recordings" filter on this.
    */
   hasTake: boolean
+  /** The subtitle lines this heard line performs — this one and any it is
+   *  shared with. What its take is checked against (Sam, 2026-09-30). */
+  performs: readonly string[]
+  /**
+   * One of several heard lines performing a line it performs (a line split
+   * across heard lines). Its take says only part of that line's text, and
+   * which part cannot be told from the text — so nothing can check it.
+   */
+  partOfSplit: boolean
 }
 
 export interface BuildLinkedTakesArgs {
@@ -80,10 +89,13 @@ export function buildLinkedTakes({
     for (const cueId of [...cueIds].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))) {
       const cell = byId.get(cueId)
       if (!cell) continue
+      const performs = textForCue.get(cueId) ?? [textCellId]
       takes.push({
         cell,
-        sharedWith: textForCue.get(cueId)?.length ?? 1,
+        sharedWith: performs.length,
         hasTake: resolveTargetAudio(cell) != null,
+        performs,
+        partOfSplit: performs.some((id) => (cuesForText.get(id)?.length ?? 0) > 1),
       })
     }
     if (takes.some((t) => t.hasTake)) out.set(textCellId, takes)

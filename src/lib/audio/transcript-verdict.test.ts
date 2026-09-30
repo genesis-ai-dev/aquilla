@@ -50,3 +50,20 @@ describe("wordDifferences", () => {
     expect(looseWords("…")).toEqual([])
   })
 })
+
+// Sam, 2026-09-30: "2 words differ" against a line with no translation said
+// the take was wrong when it was the text that was missing; and a part of a
+// split line has no text that says what it should say.
+describe("transcriptVerdict — nothing to compare with", () => {
+  const timings = [{ word: "some", end: 4 }, { word: "test", end: 9 }]
+  it("says so when the line has no text yet", () => {
+    expect(transcriptVerdict({ timings, cellText: "" })).toEqual({ kind: "noText" })
+    expect(transcriptVerdict({ timings, cellText: " … " })).toEqual({ kind: "noText" })
+  })
+  it("leaves it unchecked when nothing says what the take should say", () => {
+    expect(transcriptVerdict({ timings, cellText: null })).toEqual({ kind: "unchecked" })
+  })
+  it("still says an untranscribed take is not transcribed", () => {
+    expect(transcriptVerdict({ timings: [], cellText: null })).toEqual({ kind: "none" })
+  })
+})

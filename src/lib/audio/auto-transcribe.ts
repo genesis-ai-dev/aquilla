@@ -127,7 +127,9 @@ export interface AutoTranscribeArgs {
  */
 export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Promise<void> {
   try {
-    const consented = await requestAiModelConsent(WHISPER_MODEL)
+    const consented = args.session && navigator.onLine !== false
+      ? true
+      : await requestAiModelConsent(WHISPER_MODEL)
     if (!consented) return
     await runTranscribeAll({
       cells: args.seed.cells,

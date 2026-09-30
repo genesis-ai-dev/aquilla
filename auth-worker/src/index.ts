@@ -106,7 +106,7 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
-import { startReactionRun, sweepStrandedContextualRuns } from "./routes/contextual"
+import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
   deploymentEnvironmentError,
@@ -509,7 +509,7 @@ const scheduled = async (
     // promise joins sweepDone so the shared connection outlives the runs it
     // starts.
     try {
-      const react = await runReactSweep(runEnv, { startRun: startReactionRun })
+      const react = await runReactSweep(runEnv, { startRun: startReactionRun, wakeRun: wakeReactionRun })
       const previous = sweepDone
       sweepDone = Promise.allSettled([previous, react.done]).then(() => {})
       if (react.reactions.length > 0) {

@@ -268,6 +268,7 @@ describe("runReactSweep", () => {
         visited.push(input)
         return { status: "ok", runId: "stub-run", done: Promise.resolve() }
       },
+      wakeRun: async () => ({ status: "skipped", reason: "unexpected wake in this test" }),
     })
     await sweep.done
 
@@ -313,6 +314,78 @@ describe("react-check gates", () => {
     expect(body.skipped).toEqual([
       { fileId: FILE, reason: "a run is already active on this file" },
     ])
+  })
+
+  it("wakes a PARKED run with the reaction steering instead of starting a rival", async () => {
+    // Every finished reaction parks — if parked blocked like active does, a
+    // file's FIRST reaction would be its last. The reaction must continue the
+    // parked run's own conversation.
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedHumanCommit(5 * MINUTE)
+    const existing = await createRun(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE })
+    expect(existing.status).toBe("ok")
+    const parkedId = existing.status === "ok" ? existing.run.id : ""
+    // Parked on the AQU-1300 trust gate with its budget SPENT: without the
+    // edit's input grant, a resume would bounce straight back to parked.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE contextual_runs SET status='parked', park_reason='awaiting_input', span_allowance=0 WHERE id = ?",
+    )
+      .bind(parkedId)
+      .run()
+
+    const { body } = await reactCheck()
+    expect(body.skipped).toEqual([])
+    expect(body.reactions).toEqual([{ fileId: FILE, runId: parkedId }])
+    // The steering landed on the WOKEN run, and the run actually DROVE —
+    // it may well re-park after finishing the work (that is a reaction run's
+    // normal resting state), so progress, not status, is the proof of waking.
+    const directions = await storedDirections(parkedId)
+    expect(directions.some((d) => d.includes("React to 1 human edit"))).toBe(true)
+    const woken = await getRun(env.AQUILLA_PG, parkedId)
+    expect(woken?.doneSpans ?? 0).toBeGreaterThan(0)
+  })
+
+  it("retires an EXHAUSTED parked run and reacts with a fresh one", async () => {
+    // Waking a run dev parked as work_exhausted (AQU-1300) would consume the
+    // steering and re-park untouched — the reaction must instead run over the file's
+    // CURRENT state, leaving the old conversation as finished history.
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedHumanCommit(5 * MINUTE)
+    const existing = await createRun(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE })
+    expect(existing.status).toBe("ok")
+    const exhaustedId = existing.status === "ok" ? existing.run.id : ""
+    await env.AQUILLA_PG.prepare(
+      "UPDATE contextual_runs SET status='parked', park_reason='work_exhausted', done_spans=2, total_spans=2 WHERE id = ?",
+    )
+      .bind(exhaustedId)
+      .run()
+
+    const { body } = await reactCheck()
+    expect(body.skipped).toEqual([])
+    expect(body.reactions).toHaveLength(1)
+    expect(body.reactions[0].fileId).toBe(FILE)
+    // A FRESH run reacted; the exhausted one was retired, not revived.
+    expect(body.reactions[0].runId).not.toBe(exhaustedId)
+    expect((await getRun(env.AQUILLA_PG, exhaustedId))?.status).toBe("terminated")
+    expect((await getRun(env.AQUILLA_PG, body.reactions[0].runId))?.initiatedBy).toBe("reaction")
+  })
+
+  it("never overrides a PAUSED run — a person asked for quiet on that file", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedHumanCommit(5 * MINUTE)
+    const existing = await createRun(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE })
+    expect(existing.status).toBe("ok")
+    const pausedId = existing.status === "ok" ? existing.run.id : ""
+    await env.AQUILLA_PG.prepare("UPDATE contextual_runs SET status='paused' WHERE id = ?")
+      .bind(pausedId)
+      .run()
+
+    const { body } = await reactCheck()
+    expect(body.reactions).toEqual([])
+    expect(body.skipped).toEqual([
+      { fileId: FILE, reason: "a person paused the run on this file" },
+    ])
+    expect((await getRun(env.AQUILLA_PG, pausedId))?.status).toBe("paused")
   })
 
   it("honours the per-file cooldown", async () => {
@@ -378,6 +451,7 @@ describe("react-check gates", () => {
         visited.push(input)
         return { status: "skipped", reason: "stubbed" }
       },
+      wakeRun: async () => ({ status: "skipped", reason: "unexpected wake in this test" }),
     })
     await sweep.done
     expect(sweep.projects).toBe(0)

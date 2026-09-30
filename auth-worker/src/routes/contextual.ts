@@ -112,7 +112,7 @@ import {
   getCachedContextualReadiness,
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
-import { reactCheckProject, type StartReactionRun } from "../lib/react-loop"
+import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -662,6 +662,98 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
     status: "ok",
     runId: created.run.id,
     done: selfTickLoop(env, input.projectId, created.run.id),
+  }
+}
+
+/** Wake a PARKED run with reaction steering instead of starting a rival run.
+ *  Mirrors the human steering route's wake path (queue direction → resume →
+ *  drive) under the same budget guards as a fresh reaction start. */
+export const wakeReactionRun: WakeReactionRun = async (env, input) => {
+  if (!env.OPENROUTER_API_KEY) return { status: "skipped", reason: "not_configured" }
+
+  let orgId = 0
+  try {
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0, exactly as the start route does */
+  }
+  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+  const words = await wordGuard(env.AQUILLA_PG, orgId)
+  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+
+  // An EXHAUSTED parked run (every span settled) has nothing left to drive —
+  // waking it would consume the steering and re-park untouched. Retire it and
+  // start a fresh reaction run over the file's CURRENT state instead; the old
+  // conversation stays in the list as finished history.
+  // Dev's park reason is the authority (AQU-1300): `work_exhausted` means the
+  // work-list is spent, so waking would re-park untouched.
+  if (input.parkReason === "work_exhausted") {
+    const retired = await terminateRun(env.AQUILLA_PG, input.runId)
+    if (retired.status !== "ok") {
+      return { status: "skipped", reason: `wake_failed (retire ${retired.status})` }
+    }
+    try {
+      await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, retired.run)
+    } catch (err) {
+      console.warn(`[react] retire notify failed for run ${input.runId}:`, err)
+    }
+    return startReactionRun(env, {
+      projectId: input.projectId,
+      fileId: input.fileId,
+      targetLang: input.targetLang,
+      anchorCellId: input.anchorCellId,
+      direction: input.direction,
+    })
+  }
+
+  // Queue the steering BEFORE resuming, so the woken tick's steering read
+  // picks the direction up ahead of its first wave.
+  const steer = await appendSteering(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    runId: input.runId,
+    kind: "direction",
+    body: input.direction,
+    createdBy: REACTION_INITIATOR,
+  })
+  if (steer.status === "validation_failed") {
+    return { status: "skipped", reason: "wake_failed (steering rejected)" }
+  }
+  await appendActivitySafely(env.AQUILLA_PG, {
+    runId: input.runId,
+    projectId: input.projectId,
+    fileId: input.fileId,
+    kind: "steering_queued",
+    status: "queued",
+    details: { steeringId: steer.entry.id, steeringKind: steer.entry.kind },
+  })
+
+  // An expert edit is the human input the trust gate waits for — the same
+  // grant a draft review buys (AQU-1300), capped so a stream of edits cannot
+  // silently fund an unattended run. Granting BEFORE resuming is what keeps
+  // the woken run from bouncing straight back to parked.
+  await grantSpanAllowance(env.AQUILLA_PG, input.runId, {
+    spans: INPUT_GRANT_SPANS,
+    cap: INPUT_GRANT_CAP,
+  })
+  const resumed = await resumeRun(env.AQUILLA_PG, input.runId)
+  if (resumed.status !== "ok") {
+    return { status: "skipped", reason: `wake_failed (${resumed.status})` }
+  }
+  try {
+    await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, resumed.run)
+  } catch (err) {
+    console.warn(`[react] wake notify failed for run ${input.runId}:`, err)
+  }
+  return {
+    status: "ok",
+    runId: input.runId,
+    done: selfTickLoop(env, input.projectId, input.runId),
   }
 }
 
@@ -1442,7 +1534,10 @@ contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) 
   const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
   if (!gate.ok) return gate.res
 
-  const result = await reactCheckProject(c.env, projectId, { startRun: startReactionRun })
+  const result = await reactCheckProject(c.env, projectId, {
+    startRun: startReactionRun,
+    wakeRun: wakeReactionRun,
+  })
   // Same background-driver contract as kickLoop: the reaction runs keep
   // ticking after this Response, and _test.lastLoop is the seam tests await.
   _test.lastLoop = result.done

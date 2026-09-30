@@ -94,7 +94,7 @@ export async function readExpertEvents(
 export function groupByFile(rows: ExpertEventRow[]): FileSignal[] {
   const byFile = new Map<string, FileSignal>()
   for (const row of rows) {
-    const key = `${row.file_id}\u0000${row.target_lang}`
+    const key = fileLaneKey(row.file_id, row.target_lang)
     const signal = byFile.get(key) ?? {
       fileId: row.file_id,
       targetLang: row.target_lang,
@@ -135,17 +135,57 @@ export async function readFileKinds(
 }
 
 /** Files with a run already in flight — the reaction is already happening. */
-export async function readActiveRunFiles(
+/** What a (file, lane)'s most-relevant undead run means for a reaction:
+ *  `busy` — actively working, leave it alone; `paused` — a PERSON paused it,
+ *  never override that intent; `parked` — idle, carrying dev's park reason
+ *  (AQU-1300): `awaiting_input` is woken with a budget grant, `work_exhausted`
+ *  is retired and replaced by a fresh run over the file's current state. */
+export type FileRunState =
+  | { state: "busy" }
+  | { state: "paused" }
+  | { state: "parked"; runId: string; parkReason: "awaiting_input" | "work_exhausted" | null }
+
+/** Key for run states and signals: dev's one-active-run guard is per
+ *  (file, lane), so a reaction must never wake or wait on another lane's run. */
+export function fileLaneKey(fileId: string, targetLang: string): string {
+  return `${fileId}\u0000${targetLang}`
+}
+
+export async function readRunStatesByFile(
   db: AquillaDb,
   projectId: string,
-): Promise<Set<string>> {
+): Promise<Map<string, FileRunState>> {
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT file_id FROM contextual_runs
+      `SELECT file_id, target_lang, id, status, park_reason FROM contextual_runs
         WHERE project_id = ?
-          AND status IN ('running','pausing','paused','parked','waiting')`,
+          AND status IN ('running','pausing','paused','parked','waiting')
+        ORDER BY updated_at DESC`,
     )
     .bind(projectId)
-    .all<{ file_id: string }>()
-  return new Set(results.map((row) => row.file_id))
+    .all<{ file_id: string; target_lang: string | null; id: string; status: string; park_reason: string | null }>()
+  const rank = (state: FileRunState["state"]): number =>
+    state === "busy" ? 2 : state === "paused" ? 1 : 0
+  const map = new Map<string, FileRunState>()
+  for (const row of results) {
+    const next: FileRunState =
+      row.status === "paused"
+        ? { state: "paused" }
+        : row.status === "parked"
+          ? {
+              state: "parked",
+              runId: row.id,
+              parkReason:
+                row.park_reason === "awaiting_input" || row.park_reason === "work_exhausted"
+                  ? row.park_reason
+                  : null,
+            }
+          : { state: "busy" }
+    const key = fileLaneKey(row.file_id, row.target_lang ?? "")
+    const current = map.get(key)
+    // Rows arrive newest-first, so on equal rank the FRESHEST run wins (a
+    // reaction wakes the most recently parked run, not an ancient one).
+    if (!current || rank(next.state) > rank(current.state)) map.set(key, next)
+  }
+  return map
 }

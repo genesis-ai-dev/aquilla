@@ -193,7 +193,19 @@ export interface ServerContextualActivity {
   project: string
   frame: ContextualFrame
 }
+/**
+ * Reply to a client `ping`, sent to that socket only. Liveness for the
+ * client: a socket that stops receiving pongs is half-open (a proxy, NAT or
+ * sleeping laptop dropped one leg) and must be replaced — without this the
+ * client keeps a dead socket forever and silently misses every broadcast.
+ */
+export interface ServerPong {
+  t: "pong"
+  /** Echo of the ping's `ts`, when it sent one. */
+  ts?: number
+}
 export type ProjectDoServerMessage =
+  | ServerPong
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
@@ -266,7 +278,13 @@ export interface ClientPresenceUpdate {
   viewingCell?: string | null
   selection?: PresenceSelection | null
 }
+/** Client heartbeat; answered with `pong` (see ServerPong). */
+export interface ClientPing {
+  t: "ping"
+  ts?: number
+}
 export type ProjectDoClientMessage =
+  | ClientPing
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
@@ -287,6 +305,9 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   if (!obj || typeof obj !== "object") return null
   const m = obj as Record<string, unknown>
   const t = m.t
+  if (t === "ping") {
+    return typeof m.ts === "number" && Number.isFinite(m.ts) ? { t: "ping", ts: m.ts } : { t: "ping" }
+  }
   if (t === "focus.claim") {
     if (typeof m.cellId !== "string") return null
     return {

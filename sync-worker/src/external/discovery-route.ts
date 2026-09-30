@@ -177,23 +177,12 @@ function apiMap(): Record<string, unknown> {
     },
     exporting: {
       note:
-        'The other end of the import loop (AQU-858): pull a finished file back out in the format its consumer actually reads — USFM for Paratext, say — without a human clicking Export in the app. The export reconstructs the ORIGINAL artifact preserved at import time with the current translations substituted in; untranslated segments keep their source text so the file stays valid. With ?side=source it returns the curated SOURCE instead (AQU-1454). The MCP tool export_file wraps the same route.',
+        'The other end of the import loop (AQU-858): pull a finished file back out in the format its consumer actually reads — USFM for Paratext, say — without a human clicking Export in the app. The export reconstructs the ORIGINAL artifact preserved at import time with the current translations substituted in; untranslated segments keep their source text so the file stays valid. The MCP tool export_file wraps the same route.',
       workflow: [
         `1. GET ${EXTERNAL_ROOT}/projects/:projectId/files — find the fileId.`,
-        `2. GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/export (add ?side=source for the curated source, or ?lane=<tag> for one target-language lane) → the file bytes, with Content-Disposition naming it.`,
+        `2. GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/export (add ?lane=<tag> for one target-language lane) → the file bytes, with Content-Disposition naming it.`,
         '3. Check the fidelity headers before delivering (below), then hand the bytes to whatever consumes them.',
       ],
-      // AQU-1454: the caller picks the side and never receives the source
-      // bundled with the target.
-      side: {
-        param: 'side',
-        values: ['source', 'target'],
-        default: 'target',
-        note:
-          'side=target (the default, and what an omitted side means) is the translation round-trip for ?lane. side=source returns the CURATED SOURCE: source edits applied, hidden and deleted cells removed, added cells\' source text in place, and no translation anywhere — byte-identical to the in-app "Export source (.SFM)" download for that file, which is what you want when seeding a second project from this one. USFM only today: side=source on any other format is a validation_failed naming the format rather than a raw or empty file. ?lane has no meaning with side=source and is ignored. Any other value is a validation_failed naming the two accepted ones. One request returns one side; no response ever carries both. The role floor below applies identically to either side.',
-        responseHeader:
-          'X-Export-Side: "source" on a source-side body, absent on a target-side one — read it to confirm which side you actually received.',
-      },
       fidelityHeaders: {
         'X-Export-Mode':
           'Absent = round-trip (translations were substituted). "raw-original" / "raw-sidecar" = this format has no server-side target serializer yet, so the response is the preserved ORIGINAL bytes with NO translations in them — do not deliver it as a translation.',

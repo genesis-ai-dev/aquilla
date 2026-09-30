@@ -953,15 +953,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
       'preserved at import time with the current translations substituted in; ' +
       'untranslated segments keep their source text so the output stays valid. Args: ' +
-      'projectId, fileId (from read_content), side (optional — "source" or "target", ' +
-      'default "target"), lane (optional — which target-language lane to export; omit ' +
-      'for the default lane, ignored when side="source"). side="source" returns the ' +
-      'CURATED SOURCE instead: the original artifact with source edits applied, hidden ' +
-      'and deleted cells gone, and NO translation anywhere — the same bytes a human ' +
-      'gets from "Export source (.SFM)" in the app, and what you want when seeding a ' +
-      'second project from this one. One call returns one side; a response never ' +
-      'carries both. Returns { fileName, contentType, side, exportMode, ' +
-      'lossyVerseCount, bytes, content } where `content` is the file text. ' +
+      'projectId, fileId (from read_content), lane (optional — which target-language ' +
+      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
       'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
       'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
       'server-side target serializer yet and you are getting the preserved ORIGINAL ' +
@@ -979,20 +973,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         fileId: { type: 'string', description: 'File to export (from read_content).' },
-        side: {
-          type: 'string',
-          enum: ['source', 'target'],
-          description:
-            'Which side of the file to export. "target" (the default) is the ' +
-            'translation round-trip for `lane`. "source" is the curated source — ' +
-            'source edits applied, hidden cells removed, no translation — and is USFM-' +
-            'only today. One call returns one side, never both.',
-        },
         lane: {
           type: 'string',
           description:
-            'Target-language lane to export (e.g. "es"). Omit for the default lane. ' +
-            'Has no meaning with side="source" and is ignored there.',
+            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
         },
       },
       required: ['projectId', 'fileId'],

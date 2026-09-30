@@ -55,7 +55,7 @@ const CORS_HEADERS: Record<string, string> = {
   // AQU-276: expose custom response headers so the browser-side fetch() can
   // read them via res.headers.get(). Without Expose-Headers, only the CORS
   // safelisted headers (Content-Type, etc.) are readable from JS.
-  "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count, X-Export-Side",
+  "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }

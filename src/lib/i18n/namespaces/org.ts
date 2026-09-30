@@ -802,6 +802,8 @@ export const org = defineNamespace({
     "org.overviewLaneTable.openAction": "Open",
     "org.overviewLaneTable.staffAction": "Staff…",
     "org.overviewLaneTable.addLanguageAction": "Add language",
+    "org.overviewLaneTable.archivedGroup": "Archived ({count})",
+    "org.overviewLaneTable.archivedBadge": "Archived",
 
     // -- ProjectLaneSubRows: expanded per-lane detail for an OrgHome project row --
     "org.projectLaneSubRows.noActivity": "No activity",

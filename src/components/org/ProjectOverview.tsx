@@ -1194,16 +1194,22 @@ export function ProjectOverview() {
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
   const projectLanes: PortfolioLane[] = audio?.lanes ?? []
-  const showLaneTabs = projectLanes.length > 1
+  // AQU-1458: an archived lane is not another active language. The progress
+  // tabs stay hidden for a single active lane, and the Languages section
+  // still renders when an archived lane needs a place to live.
+  const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
+  const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
+  const showLaneTabs = activeProjectLanes.length > 1
+  const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
   const laneTabOptions = [
     { label: t("org.orgHome.statusFilter.all"), value: LANE_TAB_ALL },
-    ...projectLanes.map((l) => ({
+    ...activeProjectLanes.map((l) => ({
       label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
       value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
     })),
   ]
   const activeLane: PortfolioLane | null =
-    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+    selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
   /**
    * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
    * board's own picker. The plan is one language's answer — "All" has no
@@ -1213,7 +1219,7 @@ export function ProjectOverview() {
    * page's single lane selection, so the Progress card above agrees with it.
    */
   const planLaneOptions = useMemo(
-    () => projectLanes.map((l) => ({
+    () => projectLanes.filter((l) => l.archived !== true).map((l) => ({
       tag: l.lane,
       label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
     })),
@@ -1982,15 +1988,16 @@ export function ProjectOverview() {
                 </div>
               )}
 
-              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
-              {/* Rendered only when the project has more than one target
-                  language lane — N=1 projects are byte-identical to before. */}
-              {showLaneTabs && audio && (
+              {/* ── Languages / lane table (AQU-538 §3.3, AQU-1458) ── */}
+              {/* Hidden for a single active lane with nothing archived.
+                  An archived lane keeps the section visible so it can be found. */}
+              {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
                   orgId={portfolioOrgId}
                   jwt={jwt}
-                  lanes={projectLanes}
+                  lanes={activeProjectLanes}
+                  archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={project?.targetLanes ?? []}
                   files={project?.files ?? []}

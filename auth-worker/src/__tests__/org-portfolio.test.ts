@@ -172,6 +172,37 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
   })
 
+  it("AQU-1458: an archived lane row is flagged, and a settings-only archive is too", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Acts', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pb', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "English", targetLanes: ["sw"], archivedLanes: ["sw"] })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at) VALUES
+        ('deflane1', 'pa', 'target', 'Spanish', '', 0, NULL),
+        ('swlane01', 'pa', 'target', 'Swahili', 'sw', 1, '2026-09-01T00:00:00Z'),
+        ('frlane01', 'pa', 'target', 'French', 'fr', 2, NULL),
+        ('deflane2', 'pb', 'target', 'English', '', 0, NULL),
+        ('swlane02', 'pb', 'target', 'Swahili', 'sw', 1, NULL)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; archived?: boolean }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    const byLane = Object.fromEntries(pa.lanes.map((l) => [l.lane, l]))
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "sw", "fr"])
+    expect(byLane[""].archived).toBeUndefined()
+    expect(byLane.sw.archived).toBe(true)
+    expect(byLane.fr.archived).toBeUndefined()
+    const pb = body.projects.find((p) => p.id === "pb")!
+    expect(pb.lanes.find((l) => l.lane === "sw")?.archived).toBe(true)
+    expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
+  })
+
   it("AQU-490: validatedAudioCells counts votes against the threshold, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

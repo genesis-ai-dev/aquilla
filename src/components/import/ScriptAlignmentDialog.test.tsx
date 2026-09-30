@@ -17,7 +17,7 @@ describe("script alignment review", () => {
     },
   ])("rejects $name and keeps script intact", async ({ bytes, shouldCallArrayBuffer }) => {
     const confirm = vi.fn<(input: ScriptAlignmentConfirmation) => Promise<void>>(async () => {})
-    const align = vi.fn(async () => ({ method: "ctc-forced-alignment" as const, segments: [] }))
+    const align = vi.fn(async () => ({ method: "whisper-word-match" as const, segments: [] }))
     const file = new File([bytes], "script.txt", { type: "text/plain" })
     const arrayBufferSpy = vi.fn(async () => bytes.buffer)
 
@@ -127,17 +127,16 @@ describe("script alignment review", () => {
       overwrite: { contentFileId: "content", segmentCount: 9 } })
   })
 
-  it("labels acoustic scores separately from word-match coverage", async () => {
+  it("labels confidence as word-match coverage", async () => {
     render(<ScriptAlignmentDialog mediaName="Film" onCancel={() => {}}
-      onConfirm={async () => {}} align={async () => ({ method: "ctc-forced-alignment",
+      onConfirm={async () => {}} align={async () => ({ method: "whisper-word-match",
         segments: [{ text: "Known words.", start: 1, end: 2,
           confidence: 0.8, matchedWords: 2, totalWords: 2,
           needsReview: true, status: "partial" }],
       })} />)
     fireEvent.change(screen.getByLabelText("Script"), { target: { value: "Known words." } })
     fireEvent.click(screen.getByRole("button", { name: "Align script" }))
-    expect(await screen.findByText("Initial acoustic match: 80%")).toBeVisible()
-    expect(screen.queryByText("Initial word match: 80%")).toBeNull()
+    expect(await screen.findByText("Initial word match: 80%")).toBeVisible()
   })
   it("previews the edited range before applying it", async () => {
     const preview = vi.fn()

@@ -3,8 +3,6 @@ import type { CellData } from "@/hooks/useCells"
 import { alignSourceScript } from "@/lib/audio/align-source-script"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { playClip, type ClipPreviewHandle } from "@/lib/audio/clip-preview"
-import { whisperLanguageFromTag } from "@/lib/audio/language"
-import { runAcousticAlignment } from "@/lib/audio/run-acoustic-alignment"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { createTimelineTextTrackImporter } from "@/lib/import/timeline-text"
 import { ScriptAlignmentDialog, type AlignmentTrackDestination,
@@ -53,12 +51,6 @@ export function AlignTimelineScriptDialog(props: Props) {
         signal.throwIfAborted()
         return bytes
       },
-      forceAlign: (wording, _bytes, cancellation) => runAcousticAlignment({
-        projectId: props.projectId, fileId: props.fileId,
-        clipUrl: props.clipUrl, script: wording,
-        language: whisperLanguageFromTag(props.language) ?? "en",
-        getToken: props.getToken, signal: cancellation,
-      }),
     })
   }
 

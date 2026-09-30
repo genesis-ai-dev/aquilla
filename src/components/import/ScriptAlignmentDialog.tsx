@@ -219,8 +219,7 @@ export function ScriptAlignmentDialog({
                       event.target.value === "" ? undefined : Number(event.target.value) })} />
                 </Field>)}
               </div>
-              <Badge variant="secondary">{t(cue.metadata?.alignmentConfidenceBasis === "acoustic-score"
-                ? "importExport.scriptAlignment.acousticScore" : "importExport.scriptAlignment.coverage", {
+              <Badge variant="secondary">{t("importExport.scriptAlignment.coverage", {
                 percent: Math.round(Number(cue.metadata?.alignmentConfidence ?? 0) * 100),
               })}</Badge>
               {!valid(cue) && <p role="alert">{t("importExport.scriptAlignment.invalid")}</p>}

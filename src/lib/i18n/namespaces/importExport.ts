@@ -64,7 +64,6 @@ export const importExport = defineNamespace({
     "importExport.scriptAlignment.empty": "The alignment returned no segments.",
     "importExport.scriptAlignment.retry": "Edit script",
     "importExport.scriptAlignment.listen": "Listen to segment {number}",
-    "importExport.scriptAlignment.acousticScore": "Initial acoustic match: {percent}%",
     // — Import result panel (post-import report; also copied to the clipboard
     //   as plain text, so a couple of these keys render outside any markup) —
     "importExport.result.reportImportedCount": plural({

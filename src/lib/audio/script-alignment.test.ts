@@ -5,15 +5,15 @@ import { alignChunks } from "./timings"
 import type { CellData } from "@/hooks/useCells"
 
 describe("alignScriptParagraphs", () => {
-  it("keeps acoustic confidence distinct from word-match coverage", () => {
-    const cues = scriptAlignmentCues({ method: "ctc-forced-alignment",
+  it("preserves word-match confidence in published cues", () => {
+    const cues = scriptAlignmentCues({ method: "whisper-word-match",
       segments: [{ text: "Known words.", start: 1, end: 2,
         confidence: 0.8, matchedWords: 2, totalWords: 2,
         needsReview: true, status: "partial" }],
     })
     expect(cues[0].metadata).toMatchObject({
-      alignmentMethod: "ctc-forced-alignment",
-      alignmentConfidenceBasis: "acoustic-score", alignmentConfidence: 0.8,
+      alignmentMethod: "whisper-word-match",
+      alignmentConfidenceBasis: "word-match-coverage", alignmentConfidence: 0.8,
     })
   })
   it("reuses source word timings with trim offsets even when a dub is selected", () => {
@@ -105,7 +105,7 @@ describe("alignScriptParagraphs", () => {
       text: "word", start: i, end: i + 0.5,
     }))
     expect(() => alignScriptParagraphs(script, chunks))
-      .toThrow("acoustic alignment or shorter sections")
+      .toThrow("shorter sections")
   })
   it("rejects invalid or unordered word timings before alignment", () => {
     for (const chunks of [

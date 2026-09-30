@@ -8,9 +8,10 @@ const CORE_SENTINELS = [
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // AQU-1479: captions, media bytes, and staged attachments publish together.
-    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|run-acoustic-alignment|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/alignment\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/(?:timeline-import|script-alignment)|infra\/modal\/alignment|db\/postgres\/migrations\/0117_alignment_jobs)/i,
+    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/timeline-import)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
   },
+  {
     source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
@@ -112,7 +113,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|shared\/(?:timeline-import|script-alignment)|infra\/modal\/alignment|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/0117_alignment_jobs|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
+const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

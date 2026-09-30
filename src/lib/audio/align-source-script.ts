@@ -13,7 +13,6 @@ export interface SourceScriptAlignmentOptions {
   signal?: AbortSignal
   loadAudio(signal?: AbortSignal): Promise<Uint8Array>
   transcribe?(bytes: Uint8Array, options: TranscriptionOptions): Promise<TranscriptionResult>
-  forceAlign(script: string, bytes: Uint8Array, signal?: AbortSignal): Promise<ScriptAlignmentResult>
 }
 
 /** Reuse matching source evidence before requesting another model. */
@@ -40,9 +39,7 @@ export async function alignSourceScript(options: SourceScriptAlignmentOptions): 
     language: whisperLanguageFromTag(options.language),
   })
   options.signal?.throwIfAborted()
-  const fresh = tryWordMatch(transcript.chunks)
-  if (fresh && reusable(fresh)) return fresh
-  const forced = await options.forceAlign(options.script, bytes, options.signal)
-  options.signal?.throwIfAborted()
-  return { ...forced, method: "ctc-forced-alignment" }
+  // Keep uncertain matches editable; never send scripts to another service.
+  return { ...alignScriptParagraphs(options.script, transcript.chunks),
+    method: "whisper-word-match" }
 }

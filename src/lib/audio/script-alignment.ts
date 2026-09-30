@@ -11,7 +11,7 @@ export interface AlignedScriptSegment {
   text: string
   start: number | null
   end: number | null
-  /** Evidence score: word coverage or acoustic score, identified by method. */
+  /** Evidence score: word-match coverage. */
   confidence: number
   matchedWords: number
   totalWords: number
@@ -21,10 +21,10 @@ export interface AlignedScriptSegment {
 
 export interface ScriptAlignmentResult {
   segments: readonly AlignedScriptSegment[]
-  method?: "whisper-word-match" | "ctc-forced-alignment"
+  method?: "whisper-word-match"
 }
 
-/** Expected evidence limits let callers choose acoustic alignment instead. */
+/** Expected evidence limits require shorter sections or manual timing. */
 export class WordAlignmentUnavailableError extends Error {}
 
 /** Paragraphs define segments; preserve the supplied wording. */
@@ -56,7 +56,7 @@ export function alignScriptParagraphs(
   // Bounded dynamic programming retains globally monotonic matches. Missing
   // wording never shifts later paragraphs onto unrelated audio.
   if ((scriptWords.length + 1) * width > 4_000_000) {
-    throw new WordAlignmentUnavailableError("This script needs acoustic alignment or shorter sections.")
+    throw new WordAlignmentUnavailableError("Align this script in shorter sections.")
   }
   const scores = new Uint32Array((scriptWords.length + 1) * width)
   for (let i = scriptWords.length - 1; i >= 0; i--) {
@@ -118,8 +118,7 @@ export function scriptAlignmentCues(
       alignmentStatus: segment.status,
       alignmentNeedsReview: segment.needsReview,
       alignmentMethod: result.method ?? "whisper-word-match",
-      alignmentConfidenceBasis: result.method === "ctc-forced-alignment"
-        ? "acoustic-score" : "word-match-coverage",
+      alignmentConfidenceBasis: "word-match-coverage",
       alignmentMatchedWords: segment.matchedWords,
       alignmentTotalWords: segment.totalWords,
     },

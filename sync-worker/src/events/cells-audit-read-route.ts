@@ -12,6 +12,14 @@
 //
 // Two parallel queries — one over `cells` for stats, one over
 // `cell_validators` for active validators — then joined in JS.
+//
+// AQU-1506: every row carries its lane (`targetLang`, the legacy tag, plus the
+// opaque `laneId`) — the same marker `cells-read-route` sends. A cell on an
+// N-lane file has one target row PER LANE here, and without the marker the
+// client cannot tell them apart: it kept whichever arrived first, which is
+// Postgres heap order, not the active lane. Validators are still keyed on the
+// row's own chain head, so each row's `activeValidators` was always its own
+// lane's — only the client's choice of row was wrong.
 
 import { verifyTokenForFile } from '../auth'
 
@@ -60,6 +68,8 @@ export async function handleCellsAuditReadRequest(
     SELECT
       cell_id,
       side,
+      target_lang,
+      lane_id,
       content_hash,
       last_edit_at,
       event_id        AS last_edit_event_id,
@@ -85,6 +95,10 @@ export async function handleCellsAuditReadRequest(
   interface CellRow {
     cell_id: string
     side: string
+    /** AQU-538 legacy lane tag. '' = the default lane; always '' on source rows. */
+    target_lang: string | null
+    /** AQU-1240 opaque `lanes.id` — the row's real lane identity. */
+    lane_id: string | null
     content_hash: string | null
     last_edit_at: number | null
     last_edit_event_id: string
@@ -110,6 +124,13 @@ export async function handleCellsAuditReadRequest(
   ])
 
   // Bucket validators by cell_id → event_id → usernames[].
+  //
+  // AQU-1506: no lane column is needed in this key even though
+  // `cell_validators` has one. `event_id` here is the target row's chain head,
+  // and a head is unique to one (cell, lane) — a validate on lane `fr` names
+  // `fr`'s head — so keying on it already partitions validators by lane.
+  // Matching on `target_lang` as well would only add a way to silently drop
+  // validators if the legacy tag ever drifts from `lane_id`.
   const byCell = new Map<string, Map<string, string[]>>()
   for (const v of validatorsRes.results) {
     let perEdit = byCell.get(v.cell_id)
@@ -152,6 +173,8 @@ export async function handleCellsAuditReadRequest(
     return {
       cellId: r.cell_id,
       side: r.side,
+      targetLang: r.target_lang ?? '',
+      laneId: r.lane_id ?? null,
       contentHash: r.content_hash,
       lastEditAt: r.last_edit_at,
       lastEditEventId: r.last_edit_event_id,

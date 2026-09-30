@@ -643,6 +643,50 @@ export const editor = defineNamespace({
       other: "Removed validations from {count} cells",
     }),
 
+    // -- AQU-1503: batch text validation, shared by the selection toolbar's
+    // "Validate text" button and the "Batch validate text…" workspace action.
+    // Every one of these exists because that surface used to say NOTHING: it
+    // bailed on four branches with a bare `return`, so a confirmed dialog that
+    // found nothing eligible was an entirely dead click. --
+    "editor.batchValidate.skippedSummary": plural({
+      one: "Skipped {count} cell — {reasons}",
+      other: "Skipped {count} cells — {reasons}",
+    }),
+    "editor.batchValidate.skip.needsTranslation": plural({
+      one: "{count} still needs a translation",
+      other: "{count} still need a translation",
+    }),
+    "editor.batchValidate.skip.alreadyMine": plural({
+      one: "{count} you had already validated",
+      other: "{count} you had already validated",
+    }),
+    "editor.batchValidate.skip.aiDraft": plural({
+      one: "{count} is an untouched AI draft, reviewed one at a time",
+      other: "{count} are untouched AI drafts, reviewed one at a time",
+    }),
+    "editor.batchValidate.skip.outOfScope": plural({
+      one: "{count} is outside your assigned files or lanes",
+      other: "{count} are outside your assigned files or lanes",
+    }),
+    "editor.batchValidate.skip.notCommitted": plural({
+      one: "{count} has no saved translation yet",
+      other: "{count} have no saved translation yet",
+    }),
+    "editor.batchValidate.skip.cappedOut": plural({
+      one: "{count} left for the next run",
+      other: "{count} left for the next run",
+    }),
+    "editor.batchValidate.nothingEligibleTitle": "Nothing was validated",
+    "editor.batchValidate.nothingEligibleNoReason":
+      "None of these cells is eligible for bulk validation.",
+    "editor.batchValidate.noCandidates": "There are no cells here to validate.",
+    "editor.batchValidate.noPermission":
+      "Your role cannot validate cells in this project.",
+    "editor.batchValidate.noTarget": "Open a file before validating.",
+    "editor.batchValidate.failedTitle": "Validation could not be saved",
+    "editor.batchValidate.failedBody":
+      "Something went wrong part-way through. Reload and check which cells were signed off before trying again.",
+
     // AQU-646 stage 6I: the attach-video DIALOG is gone (Sam, 2026-08-27) — it
     // claimed to upload a video and did nothing. Only this one string outlived
     // it, because four import panels borrow it for their own file pickers. The
@@ -4338,6 +4382,117 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      // AQU-1503 — the batch-validate reporting set. These strings are the
+      // difference between a click that did nothing and a click that SAYS it
+      // did nothing and why, so they are reported even on the branches where
+      // no cell was signed off.
+      "editor.batchValidate.skippedSummary": {
+        description:
+          "Second line of the toast after a bulk text validation, accounting for "
+          + "the cells that were NOT signed off. {reasons} is a list of the "
+          + "editor.batchValidate.skip.* clauses below, already joined for this "
+          + "locale, so this string only supplies the frame around them. The dash "
+          + "may become whatever punctuation introduces a list in your language.",
+        placeholders: {
+          count:
+            "How many cells were skipped in total. Selects the plural form. Always the sum of the clauses in {reasons}.",
+          reasons:
+            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 are untouched AI drafts…\". Do not translate its contents here; translate the skip.* keys.",
+        },
+      },
+      "editor.batchValidate.skip.needsTranslation": {
+        description:
+          "One clause inside {reasons}: cells with no target text at all. A "
+          + "fragment, not a sentence — it is joined with the others and has no "
+          + "final punctuation.",
+        placeholders: {
+          count: "How many cells had no translation. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.alreadyMine": {
+        description:
+          "One clause inside {reasons}: cells this same reader had already signed "
+          + "off, so the batch left them alone. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells this reader had already validated. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.aiDraft": {
+        description:
+          "One clause inside {reasons}: untouched AI drafts. Bulk validation "
+          + "deliberately excludes them — an unread machine draft must be "
+          + "approved individually — so this clause explains a RULE, not a "
+          + "failure. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells were untouched AI drafts. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.outOfScope": {
+        description:
+          "One clause inside {reasons}: cells outside the files or target "
+          + "languages this member is assigned to. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells were out of this member's assignment. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.notCommitted": {
+        description:
+          "One clause inside {reasons}: cells whose translation has not been "
+          + "saved yet, so there is no committed version to sign off. A "
+          + "fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells had no saved translation. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.cappedOut": {
+        description:
+          "One clause inside {reasons}: eligible cells the project's per-run "
+          + "batch limit held back. These are NOT rejected — running the action "
+          + "again picks them up — so avoid wording that sounds like a refusal. "
+          + "A fragment, not a sentence.",
+        placeholders: {
+          count: "How many eligible cells the batch limit deferred. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.nothingEligibleTitle": {
+        description:
+          "Toast title when a bulk validation ran and signed off no cells at "
+          + "all. Neutral, not an error: the usual cause is that every "
+          + "candidate was an AI draft or already validated. The reasons "
+          + "follow on the next line.",
+      },
+      "editor.batchValidate.nothingEligibleNoReason": {
+        description:
+          "Second line under that title in the rare case where no specific "
+          + "reason applies to any cell.",
+      },
+      "editor.batchValidate.noCandidates": {
+        description:
+          "Toast when the bulk validation had nothing to look at — an empty "
+          + "selection, or a file whose cells have not loaded.",
+      },
+      "editor.batchValidate.noPermission": {
+        description:
+          "Toast when the reader's project role is below the validation floor. "
+          + "The server is authoritative; this is the client saying so first "
+          + "rather than sending a request it knows will be refused.",
+      },
+      "editor.batchValidate.noTarget": {
+        description:
+          "Toast when the bulk validation was invoked with no project or file "
+          + "open to act on.",
+      },
+      "editor.batchValidate.failedTitle": {
+        description:
+          "Toast title when the batch threw part-way through. An error, unlike "
+          + "nothingEligibleTitle.",
+      },
+      "editor.batchValidate.failedBody": {
+        description:
+          "Second line under that error. It says the batch may be PARTIAL "
+          + "because it can be — some cells are already queued when a later one "
+          + "throws — and a reader who retries blindly should know that first.",
       },
       // The one survivor of the removed attach-video dialog (stage 6I); the
       // file pickers in the import panels are what use it now.

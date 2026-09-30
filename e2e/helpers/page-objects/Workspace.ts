@@ -955,14 +955,6 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Download original$/i }).click()
   }
 
-  /** AQU-1449: the CURATED SOURCE download (source edits applied, hidden cells
-   *  dropped, no translation) from the file options overflow. Not the
-   *  translation round-trip — that is the export dialog's primary button. */
-  async clickExportSource(): Promise<void> {
-    await this.openFileOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /Export source/i }).click()
-  }
-
   /** First editor row whose source column contains `sourceSubstring`. */
   async cellIndexWithSource(sourceSubstring: string): Promise<number> {
     const rows = this.page.locator("[data-cell-id]")

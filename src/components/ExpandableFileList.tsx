@@ -18,7 +18,6 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
-import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
@@ -296,11 +295,6 @@ export function ExpandableFileList({
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
-                            onExportSource={
-                              canExportSourceFile(file, canExportByOrgPolicy)
-                                ? () => { void exportFile(file) }
-                                : undefined
-                            }
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)
                                 ? () => { void downloadImportedOriginal({
@@ -348,13 +342,5 @@ export function ExpandableFileList({
       </div>
     </>
   )
-
-  async function exportFile(file: FileReference) {
-    await exportSourceFile({
-      projectId,
-      file,
-      getToken: getTokenForFile,
-    })
-  }
 
 }

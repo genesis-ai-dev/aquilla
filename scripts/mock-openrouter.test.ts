@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scriptMockResponse } from "./mock-openrouter"
+import { mockTranscription, scriptMockResponse } from "./mock-openrouter"
 import { expandSlashCommand } from "../src/lib/agent/slash-commands"
 
 type MockResponse = ReturnType<typeof scriptMockResponse>
@@ -9,6 +9,14 @@ function message(response: MockResponse) {
 }
 
 describe("scripted local agent", () => {
+  it("returns provider-shaped transcription with word timestamps", () => {
+    expect(mockTranscription()).toEqual({
+      text: "Mock transcription", usage: { cost: 0.0001, seconds: 1 }, words: [
+        { word: "Mock", start: 0, end: 0.25 },
+        { word: "transcription", start: 0.25, end: 0.5 },
+      ],
+    })
+  })
   it("returns a declarative JSON recipe for the owned importer contract", () => {
     const reply = message(scriptMockResponse([
       {

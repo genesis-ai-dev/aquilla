@@ -33,6 +33,14 @@ import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import {
+  batchValidateTelemetry,
+  batchValidateToast,
+  summarizeBatchValidate,
+} from "@/lib/review/batch-validate-summary"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+import posthog from "@/lib/posthog"
 
 interface Props {
   project: ProjectRecord
@@ -98,6 +106,9 @@ type Running =
 
 export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const t = useT()
+  // AQU-1503: skip clauses join the way a list is written in the reader's
+  // language rather than with a hardcoded separator.
+  const { list: formatLocaleList } = useFormat()
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
@@ -350,37 +361,44 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
 
   const onValidate = useCallback(() => {
     if (isBusy) return
-    if (validatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      let validated = 0
-      let alreadyValidated = 0
-      for (const cell of selectedCells) {
-        if (!isBulkValidationEligible(cell)) continue
-        if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
-        if (!isBulkValidatableByMe(cell, username, myScopes, activeLane)) continue
-        if (!cell.targetEventId || !project.id) continue
+      // AQU-1503: the eligibility split, the toast wording and the telemetry
+      // now come from the same summary the "Batch validate text…" workspace
+      // action uses, so the two surfaces can no longer disagree about what a
+      // batch did — and neither can end in silence. The old loop reported only
+      // one class of skip ("already validated"); an AI draft, an out-of-scope
+      // cell or an unsaved edit fell out of the count with nothing said.
+      const summary = summarizeBatchValidate(selectedCells, {
+        username,
+        myScopes,
+        activeLane,
+        hasTarget: Boolean(project.id),
+      })
+      for (const cell of summary.validatable) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
-          editEventId: cell.targetEventId,
+          editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
-        validated++
       }
-      const msg = alreadyValidated > 0
-        ? t("editor.selection.validatedToastSkipped", { count: validated, already: alreadyValidated })
-        : t("editor.selection.validatedToast", { count: validated })
-      toast.add({ type: "success", title: msg })
+      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
+      const message = batchValidateToast(summary, t, formatLocaleList)
+      toast.add({
+        type: message.type,
+        title: message.title,
+        ...(message.description ? { description: message.description } : {}),
+      })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
-      if (validated > 0) onValidationCommitted?.()
+      if (summary.validatable.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted, t])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return

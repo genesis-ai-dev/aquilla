@@ -14,13 +14,6 @@
 // text need the branch — binary sidecar formats and unserialized formats
 // already return their stored bytes as-is.
 //
-// `?side=source` (AQU-1449) overlays the CURATED SOURCE instead of a target
-// lane: edited verses carry their corrected source text, hidden and deleted
-// verses leave the file, added cells contribute their source text, and no verse
-// carries a translation. USFM only for now; `lane` and `validated` have no
-// meaning on that side and are ignored. Source and target are never combined —
-// one request, one side.
-//
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
 // Org owners can RAISE the floor (e.g., OWNER only) or LOWER it (e.g.,
@@ -38,7 +31,7 @@ import {
   serializeUsfmLossless,
   countLossyVerses,
 } from "../lib/usfm-lossless"
-import { buildUsfmExportPlan, buildUsfmSourceExportPlan } from "./usfm-export-plan"
+import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { buildPlainTextExport } from "./plaintext-export"
 
 export interface ExportRouteEnv {
@@ -76,9 +69,6 @@ export async function handleExportSourceRequest(
   // validation threshold. Unvalidated drafts keep the client's original words
   // rather than shipping as approved text. Absent/0 preserves today's contract.
   const validatedOnly = url.searchParams.get("validated") === "1"
-  // AQU-1449: ?side=source — export the curated SOURCE rather than a target
-  // lane. Anything else (absent, `target`) is today's target-side contract.
-  const sourceSide = url.searchParams.get("side") === "source"
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -121,20 +111,6 @@ export async function handleExportSourceRequest(
     .bind(fileId, projectId)
     .first<{ name: string }>()
   const fileName = fileMeta?.name || `${fileId}.sfm`
-
-  // AQU-1449: the source overlay is USFM-only today (AQU-1452 carries DOCX and
-  // PPTX). Refuse rather than fall through, so a caller that asks for the
-  // source side never receives the target side under that name. `mode=raw` is
-  // exempt: the byte-exact upload belongs to neither side.
-  if (sourceSide && !rawMode && blob.format !== "usfm") {
-    return withCors(
-      new Response(
-        `source-side export is not yet supported for format "${blob.format}"`,
-        { status: 501 },
-      ),
-      request,
-    )
-  }
 
   if (blob.format === "docx" || blob.format === "pptx" || blob.format === "idml") {
     // AQU-233: For binary zip-of-XML formats (DOCX/PPTX/IDML) the server
@@ -318,9 +294,7 @@ export async function handleExportSourceRequest(
   // into one shared builder because export-bundle-route.ts carried a
   // character-for-character copy of the translations query with nothing
   // enforcing the duplication.
-  const { overrides, edits } = sourceSide
-    ? await buildUsfmSourceExportPlan(db, projectId, fileId)
-    : await buildUsfmExportPlan(db, projectId, fileId, lane, { validatedOnly })
+  const { overrides, edits } = await buildUsfmExportPlan(db, projectId, fileId, lane, { validatedOnly })
 
   // Safe re-imports intentionally move the immutable original to R2 and
   // atomically repoint file_source_blobs. Resolve either storage generation so
@@ -355,15 +329,8 @@ export async function handleExportSourceRequest(
         // AQU-276: number of translated verses whose original span contained
         // intra-verse markers (footnotes, poetry, character markers) that the
         // plain-text substitution dropped. 0 = clean round-trip. The client
-        // reads this to surface a per-export warning in ExportDialog. On the
-        // source side (AQU-1449) it counts the same loss over the EDITED verses,
-        // which are the only ones overlaid — an untouched verse keeps its span
-        // verbatim and can never be lossy.
+        // reads this to surface a per-export warning in ExportDialog.
         "X-Usfm-Lossy-Verse-Count": String(lossyVerseCount),
-        // Which side this body is. Absent on the target response for
-        // compatibility with clients that read X-Export-Mode only to detect the
-        // raw fallbacks.
-        ...(sourceSide ? { "X-Export-Side": "source" } : {}),
       },
     }),
     request,

@@ -33,6 +33,7 @@ import { extractDocxStrings } from '../../../src/lib/parsers/docx'
 import { usfmContentOnly } from '../../../src/lib/parsers/usfm-content-only'
 import type { ParsedTextFileResult, TranslatableString } from '../../../src/lib/parsers/core-types'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import type { UsfmNoteRecord } from '../lib/usfm-notes'
 
 /** Formats parsed from BYTES rather than decoded text — zip containers whose
  *  parser reads members itself. Routed around the text-parse core below. */
@@ -97,24 +98,27 @@ export interface ParseWarning {
 }
 
 /** Footnote/endnote/crossref lifted out of a content-only USFM cell and kept
- *  in `metadata.usfmNotes` (AQU-1283). */
-export interface UsfmNoteRecord {
-  kind: 'footnote' | 'endnote' | 'xref'
-  caller: string
-  ref: string
-  text: string
-}
+ *  in `metadata.usfmNotes` (AQU-1283). Defined in ../lib/usfm-notes.ts, which
+ *  also owns the export-side reconstruction (AQU-1295); re-exported here
+ *  because this module is where the records are written. */
+export type { UsfmNoteRecord } from '../lib/usfm-notes'
 
 /** Project a parsed string's text (and metadata) to content-only form. */
 function contentOnlyText(
   s: TranslatableString,
 ): { original: string; translated: string; metadata: Record<string, unknown> | undefined } {
   const source = usfmContentOnly(s.original)
+  // AQU-1295: `raw` is kept so export can put the note back byte-for-byte.
+  // The parsed fields alone rebuild a note faithfully in content but not
+  // necessarily character-for-character (a file's own `\fq`/`\fk` sub-markers
+  // are flattened into `text`), and this is the only moment the original span
+  // is in hand.
   const usfmNotes: UsfmNoteRecord[] = source.notes.map((n) => ({
     kind: n.noteKind,
     caller: n.caller,
     ref: n.ref,
     text: n.text,
+    raw: n.raw,
   }))
   return {
     original: source.text,

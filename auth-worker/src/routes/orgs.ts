@@ -7,7 +7,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform-admin"
-import { ROLE, type Env } from "../types"
+import { ROLE, type AuthUser, type Env } from "../types"
 import {
   addGroupMember,
   attachGroupProject,
@@ -52,6 +52,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 
@@ -786,6 +787,7 @@ async function grantOrgMemberOne(
   orgId: number,
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<OrgGrantOutcome> {
   const { username, role } = entry
   const target = await lookupUserByUsername(env, username)
@@ -796,6 +798,7 @@ async function grantOrgMemberOne(
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "org", orgId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -806,6 +809,13 @@ async function grantOrgMemberOne(
   )
     .bind(orgId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "org.member.add" : "org.member.role",
+    where: { scope: "org", orgId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -836,7 +846,7 @@ orgs.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry)
+        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry, user)
         results.push(
           outcome.ok
             ? { username: entry.username, ok: true }
@@ -846,7 +856,7 @@ orgs.post(
       return c.json({ results })
     }
 
-    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body)
+    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, ORG_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1101,12 +1111,20 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
+  const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
   ])
+  await auditMembershipChange(c.env, user, {
+    action: "org.member.remove",
+    where: { scope: "org", orgId },
+    target: { id: targetUserId },
+    roleBefore,
+    roleAfter: null,
+  })
 
   return c.json({ removed: true })
 })

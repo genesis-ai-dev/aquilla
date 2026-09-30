@@ -77,6 +77,7 @@ import {
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
   applyInviteLaneScopes,
@@ -1301,6 +1302,7 @@ async function grantProjectMemberOne(
   callerRole: { level: number; name: string },
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<ProjectGrantOutcome> {
   const { username, role } = entry
   // Caller cannot grant a role higher than their own level.
@@ -1342,6 +1344,7 @@ async function grantProjectMemberOne(
     }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "project", projectId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -1352,6 +1355,13 @@ async function grantProjectMemberOne(
   )
     .bind(projectId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "project.member.grant" : "project.member.role",
+    where: { scope: "project", projectId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -1404,7 +1414,7 @@ projects.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry)
+        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry, user)
         if (outcome.ok) {
           notifyRoleChangeBestEffort(c, projectId, {
             userId: outcome.userId,
@@ -1422,7 +1432,7 @@ projects.post(
     }
 
     // Single-user mode — response + error statuses preserved exactly.
-    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body)
+    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, PROJECT_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1494,6 +1504,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  await auditMembershipChange(c.env, user, {
+    action: "project.member.remove",
+    where: { scope: "project", projectId },
+    target: { id: targetUserId, username: targetUser?.username },
+    roleBefore: Number(existing.role_level),
+    roleAfter: null,
+  })
   // The per-request memo may hold the pre-delete role (an owner removing
   // their own direct row resolved it above as the caller).
   forgetProjectRole(c.env, projectId, targetUserId)

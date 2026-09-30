@@ -51,6 +51,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
@@ -840,6 +841,8 @@ export interface TickDeps {
   /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
    *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
   concurrency?: number
+  /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
+  triage?: TriageCall
 }
 
 export interface TickResult {
@@ -1039,6 +1042,19 @@ async function processSpan(
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // Finding codes + a "needs a human?" call per flagged cell, stored on
+        // the draft for the PR view. Never blocks staging (triage.ts).
+        const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
+        const verdictsByCell = await triageVerdicts(
+          fresh.map((c) => ({
+            cellId: c.cellId,
+            ref: pairById.get(c.cellId)?.canonicalRef ?? null,
+            source: pairById.get(c.cellId)?.source ?? "",
+            text: c.text,
+            findings: c.findings ?? [],
+          })),
+          deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
+        )
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
@@ -1047,6 +1063,7 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
+            verdicts: verdictsByCell.get(c.cellId) ?? {},
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,

@@ -23,6 +23,7 @@ import {
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
+import { cellFindings } from "./findings"
 import { verifySpan } from "./verify"
 import type { LintRule } from "../agent/lint"
 import {
@@ -251,7 +252,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     deps.examples.filter((e) => e.validated).length / EXAMPLES_TARGET,
     1,
   )
-  const accepted: { cellId: string; text: string }[] = []
+  const accepted: { cellId: string; text: string; findings: string[] }[] = []
   const ambiguityCount = briefDraft.ambiguityRegister.length
   let attemptPairs = work
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
@@ -359,7 +360,18 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     const tally = tallyVotes(verified.votes, drafted.draft)
     const textById = new Map(drafted.draft.cells.map((c) => [c.cellId, c.text]))
     for (const cellId of tally.accepted) {
-      accepted.push({ cellId, text: textById.get(cellId) ?? "" })
+      accepted.push({
+        cellId,
+        text: textById.get(cellId) ?? "",
+        // What the reviewer should know about a cell that passed: kept as
+        // codes so the PR view can show them (they used to be discarded).
+        findings: cellFindings(cellId, {
+          votes: verified.votes,
+          flags,
+          ...(supportSignal ? { support: supportSignal } : {}),
+          redrafted: attempt === 2,
+        }),
+      })
     }
 
     if (tally.rejected.length === 0 || attempt === 2) {

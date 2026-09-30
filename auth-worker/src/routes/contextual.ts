@@ -112,6 +112,7 @@ import {
   getCachedContextualReadiness,
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
+import { decide } from "../lib/jev/decide"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -426,6 +427,7 @@ async function selfTickLoop(
             llm: guarded.llm,
             notify,
             ...(concurrency ? { concurrency } : {}),
+            triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
           })
         } finally {
           await guarded.stop()

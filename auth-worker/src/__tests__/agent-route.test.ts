@@ -382,6 +382,69 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
   })
 
+  // AQU-1455: with no file open the live model either asked "which file?"
+  // without calling a tool (the prompt told it to), or called read with
+  // fileId ":file" / "" and got an error that named no files. Either way the
+  // one-document auto-pick and the AQU-1468 buttons never ran. These replay
+  // the argument shapes the model actually sent, through the route.
+  describe("no file open", () => {
+    const SECOND_FILE = "66666666-6666-4666-8666-666666666666"
+    const readCall = (args: Record<string, unknown>) => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id: "tc1", type: "function", function: { name: "read", arguments: JSON.stringify(args) } }],
+    })
+
+    async function seedFiles(count: 1 | 2) {
+      await seedProjectWorld()
+      const rows: [string, string, string][] = [[FILE, "Genesis", "GEN"]]
+      if (count === 2) rows.push([SECOND_FILE, "Mark", "MRK"])
+      for (const [id, name, book] of rows) {
+        await env.AQUILLA_PG.prepare(
+          `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, ?, ?, ?)`,
+        )
+          .bind(id, PROJECT, name, book, crypto.randomUUID())
+          .run()
+      }
+    }
+
+    async function runUnfocused(args: Record<string, unknown>) {
+      const script = [readCall(args), { role: "assistant", content: "Which file?" }]
+      const systemPrompts: string[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
+        systemPrompts.push(body.messages[0].content)
+        return modelTurn(script.shift()!)
+      })
+      const res = await postRun(await jwtFor("alice"), {
+        projectId: PROJECT,
+        messages: [{ role: "user", content: "translate the first 5 cells" }],
+      })
+      const frames = parseFrames(await res.text())
+      return { result: frames.find((f) => f.type === "code_result")!, systemPrompt: systemPrompts[0] }
+    }
+
+    it("tells the model to read first, and an unbound :file returns the files to choose from", async () => {
+      await seedFiles(2)
+      const { result, systemPrompt } = await runUnfocused({ fileId: ":file", filter: "untranslated" })
+
+      expect(systemPrompt).toContain("your FIRST step is read with no fileId and no ref")
+      expect(result.ok).toBe(false)
+      expect(result.summary).toContain("ASK THE USER which file to work in and stop")
+      const { candidates } = result.data as { candidates: { id: string; name: string }[] }
+      expect(candidates.map((c) => c.name).sort()).toEqual(["Genesis", "Mark"])
+    })
+
+    it("a blank fileId on a one-document project reads that document", async () => {
+      await seedFiles(1)
+      const { result } = await runUnfocused({ fileId: "", filter: "untranslated" })
+
+      expect(result.ok).toBe(true)
+      const { cells } = result.data as { cells: { cellId: string; fileId: string }[] }
+      expect(cells[0]).toMatchObject({ cellId: CELL, fileId: FILE })
+    })
+  })
+
   it("streams SSE upstreams as per-token assistant_delta frames", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")

@@ -80,6 +80,14 @@ The plan's rules:
   anything other than `PASS` or `none`. The oldest waiting PR holding cuts it
   alone, immediately, with `hold: true`. A holding PR behind an already-ready
   run ships that run immediately instead of waiting for it.
+- **Released means picked, and no cut goes below production.** A release
+  branch is cherry-picks of `dev` merges, so the calver tag is not on `dev`.
+  The plan treats a `dev` PR as released once the tagged tip carries its
+  pick (the `(cherry picked from commit …)` line in the body, or the same
+  `Merge pull request #N` subject), and reports `floor`, the newest `dev`
+  commit production runs. A slice never cuts below `floor`: PRs older than
+  a hotfix that went out ahead of them ship together, at `floor`, and hold
+  together if any one of them holds.
 - **Sync and auth are noted, not held.** A PR touching `sync-worker/src/`,
   `src/lib/sync/`, `db/shim/`, or `auth-worker/src/` ships in the ordinary
   slice; its area is listed in `areas` so a person can see it.

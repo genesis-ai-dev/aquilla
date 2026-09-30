@@ -63,6 +63,14 @@ import {
   type ExportContentMode,
 } from "@/lib/export/validation-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
+import {
+  DEFAULT_EXPORT_SIDE,
+  applyExportSide,
+  canExportSide,
+  isBilingualFormat,
+  sideAvailability,
+  type ExportSide,
+} from "@/lib/export/export-side"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
 import { exportTsv } from "@/lib/export/exporters/tsv"
@@ -514,6 +522,11 @@ export function ExportDialog({
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
+  // AQU-1451: WHICH SIDE this export writes. Target is today's output; Source
+  // writes each visible cell's current source text and no translation. One
+  // state for the whole dialog — the native card and the fold render the same
+  // control, because "which side" is one decision about this download, not two.
+  const [side, setSide] = useState<ExportSide>(DEFAULT_EXPORT_SIDE)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // "Export to another format" section — collapsed when the primary download
   // covers the common case, open when there is no native format to offer.
@@ -864,6 +877,17 @@ export function ExportDialog({
   const isProjectOnlyFormat = format === "sdbh-xml" || format === "project-report"
   const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
 
+  /** AQU-1451: what the Side control may offer for the fold's current format,
+   *  and the side that format would actually export under today's selection.
+   *  `canExportSide` is the single gate — a format whose Source path has not
+   *  landed yet (usfm/docx/pptx: AQU-1449 / AQU-1452) reports "pending" and
+   *  falls back to Target rather than quietly producing a target file under a
+   *  Source label. */
+  const effectiveFoldSide: ExportSide = canExportSide(format, side) ? side : "target"
+  /** The same clamp for the file's own-format card at the top of the dialog. */
+  const effectiveNativeSide: ExportSide =
+    nativeFormatId && canExportSide(nativeFormatId, side) ? side : "target"
+
   /**
    * AQU-465: the formats a chapter can be sliced out of.
    *
@@ -1057,6 +1081,17 @@ export function ExportDialog({
   // label is not in the current file. WITHOUT THE LAST CLAUSE a "GEN 3" left
   // over from the previous file would filter every cell away and export an
   // empty document — the same trap the format-reset effect above guards.
+  // AQU-1451: the side resets with the dialog and with the file, exactly as the
+  // format and the chapter do — Target is the default every export opens on,
+  // and a Source choice left over from a VTT file must not silently ride into
+  // the next file's download.
+  useEffect(() => {
+    if (!open) setSide(DEFAULT_EXPORT_SIDE)
+  }, [open])
+  useEffect(() => {
+    setSide(DEFAULT_EXPORT_SIDE)
+  }, [activeFileId])
+
   useEffect(() => {
     if (!open) setChapterFilter("")
   }, [open])
@@ -1088,7 +1123,7 @@ export function ExportDialog({
    * - Appends _<langTag> suffix when appendLangTag is set and a language is available.
    * The caller appends the format-specific extension (.txt, .csv, etc.).
    */
-  function buildExportStem(useProjectScope: boolean): string {
+  function buildExportStem(useProjectScope: boolean, forSide: ExportSide = "target"): string {
     const base = useProjectScope
       ? (projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project")
       : (customBaseName.trim() || "export")
@@ -1100,12 +1135,34 @@ export function ExportDialog({
       stem = `${stem}_${stamp}`
     }
     if (appendLangTag) {
-      const lang = targetLanguage && targetLanguage !== "und" ? targetLanguage : sourceLanguage
+      // AQU-1451: the suffix names the language that is actually IN the file, so
+      // a Source export is not handed back tagged with the target language.
+      const preferred = forSide === "source" ? sourceLanguage : targetLanguage
+      const fallback = forSide === "source" ? targetLanguage : sourceLanguage
+      const lang = preferred && preferred !== "und" ? preferred : fallback
       if (lang && lang !== "und") {
         stem = `${stem}_${lang}`
       }
     }
     return stem
+  }
+
+  /**
+   * AQU-1451: the cells a file-building exporter should see for `forSide`.
+   *
+   * Target is unchanged — `scopeCellsForExport` (AQU-1148/AQU-1423) applies the
+   * content mode and drops hidden cells, exactly as before.
+   *
+   * Source drops hidden cells and NOTHING ELSE before swapping the side. The
+   * content mode deliberately does not apply: "validated only" is a choice
+   * about which TRANSLATIONS may leave the project, and a curated source that
+   * thinned out as reviewers worked — or that changed when somebody switched
+   * lanes — would not be the same file twice. Hiding still applies, because
+   * that is a property of the cell rather than a choice about this download.
+   */
+  function exportCellsForSide<T extends CellData>(cellsIn: T[], forSide: ExportSide): T[] {
+    if (forSide === "source") return applyExportSide(dropHiddenCells(cellsIn), "source")
+    return scopeCellsForExport(cellsIn, contentMode)
   }
 
   async function handleExport(
@@ -1133,6 +1190,11 @@ export function ExportDialog({
         : (fileOnlyFormats as readonly string[]).includes(fmt)
           ? "file"
           : scope
+    // AQU-1451: the side this run actually writes. A format whose Source path
+    // has not landed yet (usfm/docx/pptx) exports Target — the control disables
+    // Source there, and this makes the code agree with the UI rather than
+    // trusting it.
+    const runSide: ExportSide = canExportSide(fmt, side) ? side : "target"
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
@@ -1608,12 +1670,14 @@ export function ExportDialog({
         const zipBlob = await buildProjectZip({
           // AQU-1148: each file's cells are narrowed by the same rule the
           // single-file path uses, before any exporter sees them.
-          files: projectFileCells.map((f) => ({ ...f, cells: scopeCellsForExport(f.cells, contentMode) })),
+          // AQU-1451: and by the same side rule — one source file per project
+          // file, with nothing from the target side riding along.
+          files: projectFileCells.map((f) => ({ ...f, cells: exportCellsForSide(f.cells, runSide) })),
           format: fmt as TextExportFormat,
           sourceLanguage,
           targetLanguage,
         })
-        const safeName = buildExportStem(true) // AQU-437: project scope uses project name + suffixes
+        const safeName = buildExportStem(true, runSide) // AQU-437: project scope uses project name + suffixes
         const ext = fmtOption.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
@@ -1644,15 +1708,20 @@ export function ExportDialog({
         // hiding is a property of the cell, validation is the person's choice
         // about this download, and the comment above says why the mode skips
         // them.
+        // AQU-1451: and the SIDE narrows last of all. Under Side = Source the
+        // content mode drops out (see `exportCellsForSide`): "validated only"
+        // is a statement about translations, and letting it filter a source
+        // export would make the curated source depend on somebody else's
+        // review work — and on which lane happens to be active.
         const filteredCells = opts?.audioCues
           ? dropHiddenCells(audioCells ?? [])
-          : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
+          : exportCellsForSide([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], runSide)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
         // into something unrecognisable anyway. This matches the audio zips'
         // suffixes, so all four of this file's audio deliverables sort together.
-        const baseName = buildExportStem(false)
+        const baseName = buildExportStem(false, runSide)
           + chapterFilenameSuffix(chapter)
           + (opts?.audioCues ? "_audio" : "")
         const ext = fmtOption.ext
@@ -1682,7 +1751,12 @@ export function ExportDialog({
               // Meaningless on the cues — they have no translation to sit
               // under a source line — and the section hides the checkbox
               // there, so it must not be honoured behind the UI's back either.
-              includeSource: opts?.audioCues ? false : vttIncludeSource,
+              // AQU-1451: meaningless on a SOURCE export for the same reason
+              // in reverse — every cue's text already IS the source, so
+              // honouring it would print each line twice, which is exactly the
+              // duplicate `bilingualText` exists to avoid. The control hides
+              // under Side = Source; this keeps the exporter agreeing with it.
+              includeSource: opts?.audioCues || runSide === "source" ? false : vttIncludeSource,
               // WITHOUT THIS THE AUDIO VTT COMES OUT COMPLETELY BARE. Voice
               // tags otherwise read `settings.castAssignments`, which a cue
               // only appears in when the AUDIO character sheet was imported —
@@ -1756,6 +1830,56 @@ export function ExportDialog({
   // wondering whether anything happened. We keep the dialog open rather than
   // auto-closing so lossy/fidelity warnings stay visible.
   const isDone = status.kind === "ok" || status.kind === "ok-lossy"
+
+  /**
+   * AQU-1451: the Source / Target choice, rendered wherever an export can be
+   * started — the file's own-format card at the top and the conversion fold
+   * below — bound to the one `side` state, because which side this download
+   * writes is a single decision rather than one per surface.
+   *
+   * Nothing is rendered for a format that cannot offer the choice: the
+   * bilingual formats carry both sides by definition (the format list says so
+   * on the option itself), and IDML, the metadata sheet and the audio
+   * deliverables have no second text side to write. Where the Source path is
+   * still landing (usfm: AQU-1449; docx/pptx: AQU-1452) the option is shown
+   * DISABLED with a note, rather than absent — "not yet" and "not a thing" are
+   * different answers, and hiding the control would tell the user the wrong one.
+   */
+  const renderSideControl = (fmt: ExportFormat) => {
+    const availability = sideAvailability(fmt)
+    if (availability === "bilingual" || availability === "target-only") return null
+    const sourcePending = availability === "pending"
+    // Never show Source selected on a format that would export Target anyway —
+    // the same clamp `runSide` applies in handleExport.
+    const shown: ExportSide = canExportSide(fmt, side) ? side : "target"
+    return (
+      <fieldset className="flex flex-col gap-1.5" data-testid="export-side">
+        <legend className="text-xs font-medium text-muted-foreground mb-1.5">
+          {t("importExport.dialog.sideLegend")}
+        </legend>
+        <SegmentTabs<ExportSide>
+          value={shown}
+          aria-label={t("importExport.dialog.sideGroupAriaLabel")}
+          className="self-start"
+          options={[
+            { label: t("importExport.dialog.sideTarget"), value: "target" },
+            { label: t("importExport.dialog.sideSource"), value: "source", disabled: sourcePending },
+          ]}
+          onValueChange={setSide}
+        />
+        <p className="text-[10px] text-muted-foreground mt-0.5">
+          {t(shown === "source"
+            ? "importExport.dialog.sideSourceHint"
+            : "importExport.dialog.sideTargetHint")}
+        </p>
+        {sourcePending && (
+          <p className="text-[10px] text-muted-foreground">
+            {t("importExport.dialog.sideSourcePendingHint")}
+          </p>
+        )}
+      </fieldset>
+    )
+  }
 
   /**
    * The three shapes a subtitle file can take. Rendered in two places — on the
@@ -2183,8 +2307,16 @@ export function ExportDialog({
                       ))}
                     </RadioGroup>
                   )}
+                  {/* AQU-1451: on the AUDIO cues there is no second side to
+                      choose — a cue holds the words as they were heard, which
+                      the exporter already writes — so the choice belongs to the
+                      subtitle deliverable only. */}
+                  {effectiveSubtitleTarget === "subtitle" && renderSideControl(nativeOption.id)}
                   {nativeOption.id === "vtt" &&
-                    renderVttOptions({ showSource: effectiveSubtitleTarget === "subtitle" })}
+                    renderVttOptions({
+                      showSource:
+                        effectiveSubtitleTarget === "subtitle" && effectiveNativeSide !== "source",
+                    })}
                   <Button
                     size="lg"
                     className="w-full justify-center"
@@ -2198,7 +2330,7 @@ export function ExportDialog({
                   >
                     {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
                     {t("importExport.dialog.downloadFile", {
-                      fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
+                      fileName: `${buildExportStem(false, effectiveSubtitleTarget === "audio" ? "target" : effectiveNativeSide)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
                     })}
                   </Button>
                 </div>
@@ -2210,6 +2342,9 @@ export function ExportDialog({
         {/* Primary action: download the file back in its own format. */}
         {!isDubbingFile && nativeOption && (
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
+            {/* AQU-1451: the own-format download asks the same question as the
+                fold, off the same state. */}
+            {renderSideControl(nativeOption.id)}
             <Button
               size="lg"
               className="w-full justify-center"
@@ -2222,7 +2357,7 @@ export function ExportDialog({
               ) : (
                 <Download className="h-4 w-4" aria-hidden="true" />
               )}
-              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false, effectiveNativeSide)}${nativeOption.ext}` })}
             </Button>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
@@ -2309,6 +2444,15 @@ export function ExportDialog({
                         {t("importExport.dialog.lossyBadge")}
                       </span>
                     )}
+                    {/* AQU-1451: tsv/csv/xliff/tmx hold both sides by
+                        definition, so picking one IS the choice and no Side
+                        control appears for them. Saying so on the option is
+                        what keeps that from reading as a missing control. */}
+                    {isBilingualFormat(f.id) && (
+                      <span className="text-[10px] text-muted-foreground font-semibold">
+                        {t("importExport.dialog.bilingualBadge")}
+                      </span>
+                    )}
                   </span>
                   <span className="text-xs text-muted-foreground leading-relaxed">{t(f.descriptionKey)}</span>
                 </span>
@@ -2316,6 +2460,11 @@ export function ExportDialog({
             ))}
           </RadioGroup>
         </fieldset>
+
+        {/* AQU-1451: Side — which side of the project this export writes.
+            Above Scope because it is the bigger question: Scope says how many
+            files come down, Side says what is inside them. */}
+        {renderSideControl(format)}
 
         {/* Scope selector */}
         <fieldset className="flex flex-col gap-1.5">
@@ -2535,7 +2684,12 @@ export function ExportDialog({
         </fieldset>
 
         {/* Subtitle shape options — on the card for a dubbing file. */}
-        {!isDubbingFile && format === "vtt" && renderVttOptions()}
+        {/* AQU-1451: "include source" is a TARGET-side review option — it puts
+            the source line above the translation. Under Side = Source both
+            lines would be the source, so the checkbox comes off rather than
+            visibly doing nothing (the exporter refuses it there too). */}
+        {!isDubbingFile && format === "vtt" &&
+          renderVttOptions({ showSource: effectiveFoldSide !== "source" })}
 
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")

@@ -6,6 +6,11 @@ const REPO = "genesis-ai-dev/aquilla"
 const MARKER = "<!-- aquilla-smart-tests -->"
 const escape = (value) => String(value).replace(/[&<>|`\r\n]/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "|": "&#124;", "`": "&#96;", "\r": " ", "\n": " " })[char])
+const UNAVAILABLE = "**HARNESS UNAVAILABLE — this run produced no journey coverage.**"
+const NOT_A_FINDING = "The harness could not collect trustworthy evidence on this commit, so this run reports nothing about these changes. It is not a product finding, and it is not a pass."
+/** The oracle self-test qualifies every other verdict a run emits. */
+const isSelfTest = (title) => typeof title === "string" && title.startsWith("oracle qualification:")
+const CONCLUSIVE = ["VERIFIED PASS", "PASS (model-free check)", "FAIL (model-free check)", "PRODUCT FAILURE"]
 const brief = (value) => escape(typeof value === "string" ? value.slice(0, 40)
   : JSON.stringify(value ?? null).slice(0, 40))
 
@@ -53,7 +58,8 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   } else {
     const defect = evidenceDefect(suite, sha)
     if (defect) {
-      lines.push(`**INCONCLUSIVE.** No complete, clean-checkout evidence matches this commit. ${defect}`)
+      lines.push(UNAVAILABLE, "", NOT_A_FINDING, "",
+        `No complete, clean-checkout evidence matches this commit. ${defect}`)
     } else {
       const remaining = [...suite.planned]
       let verified = suite.status === "passed" && (!jobStatus || jobStatus === "success")
@@ -61,6 +67,8 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
       let costReported = 0
       let modelCalls = 0
       const rows = []
+      const passedTitles = new Set()
+      let conclusive = 0
       for (const test of suite.tests) {
         const index = remaining.indexOf(test.title)
         if (index < 0) verified = false
@@ -88,6 +96,8 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
           verdict = "INCONCLUSIVE"
         }
         if (!["VERIFIED PASS", "PASS (model-free check)"].includes(verdict)) verified = false
+        else passedTitles.add(test.title)
+        if (CONCLUSIVE.includes(verdict)) conclusive++
         const calls = evidence?.agent?.modelCalls ?? []
         for (const call of calls) {
           modelCalls++
@@ -100,14 +110,27 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
       }
       for (const title of remaining) rows.push(`| ${escape(title)} | NOT RUN | — |`)
       if (remaining.length) verified = false
-      lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
-        "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,
-        "", `Provider-reported model cost: $${cost.toFixed(6)} (${costReported}/${modelCalls} calls report cost; excludes runner compute).`)
-      if (suite.parallel) {
-        const timing = suite.parallel
-        lines.push("", `Parallel execution: ${Number(timing.shards)} isolated stacks; `
-          + `${(Number(timing.wallMs) / 1000).toFixed(1)} s including setup; `
-          + `${(Number(timing.longestShardTestMs) / 1000).toFixed(1)} s for the slowest test shard.`)
+      // A run whose oracle self-test did not pass has not qualified its own
+      // checks, so none of its verdicts — a product failure included — say
+      // anything about this commit. Publishing the rows anyway is what makes
+      // a dead harness read as the PR's fault, so they are withheld.
+      const selfTests = suite.planned.filter(isSelfTest)
+      const unqualified = selfTests.filter((title) => !passedTitles.has(title))
+      if (unqualified.length > 0 || conclusive === 0) {
+        lines.push(UNAVAILABLE, "", NOT_A_FINDING, "", unqualified.length > 0
+          ? `The oracle self-test did not pass (${unqualified.length} of ${selfTests.length}: ${unqualified.map(escape).join("; ")}), so every journey verdict in this run is unqualified.`
+          : `No journey reached a verdict (0 of ${suite.planned.length} planned).`,
+          "", "Per-journey rows are withheld deliberately: an unqualified run's rows read like product findings. Start with the runner and the stack it builds, not with this pull request's diff.")
+      } else {
+        lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
+          "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,
+          "", `Provider-reported model cost: $${cost.toFixed(6)} (${costReported}/${modelCalls} calls report cost; excludes runner compute).`)
+        if (suite.parallel) {
+          const timing = suite.parallel
+          lines.push("", `Parallel execution: ${Number(timing.shards)} isolated stacks; `
+            + `${(Number(timing.wallMs) / 1000).toFixed(1)} s including setup; `
+            + `${(Number(timing.longestShardTestMs) / 1000).toFixed(1)} s for the slowest test shard.`)
+        }
       }
     }
   }

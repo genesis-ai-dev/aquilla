@@ -10,6 +10,27 @@ Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
 plus environment/artifact checks. They run no tests, lint, or secret scans.
 QA tests the published preview; its green check proves compilation only.
 
+### What actually gates a pull request (AQU-1350)
+
+Do not read a green PR as "CI ran". Only two things run automatically on a PR:
+
+| Surface | Trigger | What it proves |
+| --- | --- | --- |
+| `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy, nothing else |
+| `Jev smart testing` (comment, marker `<!-- aquilla-smart-tests -->`) | every PR, from the external Hetzner runner | advisory journey coverage; posts no check |
+| `.github/workflows/ci.yml` | **`workflow_dispatch` only — intentionally dormant** | lint, typecheck, unit, worker, build, migrations |
+| `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
+
+`ci.yml` is deliberately trigger-less (AQU-564: Workers Builds owns automatic PR
+compilation), so its jobs are **not** a merge gate and its last automatic run is
+historical. The local pre-push hook plus `pnpm lint` / `npx tsc -b --noEmit` /
+`pnpm test` are what actually cover lint, types, and units — run them yourself.
+
+`Jev smart testing` is advisory and posts no required check, so a dead harness
+cannot fail a PR. When its comment says **HARNESS UNAVAILABLE**, the run says
+nothing about your changes — it is a runner problem, not a finding against the
+PR, and it means that PR merged with zero journey coverage.
+
 ## Testing — non-negotiable
 
 Keep test coverage synchronized with behavior without running the entire suite after every coding step:

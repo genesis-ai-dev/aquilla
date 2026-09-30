@@ -58,7 +58,8 @@ describe("truthful outcome report", () => {
     })
   }
   it("does not pass a setup failure or missing artifact", () => {
-    expect(render(undefined)).toContain("INCONCLUSIVE")
+    expect(render(undefined)).toContain("HARNESS UNAVAILABLE")
+    expect(render(undefined)).toContain("No complete, clean-checkout evidence matches this commit")
     expect(renderReport({ sha, phase: "finished", suite: suite(), jobStatus: "failure" }))
       .not.toContain("**PASS — all listed outcomes verified.**")
   })
@@ -99,19 +100,29 @@ describe("truthful outcome report", () => {
   it("separates a real model-free failure from an unknown outcome", () => {
     // Both are "not a pass", but only one is evidence about the product. Sharing
     // one word is what made the DOM-audit row unreadable for weeks.
-    const domAudit = (status) => {
+    const domAudit = (status, { besideSelfTest = false } = {}) => {
       const value = suite()
       value.tests[0].title = "DOM audit: project surfaces and editor activation use Jev's actual snapshot"
       value.tests[0].status = status
       value.tests[0].evidence = { "dom-audit": { reports: [] } }
       value.planned = [value.tests[0].title]
+      if (besideSelfTest) {
+        value.planned.unshift(selfTest)
+        value.tests.unshift({ title: selfTest, status: "passed", durationMs: 1300,
+          evidence: { "oracle-qualification": { real: true } } })
+      }
       return render(value)
     }
     expect(domAudit("failed")).toContain("FAIL (model-free check)")
     expect(domAudit("failed")).not.toContain("INCONCLUSIVE")
     expect(domAudit("failed")).toContain("**NOT A PASS")
     for (const status of ["timedOut", "interrupted", "skipped"]) {
-      expect(domAudit(status)).toContain("INCONCLUSIVE")
+      // AQU-1350: alone, an unknown outcome is a run with no verdict at all,
+      // which withholds its rows. The label is read beside a passing self-test.
+      const report = domAudit(status, { besideSelfTest: true })
+      expect(report).toContain("INCONCLUSIVE")
+      expect(report).not.toContain("FAIL (model-free check)")
+      expect(domAudit(status)).toContain("HARNESS UNAVAILABLE")
       expect(domAudit(status)).not.toContain("FAIL (model-free check)")
     }
     expect(domAudit("passed")).toContain("PASS (model-free check)")
@@ -130,6 +141,59 @@ describe("truthful outcome report", () => {
     value.tests[0].title = "Jev test | fake\n<b>"
     value.planned = [value.tests[0].title]
     expect(render(value)).toContain("Jev test &#124; fake &lt;b&gt;")
+  })
+})
+
+const selfTest = "oracle qualification: rejects a missing write and accepts a real durable edit"
+/** A run carrying the oracle self-test alongside one live journey. */
+function qualified({ selfTestStatus = "passed", journeyStatus = "passed" } = {}) {
+  const value = suite()
+  value.status = selfTestStatus === "passed" && journeyStatus === "passed" ? "passed" : "failed"
+  value.planned = [selfTest, title]
+  value.tests[0].status = journeyStatus
+  value.tests.unshift({
+    title: selfTest, status: selfTestStatus, durationMs: 1300,
+    evidence: selfTestStatus === "passed" ? { "oracle-qualification": { real: true } } : {},
+  })
+  return value
+}
+describe("a dead harness is not a finding about the commit", () => {
+  it("withholds journey rows when the oracle self-test did not pass", () => {
+    const report = render(qualified({ selfTestStatus: "failed", journeyStatus: "failed" }))
+    expect(report).toContain("HARNESS UNAVAILABLE")
+    expect(report).toContain("It is not a product finding, and it is not a pass.")
+    expect(report).toContain(`1 of 1: ${selfTest}`)
+    // The per-journey table is what reads as the pull request's fault.
+    expect(report).not.toContain("| Journey | Result | Duration |")
+    expect(report).not.toContain("NOT A PASS")
+    expect(report).not.toContain("**PASS — all listed outcomes verified.**")
+  })
+  it("does not publish an unqualified run's product failure as a product finding", () => {
+    const value = qualified({ selfTestStatus: "failed" })
+    value.tests[1].evidence["smart-testing-evidence"].outcome.verdict = "product_failure"
+    expect(render(value)).toContain("HARNESS UNAVAILABLE")
+    expect(render(value)).not.toContain("PRODUCT FAILURE")
+  })
+  it("reports a real product failure once the self-test qualifies the run", () => {
+    const value = qualified()
+    value.tests[1].evidence["smart-testing-evidence"].outcome.verdict = "product_failure"
+    const report = render(value)
+    expect(report).toContain("PRODUCT FAILURE")
+    expect(report).toContain("| Journey | Result | Duration |")
+    expect(report).not.toContain("HARNESS UNAVAILABLE")
+  })
+  it("still reports a fully qualified pass", () => {
+    const report = render(qualified())
+    expect(report).toContain("**PASS — all listed outcomes verified.**")
+    expect(report).toContain("PASS (model-free check)")
+    expect(report).not.toContain("HARNESS UNAVAILABLE")
+  })
+  it("calls a run with no verdict at all unavailable even without a self-test", () => {
+    const value = suite()
+    value.tests[0].evidence = {}
+    const report = render(value)
+    expect(report).toContain("HARNESS UNAVAILABLE")
+    expect(report).toContain("No journey reached a verdict (0 of 1 planned).")
   })
 })
 

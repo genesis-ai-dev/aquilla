@@ -7,7 +7,11 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {
@@ -28,6 +32,15 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
       "e2e/specs/orgs/account-switcher.smoke.spec.ts",
       "e2e/specs/orgs/members.smoke.spec.ts",
     ],
+  },
+  {
+    // AQU-1153: the share / invite journey — Add a member (+ Invite link tab),
+    // the org members page's "Add to projects" dialog, the recipient typeahead
+    // they share, and /join/:token — has its own smoke spec, but none of these
+    // files carry a domain keyword above, so they fell through to the core
+    // sentinels and PR #882 shipped a stale locator in that spec ungated.
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectMembersPage|ProjectSettings\/AddProjectMemberDialog|SharePanel|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
   },
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload

@@ -190,6 +190,65 @@ export function audioFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
   return ids
 }
 
+/**
+ * AQU-955: does this unit expect TARGET TEXT at all?
+ *
+ * The mirror of `planUnitExpectsAudio`, and deliberately NOT its symmetric
+ * twin. Audio has to prove it is expected — a file announces itself by being
+ * recorded or by carrying a cue sheet — because the default is a text project
+ * and charging every text book for takes nobody planned would bury the board.
+ * Text is the other way round: it is expected by default, and only a positive
+ * piece of evidence takes it away.
+ *
+ * That evidence is "this file is being RECORDED and carries no target text at
+ * all". An ETEN audio-only project is exactly that shape, and today the board
+ * charges each of its books its whole cell count in text that will never be
+ * written: the worse medium is always text, `worst` never falls, no book ever
+ * reaches Nearly complete, and the row's words lead with "N to translate" and
+ * never mention the takes. A PM asking "which books have finished audio" gets
+ * no answer from a board where every book reads 0%.
+ *
+ * Absence of text alone is NOT evidence — a text project on day one has no
+ * filled cells either, and reading that as "no text expected" would call it
+ * finished. Recording has to have started (or a cue sheet been imported) before
+ * this can fire, which is why `planUnitExpectsAudio` gates it.
+ */
+export function planUnitExpectsText(
+  u: Pick<PlanUnit, "filledCount" | "audioCount" | "audioTotalCount">,
+): boolean {
+  if (u.filledCount > 0) return true
+  return !planUnitExpectsAudio(u)
+}
+
+/**
+ * Which FILES carry text work — judged per file, for the same reason
+ * `audioFileIds` is.
+ *
+ * Per UNIT this question answers itself wrongly on the shape it exists for: in
+ * an audio-only whole-Bible file, a book nobody has recorded yet has neither
+ * text nor takes, so the unit rule says "expects text" and that one book would
+ * go on reading 0% beside its finished siblings. The file is the honest grain —
+ * one file is one team's one job — so a file with recordings and no target text
+ * anywhere in this lane is audio-only for ALL of its books.
+ *
+ * The first target cell anyone writes puts the file back in the set and its
+ * text shortfall reappears, which is correct: the work became text work.
+ */
+export function textFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
+  const audioFiles = audioFileIds(units)
+  const filesWithText = new Set<string>()
+  const allFiles = new Set<string>()
+  for (const u of units) {
+    allFiles.add(u.fileId)
+    if (u.filledCount > 0) filesWithText.add(u.fileId)
+  }
+  const ids = new Set<string>()
+  for (const fileId of allFiles) {
+    if (filesWithText.has(fileId) || !audioFiles.has(fileId)) ids.add(fileId)
+  }
+  return ids
+}
+
 /** Outstanding work in a unit, per medium. Every term is floored at zero. */
 export interface PlanShortfall {
   toTranslate: number
@@ -217,15 +276,25 @@ const atLeastZero = (n: number): number => (n > 0 ? n : 0)
  * recorded its headings. It costs one comparison; keep it.
  *
  * `hasAudio` comes from `audioFileIds`, not from the unit — see that function.
+ * `hasText` comes from `textFileIds` the same way, and DEFAULTS TO TRUE so that
+ * every caller written before AQU-955 keeps measuring text exactly as it did.
  */
-export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall {
+export function planUnitShortfall(
+  u: PlanUnit,
+  hasAudio: boolean,
+  hasText = true,
+): PlanShortfall {
   // AQU-1278: every audio term counts against the CUE SHEET where there is
   // one, never the subtitle cells. See `planAudioTotal` — on a dubbing project
   // the two totals differ by a hundred cells and the text one is the wrong
   // number to subtract a take count from.
   const audioTotal = planAudioTotal(u)
-  const toTranslate = atLeastZero(u.totalCount - u.filledCount)
-  const toValidate = atLeastZero(u.filledCount - u.validatedCount)
+  // AQU-955: the text terms are gated exactly as the audio ones are. On an
+  // audio-only file there is no text queue to send anyone to, so naming one is
+  // not a smaller claim than naming the wrong one — it is the reason the board
+  // said nothing useful about these projects at all.
+  const toTranslate = hasText ? atLeastZero(u.totalCount - u.filledCount) : 0
+  const toValidate = hasText ? atLeastZero(u.filledCount - u.validatedCount) : 0
   const toRecord = hasAudio ? atLeastZero(audioTotal - u.audioCount) : 0
   const toAudioValidate =
     hasAudio && !AUDIO_JUDGED_ON_RECORDED
@@ -233,7 +302,7 @@ export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall
       : 0
   // Text's outstanding set is everything not yet validated — untranslated cells
   // are a subset of it, so this is one number, not a sum.
-  const textShort = atLeastZero(u.totalCount - u.validatedCount)
+  const textShort = hasText ? atLeastZero(u.totalCount - u.validatedCount) : 0
   const audioShort = hasAudio
     ? AUDIO_JUDGED_ON_RECORDED
       ? toRecord
@@ -342,6 +411,12 @@ export function planUnitStatus(
    * wrong for a board, which is why every board path passes the set.
    */
   audioFiles?: ReadonlySet<string>,
+  /**
+   * AQU-955: files that carry text work, from `textFileIds` over the WHOLE
+   * board. Omitted, the unit's own expectation stands in — same trade-off as
+   * `audioFiles`, and the same reason every board path passes the set.
+   */
+  textFiles?: ReadonlySet<string>,
 ): PlanUnitStatus {
   if (u.doneAt != null) return "done"
   const started = planUnitHasContent(u)
@@ -359,7 +434,8 @@ export function planUnitStatus(
   // started, which is short by everything and belongs in Not started.
   if (started && u.totalCount > 0) {
     const hasAudio = audioFiles ? audioFiles.has(u.fileId) : planUnitExpectsAudio(u)
-    const { worst } = planUnitShortfall(u, hasAudio)
+    const hasText = textFiles ? textFiles.has(u.fileId) : planUnitExpectsText(u)
+    const { worst } = planUnitShortfall(u, hasAudio, hasText)
     // ONE THRESHOLD PER UNIT, and it is the unit's own cell count even when
     // audio is counted against a cue sheet of a different size. The row is one
     // row; "a few cells from finished" is one question about it, and a unit
@@ -390,9 +466,10 @@ export function planUnitIsNearlyComplete(
   u: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
 ): boolean {
   if (u.doneAt != null) return false
-  return planUnitStatus({ ...u, targetDate: null }, now, audioFiles) === "nearly_complete"
+  return planUnitStatus({ ...u, targetDate: null }, now, audioFiles, textFiles) === "nearly_complete"
 }
 
 /**
@@ -462,8 +539,9 @@ export function planUnitNote(
   u: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
 ): PlanUnitNote | null {
-  const status = planUnitStatus(u, now, audioFiles)
+  const status = planUnitStatus(u, now, audioFiles, textFiles)
   if (status === "done") return u.doneAt != null ? { kind: "marked", at: u.doneAt } : null
   const target = targetTime(u.targetDate)
   if (status === "overdue" && target != null) {
@@ -509,10 +587,12 @@ export interface PlanGroup {
 export function sortNearlyComplete(
   units: readonly PlanUnit[],
   audioFiles: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
 ): PlanUnit[] {
   const worstOf = new Map<string, number>()
   for (const u of units) {
-    worstOf.set(planUnitId(u), planUnitShortfall(u, audioFiles.has(u.fileId)).worst)
+    const hasText = textFiles ? textFiles.has(u.fileId) : planUnitExpectsText(u)
+    worstOf.set(planUnitId(u), planUnitShortfall(u, audioFiles.has(u.fileId), hasText).worst)
   }
   return sortUnitsInGroup(units).sort(
     (a, b) => (worstOf.get(planUnitId(a)) ?? 0) - (worstOf.get(planUnitId(b)) ?? 0),
@@ -533,11 +613,14 @@ export function groupPlanUnits(
   units: readonly PlanUnit[],
   now: number,
   audioFilesOverride?: ReadonlySet<string>,
+  /** AQU-955: pass this alongside `audioFiles`, for the same reason. */
+  textFilesOverride?: ReadonlySet<string>,
 ): PlanGroup[] {
   const audioFiles = audioFilesOverride ?? audioFileIds(units)
+  const textFiles = textFilesOverride ?? textFileIds(units)
   const by = new Map<PlanUnitStatus, PlanUnit[]>()
   for (const u of units) {
-    const k = planUnitStatus(u, now, audioFiles)
+    const k = planUnitStatus(u, now, audioFiles, textFiles)
     const list = by.get(k)
     if (list) list.push(u)
     else by.set(k, [u])
@@ -548,7 +631,7 @@ export function groupPlanUnits(
     return [{
       status,
       units: status === "nearly_complete"
-        ? sortNearlyComplete(list, audioFiles)
+        ? sortNearlyComplete(list, audioFiles, textFiles)
         : sortUnitsInGroup(list),
     }]
   })
@@ -573,12 +656,13 @@ export interface PlanSummary {
  */
 export function planSummary(units: readonly PlanUnit[], now: number): PlanSummary {
   const audioFiles = audioFileIds(units)
+  const textFiles = textFileIds(units)
   let done = 0
   let overdue = 0
   let inFlight = 0
   let nearlyComplete = 0
   for (const u of units) {
-    const s = planUnitStatus(u, now, audioFiles)
+    const s = planUnitStatus(u, now, audioFiles, textFiles)
     if (s === "done") done += 1
     else if (s === "overdue") overdue += 1
     else if (s === "nearly_complete") nearlyComplete += 1
@@ -649,4 +733,18 @@ export function filterPlanUnits(units: readonly PlanUnit[], filter: PlanFilter):
  */
 export function planHasAudio(units: readonly PlanUnit[]): boolean {
   return units.some(planUnitExpectsAudio)
+}
+
+/**
+ * AQU-955: does this project carry text work at all? Drives whether text bars
+ * and the text half of a chapter tile's underline render.
+ *
+ * Asked of `textFileIds` rather than of each unit, for the reason that function
+ * gives: per unit, an unrecorded book in an audio-only file answers yes and a
+ * text bar comes back for a project that has no text in it. False here means a
+ * fully audio-only project, where a text bar pinned at 0% is the thing the PM
+ * had to look past to find the number they came for.
+ */
+export function planHasText(units: readonly PlanUnit[]): boolean {
+  return textFileIds(units).size > 0
 }

@@ -81,6 +81,8 @@ interface Props {
    *  recorder's utility strip owns that chrome and the count, so the two
    *  cannot say the same thing twice. */
   chromeless?: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export function TakesStrip({
@@ -96,9 +98,13 @@ export function TakesStrip({
   author,
   session,
   chromeless = false,
+  targetLang,
 }: Props) {
   const t = useT()
-  const audioValidation = useAudioValidation({ project, fileId, cellId, username: author, jwt: session?.jwt ?? null })
+  const audioValidation = useAudioValidation({
+    project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
+  })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -231,12 +237,16 @@ export function TakesStrip({
       sourceClip != null &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
     try {
-      const selectP = emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
+      const selectP = emitCellAudioSelect({
+        projectId, fileId, cellId, audioId, slot, author,
+        ...(targetLang ? { targetLang } : {}),
+      })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
       if (displaceToSource) {
         const displaceP = emitCellAudioSelect({
           projectId, fileId, cellId, audioId: sourceClip.audioId, slot: "recording", author,
+          ...(targetLang ? { targetLang } : {}),
         })
         injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
         await displaceP
@@ -250,7 +260,7 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author])
+  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
@@ -264,7 +274,10 @@ export function TakesStrip({
       // the old binary coercion became a data-mover once a take could belong
       // to an added track.
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
-      const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author })
+      const removeP = emitCellAudioRemove({
+        projectId, fileId, cellId, audioId, author,
+        ...(targetLang ? { targetLang } : {}),
+      })
       injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
       await removeP
       notifyAudioAttachmentsChanged(fileId)
@@ -285,7 +298,7 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved])
+  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
 
   // On-device noise removal: clean THIS take into a new (denoised) take. The
   // heavy RNNoise/wasm path is dynamically imported so it's only loaded when a
@@ -302,6 +315,7 @@ export function TakesStrip({
         sourceUrl: att.url,
         author,
         session,
+        ...(targetLang ? { targetLang } : {}),
       })
     } catch {
       // Failure leaves the original untouched; the strip simply doesn't gain a
@@ -309,7 +323,7 @@ export function TakesStrip({
     } finally {
       setDenoisingId((cur) => (cur === att.audioId ? null : cur))
     }
-  }, [session, denoisingId, projectId, fileId, cellId, author])
+  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang])
 
   // Round 8: names are PERSISTED (att.label) — never derived from position.
   // Strip-local overrides show a rename/backfill instantly (a bus inject
@@ -353,7 +367,10 @@ export function TakesStrip({
       if (!label || label === displayLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
-        await emitCellAudioRename({ projectId, fileId, cellId, audioId: att.audioId, label, author })
+        await emitCellAudioRename({
+          projectId, fileId, cellId, audioId: att.audioId, label, author,
+          ...(targetLang ? { targetLang } : {}),
+        })
         notifyAudioAttachmentsChanged(fileId)
       } catch {
         setLabelOverrides((prev) => {
@@ -363,7 +380,7 @@ export function TakesStrip({
         })
       }
     },
-    [renameDraft, displayLabel, projectId, fileId, cellId, author],
+    [renameDraft, displayLabel, projectId, fileId, cellId, author, targetLang],
   )
 
   // Legacy takes recorded before labels existed: backfill "Take N" ONCE (by
@@ -386,14 +403,17 @@ export function TakesStrip({
         const label = `Take ${n}`
         setLabelOverrides((prev) => new Map(prev).set(t.audioId, label))
         try {
-          await emitCellAudioRename({ projectId, fileId, cellId, audioId: t.audioId, label, author })
+          await emitCellAudioRename({
+            projectId, fileId, cellId, audioId: t.audioId, label, author,
+            ...(targetLang ? { targetLang } : {}),
+          })
         } catch {
           /* backfill is best-effort; next mount retries */
         }
       }
       notifyAudioAttachmentsChanged(fileId)
     })()
-  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author])
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang])
 
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   const ordered = useMemo(() => {

@@ -36,9 +36,11 @@ interface Props {
   /** Author attribution for the cell.audio.attach event. */
   username: string
   disabled?: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
-export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved }: Props) {
+export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved, targetLang }: Props) {
   const t = useT()
   const { session } = useFrontierSession()
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -61,14 +63,17 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
     try {
       // No `label`: this rail has no takes list to number against, and
       // fetching one to name a single icon click isn't worth the request.
-      await attachAudioFileToCell({ session, projectId, fileId, cellId, file, username })
+      await attachAudioFileToCell({
+        session, projectId, fileId, cellId, file, username,
+        ...(targetLang ? { targetLang } : {}),
+      })
       onTakeSaved?.(cellId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setUploading(false)
     }
-  }, [session, projectId, fileId, cellId, username, onTakeSaved, t])
+  }, [session, projectId, fileId, cellId, username, onTakeSaved, t, targetLang])
 
   const onInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

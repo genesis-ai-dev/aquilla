@@ -5,15 +5,22 @@
 const REPO = "genesis-ai-dev/aquilla"
 
 // PR-BOT.md's exact heading and verdict line: "## Bot walk — PR <n> @ <sha>"
-// followed by a line opening "**PASS**", "**FAIL**", "**FLAKY**", or
-// "**BLOCKED**". <sha> is the PR's own head sha, not the dev merge commit.
+// followed by a line opening "**PASS**", "**FAIL**", "**FLAKY**",
+// "**BLOCKED**", or "**NOT CHECKED**". <sha> is the PR's own head sha, not
+// the dev merge commit.
 const WALK_HEADING = /^## Bot walk — PR (\d+) @ ([0-9a-f]{40})\s*$/m
-const VERDICT_LINE = /^\*\*(PASS|FAIL|FLAKY|BLOCKED)\*\*/
+const VERDICT_LINE = /^\*\*(PASS|FAIL|FLAKY|BLOCKED|NOT CHECKED)\*\*/
 
 // FLAKY and BLOCKED both mean the bot could not prove the outcome; the
-// release planner holds on either exactly like a FAIL.
+// release planner holds on either exactly like a FAIL. NOT CHECKED means the
+// bot found no UI claim to walk (a scripts/CLI-only diff, same idea as
+// isDocsOrTestOnly's path check in release-plan.mjs, just caught here
+// instead because the diff isn't purely docs/test files) — that's not a
+// hold, it's the bot correctly declining to invent a PASS.
 export function normalizeVerdict(verdict) {
-  return verdict === "PASS" ? "PASS" : "fail"
+  if (verdict === "PASS") return "PASS"
+  if (verdict === "NOT CHECKED") return "none"
+  return "fail"
 }
 
 // Parses one comment body. Returns null for a comment that isn't a bot-walk

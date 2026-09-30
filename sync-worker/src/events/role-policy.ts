@@ -65,6 +65,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
+  // AQU-1422: hiding a cell takes it out of translation and (AQU-1423) out of
+  // every export for EVERYONE, in every lane. That is a decision about what the
+  // file contains, so it sits with source.cell.commit at PROJECT_LEAD and NOT
+  // with the create/delete/reorder trio at COMMENTER — those are floored low
+  // because re-import, DCS repair and diarization all emit them through a
+  // user's own outbox, and nothing emits this but a person choosing it.
+  'source.cell.visibility.set': ROLE.PROJECT_LEAD,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,
@@ -89,6 +96,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
+
+  // AQU-777: per-cell file attachments. Same floor as the other per-cell blob
+  // write (cell.audio.attach) — attaching a reference image is editing the
+  // cell's working context, not commenting on it. Mirrored client-side in
+  // src/lib/sync/role-policy.ts.
+  'cell.attachment.add': ROLE.CONTRIBUTOR,
+  'cell.attachment.remove': ROLE.CONTRIBUTOR,
 
   // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.
   // The stage-4 reasoning — "pairing a subtitle line with the audio cue that

@@ -33,11 +33,13 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
-import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
+import type { AgentProposal, AquiferPublishProposal, FileCandidate } from "@/lib/agent/protocol"
+import { latestFileCandidates } from "@/lib/agent/file-candidates"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
 import { BudgetMeter } from "./BudgetMeter"
 import { ChangesetCard } from "./ChangesetCard"
 import { CodeActivityBlock } from "./CodeActivityBlock"
+import { FileCandidateButtons } from "./FileCandidateButtons"
 import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
 import { InlineAiError } from "@/components/InlineAiError"
 
@@ -144,6 +146,12 @@ export interface AgentRunViewProps {
    *  same hook AgentDockView passes to ProposalCard. Omitted → the card
    *  relies on the project DO's event.applied broadcast alone. */
   onChangesetApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+  /** AQU-1468: when the agent asks "which file?", the candidates render as
+   *  buttons and a click calls this. Omitted → no buttons (previews/tests). */
+  onChooseFile?: (candidate: FileCandidate) => void
+  /** False once the run is no longer the newest or a run is streaming: the
+   *  buttons stay visible but disabled. */
+  fileChoiceEnabled?: boolean
 }
 
 export function AgentRunView({
@@ -153,8 +161,11 @@ export function AgentRunView({
   renderToolCard,
   onReviewMemory,
   onChangesetApplied,
+  onChooseFile,
+  fileChoiceEnabled = false,
 }: AgentRunViewProps) {
   const { locale, t } = useI18n()
+  const fileCandidates = onChooseFile ? latestFileCandidates(run) : []
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -202,6 +213,14 @@ export function AgentRunView({
             return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
         }
       })}
+
+      {onChooseFile && fileCandidates.length > 0 && (
+        <FileCandidateButtons
+          candidates={fileCandidates}
+          enabled={fileChoiceEnabled && run.status !== "running"}
+          onChoose={onChooseFile}
+        />
+      )}
 
       {run.status === "running" && (
         <Marker role="status">

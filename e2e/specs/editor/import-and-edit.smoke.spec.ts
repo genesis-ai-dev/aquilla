@@ -5,7 +5,6 @@ import { readFile } from "node:fs/promises"
 import { jwtFor, readSeededFileEvents } from "../../helpers/seed-project"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { readFile } from "node:fs/promises"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")

@@ -153,11 +153,22 @@ for (const format of ["m4a", "mp4"]) {
     await expect(ws.cellRow(0)).toContainText("Reviewed embedded caption.")
     await expect(ws.cellRow(0)).toContainText("00:00:00.500 --> 00:00:01.500")
     await expect(ws.cellRow(1)).toContainText("00:00:02.000 --> 00:00:03.000")
+    if (format === "mp4") await ws.waitForLinkedVideo()
     await alice.reload()
     await ws.waitForEditor()
     await expect(ws.sourceAudioClips()).toHaveCount(2)
     await expect(ws.cellRow(0)).toContainText("Reviewed embedded caption.")
     await expect(ws.cellRow(1)).toContainText("Embedded second caption.")
+    if (format === "mp4") {
+      await ws.waitForLinkedVideo()
+      // The transport enables seeking after a playback queue becomes active.
+      await ws.playMedia()
+      await expect.poll(() => ws.linkedVideo().evaluate(
+        (element: HTMLVideoElement) => element.currentTime,
+      )).toBeGreaterThan(0.15)
+      await ws.pauseMedia()
+      await ws.seekLinkedVideo(0.75)
+    }
     const downloadPromise = alice.waitForEvent("download")
     await ws.clickDownloadOriginal()
     const download = await downloadPromise

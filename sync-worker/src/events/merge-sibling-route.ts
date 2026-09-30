@@ -26,6 +26,7 @@
 // default lane — it only ever INSERTs the new lane's target rows.
 
 import { verifyTokenForProject } from '../auth'
+import { checkProjectMembershipDetailed } from './membership'
 import {
   buildEventProjectionStmts,
   fileCountersRecomputeStmt,
@@ -259,6 +260,25 @@ export async function handleMergeSiblingRequest(
   if (!donorProjectId) return new Response('donorProjectId required', { status: 400 })
   if (!lane) return new Response('lane required', { status: 400 })
   if (donorProjectId === hostId) return new Response('donor and host must differ', { status: 400 })
+
+  // [Pen test 2026-09-29] The token only proves host access. `donorProjectId`
+  // is body-supplied, so verify the caller's LIVE role on the donor here too —
+  // otherwise a host project_lead could call this route directly and copy any
+  // other tenant's translations into their own project. Platform operators
+  // (`src: "platform"`) have no membership rows and are exempt, matching the
+  // write perimeter. Fail closed: a missing/low donor role is a 403.
+  if (auth.claims.src !== 'platform') {
+    const donor = await checkProjectMembershipDetailed(
+      env.AQUILLA_PG,
+      donorProjectId,
+      auth.claims.userId,
+    )
+    if (donor.roleLevel === null || donor.roleLevel < MERGE_MIN_ROLE) {
+      return new Response('role >= project_lead (500) required on donor project', {
+        status: 403,
+      })
+    }
+  }
 
   const result = await mergeSibling(env.AQUILLA_PG, {
     hostProjectId: hostId,

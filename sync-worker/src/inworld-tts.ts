@@ -31,6 +31,21 @@ export const INWORLD_DESIGN_PROMPT_MAX = 1000
 export const INWORLD_DESIGN_SAMPLE_COUNT = 3
 export const INWORLD_DESIGN_PROMPT_MODE_ASSISTED = "DESIGN_PROMPT_MODE_ASSISTED"
 export const INWORLD_DESIGN_PROMPT_MODE_VERBATIM = "DESIGN_PROMPT_MODE_VERBATIM"
+/**
+ * AQU-1156: hard deadline on one upstream synthesis subrequest. Comfortably
+ * above a real TTS-2 run on the longest text we accept
+ * (`INWORLD_MAX_TEXT_CHARS`), and below the client's own
+ * `TTS_REQUEST_TIMEOUT_MS` so this specific 502 wins the race and the user
+ * reads why generation failed instead of watching a spinner.
+ */
+export const INWORLD_TTS_REQUEST_TIMEOUT_MS = 60_000
+
+/** True for the DOMException `AbortSignal.timeout` rejects a fetch with. */
+export function isAbortTimeout(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false
+  const name = (err as { name?: unknown }).name
+  return name === "TimeoutError" || name === "AbortError"
+}
 /** BSB Revelation 1:17–18 — default spoken script for Voice Design previews. */
 export const INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT =
   "Do not be afraid. I am the First and the Last, the Living One. I was dead, and behold, now I am alive forever and ever! And I hold the keys of Death and of Hades."
@@ -444,8 +459,18 @@ export async function synthesizeInworldSpeech(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(INWORLD_TTS_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
+    // AQU-1156: a hung upstream used to hold this subrequest open until the
+    // platform killed it, so the caller's generate control spun forever with
+    // no audio and no error. The deadline turns that into a 502 the client can
+    // show and the user can retry.
+    if (isAbortTimeout(err)) {
+      throw new Error(
+        `Inworld TTS did not respond within ${Math.round(INWORLD_TTS_REQUEST_TIMEOUT_MS / 1000)}s`,
+      )
+    }
     throw new Error(`Inworld TTS unreachable: ${String(err)}`)
   }
   if (!res.ok) {

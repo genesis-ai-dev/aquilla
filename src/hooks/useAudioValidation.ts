@@ -44,8 +44,10 @@ export function useAudioValidation(opts: {
    * query client — every caller already holds a session.
    */
   jwt?: string | null
+  /** AQU-1462: lane the member is working in. The vote itself stays shared. */
+  targetLang?: string
 }): UseAudioValidation {
-  const { project, fileId, cellId, username, onCommitted, jwt } = opts
+  const { project, fileId, cellId, username, onCommitted, jwt, targetLang } = opts
   const { t } = useI18n()
   const jwtRef = useRef<string | null>(jwt ?? null)
   jwtRef.current = jwt ?? null
@@ -81,7 +83,14 @@ export function useAudioValidation(opts: {
     }
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
-      await emit({ projectId: project.id, fileId, cellId, audioId, author: username })
+      await emit({
+        projectId: project.id,
+        fileId,
+        cellId,
+        audioId,
+        author: username,
+        ...(targetLang ? { targetLang } : {}),
+      })
       await onCommitted?.(cellId)
       // AQU-490: and the part `onCommitted` cannot do. It refreshes the CELLS
       // read, which is where text validation lives; an audio vote lives in the
@@ -95,7 +104,7 @@ export function useAudioValidation(opts: {
       console.error("[audio-validate] emit failed", error)
       return false
     }
-  }, [project.id, fileId, cellId, username, roleLevel, onCommitted, getTokenForFile])
+  }, [project.id, fileId, cellId, username, roleLevel, onCommitted, getTokenForFile, targetLang])
 
   return {
     takesFor,

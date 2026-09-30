@@ -121,6 +121,8 @@ economics) lives in the AQU-533 comment thread, not here.
   real use case requires it.
 - Carry an **autonomy ceiling** (`ask` or `act`, below), expiry, last-used metadata,
   rotation, and emergency revocation.
+- Carry an **access ceiling** (`read` or `write`, AQU-1242) — orthogonal to autonomy.
+  See "Access ceiling" below.
 - **Live role/membership resolution on every call** — a credential never outlives or
   exceeds the user's current role. Every command passes the same per-action permission
   checks as the in-app path.
@@ -141,7 +143,7 @@ fact about a person, not a preference. An agent needs none of it to translate. S
 | Layer | Default | Who can change it |
 | --- | --- | --- |
 | Author fields (`lastEditor` on cells, `author` on history) | stable per-project pseudonym `u_xxxxxxxx` | credential `pii` flag |
-| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + scope; no `userId`/`username` | credential `pii` flag |
+| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + access + scope; no `userId`/`username` | credential `pii` flag |
 | Project-wide | authorship exposed pseudonymously | project setting `agentAuthorship` |
 
 - **Pseudonyms are HMAC(SYNC_SECRET_KEY, projectId ‖ author)**, truncated to 8 hex. Stable
@@ -165,6 +167,38 @@ the external boundary — the internal SPA read path legitimately shows real nam
 
 Auth transport: personal access tokens for the initial developer preview; OAuth 2.1
 for broadly compatible remote MCP (connector directories) as a fast follow.
+
+### Access ceiling (AQU-1242)
+
+`access` answers a different question from `mode`: **may this token change anything at
+all?** `mode` is the autonomy dial for writes that are already permitted — an ask-mode
+token still writes, with a human at the approval page.
+
+- **`write`** (the default, and what every token minted before migration 0113 carries)
+  — the original grant: stage, commit, upload artifacts.
+- **`read`** — the whole API is read-only. Changeset prepare, changeset commit and
+  artifact upload answer `403 scope_denied`; reads, search, history and export are
+  unaffected. `GET /me` reports `access: "read"` with a hint saying so, so an agent
+  learns the ceiling from discovery rather than from a refusal on work it already did.
+
+A read-only refusal is **not** retryable and is not about the caller's project role:
+only a human minting a new token can lift it. That is why it is `scope_denied` rather
+than `permission_denied` — the token's scope is what falls short, exactly as it does
+for an out-of-scope org or project.
+
+Enforced at three depths, the deepest being load-bearing: prepare and commit refuse
+early so an agent does not build a plan it can never apply, and `mintInternalSyncToken`
+(the one door every external event write passes — the engine never constructs an
+`AuthorizedEvent` itself) refuses unconditionally, so a write path added later is
+refused even if it forgets the route-level check.
+
+Access is fixed at mint time and cannot be raised by any API call. It is a ceiling like
+every other: the caller's live project role is still resolved per call, so a read-only
+token can only ever narrow what its owner could already do.
+
+Not yet scoped finer than read/write — per-book, per-file and per-interaction-type
+scoping is tracked separately (see AQU-1242's follow-up); a book-scoped token would have
+to filter every read surface, and a half-filtered one would restrict in appearance only.
 
 ### Autonomy modes
 
@@ -393,7 +427,7 @@ CRUD surface with MCP bolted on.
 | Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
 | Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. The original bytes still round-trip on export through the preserved artifact. **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text, raw }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. Export substitutes translations into the preserved original artifact, and **re-attaches each verse's `usfmNotes` to its translation (AQU-1295)** — appended at the end of the verse, restored from `raw` where the importer captured it — so a translated verse keeps its notes instead of losing them with the replaced span. This is the one place the two importers deliberately differ and still agree on the exported file: the in-app import is lossless (markers stay in cell text and the translator edits them in place), the agent import is content-only (markers are parked in metadata and the exporter puts the notes back). **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
 | Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
@@ -976,6 +1010,19 @@ changesets with no invented semantics, and it is what the workspace does today.
 Found while standing up the IBT Siberian Tatar pilot (`sibtatar`) end-to-end through this
 API. Four gaps, all on the path every partner USFM import takes.
 
+- **Notes survive a translated export (AQU-1295).** Content-only import parks a verse's
+  notes in `metadata.usfmNotes`, and export used to replace the whole verse span with the
+  translation — so every note on a translated verse left the file silently (294 of them on
+  Biblica's NRT Acts, invisible until someone proofread the typeset book). The export plan
+  now re-attaches a verse's own notes to its translation, at the end of the verse. The
+  source-side export (`side=source`, AQU-1449) does the same for a verse whose source text
+  was edited, since that edit replaces the span in exactly the same way. Offsets
+  are not preserved: a translation is a different length and word order, so the source
+  offset addresses nothing in it. Placing a note back at its right point inside a
+  translated verse needs a translator — that is option A in the ticket, and a separate
+  piece of work. `X-Usfm-Lossy-Verse-Count` is unchanged and stays conservative: it still
+  counts a verse whose span held any intra-verse marker, including one whose only markers
+  were notes that are now restored.
 - **Imports are content-only for real (AQU-1283).** See the Ingestion row above. Cell
   `value` no longer carries `\` markers; footnotes move to `metadata.usfmNotes`;
   `importExcludeFrontMatter` is honoured on the agent path and echoed back with its
@@ -1015,3 +1062,57 @@ API. Four gaps, all on the path every partner USFM import takes.
   into a `ProjectSetup` body with every blank named. `GET /api/v1/external/skills` serves
   the sequencing prose itself, so the workflow lives in one server-owned place instead of
   each partner's chat history.
+
+## Status addendum (2026-09-26, AQU-1426 — HideCell / ShowCell)
+
+AQU-1422 gave the editor a reversible **Hide cell**: a per-cell park flag that takes a row
+out of translation and out of every export without deleting anything. Two commands give an
+agent the same act, implemented in `sync-worker/src/external/commands-hide-cell.ts`:
+
+- **`HideCell`** `{ fileId, cellId }` → `source.cell.visibility.set` with `hidden: true`.
+- **`ShowCell`** `{ fileId, cellId }` → the same kind with `hidden: false`.
+
+**Why they exist.** Before them an agent's only way to get a cell out of a file was
+`DeleteCell`, which hard-deletes the row and is refused outright while the cell owns a
+comment, a validator or an audio take. A stray heading or an import artefact needed the
+destructive tool or a human. Hiding deletes nothing: source text, every lane's translation,
+recordings, comments and validations survive and come back untouched on `ShowCell`.
+
+Both are **sugar over `EmitEvents`**, exactly like `RenameFile` — prepare desugars them and
+hands the plan to the EmitEvents engine, so existence checks, prepare-time event ids, the
+approval gate, the provenance envelope and the `/events` perimeter round-trip are the same
+code path every other command uses. The staged plan you read back therefore holds
+`source.cell.visibility.set` events, not a `HideCell` entry.
+
+The kind is deliberately **NOT** on `ALLOWED_EMIT_KINDS`: the raw EmitEvents door still
+refuses it, and these two named commands are the only way in. That is what makes the act
+discoverable (`describe_command`, the role-filtered index, `get_capabilities.commands`) and
+what lets the discovery surfaces say the thing that matters — this is the reversible one.
+
+Rules:
+
+- **`PROJECT_LEAD`**, taken from `REQUIRED_ROLE['source.cell.visibility.set']` rather than
+  restated, so this surface cannot drift below the perimeter that would refuse the event.
+  A Contributor-scoped credential gets the standard role error and nothing is staged.
+- Several may share one changeset, but they cannot mix with other command kinds, and hides
+  cannot mix with shows — the approval page groups its effect lines by event kind, and one
+  sentence cannot honestly describe both directions. Naming one cell twice is refused too.
+- Prepare refuses a cell that does not exist, or one already in the state asked for: a plan
+  whose whole effect is nothing is not worth a human's approval.
+- Commit re-checks that the **source row** still exists (the flag lives there, so a surviving
+  target row is not enough) but deliberately does **not** re-check the current visibility: the
+  compiled event *sets* the flag rather than toggling it, so a human hiding the same cell
+  between prepare and approval leaves commit landing exactly the state that was approved.
+- Hiding is per **cell**, not per lane — one command hides the row in every target language.
+- Cell reads over REST and the MCP `read_content` tool carry an explicit `hidden` boolean per
+  cell, stamped at the agent boundary (`stampCellVisibility` in `read-routes.ts`). The shared
+  serializer still OMITS the key on a visible row for the SPA's sake (a 30k-cell Bible file
+  would pay ~15 bytes a row for a field false on all but a handful); an agent gets the
+  explicit boolean because an absent key is indistinguishable from "this server does not know
+  about hiding". The flag rides the SOURCE row, so a cell's visibility is resolved from there
+  and stamped onto every row of that cell; a cell whose source row is not in the payload at
+  all (possible on a `since=` delta read) carries no `hidden` key rather than a false one.
+
+Out of scope here, each its own issue: the editor's own menu item and reveal toggle
+(AQU-1422), exports (AQU-1423), progress/health/drafting/search (AQU-1424), the Codex
+migration (AQU-1425).

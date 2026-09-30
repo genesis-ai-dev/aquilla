@@ -9,6 +9,22 @@ describe("BriefSection", () => {
     render(<BriefSection brief={undefined} canEdit onEdit={() => {}} onGenerate={() => {}} stale={false} />)
     expect(screen.getByRole("button", { name: /create brief/i })).toBeTruthy()
   })
+  // AQU-912: the brief read as mandatory to two partner users (Biblica GP,
+  // ETT) in two days, and ETT does not use briefs at all — so the empty state
+  // must say it is optional, not just offer a CTA. Asserted on the rendered
+  // string rather than the key so a copy change that drops the qualifier fails
+  // here instead of shipping.
+  it("marks the brief optional while none exists", () => {
+    render(<BriefSection brief={undefined} canEdit onEdit={() => {}} onGenerate={() => {}} stale={false} />)
+    expect(screen.getByText(/\(optional\)/i)).toBeTruthy()
+    expect(screen.getByText(/or skip it and start translating without one/i)).toBeTruthy()
+  })
+  // Once a brief exists the qualifier is noise — the decision it informs is
+  // already made, and the card's own status badge carries the state.
+  it("drops the optional qualifier once a brief exists", () => {
+    render(<BriefSection brief={emptyBrief("a")} canEdit onEdit={() => {}} onGenerate={() => {}} stale={false} />)
+    expect(screen.queryByText(/\(optional\)/i)).toBeNull()
+  })
   it("shows an 'out of date' badge when the L1 is stale", () => {
     render(<BriefSection brief={emptyBrief("a")} canEdit onEdit={() => {}} onGenerate={() => {}} stale />)
     expect(screen.getByText(/out of date/i)).toBeTruthy()

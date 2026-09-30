@@ -37,6 +37,8 @@
  * ```
  */
 
+import { tokenize } from "./tokenize"
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Pair count below this threshold → Dice cold-start; at or above → EM. */
@@ -141,26 +143,15 @@ export interface AlignmentModel {
 // ── Tokenization ──────────────────────────────────────────────────────────────
 
 /**
- * AQU-462: combining marks (`\p{M}`) are part of a word, not separators.
- *
- * Pointed Hebrew carries its vowels as combining marks, so a letters-and-digits
- * class shredded בְּרֵאשִׁית into eleven single-consonant "tokens" — every
- * Hebrew alignment was really a per-consonant alignment, which is noise no
- * matter how good the model is. Greek was unaffected only because its accents
- * arrive precomposed. The same shredding hits any script that points its
- * vowels (Arabic, Devanagari, Thai), so this is a fix for them too.
- */
-const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
-
-/** Split a string into lowercase Unicode tokens. */
-/**
- * The tokenizer `alignCell` uses, exported so the panel can synthesize a row
+ * The tokenizer `alignCell` uses, re-exported so the panel can synthesize a row
  * for a decided (srcToken, tgtToken) pair on the same token boundaries that
  * produced the link in the first place (AQU-207).
+ *
+ * The rule — combining marks belong inside a word — and why it matters live in
+ * `./tokenize`, which `bt-glosser.ts` shares so the gloss cannot tokenize
+ * differently from the alignment it is read against (AQU-462, AQU-1190).
  */
-export function tokenize(s: string): string[] {
-  return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
-}
+export { tokenize }
 
 // ── Dice cold-start ───────────────────────────────────────────────────────────
 

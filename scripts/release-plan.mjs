@@ -50,12 +50,19 @@ export function prHolds(pr) {
   return pr.pathHolds || (pr.walk !== "PASS" && pr.walk !== "none")
 }
 
-// A PR whose diff touches only docs or only test/journey files has no UI
-// claim, so the bot skips the walk entirely (PR-BOT.md) — there is no walk
-// comment to look up, and there never will be one. This is a path check, not
-// a GitHub lookup, so it needs no PAT and stays true even before the walk
-// lookup script runs.
-const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\//
+// A PR whose diff touches only docs, only test/journey files, or only
+// release/dev-tooling scripts has no UI claim, so the bot skips the walk
+// entirely (PR-BOT.md) — there is no walk comment to look up, and there
+// never will be one. This is a path check, not a GitHub lookup, so it needs
+// no PAT and stays true even before the walk lookup script runs.
+//
+// scripts/ is included here, not exempted from walk requirements entirely:
+// a scripts-only PR that also trips the infra area (tag-release, verify-
+// deploy, resolve-deployment, cloudflare-*) still holds on its own, via
+// classifyFiles/pathHolds — that gate runs independently of walk. This only
+// stops a *non-infra* scripts change (like this file) from sitting at
+// walk: "unknown" forever because no UI walk will ever post for it.
+const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\/|^scripts\//
 
 export function isDocsOrTestOnly(files) {
   return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file))

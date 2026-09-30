@@ -11,8 +11,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|run-acoustic-alignment|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/alignment\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/(?:timeline-import|script-alignment)|infra\/modal\/alignment|db\/postgres\/migrations\/0117_alignment_jobs)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
   },
+    source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {

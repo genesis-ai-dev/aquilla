@@ -78,6 +78,7 @@ import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
+import transcriptionRoutes from "./routes/transcription"
 import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
@@ -125,7 +126,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -233,6 +234,7 @@ app.get("/", (c) =>
       "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
+      "/api/v1/audio/transcriptions",
       "/api/v1/chat/ab-feedback",
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",
@@ -330,6 +332,7 @@ app.route("/api/v2/changesets", changesetApprovalsRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+app.route("/api/v1/audio", transcriptionRoutes)
 // Unknown-text import classification. Deliberately separate from chat: the
 // server owns the prompt and accepts only bounded file metadata + a sample.
 app.route("/api/v1/import", importClassifyRoutes)

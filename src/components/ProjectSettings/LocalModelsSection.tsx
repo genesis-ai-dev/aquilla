@@ -20,8 +20,12 @@ import {
   useModelStatus,
   type ModelId,
 } from "@/lib/audio/prefetch"
-import { clearStoredConsent } from "@/lib/audio/ai-consent"
+import { clearStoredConsent, storeAiModelConsent } from "@/lib/audio/ai-consent"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import {
+  setTranscriptionProvider, useTranscriptionProvider,
+} from "@/lib/audio/transcription-preference"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ModelMeta {
@@ -50,6 +54,8 @@ const MODELS: ModelMeta[] = [
 
 export function LocalModelsSection() {
   const t = useT()
+  const { session } = useFrontierSession()
+  const provider = useTranscriptionProvider(session?.username)
   // Derive ready-state from Cache Storage on mount so the section reflects
   // what's actually downloaded, not just what was fetched this session.
   useEffect(() => {
@@ -57,7 +63,39 @@ export function LocalModelsSection() {
   }, [])
 
   return (
-    <div id="local-models">
+    <div id="local-models" className="space-y-6">
+      <SettingsGroup label={t("settings.transcription.title")}>
+        <fieldset className="space-y-3 px-5 py-4">
+          <legend className="sr-only">{t("settings.transcription.title")}</legend>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.transcription.scope")}
+          </p>
+          {(["hosted", "local"] as const).map(value => (
+            <label key={value} className="flex items-start gap-3 text-sm">
+              <input
+                type="radio"
+                name="transcription-provider"
+                value={value}
+                checked={provider === value}
+                onChange={() => setTranscriptionProvider(session?.username, value)}
+                className="mt-1 accent-primary"
+              />
+              <span>
+                <span className="font-medium">
+                  {t(value === "hosted"
+                    ? "settings.transcription.hosted"
+                    : "settings.transcription.local")}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  {t(value === "hosted"
+                    ? "settings.transcription.hostedDescription"
+                    : "settings.transcription.localDescription")}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      </SettingsGroup>
       <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>
         {MODELS.map((meta) => (
           <ModelRow key={meta.id} meta={meta} />
@@ -77,6 +115,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   const isError = status.kind === "error"
 
   const download = async () => {
+    storeAiModelConsent(meta.id)
     setBusy(true)
     try {
       await prefetchAiModels({

@@ -16,7 +16,7 @@ import type { AquillaDb } from '../../../db/shim/postgres'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
-import { counts, readValidationCount, BOOK_INDEX } from './progress-read-route'
+import { counts, readValidationCount, readValidationCountAudio, BOOK_INDEX } from './progress-read-route'
 import { readCountStructuralCells } from './structural-cells'
 import { resolveCorpusMarker } from './corpus-marker'
 import {
@@ -95,7 +95,12 @@ function corpusMarkerOf(meta: string | null): string | null {
   }
 }
 
-function toUnit(row: PlanUnitRow, validationCount: number, countStructural: boolean): PlanUnit {
+function toUnit(
+  row: PlanUnitRow,
+  validationCount: number,
+  countStructural: boolean,
+  validationCountAudio: number,
+): PlanUnit {
   const c = counts(
     {
       scope: row.section_key ? 'book' : 'file',
@@ -115,9 +120,14 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
       audio_validated_count: row.audio_validated_count,
       structural_audio_count: row.structural_audio_count,
       structural_audio_validated_count: row.structural_audio_validated_count,
+      // AQU-490: the board's audio number is now measured at the project's
+      // required validator count, so the histograms have to come with the row.
+      audio_validator_histogram: row.audio_validator_histogram ?? null,
+      structural_audio_validator_histogram: row.structural_audio_validator_histogram ?? null,
     },
     validationCount,
     countStructural,
+    validationCountAudio,
   )
   return {
     fileId: row.file_id,
@@ -167,12 +177,13 @@ async function readPlan(
   db: AquillaDb,
   projectId: string,
   lane: string,
-): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
-  const [validationCount, countStructural] = await Promise.all([
+): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; validationCountAudio: number; countStructural: boolean; planUpdatedAt: number; progressUpdatedAt: number }> {
+  const [validationCount, countStructural, validationCountAudio] = await Promise.all([
     readValidationCount(db, projectId),
     // AQU-1083: the board reads the same policy every other progress surface
     // does, so a book that opted out of counting headings is Done here too.
     readCountStructuralCells(db, projectId),
+    readValidationCountAudio(db, projectId),
   ])
   const { results } = await db
     .prepare(readPlanUnitsSql())
@@ -190,12 +201,12 @@ async function readPlan(
     // watch; without this the board keeps the old folder until an edit lands.
     progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.file_updated_at) || 0)
     return {
-      unit: toUnit(row, validationCount, countStructural),
+      unit: toUnit(row, validationCount, countStructural, validationCountAudio),
       book: row.section_key || row.file_book_code || null,
     }
   })
   withBook.sort((x, y) => compareUnits(x.unit, y.unit, x.book, y.book))
-  return { units: withBook.map((x) => x.unit), revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt }
+  return { units: withBook.map((x) => x.unit), revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt }
 }
 
 export async function handlePlanRequest(
@@ -221,7 +232,7 @@ export async function handlePlanRequest(
   const lane = (url.searchParams.get('lane') ?? '').trim()
 
   if (request.method === 'GET') {
-    const { units, revision, validationCount, countStructural, planUpdatedAt, progressUpdatedAt } =
+    const { units, revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt } =
       await readPlan(db, projectId, lane)
     // THREE CLOCKS, because none of them alone moves for every change worth
     // re-reading. `revision` tracks the event sequence; plan writes never
@@ -241,8 +252,15 @@ export async function handlePlanRequest(
     // against its subtitle count instead of its cue sheet, and every file in
     // one "All files" folder, for as long as nothing in the project changes.
     // s1 = the shape before AQU-1278; s2 = these three fields.
+    //
+    // AQU-490 needs both halves again. `va` joins the key because every
+    // unit's audioValidatedCount is now measured against the AUDIO threshold,
+    // so raising it changes the body with no data write to move any of the
+    // three timestamps. And s3 because that field kept its name and its type
+    // and changed its question — the one kind of change none of the DATA
+    // parts of this key can ever express.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:s2${structuralTag}"`
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:va${validationCountAudio}:s3${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -331,9 +349,10 @@ export async function handlePlanRequest(
     .all<PlanUnitRow>()
   const row = (results ?? [])[0]
   if (!row) return new Response('unknown plan unit', { status: 404 })
-  const [validationCount, countStructural] = await Promise.all([
+  const [validationCount, countStructural, validationCountAudio] = await Promise.all([
     readValidationCount(db, projectId),
     readCountStructuralCells(db, projectId),
+    readValidationCountAudio(db, projectId),
   ])
-  return Response.json({ unit: toUnit(row, validationCount, countStructural) })
+  return Response.json({ unit: toUnit(row, validationCount, countStructural, validationCountAudio) })
 }

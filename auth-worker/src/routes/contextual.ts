@@ -23,6 +23,7 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { visibleSourceSql } from "../lib/hidden-cells-scope"
 import { ROLE, type Env } from "../types"
 import { errorJson, requireRole } from "./_contextual-helpers"
 import { runAiGuard } from "../lib/ai-budget"
@@ -692,9 +693,14 @@ contextual.post(
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
     if (body.scope === "project") {
+      // AQU-935: discovery and conflict detection both read the lane the start
+      // request named. Without it a multi-lane project's second language sees
+      // the default lane's finished work and its in-flight runs, so a start
+      // there either finds nothing to do or skips every file as "already
+      // running". `lane` is `''` for a single-language project — unchanged.
       const [candidates, activeFiles] = await Promise.all([
-        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId),
-        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId),
+        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId, lane),
+        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId, lane),
       ])
       if (candidates.length === 0) {
         const { body: err, status } = errorJson(
@@ -866,7 +872,10 @@ async function readinessCellCounts(
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''`,
+          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            -- AQU-1424: a parked cell is not untranslated work waiting for
+            -- autopilot, so it leaves both of these counts.
+            AND ${visibleSourceSql('s')}`,
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()
@@ -1536,7 +1545,7 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
-    selectCellPairs(db, projectId, { fileId }),
+    selectCellPairs(db, projectId, { fileId, targetLang: "" }),
   ])
   const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
@@ -1591,7 +1600,7 @@ contextual.put(
     // 'auto'/'fixed' do not need them, so only pay for the read when they do.
     const orderedCellIds =
       input.strategy === "explicit"
-        ? (await selectCellPairs(db, projectId, { fileId })).map((p) => p.cellId)
+        ? (await selectCellPairs(db, projectId, { fileId, targetLang: "" })).map((p) => p.cellId)
         : []
     const checked = validateSegmentationInput(input, orderedCellIds)
     if (!checked.ok) {
@@ -1689,7 +1698,7 @@ contextual.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    const pairs = await selectCellPairs(db, projectId, { fileId })
+    const pairs = await selectCellPairs(db, projectId, { fileId, targetLang: "" })
     if (pairs.length === 0) {
       const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
       return c.json(body, status)

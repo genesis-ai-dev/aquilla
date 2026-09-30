@@ -109,6 +109,17 @@ export interface CellRow {
    * arrives parsed as an object (cells-read.ts normalizes a JSON string).
    */
   metadata?: Record<string, unknown> | null
+  /**
+   * AQU-1422: true while this cell is parked ("Hide cell"). Absent on a visible
+   * row — the server omits the key rather than sending `false` on every one of a
+   * Bible file's 30k rows.
+   *
+   * ONLY THE SOURCE ROW CARRIES IT. Read a cell's visibility off its source row,
+   * never off a target row: hiding is per cell, not per lane, and a target row
+   * created after the hide (a collaborator's in-flight translation, which must
+   * survive) has no flag of its own.
+   */
+  hidden?: boolean
 }
 
 /** Primary content kind of a segment. */

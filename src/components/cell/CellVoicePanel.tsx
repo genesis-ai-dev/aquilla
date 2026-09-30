@@ -41,6 +41,9 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { AudioValidationControl } from "./AudioValidationControl"
+import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -61,6 +64,8 @@ interface CellVoicePanelProps {
   onPlay?: () => void
   /** Open the character creator seeded with THIS cell's take (clone source). */
   onMakeCharacter: () => void
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 function fmtTime(s: number): string {
@@ -215,6 +220,7 @@ export function CellVoicePanel({
   onAssign,
   onAfterGenerate,
   onMakeCharacter,
+  targetLang,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -329,6 +335,7 @@ export function CellVoicePanel({
       audioId: playableId,
       trimStartMs: start != null ? Math.round(start * 1000) : null,
       trimEndMs: end != null ? Math.round(end * 1000) : null,
+      ...(targetLang ? { targetLang } : {}),
       author: username,
     })
     injectOptimisticAudioTrim(cell.fileId, cell.id, {
@@ -339,12 +346,17 @@ export function CellVoicePanel({
       voiceId: att.voiceId ?? null,
       referenceAudioId: att.referenceAudioId ?? null,
       durationMs: att.durationMs ?? null,
+      // AQU-490: carried, because this overlay REPLACES the attachment and a
+      // missing optional field silently reads as "nobody validated this". The
+      // second of the two trim call sites; both have to say it.
+      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
+      ...(att.validators ? { validators: att.validators } : {}),
       trimStartMs: start != null ? Math.round(start * 1000) : null,
       trimEndMs: end != null ? Math.round(end * 1000) : null,
     }, trimP)
     void trimP
     notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
+  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username, targetLang])
 
   const changeTrim = useCallback((start: number | null, end: number | null) => {
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
@@ -365,10 +377,13 @@ export function CellVoicePanel({
   const generate = useCallback(async (autoplay: boolean, voiceId?: string) => {
     if (isVoicing || !canGenerate) return
     if (autoplay) autoplayRef.current = true
-    const ok = await generateCellVoice({ project, cell, session: sess, username, voiceId: voiceId ?? active.id })
+    const ok = await generateCellVoice({
+      project, cell, session: sess, username, voiceId: voiceId ?? active.id,
+      ...(targetLang ? { targetLang } : {}),
+    })
     if (ok) onAfterGenerate()
     else autoplayRef.current = false
-  }, [isVoicing, canGenerate, project, cell, sess, username, active.id, onAfterGenerate])
+  }, [isVoicing, canGenerate, project, cell, sess, username, active.id, onAfterGenerate, targetLang])
 
   // Clicking a voice chip IS the generate action: assign the line to that voice
   // and voice it immediately (autoplay when the take lands). Record it as
@@ -401,6 +416,19 @@ export function CellVoicePanel({
   }, [voices, recency])
 
   // Section breaks (paratext) aren't voiced — render nothing.
+  // AQU-490. The source clip is excluded by the adapter (role 'source'), so a
+  // media line whose only audio is the shared programme track shows no control
+  // here — which is right: nobody validates the film's own soundtrack.
+  const audioValidation = useAudioValidation({
+    project: project as unknown as ProjectRecord,
+    fileId: cell.fileId,
+    cellId: cell.id,
+    username,
+    jwt: sess?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
+  })
+  const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
+
   if (isParatext) return null
 
   // Nothing to voice yet (untranslated) — a quiet hint, no player chrome.
@@ -421,6 +449,17 @@ export function CellVoicePanel({
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
+      {voiceValidationTakes.length > 0 && (
+        <AudioValidationControl
+          cellRef={cell.context?.trim() || cell.id}
+          takes={voiceValidationTakes}
+          currentUsername={username}
+          validationRequirement={audioValidation.validationRequirement}
+          canValidate={audioValidation.canValidate}
+          onValidationChange={audioValidation.onValidationChange}
+          variant="inline"
+        />
+      )}
       {/* Round 5: no crop on the shared source clip — its window is the
           section's timing; retime the section in the timeline. */}
       {!isSourceClip && (

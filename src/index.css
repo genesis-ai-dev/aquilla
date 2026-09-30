@@ -298,10 +298,40 @@
        scroll). Inner panes keep using overscroll-contain for their own
        scroll chaining. */
     overscroll-behavior: none;
+    /* THE DOCUMENT NEVER SCROLLS. AppShell is a fixed-height frame
+       (`h-screen overflow-hidden`) and every pane inside it scrolls on its
+       own, so a scrolled document can only ever slide the whole application
+       off the top of the window and leave blank space behind — which is
+       exactly what it did. Nothing becomes unreachable by forbidding it:
+       content past the frame's edge was already clipped, so scrolling the
+       document revealed emptiness rather than more of the page.
+
+       It was reachable because a wheel over an inner pane with nothing left
+       to scroll chains outward, and the document was taller than the window
+       on three of the five routes measured (the plan board reported 2142px
+       against a 900px viewport) even though every ancestor clips. Found via
+       the plan inspector, whose panel is often short enough that the wheel
+       had somewhere else to go (2026-09-22).
+
+       This refuses the USER gesture, which is the bug. A script can still
+       move the viewport — `overflow` on the root propagates to the viewport,
+       where `hidden` permits programmatic scrolling and `clip` is not
+       propagated at all, so neither keyword closes that door. Worth knowing
+       if a future `scrollIntoView` ever strands the frame.
+
+       SCOPED to `html[data-app-frame]`, which AppShell sets while mounted.
+       The blanket version of this rule broke every page rendered OUTSIDE the
+       frame: /privacy-policy is a 3,400px document in the body, and two
+       thirds of it — its analytics opt-out included — became unreachable. */
   }
   html {
     @apply font-sans;
     overscroll-behavior: none;
+  }
+  /* The frame's no-scroll rule, only while the frame is on screen. */
+  html[data-app-frame],
+  html[data-app-frame] body {
+    overflow: hidden;
   }
   html.dark {
     color-scheme: dark;

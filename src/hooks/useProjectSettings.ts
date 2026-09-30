@@ -12,9 +12,11 @@ import {
   type PatchResult,
   type ProjectWideSettings,
   type ProjectSettingsResponse,
+  type ProjectLaneView,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -199,6 +201,10 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /** AQU-1418: the project's lane rows from the last settings response.
+   *  Null before the first response that carries them, and on a server
+   *  that predates lane rows. */
+  lanes: ProjectLaneView[] | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
@@ -367,7 +373,13 @@ export function useProjectSettings(
     [],
   )
 
-  const mountAtRef = useRef(performance.now())
+  // AQU-1470: count this instance toward the project's open so the hydration
+  // event fires once per open, not once per instance or refetch. Declared
+  // before the fetch effect so the open exists when the first GET resolves.
+  useEffect(() => {
+    if (!projectId) return
+    return retainProjectOpen(projectId)
+  }, [projectId])
 
   // AQU-979: stable per-instance id so this hook can ignore the settings-updated
   // event it broadcast itself (it already holds the authoritative response).
@@ -399,12 +411,14 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
     }
+    if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -448,10 +462,11 @@ export function useProjectSettings(
       const got = out.value
       writeServer(got)
       setHasFetched(true)
-      if (got) {
+      const withinMs = got ? claimHydrationReport(projectId) : null
+      if (got && withinMs !== null) {
         posthog.capture("project settings hydrated", {
           project_id: projectId,
-          within_ms: Math.round(performance.now() - mountAtRef.current),
+          within_ms: withinMs,
           has_server_row: got.version > 0,
           // AQU-1274 — see UseProjectSettingsOptions.roleTelemetry.
           ...(roleTelemetryRef.current
@@ -887,6 +902,7 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
+    lanes,
     isOnline,
     canEdit,
     reasonCannotEdit,

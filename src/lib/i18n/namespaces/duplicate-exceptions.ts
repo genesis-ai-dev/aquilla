@@ -296,6 +296,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "name and an item's lifecycle status are different concepts sharing one " +
     "English participle; several languages would render a place-name and a " +
     "state-of-an-item differently.",
+  "org.overviewLaneTable.archivedBadge":
+    "Inline status badge beside one retired target-LANGUAGE LANE in the project " +
+    "overview's collapsed Archived group (AQU-1458) — it says that lane is " +
+    "archived. autopilot.evidence.status.archived is one value of the fixed " +
+    "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
+    "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
+    "org.orgSidebar.archived above names a destination. A language lane and an " +
+    "evidence item are unrelated referents, and where a participle agrees with the " +
+    "noun it describes the two cannot share a form — the ar catalog already gives " +
+    "the evidence state and the sidebar name different genders, and ru renders " +
+    "them as different phrases altogether.",
   "org.membersPage.orgPage.unknownInviter":
     "Lower-case filler substituted into the middle of a byline sentence ('by " +
     "{username}') when the inviter is unavailable — grammatically the object of " +
@@ -399,6 +410,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "dialog. editor.sync.live is the websocket-connection status indicator in " +
     "the editor's sync badge. A project-linking term of art vs a connectivity " +
     "status word that happen to share the English word 'Live'.",
+  "projectSettings.create.liveModeName":
+    "The emphasized mode word spliced into projectSettings.create.liveIntro's " +
+    "running sentence as a <strong> placeholder ('…a live copy that stays " +
+    "connected…'), so it must take whatever case, gender or article agreement " +
+    "that sentence demands in the target language. editor.sync.live is the " +
+    "standalone websocket-status chip label beside a colored dot, and " +
+    "projectSettings.sourceLink.modeLive is the citation-form badge/radio name " +
+    "of the link mode. A word inside a sentence vs two standalone labels.",
   "projectSettings.section.languages":
     "Card heading for this project's target-language lanes. fileDetails.languages " +
     "is a plain data label in a file-info panel naming which languages a file " +

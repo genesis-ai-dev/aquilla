@@ -902,10 +902,14 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   try {
     const row = await db
       .prepare(
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
+        // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
         `INSERT INTO contextual_runs
             (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
-             anchor_cell_id, scope_group, span_allowance)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?)
+             anchor_cell_id, scope_group, span_allowance, lane_id)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -924,6 +928,9 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
           : input.spanAllowance === null
             ? null
             : Math.max(0, Math.round(input.spanAllowance)),
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang).
+        input.projectId,
+        lane,
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1620,9 +1627,13 @@ export async function insertDrafts(
     ...input.drafts.map((d) =>
       db
         .prepare(
-          `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+          // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql). COALESCE on
+        // conflict so a resolved id is never regressed to NULL.
+        `INSERT INTO contextual_drafts
+              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb,
+                   (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
            ON CONFLICT (project_id, file_id, cell_id, target_lang) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
@@ -1631,6 +1642,7 @@ export async function insertDrafts(
              text = EXCLUDED.text,
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
+             lane_id = COALESCE(EXCLUDED.lane_id, contextual_drafts.lane_id),
              created_at = now()`,
         )
         .bind(
@@ -1644,6 +1656,8 @@ export async function insertDrafts(
           d.text,
           d.verdicts ?? null,
           d.provenance ?? null,
+          input.projectId,
+          lane,
         ),
     ),
   ]
@@ -2109,12 +2123,20 @@ export interface ActiveAutopilotRunFile {
   workQueued: boolean
 }
 
-/** Active default-lane files are still candidates (their staged drafts have
+/** Active files in THIS lane are still candidates (their staged drafts have
  * not changed target cells), but a project fan-out must not let them consume
- * its bounded batch. The active partial index makes this one row per file. */
+ * its bounded batch. The active partial index makes this one row per file.
+ *
+ * AQU-935: the lane is a parameter rather than a hardcoded `''`. A run in the
+ * Burmese lane says nothing about whether the Thai lane is free — conflating
+ * them made a second lane's project-wide start report every file as "already
+ * running" and start nothing at all. `''` (the project default lane) remains
+ * the default argument, so a single-language project is unchanged.
+ */
 export async function listActiveAutopilotRunFiles(
   db: AquillaDb,
   projectId: string,
+  targetLang = "",
 ): Promise<ActiveAutopilotRunFile[]> {
   const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const { results } = await db
@@ -2122,11 +2144,11 @@ export async function listActiveAutopilotRunFiles(
       `SELECT file_id, id, status,
               (status = 'parked' AND done_spans + failed_spans < total_spans) AS work_queued
          FROM contextual_runs
-        WHERE project_id = ? AND target_lang = ''
+        WHERE project_id = ? AND target_lang = ?
           AND status IN (${activePlaceholders})
         ORDER BY file_id ASC`,
     )
-    .bind(projectId, ...ACTIVE_STATUSES)
+    .bind(projectId, targetLang, ...ACTIVE_STATUSES)
     .all<{
       file_id: string
       id: string
@@ -2150,10 +2172,17 @@ export async function listActiveAutopilotRunFiles(
  * This is the unit that makes fan-out worth its overhead: one file is a chain
  * of spans, but a project is dozens of files that share nothing at all — no
  * briefs, no cells, no ordering. Whole books can run at once.
+ *
+ * AQU-935: "work left" is a question about ONE lane. The source side is always
+ * lane `''` — source cells have no target language — but the target side and
+ * the least-recent-attempt ordering must both read the lane being started, or
+ * a second lane inherits the default lane's progress and Autopilot declares a
+ * wholly untranslated language already finished.
  */
 export async function listAutopilotCandidateFiles(
   db: AquillaDb,
   projectId: string,
+  targetLang = "",
 ): Promise<AutopilotCandidateFile[]> {
   const placeholders = NON_DISCOURSE_KINDS.map(() => "?").join(",")
   const { results } = await db
@@ -2167,7 +2196,7 @@ export async function listAutopilotCandidateFiles(
           AND s.side = 'source' AND s.target_lang = ''
          LEFT JOIN cells t
            ON t.project_id = s.project_id AND t.file_id = s.file_id
-          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
+          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?
         WHERE f.project_id = ? AND f.deleted_at IS NULL
           AND COALESCE(f.kind, '') NOT IN (${placeholders})
         GROUP BY f.id, f.name, f.kind
@@ -2176,12 +2205,12 @@ export async function listAutopilotCandidateFiles(
                    SELECT MAX(prior.created_at) FROM contextual_runs prior
                     WHERE prior.project_id = f.project_id
                       AND prior.file_id = f.id
-                      AND prior.target_lang = ''
+                      AND prior.target_lang = ?
                  ) ASC NULLS FIRST,
                  untranslated DESC,
                  f.id ASC`,
     )
-    .bind(projectId, ...NON_DISCOURSE_KINDS)
+    .bind(targetLang, projectId, ...NON_DISCOURSE_KINDS, targetLang)
     .all<{ id: string; name: string; kind: string; untranslated: number; has_refs: boolean | null }>()
 
   return results

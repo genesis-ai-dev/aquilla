@@ -6,18 +6,24 @@
 // is designed for), fetches fire only while the panel is open, chapter
 // responses are promise-cached in the helloao client (scrolling within a
 // chapter costs zero requests), and chapter changes are debounced so fast
-// scrolling doesn't burst-fetch every chapter passed over.
+// scrolling doesn't burst-fetch every chapter passed over. The neighbouring
+// chapters are warmed after the visible one lands (AQU-843) — steady-state
+// reading therefore pays the same one request per chapter it always did, just
+// early enough that the panel is populated on arrival.
 //
 // Pinned versions persist in localStorage per user (not project settings) —
 // helps are a personal reading aid, not project data.
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  adjacentChapters,
   fetchHelloaoChapter,
   fetchHelloaoTranslations,
   flattenHelloaoContent,
+  prefetchHelloaoChapter,
   type HelloaoTranslation,
 } from "@/lib/parsers/helloao"
+import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -154,10 +160,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     const chapter = Number(chapterStr)
     let cancelled = false
 
-    for (const versionId of pinned) {
+    const loads = pinned.map((versionId) =>
       fetchHelloaoChapter(versionId, book, chapter)
         .then((res) => {
-          if (cancelled) return
+          if (cancelled) return null
           const verses = new Map<number, string>()
           for (const node of res.chapter.content) {
             if (node.type === "verse") {
@@ -169,9 +175,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             next.set(`${versionId}/${book}/${chapter}`, { verses })
             return next
           })
+          return res
         })
         .catch((err) => {
-          if (cancelled) return
+          if (cancelled) return null
           setChapterData((prev) => {
             const next = new Map(prev)
             next.set(`${versionId}/${book}/${chapter}`, {
@@ -180,8 +187,26 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             })
             return next
           })
-        })
-    }
+          return null
+        }),
+    )
+
+    // AQU-843: once the visible chapter has landed for every pinned version,
+    // warm the chapters either side so crossing a chapter boundary mid-scroll
+    // reads from cache instead of leaving the panel blank on arrival. Ordered
+    // after the visible fetches on purpose — on a weak link a preload must
+    // never compete with the text the translator is waiting on. The book's
+    // chapter count comes off the response we just got, so the warm never
+    // spends a request on a chapter past the end of the book.
+    void Promise.all(loads).then((results) => {
+      if (cancelled || !referencePrefetchAllowed()) return
+      const numberOfChapters = results.find((res) => res !== null)?.book.numberOfChapters
+      if (!numberOfChapters) return
+      for (const target of adjacentChapters(chapter, numberOfChapters)) {
+        for (const versionId of pinned) prefetchHelloaoChapter(versionId, book, target)
+      }
+    })
+
     return () => {
       cancelled = true
     }

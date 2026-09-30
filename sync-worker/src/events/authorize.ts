@@ -14,6 +14,8 @@ import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { laneTagForArchiveCheck } from '../../../src/lib/lanes/archived-lane'
+import { refusalForArchivedLane } from './archived-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -340,6 +342,17 @@ export async function authorize<K extends EventKind>(
     typeof tokenClaims.username === 'string' && tokenClaims.username.trim() !== ''
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
+
+  // AQU-1462: an archived lane refuses writes that name it. Every role,
+  // including Maintainer and platform, and whether or not the write wall is
+  // on. The default lane is not archivable. Kinds that are not stored per
+  // lane (audio, waivers, back-translations, lane retimes) are frozen only
+  // when the event carries that lane's tag.
+  const archiveTag = laneTagForArchiveCheck(raw.kind, raw.payload)
+  if (db != null && settings && archiveTag) {
+    const archived = await refusalForArchivedLane(db, raw.projectId, archiveTag, settings)
+    if (archived) return { ok: false, status: 403, reason: archived }
+  }
 
   // AQU-1037: assignment events replace their historical static
   // PROJECT_LEAD floor with the project's org-configured floor. The resolver

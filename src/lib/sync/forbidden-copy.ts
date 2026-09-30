@@ -44,6 +44,13 @@ export function forbiddenReasonCopy(reason: string): string {
   if (r.includes("validator allowlist")) {
     return "you weren't on this project's validator allowlist"
   }
+  // AQU-1462: `lane 'Spanish' is archived`. Past tense, like the other
+  // refusals — the lane may have been restored since the server said no.
+  const archived = /lane '([^']*)' is archived/i.exec(reason)
+  if (archived) {
+    const lane = archived[1] ?? ""
+    return lane === "" ? "the lane was archived" : `the ${lane} lane was archived`
+  }
   return reason
 }
 

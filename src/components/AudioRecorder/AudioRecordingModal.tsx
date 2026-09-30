@@ -81,6 +81,12 @@ interface Props {
    * and the take is attached, injected, transcribed and listed under that.
    */
   targetSlot?: string
+  /**
+   * AQU-1462: the lane the member is recording in. A non-empty tag is stamped
+   * on the take's events so an archived lane can refuse them. Omitted for
+   * the default lane, which cannot be archived.
+   */
+  laneTag?: string
   /** The file's tracks, so the takes list can be grouped under a heading per
    *  track. Absent = one ungrouped list, exactly as it has always been. */
   timelineTracks?: readonly TimelineTrack[]
@@ -206,6 +212,7 @@ function GroupedTakes({
   username,
   session,
   onLastTakeRemoved,
+  laneTag,
 }: {
   groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
   project: ProjectRecord
@@ -215,6 +222,8 @@ function GroupedTakes({
   username: string
   session: FrontierSession | null
   onLastTakeRemoved?: (cellId: string) => void
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  laneTag?: string
 }) {
   const showHeadings = groups.length > 1
   return (
@@ -254,6 +263,7 @@ function GroupedTakes({
               sourceClip={isDefault ? sourceClip : null}
               author={username}
               session={session}
+              targetLang={laneTag}
             />
           </div>
         )
@@ -264,7 +274,7 @@ function GroupedTakes({
 
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, timelineTracks, username,
+  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   const t = useT()
@@ -612,6 +622,7 @@ export function AudioRecordingModal({
           label: take.label ?? undefined,
           trimStartMs: take.trimStartMs ?? undefined,
           trimEndMs: take.trimEndMs ?? undefined,
+          ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
         injectOptimisticAudioAttachment(
@@ -625,7 +636,7 @@ export function AudioRecordingModal({
         /* best-effort — the take simply keeps its fallback-width chip */
       }
     })()
-  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username])
+  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username, laneTag])
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -939,6 +950,7 @@ export function AudioRecordingModal({
         // The voice lands on the track the recorder is pointed at, not always
         // on the default row's generated-voice slot.
         slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       if (ok) {
         setTtsDone(true)
@@ -959,6 +971,7 @@ export function AudioRecordingModal({
           const displaceP = emitCellAudioSelect({
             projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
             audioId: sourceClip.audioId, slot: "recording", author: username,
+            ...(laneTag ? { targetLang: laneTag } : {}),
           })
           injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
           await displaceP
@@ -968,7 +981,7 @@ export function AudioRecordingModal({
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot])
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot, laneTag])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -1095,6 +1108,7 @@ export function AudioRecordingModal({
           durationMs: takeDurationMs,
           ...takeTrimWindow,
           label: takeLabel,
+          ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
       } catch (emitErr) {
@@ -1159,6 +1173,7 @@ export function AudioRecordingModal({
           fileId: activeCell.fileId,
           cellId: activeCell.id,
           audioId: savedTakeId,
+          ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         }).catch((err) => {
           // Non-blocking, as for text: the take itself already landed.
@@ -1192,6 +1207,7 @@ export function AudioRecordingModal({
             fileId: activeCell.fileId,
             cellId: activeCell.id,
             targetOffsetMs: laneOffsetMs,
+            ...(laneTag ? { targetLang: laneTag } : {}),
             author: username,
           })
         } catch {
@@ -1245,7 +1261,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady])
+  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1281,6 +1297,7 @@ export function AudioRecordingModal({
         file,
         username,
         label,
+        ...(laneTag ? { targetLang: laneTag } : {}),
         // Sam, 2026-08-24: uploading is the other way audio gets onto an added
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
@@ -1308,7 +1325,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -2148,6 +2165,7 @@ export function AudioRecordingModal({
                   username={username}
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
+                  laneTag={laneTag}
                 />
               </div>
             )}
@@ -2317,6 +2335,7 @@ export function AudioRecordingModal({
                   username={username}
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
+                  laneTag={laneTag}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">

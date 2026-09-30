@@ -35,6 +35,12 @@ import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authoriz
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
+import { loadProjectSettings } from '../../../db/shared/projects'
+import {
+  archiveCheckApplies,
+  archivedLaneReason,
+  archivedTagsFromSettings,
+} from '../../../src/lib/lanes/archived-lane'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -255,6 +261,25 @@ export async function prepareEmitEvents(
 
   const failed = (i: number, message: string, details?: unknown): Response =>
     errorResponse('validation_failed', `events[${i}]: ${message}`, details)
+
+  const namedLaneEvents = cmd.events.some((e) => e.laneId && archiveCheckApplies(e.kind))
+  if (namedLaneEvents) {
+    const projectSettings = await loadProjectSettings(db, projectId)
+    const lanes = (projectSettings.lanes ?? [])
+      .filter((lane) => lane.role === 'target')
+      .map((lane) => ({
+        id: lane.id,
+        name: lane.name,
+        legacyTag: lane.legacyTag,
+        archivedAt: lane.archivedAt,
+      }))
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    for (const [i, e] of cmd.events.entries()) {
+      if (!e.laneId || !archiveCheckApplies(e.kind)) continue
+      const archived = archivedLaneReason({ tag: e.laneId, lanes, archivedTags })
+      if (archived) return failed(i, archived)
+    }
+  }
 
   const preconditionByKey = new Map<string, CellPrecondition>()
   const plannedEmit: NonNullable<PlannedEventIds['emitEvents']> = []
@@ -510,6 +535,12 @@ export async function prepareEmitEvents(
   })
 }
 
+/** AQU-1462: stamp the lane so authorize can refuse an archived one. */
+function withLaneTag(kind: string, laneId: string | undefined, payload: Record<string, unknown>): Record<string, unknown> {
+  if (!laneId || !archiveCheckApplies(kind)) return payload
+  return { ...payload, targetLang: laneId }
+}
+
 /** Build the compiled payload for one plan event, filling server-resolved pins
  *  from the stored precondition and minted ids from the planned ledger. */
 function compilePayload(
@@ -530,10 +561,13 @@ function compilePayload(
       }
     case 'cell.backtranslation.set':
       if (!pin?.targetHeadEventId) return null
-      return { ...e.payload, targetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, { ...e.payload, targetEventId: pin.targetHeadEventId })
     case 'target.cell.repin':
       if (!pin?.targetHeadEventId || !pin.sourceEventId) return null
-      return { sourceEventId: pin.sourceEventId, expectedTargetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, {
+        sourceEventId: pin.sourceEventId,
+        expectedTargetEventId: pin.targetHeadEventId,
+      })
     case 'comment.create': {
       const scope: CommentScope =
         e.fileId && e.cellId
@@ -572,7 +606,8 @@ function compilePayload(
     default:
       // comment.edit/delete/resolve, cell.waive/unwaive, file.*,
       // assignment.unassign: the normalized payload IS the wire payload.
-      return { ...e.payload }
+      // AQU-1462 stamps targetLang only for kinds the archive check reads.
+      return withLaneTag(e.kind, e.laneId, { ...e.payload })
   }
 }
 

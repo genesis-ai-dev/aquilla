@@ -183,6 +183,24 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   )
   const isBusy = running.kind !== "idle"
 
+  /**
+   * AQU-1459: the SAME permission `commitCompletedCells` applies, asked BEFORE
+   * the model is called instead of after it answers. A validator (Reviewer)
+   * passes the `cell.validate` check that keeps the whole bar on screen, so
+   * Translate used to stay live for them: the click spent tokens on drafts the
+   * commit then refused with "You do not have permission to commit target
+   * cells". The header's Run completions / Complete all already gate on this
+   * (`workspace-actions/registry.ts`); this is the affordance that did not.
+   *
+   * `canPerform` fails OPEN on an unknown role, so local/legacy projects with
+   * no `syncRole` keep Translate — same convention as the suppression check
+   * below. `project.syncRole` is re-read on every render, so a role downgrade
+   * or lane grant that lands through the app's usual refresh takes effect here
+   * without a reload.
+   */
+  const roleLevel = project.syncRole?.level ?? null
+  const canCommitTarget = canPerform("target.cell.commit", roleLevel)
+
   // AQU-490: bulk AUDIO validation — a SEPARATE action beside the text one,
   // per Sam's ruling. Never merged: a reviewer signing off translations has
   // not listened to the recordings, and one button doing both would collect
@@ -305,6 +323,8 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
 
   const onTranslate = useCallback(async () => {
     if (isBusy) return
+    // AQU-1459: never call the model for someone whose commit is already denied.
+    if (!canCommitTarget) return
     setRunning({ kind: "translate" })
     try {
       const missing = selectedCells.filter(
@@ -316,7 +336,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, completeBatch, isBusy])
+  }, [selectedCells, completeBatch, isBusy, canCommitTarget])
 
   const onVoice = useCallback(async () => {
     if (isBusy || !onVoiceTogether) return
@@ -399,8 +419,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // canPerform fails OPEN when the role is unknown (local/legacy projects
   // with no syncRole), so this only suppresses the bar for a KNOWN
   // sub-reviewer role — never blocks legacy non-cloud projects.
-  const roleLevel = project.syncRole?.level ?? null
-  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canPerform("target.cell.commit", roleLevel)) {
+  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canCommitTarget) {
     return null
   }
 
@@ -457,6 +476,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       {!audioMode && (
         <>
       <AppTooltip content={
+        // AQU-1459: the permission reason comes FIRST. A validator sees why the
+        // button is dark in the terms of their role, not "all translated".
+        !canCommitTarget ? t("editor.selection.translateNoPermission") :
         !completeBatch ? t("editor.selection.translateNotConfigured") :
         missingCount === 0 ? t("editor.selection.allTranslated") :
         t("editor.selection.translateTooltip", { count: missingCount })
@@ -466,7 +488,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           size="sm"
           variant="default"
           onClick={onTranslate}
-          disabled={isBusy || missingCount === 0 || !completeBatch}
+          disabled={isBusy || missingCount === 0 || !completeBatch || !canCommitTarget}
         >
           {running.kind === "translate" ? (
             <Spinner className="me-1 size-3.5" />

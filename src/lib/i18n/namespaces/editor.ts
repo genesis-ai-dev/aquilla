@@ -538,6 +538,11 @@ export const editor = defineNamespace({
     }),
     "editor.history.collapsedNote":
       "({total} total, {hidden} minor intermediate edits collapsed)",
+    "editor.history.draftKept": "{pct} of AI draft kept",
+    "editor.history.draftKeptAsIs": "AI draft kept as-is",
+    "editor.history.draftKeptTooltip":
+      "How much of the AI draft above survived this revision, measured character " +
+      "by character. 100% means the draft was approved unchanged.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
       "This edit lost the first-child-of-parent race for its slot. It was logged " +
@@ -4000,6 +4005,29 @@ export const editor = defineNamespace({
           total: "Raw number of stored edits, before grouping.",
           hidden: "How many of those were folded into a group and are not listed.",
         },
+      },
+      "editor.history.draftKept": {
+        description:
+          "Badge on a history entry that revised an AI draft, stating how much of " +
+          "the draft text the reviser kept. Lower-case badge sitting in a row of " +
+          "other badges, so it must stay short; 'kept' is the survival sense — " +
+          "the share of the draft still present, NOT a share that was deleted.",
+        maxLength: 24,
+        placeholders: {
+          pct: "Already-formatted percentage of the draft that survived, e.g. '62%'.",
+        },
+      },
+      "editor.history.draftKeptAsIs": {
+        description:
+          "Variant of the same badge for an AI draft that was approved without any " +
+          "edit at all, so there is no percentage to state. Lower-case badge.",
+        maxLength: 24,
+      },
+      "editor.history.draftKeptTooltip": {
+        description:
+          "Tooltip explaining the draft-kept badge. Says what is being compared " +
+          "(the AI draft against this revision) and that the unit is characters, so " +
+          "a reader does not mistake it for a quality score.",
       },
       "editor.history.staleBadge": {
         description:

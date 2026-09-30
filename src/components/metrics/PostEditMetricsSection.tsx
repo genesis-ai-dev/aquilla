@@ -31,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
+import type { PostEditMetrics, WeekBucket, UserBucket, FileBucket } from "@/lib/metrics/post-edit-metrics"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { formatDate } from "@/lib/i18n/format"
@@ -154,6 +154,59 @@ function UserTable({ users, activeUser, onSelectUser }: {
               </TableRow>
             )
           })}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+// ── File table ────────────────────────────────────────────────────────────────
+
+/**
+ * Per-file rollup (AQU-1321). This is the ticket's "per-book if cheap" ask: a
+ * scripture import lands one file per book, so for those projects these rows
+ * *are* the books, and unlike a book key it still has something to say about
+ * workbooks, prose and transcripts. See `FileBucket` for why the key is the file.
+ *
+ * Deliberately not clickable, unlike the reviewer table: the weekly chart it
+ * would filter is a project-wide trend, and there is no per-file trend to show.
+ */
+function FileTable({ files }: { files: FileBucket[] }) {
+  const { t } = useI18n()
+  if (files.length === 0) return null
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("workspace.metrics.fileColumn")}</TableHead>
+            <TableHead className="text-end">{t("workspace.metrics.approvalsColumn")}</TableHead>
+            <TableHead className="text-end">{t("workspace.metrics.acceptedAsIsColumn")}</TableHead>
+            <TableHead className="text-end">{t("workspace.metrics.avgEditDistanceColumn")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {files.map((f) => (
+            <TableRow key={f.fileId}>
+              {/* The id is a UUID, so it is monospaced when it stands in for a
+                  missing name; a real file name reads as prose. */}
+              <TableCell className={f.fileName ? "text-xs" : "font-mono text-xs"}>
+                {f.fileName ?? f.fileId}
+              </TableCell>
+              <TableCell className="text-end text-muted-foreground">{f.count}</TableCell>
+              <TableCell className="text-end text-muted-foreground">
+                {f.acceptedAsIsCount}
+              </TableCell>
+              <TableCell className="text-end">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className={`inline-block size-2 rounded-lg ${nedColor(f.avgNed)}`} />
+                  <span>{pct(f.avgNed)}</span>
+                  <span className="text-xs text-muted-foreground">({t(nedLabelKey(f.avgNed))})</span>
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </div>
@@ -368,6 +421,19 @@ export function PostEditMetricsSection({
                     activeUser={activeUser}
                     onSelectUser={setActiveUser}
                   />
+                </div>
+              )}
+
+              {/* By-file table */}
+              {metrics.byFile.length > 0 && (
+                <div className="mt-5">
+                  <h4 className="text-xs font-medium text-muted-foreground">
+                    {t("workspace.metrics.byFileHeading")}
+                    <span className="ms-1 normal-case font-normal text-muted-foreground">
+                      {t("workspace.metrics.byFileHint")}
+                    </span>
+                  </h4>
+                  <FileTable files={metrics.byFile} />
                 </div>
               )}
 

@@ -159,6 +159,10 @@ export const workspace = defineNamespace({
     "workspace.metrics.weeklyTrendHeading": "Weekly trend",
     "workspace.metrics.filteredTo": "— filtered to {user}",
     "workspace.metrics.noUserData": "No data for this user yet.",
+    "workspace.metrics.byFileHeading": "By file",
+    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for scripture)",
+    "workspace.metrics.fileColumn": "File",
+    "workspace.metrics.acceptedAsIsColumn": "Kept as-is",
     "workspace.metrics.byReviewerHeading": "By reviewer",
     "workspace.metrics.byReviewerHint": "(click a row to filter the trend above)",
     "workspace.metrics.disclosure":
@@ -937,6 +941,29 @@ export const workspace = defineNamespace({
         description:
           "Shown instead of the weekly chart when the selected reviewer has no " +
           "weeks with data (edge case after filtering).",
+      },
+      "workspace.metrics.byFileHeading": {
+        description: "Heading over the per-file breakdown table of AI post-edit effort.",
+      },
+      "workspace.metrics.byFileHint": {
+        description:
+          "Small parenthetical note after workspace.metrics.byFileHeading, saying " +
+          "the rows are the project's imported files, and that for a scripture " +
+          "project one file is one book — so a reader looking for a per-book " +
+          "breakdown knows this is it.",
+      },
+      "workspace.metrics.fileColumn": {
+        description:
+          "Column header naming the file each row of the per-file table covers. " +
+          "One word; it sits over file names in a narrow column.",
+        maxLength: 14,
+      },
+      "workspace.metrics.acceptedAsIsColumn": {
+        description:
+          "Column header for the count of AI drafts in that file which a reviewer " +
+          "approved without editing. Short — it sits over numbers in a narrow " +
+          "column. 'As-is' means unchanged.",
+        maxLength: 16,
       },
       "workspace.metrics.byReviewerHeading": {
         description: "Heading over the by-reviewer breakdown table.",

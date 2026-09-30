@@ -10,6 +10,7 @@
  */
 
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { REACT_SAMPLE_CELLS, REACT_SAMPLE_CHARS, type EditSample } from "./react-route"
 
 /** Expert input the watcher reacts to: a human committing a translation, or a
  *  human validating one. Everything else in the log (source imports, audio,
@@ -25,6 +26,8 @@ export const NON_DISCOURSE_KINDS = new Set(["json", "po", "properties", "idml"])
 export const REACT_MAX_EVENTS_PER_SWEEP = 2000
 
 export interface ExpertEventRow {
+  id: string
+  kind: string
   file_id: string
   /** Lane legacy tag from the event payload ('' = default lane, AQU-538). */
   target_lang: string
@@ -45,6 +48,9 @@ export interface FileSignal {
   /** Canonical refs (falling back to cell ids) for the direction text. */
   refs: string[]
   latestTs: number
+  /** Most recent text commits (oldest first, capped) — what Jev reads as the
+   *  before → after sample. Empty when the signal is validations only. */
+  commitEventIds: string[]
 }
 
 /**
@@ -68,7 +74,7 @@ export async function readExpertEvents(
   const kindPlaceholders = HUMAN_EXPERT_EVENT_KINDS.map(() => "?").join(",")
   const { results } = await db
     .prepare(
-      `SELECT e.file_id, COALESCE(e.payload::jsonb ->> 'targetLang', '') AS target_lang,
+      `SELECT e.id, e.kind, e.file_id, COALESCE(e.payload::jsonb ->> 'targetLang', '') AS target_lang,
               e.cell_id, c.canonical_ref, e.server_ts
          FROM events e
          LEFT JOIN cells c
@@ -102,6 +108,7 @@ export function groupByFile(rows: ExpertEventRow[]): FileSignal[] {
       anchorCellId: null,
       refs: [],
       latestTs: 0,
+      commitEventIds: [] as string[],
     }
     signal.count += 1
     // Rows arrive oldest-first, so the last write wins: the anchor ends up on
@@ -110,6 +117,10 @@ export function groupByFile(rows: ExpertEventRow[]): FileSignal[] {
     const ref = row.canonical_ref ?? row.cell_id
     if (ref && !signal.refs.includes(ref)) signal.refs.push(ref)
     signal.latestTs = Math.max(signal.latestTs, Number(row.server_ts))
+    if (row.kind === "target.cell.commit") {
+      signal.commitEventIds.push(row.id)
+      if (signal.commitEventIds.length > REACT_SAMPLE_CELLS) signal.commitEventIds.shift()
+    }
     byFile.set(key, signal)
   }
   return [...byFile.values()].sort((a, b) => b.latestTs - a.latestTs)
@@ -188,4 +199,41 @@ export async function readRunStatesByFile(
     if (!current || rank(next.state) > rank(current.state)) map.set(key, next)
   }
   return map
+}
+
+/**
+ * The before → after texts Jev reads for one signal, in the order given. The
+ * "before" is the parent event's text (the prior winning commit on that cell);
+ * a first-ever commit has none. Source text is the shared source row. Texts are
+ * cut to REACT_SAMPLE_CHARS here so no caller can send a whole chapter.
+ */
+export async function readEditSamples(
+  db: AquillaDb,
+  projectId: string,
+  eventIds: string[],
+): Promise<EditSample[]> {
+  if (eventIds.length === 0) return []
+  const placeholders = eventIds.map(() => "?").join(",")
+  const { results } = await db
+    .prepare(
+      `SELECT e.id,
+              COALESCE(e.payload::jsonb ->> 'value', '') AS after,
+              COALESCE(p.payload::jsonb ->> 'value', '') AS before,
+              COALESCE(src.value, '') AS source,
+              src.canonical_ref
+         FROM events e
+         LEFT JOIN events p ON p.id = e.parent_id AND p.project_id = e.project_id
+         LEFT JOIN cells src
+           ON src.project_id = e.project_id AND src.file_id = e.file_id
+          AND src.cell_id = e.cell_id AND src.side = 'source' AND src.target_lang = ''
+        WHERE e.project_id = ? AND e.id IN (${placeholders})`,
+    )
+    .bind(projectId, ...eventIds)
+    .all<{ id: string; after: string; before: string; source: string; canonical_ref: string | null }>()
+  const byId = new Map(results.map((r) => [r.id, r]))
+  const cut = (t: string) => (t.length > REACT_SAMPLE_CHARS ? `${t.slice(0, REACT_SAMPLE_CHARS - 1)}…` : t)
+  return eventIds.flatMap((id) => {
+    const r = byId.get(id)
+    return r ? [{ ref: r.canonical_ref, source: cut(r.source), before: cut(r.before), after: cut(r.after) }] : []
+  })
 }

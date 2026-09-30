@@ -38,6 +38,9 @@ const realFetch = globalThis.fetch
 
 let contrib: string
 let viewer: string
+/** Jev's scripted answers for the next react-check. null = Jev unreachable,
+ *  which every pre-Jev test relies on: it must equal today's behaviour. */
+let jevAnswers: Record<string, number> | null = null
 
 beforeEach(async () => {
   testEnv.OPENROUTER_API_KEY = "mock"
@@ -54,6 +57,15 @@ beforeEach(async () => {
       })
     }
     if (url.includes("/admin/projects/")) return new Response("{}", { status: 200 })
+    if (url === "http://mock.local/api/alpha/decisions" && jevAnswers) {
+      const answers = Object.fromEntries(
+        Object.entries(jevAnswers).map(([k, v]) => [k, { type: "noul", noul: v }]),
+      )
+      return new Response(JSON.stringify({ model: "jev-1.13.0", answers }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
     throw new Error(`unexpected fetch in react test: ${url}`)
   })
 
@@ -89,6 +101,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  jevAnswers = null
   if (_test.lastLoop) await _test.lastLoop
   _test.lastLoop = null
   testEnv.OPENROUTER_API_KEY = undefined
@@ -113,14 +126,14 @@ let seq = 0
 /** One human target commit `agoMs` milliseconds in the past. */
 async function seedHumanCommit(
   agoMs: number,
-  opts?: { id?: string; cellId?: string; kind?: string; payload?: Record<string, unknown> },
+  opts?: { id?: string; cellId?: string; kind?: string; payload?: Record<string, unknown>; parentId?: string },
 ): Promise<number> {
   const ts = Date.now() - agoMs
   seq += 1
   await env.AQUILLA_PG.prepare(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author,
-                         payload, client_ts, server_ts, server_seq)
-     VALUES (?, 1, ?, ?, ?, ?, 'contrib', ?, ?, ?, ?)`,
+                         payload, client_ts, server_ts, server_seq, parent_id)
+     VALUES (?, 1, ?, ?, ?, ?, 'contrib', ?, ?, ?, ?, ?)`,
   )
     .bind(
       opts?.id ?? `ev-human-${agoMs}`,
@@ -132,6 +145,7 @@ async function seedHumanCommit(
       ts,
       ts,
       seq,
+      opts?.parentId ?? null,
     )
     .run()
   return ts
@@ -139,6 +153,7 @@ async function seedHumanCommit(
 
 interface ReactCheckBody {
   reactions: { fileId: string; runId: string }[]
+  questions: { fileId: string; decisionId: string }[]
   skipped: { fileId: string | null; reason: string }[]
 }
 
@@ -148,7 +163,7 @@ async function reactCheck(jwt = contrib): Promise<{ status: number; body: ReactC
     { method: "POST", headers: authHeader(jwt) },
     env,
   )
-  const body = res.status === 200 ? ((await res.json()) as ReactCheckBody) : { reactions: [], skipped: [] }
+  const body = res.status === 200 ? ((await res.json()) as ReactCheckBody) : { reactions: [], questions: [], skipped: [] }
   // Settle the driver the reaction kicked before anything asserts on run state.
   if (_test.lastLoop) await _test.lastLoop
   _test.lastLoop = null
@@ -470,5 +485,64 @@ describe("react-check gates", () => {
     expect(res.status).toBe(403)
     // A denied request must not have swept anything.
     expect((await reactState()).cursor).toBeNull()
+  })
+})
+
+// ── Jev routing (docs/superpowers/specs/2026-09-30-jev-react-decisions-design.md) ──
+
+describe("react-check with Jev decisions", () => {
+  async function seedEdit(before: string, after: string) {
+    // The prior winning commit is OUTSIDE the window (it is not new input);
+    // the edit on top of it is the human signal.
+    await seedHumanCommit(3 * 60 * MINUTE, { id: "ev-before", payload: { value: before } })
+    await seedHumanCommit(5 * MINUTE, { id: "ev-after", payload: { value: after }, parentId: "ev-before" })
+  }
+
+  it("starts nothing for a punctuation-only fix, and leaves no cooldown to block the next real edit", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedEdit("In the beginning", "In the beginning,")
+    const { body } = await reactCheck()
+    expect(body.reactions).toEqual([])
+    expect(body.skipped).toContainEqual({ fileId: FILE, reason: "not_substantive" })
+    expect((await reactState()).lastReactionAt[FILE]).toBeUndefined()
+  })
+
+  it("routes a reusable-rule edit to learn: a run told to propose, not redraft", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedEdit("In the beginning", "At the very start")
+    jevAnswers = { substantive: 0.95, unclear_intent: 0.1, want_redraft: 0.55, want_check: 0.2, want_learn: 0.9 }
+    const { body } = await reactCheck()
+    expect(body.reactions).toHaveLength(1)
+    const [direction] = await storedDirections(body.reactions[0].runId)
+    expect(direction).toContain("do not redraft")
+    expect(direction).toContain("project memory or terminology entry")
+    const note = (await coordinatorTexts()).find((t) => t.startsWith("Reacting"))
+    expect(note).toContain("proposing the change as a reusable rule")
+    expect(note).not.toContain("Rule-based")
+  })
+
+  it("asks the expert when intent is unclear — a question in the queue, no run", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedEdit("the word", "the Word")
+    jevAnswers = { substantive: 0.8, unclear_intent: 0.75, want_redraft: 0.9, want_check: 0, want_learn: 0 }
+    const { body } = await reactCheck()
+    expect(body.reactions).toEqual([])
+    expect(body.questions).toHaveLength(1)
+    const decision = await env.AQUILLA_PG
+      .prepare("SELECT reason, run_id FROM contextual_decisions WHERE id = ?")
+      .bind(body.questions[0].decisionId)
+      .first<{ reason: string; run_id: string | null }>()
+    expect(decision?.run_id).toBeNull()
+    expect(decision?.reason).toContain("MRK 1:1")
+    expect(decision?.reason).toContain("“the Word”")
+  })
+
+  it("says so in the thread when the fixed rules decided (Jev unreachable)", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedEdit("In the beginning", "At the very start")
+    const { body } = await reactCheck()
+    expect(body.reactions).toHaveLength(1)
+    const note = (await coordinatorTexts()).find((t) => t.startsWith("Reacting"))
+    expect(note).toContain("Rule-based")
   })
 })

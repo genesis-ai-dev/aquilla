@@ -1546,7 +1546,7 @@ contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) 
   } catch {
     void result.done.catch(() => {})
   }
-  return c.json({ reactions: result.reactions, skipped: result.skipped })
+  return c.json({ reactions: result.reactions, questions: result.questions, skipped: result.skipped })
 })
 
 // GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).

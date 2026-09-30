@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { groupByFile, type ExpertEventRow } from "../lib/react-signals"
 
 const row = (over: Partial<ExpertEventRow>): ExpertEventRow => ({
+  id: `e-${Math.random()}`,
+  kind: "target.cell.commit",
   file_id: "f1",
   target_lang: "",
   cell_id: "c1",
@@ -24,5 +26,14 @@ describe("react signals are lane-scoped", () => {
       ["fr", 2, "c"],
       ["", 1, "a"],
     ])
+  })
+
+  // Jev reads the newest few commits as its before → after sample; a
+  // validation carries no text change, so it never becomes a sample.
+  it("keeps the newest text commits, capped, and leaves validations out", () => {
+    const rows = [1, 2, 3, 4, 5, 6].map((n) => row({ id: `c${n}`, server_ts: n }))
+    rows.push(row({ id: "v1", kind: "cell.validate", server_ts: 7 }))
+    const [signal] = groupByFile(rows)
+    expect(signal.commitEventIds).toEqual(["c2", "c3", "c4", "c5", "c6"])
   })
 })

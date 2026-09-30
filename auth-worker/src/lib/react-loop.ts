@@ -40,9 +40,21 @@ import {
   readAgentMode,
   readAgentReactState,
   type AgentReactState,
-  type AgentScope,
 } from "./agent-mode"
 import { appendMessage, touchThread } from "./team-channel"
+import { raiseDecision } from "../../../db/shared/contextual-decisions"
+import { decide, type DecideResult } from "./jev/decide"
+import {
+  ACTION_WHY,
+  actionDirection,
+  askQuestionText,
+  refsLabel,
+  fallbackReactAnswers,
+  REACT_QUESTIONS,
+  routeReaction,
+  type ReactAction,
+  type ReactRoute,
+} from "./react-route"
 import { ensureRunThread } from "./team-ingest"
 import {
   groupByFile,
@@ -50,6 +62,7 @@ import {
   fileLaneKey,
   readRunStatesByFile,
   readExpertEvents,
+  readEditSamples,
   readFileKinds,
   REACT_MAX_EVENTS_PER_SWEEP,
   type ExpertEventRow,
@@ -68,8 +81,9 @@ export const REACT_MAX_PROJECTS_PER_SWEEP = 10
 /** Reactions one project may start in a single sweep. Files are considered
  *  freshest-first, so the cap drops the stalest signal, not the newest. */
 export const REACT_MAX_FILES_PER_SWEEP = 5
-/** Canonical refs quoted in the auto-steering direction. */
-const REACT_MAX_REFS_IN_DIRECTION = 3
+/** Total Jev time one project sweep may spend; later signals use the fixed
+ *  rules. Five 10 s calls back to back would otherwise hold the cron. */
+export const REACT_JEV_BUDGET_MS = 20_000
 
 // ── The starter seam ────────────────────────────────────────────────────────
 
@@ -131,6 +145,9 @@ export interface ReactSkip {
 
 export interface ReactResult {
   reactions: { fileId: string; runId: string }[]
+  /** Edits whose intent Jev found unclear: raised as expert questions instead
+   *  of acted on (no run). */
+  questions: { fileId: string; decisionId: string }[]
   skipped: ReactSkip[]
   /** Settles when every run this call started has finished driving. Callers
    *  holding a request-scoped Postgres connection MUST await it. */
@@ -139,34 +156,22 @@ export interface ReactResult {
 
 // ── Auto-steering ───────────────────────────────────────────────────────────
 
-function refsLabel(refs: string[]): string {
-  if (refs.length === 0) return "the edited passages"
-  const shown = refs.slice(0, REACT_MAX_REFS_IN_DIRECTION)
-  const more = refs.length - shown.length
-  return more > 0 ? `${shown.join(", ")} (+${more} more)` : shown.join(", ")
-}
-
-/** The direction the reaction run is seeded with. `scope` is the whole point
- *  of the mode dial: "qa" verifies and reports, everything else may redraft. */
-export function reactionDirection(
-  scope: AgentScope,
-  count: number,
-  refs: string[],
-): string {
-  const plural = count === 1 ? "edit" : "edits"
-  const trigger = `React to ${count} human ${plural} near ${refsLabel(refs)}`
-  return scope === "qa"
-    ? `${trigger}: verify and report on the surrounding drafts; do not redraft unless a check fails.`
-    : `${trigger}: reassess the surrounding passages and update drafts where the human's changes have implications.`
-}
-
 /**
  * Say in the run's own thread why it exists. Best-effort by contract: the
  * reaction is already real and driving, and a channel outage must not undo it.
  */
 async function announceReaction(
   db: AquillaDb,
-  input: { projectId: string; runId: string; fileId: string; count: number; refs: string[] },
+  input: {
+    projectId: string
+    runId: string
+    fileId: string
+    count: number
+    refs: string[]
+    action: Exclude<ReactAction, "skip" | "ask">
+    decidedBy: DecideResult["decidedBy"]
+    scores: ReactRoute["scores"]
+  },
 ): Promise<void> {
   try {
     const thread = await ensureRunThread(db, {
@@ -183,7 +188,10 @@ async function announceReaction(
       body: {
         text:
           `Reacting to ${input.count} human ${plural} near ${refsLabel(input.refs)} — ` +
-          `re-reading the surrounding passages.`,
+          `${ACTION_WHY[input.action]}.` +
+          (input.decidedBy === "heuristic" ? " (Rule-based: the quick judgement was unavailable.)" : ""),
+        // For the step inspector: why this action, and who decided.
+        decision: { action: input.action, decidedBy: input.decidedBy, scores: input.scores },
       },
     })
     await touchThread(db, thread.id)
@@ -258,10 +266,12 @@ export async function reactCheckProject(
   const db = env.AQUILLA_PG
   const now = Date.now()
   const reactions: ReactResult["reactions"] = []
+  const questions: ReactResult["questions"] = []
   const skipped: ReactSkip[] = []
   const drivers: Promise<void>[] = []
   const settle = (): ReactResult => ({
     reactions,
+    questions,
     skipped,
     done: Promise.allSettled(drivers).then(() => {}),
   })
@@ -308,6 +318,7 @@ export async function reactCheckProject(
       readRunStatesByFile(db, projectId),
     ])
     const lastReactionAt = { ...state.lastReactionAt }
+    const jevDeadline = Date.now() + REACT_JEV_BUDGET_MS
 
     for (const signal of signals) {
       if (reactions.length >= REACT_MAX_FILES_PER_SWEEP) {
@@ -345,7 +356,50 @@ export async function reactCheckProject(
         continue
       }
 
-      const direction = reactionDirection(mode.scope, signal.count, signal.refs)
+      // Jev's two decisions: whether this is worth a run, and which kind.
+      // Everything above is a cheap fixed gate, so Jev only spends on edits
+      // that would have reacted anyway.
+      let samples: Awaited<ReturnType<typeof readEditSamples>> = []
+      try {
+        samples = await readEditSamples(db, projectId, signal.commitEventIds)
+      } catch (err) {
+        console.warn(`[react] edit samples unreadable for ${projectId}/${signal.fileId}:`, err)
+      }
+      const validationOnly = signal.commitEventIds.length === 0
+      const decision = await decide(env, {
+        purpose: "react",
+        projectId,
+        state: { fileKind: kind, editCount: signal.count, validationOnly, edits: samples },
+        questions: REACT_QUESTIONS,
+        fallback: () => fallbackReactAnswers(samples, { validationOnly }),
+        deadline: jevDeadline,
+      })
+      const route = routeReaction(decision.answers, mode.scope)
+      if (route.action === "skip") {
+        // No cooldown stamp: a typo fix must not block the real edit after it.
+        skipped.push({ fileId: signal.fileId, reason: "not_substantive" })
+        continue
+      }
+      if (route.action === "ask") {
+        try {
+          const asked = await raiseDecision(db, {
+            projectId,
+            runId: null,
+            fileId: signal.fileId,
+            cellIds: signal.anchorCellId ? [signal.anchorCellId] : [],
+            reason: askQuestionText(samples, signal.count),
+          })
+          questions.push({ fileId: signal.fileId, decisionId: asked.id })
+          // Stamped: one question per file per cooldown, not one per sweep.
+          lastReactionAt[signal.fileId] = new Date(now).toISOString()
+        } catch (err) {
+          console.warn(`[react] could not raise a question for ${projectId}/${signal.fileId}:`, err)
+          skipped.push({ fileId: signal.fileId, reason: "ask_failed" })
+        }
+        continue
+      }
+      const action = route.action
+      const direction = actionDirection(action, signal.count, signal.refs)
       let started: StartReactionRunResult
       try {
         started =
@@ -395,6 +449,9 @@ export async function reactCheckProject(
         fileId: signal.fileId,
         count: signal.count,
         refs: signal.refs,
+        action,
+        decidedBy: decision.decidedBy,
+        scores: route.scores,
       })
     }
     state.lastReactionAt = pruneCooldowns(lastReactionAt, now)

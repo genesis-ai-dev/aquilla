@@ -9,6 +9,7 @@ import {
   audioValidationScope,
   audioValidationTakes,
   canValidateTake,
+  lineValidationTakes,
 } from "./audio-validation-permissions"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
@@ -175,5 +176,66 @@ describe("audioEntryFromCell", () => {
       selectedBySlot: { recording: "a" },
     })!
     expect(entry.attachments.a.slot).toBe("recording")
+  })
+})
+
+// Sam, 2026-09-30: in a dubbing file a subtitle line's takes live on the heard
+// lines performing it, and the line's audio check read only the row — "No
+// audio to validate" everywhere, and a vote on the heard line never showed.
+describe("lineValidationTakes — a line and the heard lines performing it", () => {
+  const cue = (id: string, audioId: string | null, over: { validators?: string[]; original?: string } = {}) => ({
+    id,
+    fileId: "cues",
+    original: over.original ?? id,
+    attachments: audioId
+      ? { [audioId]: { slot: "recording", validators: over.validators ?? [], validatorCount: over.validators?.length ?? 0 } }
+      : undefined,
+    selectedAudioId: audioId,
+  })
+  const row = { id: "line-1", fileId: "subs" }
+  const name = (c: { id: string; original?: string }) => `“${c.original ?? c.id}”`
+
+  it("is the row's own takes, owned by the row, when nothing performs it", () => {
+    const own = {
+      ...row,
+      attachments: { t1: { slot: "recording" } },
+      selectedAudioId: "t1",
+    }
+    const { takes, ownerOf } = lineValidationTakes(own, undefined, {}, policy(), reason, name)
+    expect(takes.map((t) => t.audioId)).toEqual(["t1"])
+    expect(ownerOf.get("t1")).toEqual({ fileId: "subs", cellId: "line-1" })
+  })
+
+  it("takes the heard line's selected take, named by its words, voted on its cue", () => {
+    const heard = cue("cue-a", "ta", { validators: ["bo"], original: "Bring back some bread," })
+    const { takes, ownerOf } = lineValidationTakes(row, [{ cell: heard, hasTake: true }], {}, policy(), reason, name)
+    expect(takes).toEqual([
+      expect.objectContaining({ audioId: "ta", label: "“Bring back some bread,”", validators: ["bo"], canValidate: true }),
+    ])
+    expect(ownerOf.get("ta")).toEqual({ fileId: "cues", cellId: "cue-a" })
+  })
+
+  it("lists every part of a split line, and a part not yet recorded takes no vote", () => {
+    const { takes, ownerOf } = lineValidationTakes(
+      row,
+      [{ cell: cue("cue-a", "ta"), hasTake: true }, { cell: cue("cue-b", null), hasTake: false }],
+      {},
+      policy(),
+      reason,
+      name,
+    )
+    expect(takes.map((t) => t.audioId)).toEqual(["ta", "unrecorded:cue-b"])
+    expect(takes[1]).toMatchObject({
+      unrecorded: true, canValidate: false, blockedReason: "blocked:unrecorded", label: "“cue-b”",
+    })
+    expect(ownerOf.get("unrecorded:cue-b")).toEqual({ fileId: "cues", cellId: "cue-b" })
+  })
+
+  it("applies the project's policy to a heard line's take as to the row's own", () => {
+    const heard = { ...cue("cue-a", "ta"), attachments: { ta: { slot: "recording", recordedBy: "ana" } } }
+    const { takes } = lineValidationTakes(
+      row, [{ cell: heard, hasTake: true }], { allowSelfValidationAudio: false }, policy(), reason, name,
+    )
+    expect(takes[0]).toMatchObject({ canValidate: false, blockedReason: "blocked:self" })
   })
 })

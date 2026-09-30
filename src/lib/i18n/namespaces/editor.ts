@@ -1476,6 +1476,9 @@ export const editor = defineNamespace({
       other: "{count} more validators needed",
     }),
     "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.notRecorded": "Not recorded yet",
+    "editor.audioValidation.partNotRecordedTooltip": "Part of this line is not recorded yet",
+    "editor.audioValidation.ariaPartUnrecorded": "Part of this line is not recorded yet — {ref}.",
     "editor.audioValidation.generatedTake": "Generated voice",
     "editor.audioValidation.defaultTrack": "Main",
     "editor.audioValidation.readOnlyNote": "Only the take that plays for the line can be validated",
@@ -5553,6 +5556,29 @@ export const editor = defineNamespace({
       "editor.audioValidation.noValidators": {
         description: "Shown for a take in the popover that nobody has validated yet.",
         maxLength: 36,
+      },
+      "editor.audioValidation.notRecorded": {
+        description:
+          "In the list of who validated a line's audio, under one heard line (in dubbing, one " +
+          "recorded performance of part of a subtitle line) that nobody has recorded yet, so " +
+          "there is nothing of it to validate.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.partNotRecordedTooltip": {
+        description:
+          "Tooltip on a line's audio validation check when the line is performed as several " +
+          "heard lines (dubbing) and at least one of them has not been recorded, so the line " +
+          "cannot be fully validated yet.",
+        maxLength: 60,
+      },
+      "editor.audioValidation.ariaPartUnrecorded": {
+        description:
+          "Screen-reader label for a line's audio validation check when part of the line (one " +
+          "of the heard lines performing it, in dubbing) has not been recorded yet. {ref} is " +
+          "the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
       },
       "editor.audioValidation.readOnlyNote": {
         description:

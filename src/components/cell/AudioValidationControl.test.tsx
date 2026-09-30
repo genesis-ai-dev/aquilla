@@ -490,3 +490,43 @@ describe("read-only", () => {
     expect(within(list).queryByRole("button", { name: /validate this take/i })).toBeNull()
   })
 })
+
+// Sam, 2026-09-30: a line split across heard lines, one recorded and one not.
+// The unrecorded part is in the set but is not a take.
+describe("AudioValidationControl — a part of the line not yet recorded", () => {
+  const missing = take({
+    audioId: "unrecorded:cue-b",
+    label: "“and some milk too.”",
+    canValidate: false,
+    blockedReason: "Part of this line is not recorded yet",
+    unrecorded: true,
+  })
+
+  it("never reads fully validated while a part is silent", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] }), missing])
+    // Validated by me at a threshold of one would be the double check; with a
+    // part missing it is the single one, and the label says why.
+    expect(button()).toHaveAttribute("aria-label", "Part of this line is not recorded yet — GEN 1:1.")
+    expect(fraction()).toBeNull()
+  })
+
+  it("votes on the recorded part only, and counts only it", async () => {
+    const user = userEvent.setup()
+    const { onValidationChange } = draw([
+      take({ audioId: "a" }),
+      take({ audioId: "b" }),
+      missing,
+    ])
+    expect(fraction()).toHaveTextContent("0/2")
+    await user.click(button()!)
+    expect(onValidationChange.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"])
+  })
+
+  it("names the missing part in the list", async () => {
+    const user = userEvent.setup()
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], label: "“Bring back some bread,”" }), missing])
+    await user.hover(button()!)
+    const list = await screen.findByText("“and some milk too.”", {}, { timeout: 2000 })
+    expect(within(list.closest("li")!).getByTestId("audio-validation-unrecorded")).toHaveTextContent("Not recorded yet")
+  })
+})

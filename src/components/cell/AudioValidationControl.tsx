@@ -38,6 +38,12 @@ export interface AudioValidationTake {
   canValidate: boolean
   /** Why not, when `canValidate` is false. Shown as the tooltip. */
   blockedReason?: string
+  /**
+   * Not a take: a heard line performing this line that nobody has recorded
+   * yet (a line split across heard lines, some done). It takes no vote, and
+   * while it is there the line never reads fully validated.
+   */
+  unrecorded?: boolean
 }
 
 interface AudioValidationControlProps {
@@ -134,7 +140,17 @@ export function AudioValidationControl({
   }), [takes, pending, currentUsername])
 
   const requirement = Math.max(1, validationRequirement)
-  const state = lineState(displayed, currentUsername, requirement)
+  // A heard line nobody has recorded is in the set but is not a take (Sam,
+  // 2026-09-30: a line split across heard lines, one of them done). It takes
+  // no vote and counts toward nothing, but while it is there the line cannot
+  // read fully validated: the double check drops to a single one (yours, or
+  // others'), and the hover names the part still to record.
+  const recorded = displayed.filter((take) => !take.unrecorded)
+  const unrecorded = displayed.filter((take) => take.unrecorded)
+  const recordedState = lineState(recorded, currentUsername, requirement)
+  const state = unrecorded.length > 0 && recordedState === "full"
+    ? (recorded.every((take) => take.validators.includes(currentUsername)) ? "self" : "others")
+    : recordedState
   const mineToGive = displayed.filter(
     (take) => take.canValidate && !take.validators.includes(currentUsername),
   )
@@ -148,10 +164,10 @@ export function AudioValidationControl({
   // says the rest (single check: waiting on others; double: finished). That
   // is also exactly what a click does: give your vote to the tracks without
   // it. The hover list still tells the fuller story per take.
-  const mineDone = displayed.filter((take) => take.validators.includes(currentUsername)).length
-  const showFraction = displayed.length > 1 && state !== "full" && mineToGive.length > 0
-  const allMine = displayed.length > 0 && mineToGive.length === 0
-    && displayed.every((take) => take.validators.includes(currentUsername))
+  const mineDone = recorded.filter((take) => take.validators.includes(currentUsername)).length
+  const showFraction = recorded.length > 1 && state !== "full" && mineToGive.length > 0
+  const allMine = recorded.length > 0 && mineToGive.length === 0
+    && recorded.every((take) => take.validators.includes(currentUsername))
 
   const change = (audioId: string, validated: boolean) => {
     const atRequest = takes
@@ -211,7 +227,8 @@ export function AudioValidationControl({
     ? t(readOnlyFor === "playing" ? "editor.audioValidation.playingNone" : "editor.audioValidation.readOnlyNone")
     : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
-    : blocked?.blockedReason
+    : unrecorded[0]?.blockedReason
+      ?? blocked?.blockedReason
       ?? (canValidate
         ? t("editor.audioValidation.outOfScopeTooltip")
         : t("editor.audioValidation.unavailableTooltip"))
@@ -221,7 +238,7 @@ export function AudioValidationControl({
   // beside it is still a single check. Found in the browser: at a threshold of
   // two the button announced "Recording validated" on a line that visibly was
   // not, which is the picture and the words disagreeing.
-  const shortBy = displayed.reduce(
+  const shortBy = recorded.reduce(
     (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
     0,
   )
@@ -249,6 +266,10 @@ export function AudioValidationControl({
           : state === "others"
             ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
             : t("editor.audioValidation.ariaNotValidatedByYou", { ref: cellRef }))
+    // Nothing left to give, and part of the line is not recorded: that is
+    // the news, whatever the recorded parts say.
+    : unrecorded.length > 0 && !clickable
+    ? t("editor.audioValidation.ariaPartUnrecorded", { ref: cellRef })
     : state === "full"
     // "Click to remove your validation" only when there IS one of mine on
     // every take. A line others finished used to say it to someone who had
@@ -264,7 +285,7 @@ export function AudioValidationControl({
           : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
       : showFraction
         ? t("editor.audioValidation.ariaPartlyValidated", {
-            done: mineDone, total: displayed.length, ref: cellRef,
+            done: mineDone, total: recorded.length, ref: cellRef,
           })
         : state === "others"
           ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
@@ -324,7 +345,7 @@ export function AudioValidationControl({
       />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
-          {t("editor.audioValidation.takeFraction", { done: mineDone, total: displayed.length })}
+          {t("editor.audioValidation.takeFraction", { done: mineDone, total: recorded.length })}
         </span>
       )}
     </button>
@@ -383,7 +404,7 @@ export function AudioValidationControl({
         <ul className="space-y-1">
           {displayed.map((take) => {
             const mine = take.validators.includes(currentUsername)
-            const short = Math.max(0, requirement - take.validatorCount)
+            const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
             return (
               <li key={take.audioId} className="rounded px-1 py-1 text-xs">
                 {displayed.length > 1 && (
@@ -396,7 +417,11 @@ export function AudioValidationControl({
                     )}
                   </div>
                 )}
-                {take.validators.length === 0 ? (
+                {take.unrecorded ? (
+                  <div data-testid="audio-validation-unrecorded" className="text-muted-foreground">
+                    {t("editor.audioValidation.notRecorded")}
+                  </div>
+                ) : take.validators.length === 0 ? (
                   <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
                 ) : (
                   <ul className="space-y-0.5">

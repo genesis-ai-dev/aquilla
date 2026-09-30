@@ -175,6 +175,91 @@ export function audioValidationTakes(
   })
 }
 
+/** Where a take a line's audio check stands for LIVES: the row's own cell, or
+ *  the heard line (a cue in the audio-cue sibling) that performs the line. */
+export interface TakeOwner {
+  fileId: string
+  cellId: string
+}
+
+export interface LineValidation {
+  takes: AudioValidationTake[]
+  /** audioId → the cell a vote on that take is cast against. */
+  ownerOf: ReadonlyMap<string, TakeOwner>
+}
+
+type OwnedCell = CellLikeAudio & { id: string; fileId: string }
+
+/**
+ * The takes a LINE's audio check stands for, and where each one lives.
+ *
+ * In a dubbing file a subtitle line's recordings are not on it: they hang off
+ * the heard lines that perform it — cues in the hidden audio-cue sibling. A
+ * check that read the row alone therefore found nothing: every subtitle line
+ * said "No audio to validate", and a vote cast on the heard line's take in the
+ * Recording tab never showed on it (Sam, 2026-09-30). So a line's set is its
+ * own selected takes plus, for every heard line performing it, that heard
+ * line's selected take(s) — each named by what the heard line says (`nameOf`),
+ * so the hover list can tell two parts of one line apart — and `ownerOf` says
+ * which cell a vote on each goes to.
+ *
+ * A heard line nobody has recorded yet (a line split across two, one of them
+ * done) joins the set as an UNRECORDED member. It can take no vote, and it
+ * keeps the line from reading fully validated — a row must never read
+ * validated while part of it is silent without saying so (the dubbing rule
+ * of 2026-09-20).
+ *
+ * With no heard lines this is `audioValidationTakes` on the row, every
+ * owner the row itself.
+ */
+export function lineValidationTakes<C extends OwnedCell>(
+  cell: OwnedCell,
+  heardLines: ReadonlyArray<{ cell: C; hasTake: boolean }> | null | undefined,
+  project: Pick<
+    ProjectRecord,
+    "validationRoleFloorAudio" | "validationNamedUsersAudio" | "allowSelfValidationAudio"
+  >,
+  policy: AudioValidationPolicy,
+  reasonText: (reason: "role" | "allowlist" | "self" | "unrecorded") => string,
+  nameOf: (cue: C) => string,
+): LineValidation {
+  const takes: AudioValidationTake[] = []
+  const ownerOf = new Map<string, TakeOwner>()
+  const add = (owner: OwnedCell, take: AudioValidationTake) => {
+    if (ownerOf.has(take.audioId)) return
+    ownerOf.set(take.audioId, { fileId: owner.fileId, cellId: owner.id })
+    takes.push(take)
+  }
+  for (const take of audioValidationTakes(audioEntryFromCell(cell), project, policy, reasonText)) {
+    add(cell, take)
+  }
+  for (const { cell: cue, hasTake } of heardLines ?? []) {
+    const name = nameOf(cue)
+    if (!hasTake) {
+      add(cue, {
+        audioId: `unrecorded:${cue.id}`,
+        label: name,
+        slot: "recording",
+        validatorCount: 0,
+        validators: [],
+        isGenerated: false,
+        canValidate: false,
+        blockedReason: reasonText("unrecorded"),
+        unrecorded: true,
+      })
+      continue
+    }
+    const own = audioValidationTakes(audioEntryFromCell(cue), project, policy, reasonText)
+    for (const take of own) {
+      // A heard line with a take on more than one track: keep each take's own
+      // name beside the words, or the two would read the same.
+      const label = own.length > 1 && take.label ? `${name} · ${take.label}` : name
+      add(cue, { ...take, label })
+    }
+  }
+  return { takes, ownerOf }
+}
+
 /**
  * The refusal, as a sentence. Every surface needs the same three, so the
  * mapping lives here rather than in five lambdas that could drift apart.
@@ -188,14 +273,17 @@ export function audioValidationTakes(
 type BlockedKey =
   | "editor.audioValidation.ownRecordingTooltip"
   | "editor.audioValidation.unavailableTooltip"
+  | "editor.audioValidation.partNotRecordedTooltip"
 
 export function audioBlockedReason(
   // Narrowed to the two keys this uses rather than `(key: string) => string`:
   // the app's `t` is typed against the whole catalogue, and a parameter typed
   // as plain `string` is not something it can be passed to.
   t: (key: BlockedKey) => string,
-): (reason: "role" | "allowlist" | "self") => string {
+): (reason: "role" | "allowlist" | "self" | "unrecorded") => string {
   return (reason) => reason === "self"
     ? t("editor.audioValidation.ownRecordingTooltip")
-    : t("editor.audioValidation.unavailableTooltip")
+    : reason === "unrecorded"
+      ? t("editor.audioValidation.partNotRecordedTooltip")
+      : t("editor.audioValidation.unavailableTooltip")
 }

@@ -115,7 +115,7 @@ import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { parseTimecode, spanProblem } from "@/lib/timeline/timecode"
-import { fmtDragTime } from "@/components/timeline/format"
+import { fmtClock, fmtDragTime } from "@/components/timeline/format"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   DropdownMenu,
@@ -146,7 +146,7 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
-import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { PericopeSuggestions } from "./PericopeSuggestions"
@@ -6728,6 +6728,22 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
+  // The line's takes — its own, and in a dubbing file those of the heard
+  // lines performing it, each named by what it says (Sam, 2026-09-30: the
+  // check read only the row, so every subtitle line said "No audio to
+  // validate" and a vote on its heard line never showed here).
+  const audioValidationLine = lineValidationTakes(
+    cell,
+    linkedTakes,
+    project,
+    { roleLevel: project.syncRole?.level ?? null, username },
+    audioBlockedReason(t),
+    (cue) => cue.original?.trim()
+      ? `“${cue.original.trim()}”`
+      : t("editor.audio.heardLineAt", {
+          range: `${fmtClock(cue.startTime ?? 0, true)}–${fmtClock(cue.endTime ?? cue.startTime ?? 0, true)}`,
+        }),
+  )
   // AQU-490: the audio twin of emitValidationChange above. The vote itself is
   // shared across languages. AQU-1462 stamps the lane the member is in so an
   // archived lane can refuse it; the default lane omits the tag.
@@ -6741,12 +6757,16 @@ function EditorRow({
       console.warn("[audio-validate] aborting: cell out of the caller's assigned scope")
       return false
     }
+    // The cell the take lives on: this row's own, or the heard line that
+    // performs it (dubbing). The scope asked above stays THIS row's — an
+    // assignment is to the subtitle file, never to its hidden cue sibling.
+    const owner = audioValidationLine.ownerOf.get(audioId) ?? { fileId: cell.fileId, cellId: cell.id }
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
         projectId: project.id,
-        fileId: cell.fileId,
-        cellId: cell.id,
+        fileId: owner.fileId,
+        cellId: owner.cellId,
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
@@ -6756,7 +6776,7 @@ function EditorRow({
       // to contradict it. The picture was right for the wrong reason and only
       // until the row recycled. Now the vote is flushed and every reader of
       // this file refetches, including a timeline open beside the text view.
-      await commitAudioValidation([cell.fileId])
+      await commitAudioValidation([owner.fileId])
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
@@ -6764,12 +6784,6 @@ function EditorRow({
     }
   }
 
-  const audioValidationTakeList = audioValidationTakes(
-    audioEntryFromCell(cell),
-    project,
-    { roleLevel: project.syncRole?.level ?? null, username },
-    audioBlockedReason(t),
-  )
   // AQU-490: no switch, no project setting, no file-level gate. Audio
   // validation sits in this gutter beside text validation wherever a line has
   // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
@@ -6779,7 +6793,7 @@ function EditorRow({
   const audioValidationControl = (
     <AudioValidationControl
       cellRef={cellRef}
-      takes={audioValidationTakeList}
+      takes={audioValidationLine.takes}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide

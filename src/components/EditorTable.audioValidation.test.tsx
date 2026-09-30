@@ -22,6 +22,8 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { CellData } from "@/hooks/useCells"
+import type { LinkedTake } from "@/lib/audio/linked-takes"
 
 vi.mock("@/hooks/useMicPermission", () => ({ useMicPermission: () => ({ micDenied: true }) }))
 vi.mock("@legendapp/list/react", async () => {
@@ -45,6 +47,17 @@ const audioState = vi.hoisted(() => ({ byCellId: new Map<string, CellAudioEntry>
 vi.mock("@/hooks/useFileAudioAttachments", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useFileAudioAttachments: () => ({ byCellId: audioState.byCellId, isLoading: false, revalidate: vi.fn() }),
+}))
+// The votes, caught rather than sent; the flush-then-refresh after one is a
+// no-op here.
+const emits = vi.hoisted(() => ({ validate: vi.fn(async (_: unknown) => undefined) }))
+vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  emitCellAudioValidate: emits.validate,
+}))
+vi.mock("@/lib/audio/audio-validation-commit", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAudioValidationCommit: () => async () => undefined,
 }))
 // The take block's audio controller reaches for AudioContext and fetch; a
 // stub keeps the block mounted without a media pipeline behind it.
@@ -200,5 +213,49 @@ describe("EditorTable — the Recording tab lists added-track takes", () => {
     const tab = await screen.findByText("Recording")
     fireEvent.click(tab.closest("button") ?? tab)
     expect(await screen.findByText("Take on an added track")).toBeInTheDocument()
+  })
+})
+
+// Sam, 2026-09-30: in a dubbing file a subtitle line's takes live on the heard
+// lines (cues) performing it. The line's audio check read only the row, so it
+// said "No audio to validate", and a vote on the heard line never showed.
+describe("EditorTable — a subtitle line's audio check reaches its heard lines", () => {
+  const cue = (id: string, audioId: string | null, words: string, validators: string[] = []): CellData => ({
+    id, fileId: "cue-file", original: words, translated: "", startTime: 1, endTime: 2,
+    attachments: audioId
+      ? { [audioId]: { ...take(audioId, "recording"), validators, validatorCount: validators.length } }
+      : {},
+    selectedAudioId: audioId,
+    selectedGeneratedVoiceAudioId: null,
+  } as unknown as CellData)
+
+  function renderWith(linked: Map<string, LinkedTake[]>) {
+    audioState.byCellId = new Map()
+    return render(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} linkedTakesByCell={linked} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+  }
+
+  it("draws the heard line's take, and votes on it where it lives", async () => {
+    emits.validate.mockClear()
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true }]]]))
+    const row = await rowOf("bonjour cell-1")
+    expect(within(row).queryByTestId("audio-validation-unavailable")).toBeNull()
+    fireEvent.click(within(row).getByTestId("audio-validation-button"))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1))
+    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", audioId: "ta" })
+  })
+
+  it("shows a vote cast on the heard line elsewhere", async () => {
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,", ["someone"]), sharedWith: 1, hasTake: true }]]]))
+    const row = await rowOf("bonjour cell-1")
+    // Validated by another at a threshold of one: the double check, which
+    // offers nothing to press.
+    expect(within(row).getByTestId("audio-validation-button")).toHaveAttribute(
+      "aria-label", expect.stringContaining("validated"),
+    )
+    expect(within(row).getByTestId("audio-validation-button").className).toContain("text-green-500")
   })
 })

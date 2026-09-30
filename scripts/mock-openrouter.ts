@@ -433,7 +433,22 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   )
 }
 
+export function mockTranscription() {
+  return { text: "Mock transcription", words: [
+    { word: "Mock", start: 0, end: 0.25 },
+    { word: "transcription", start: 0.25, end: 0.5 },
+  ] }
+}
+
 const server = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
+    req.resume()
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(mockTranscription()))
+    })
+    return
+  }
   if (req.method === "GET" && (req.url === "/" || req.url === "/healthz")) {
     res.writeHead(200, { "Content-Type": "application/json" })
     res.end(JSON.stringify({ ok: true }))

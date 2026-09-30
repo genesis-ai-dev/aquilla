@@ -77,6 +77,15 @@ describe("autoTranscribeImportedMedia", () => {
     audioId: "a.mp3", url: "frontier-audio://a.mp3",
   }) }
 
+  it("signed-in hosted transcription needs no local model consent", async () => {
+    await autoTranscribeImportedMedia({
+      seed, projectId: "p1",
+      session: { jwt: "jwt", username: "dev", createdAt: "2026-09-30" },
+    })
+    expect(requestAiModelConsent).not.toHaveBeenCalled()
+    expect(runTranscribeAll).toHaveBeenCalledOnce()
+  })
+
   it("consent granted → runs the batch once with the seed cells + languages", async () => {
     await autoTranscribeImportedMedia({
       seed, projectId: "p1", session: null, sourceLanguage: "fra", targetLanguage: "spa",

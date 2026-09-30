@@ -11427,7 +11427,6 @@ export function ProjectWorkspace() {
             projectId,
             file: activeFile,
             getToken: getTokenForFile,
-            targetLang: activeLane,
           })
         },
       })
@@ -11961,7 +11960,6 @@ export function ProjectWorkspace() {
                   validationCount={validationCount}
                   countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
-                  targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}

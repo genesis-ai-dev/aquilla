@@ -121,7 +121,7 @@ test("six editors commit distinct cells while a whole-BSB helloao import is in f
     ).toBeGreaterThanOrEqual(BSB_VERSE_COUNT)
 
     const runId = randomUUID().slice(0, 8)
-    const texts = names.map((name, i) => `aqu1060-${name}-${runId}`)
+    const texts = names.map((name) => `aqu1060-${name}-${runId}`)
 
     // Start waiters before the writes so we measure ack → render, not
     // test-start → render. Each editor watches the next editor's cell

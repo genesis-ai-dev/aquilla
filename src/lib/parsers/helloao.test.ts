@@ -4,6 +4,7 @@ import {
   fetchHelloaoChapter,
   fetchHelloaoComplete,
   flattenHelloaoContent,
+  HelloaoChapterNotFoundError,
   parseHelloaoChapterStrings,
   parseHelloaoComplete,
   prefetchHelloaoChapter,
@@ -29,6 +30,27 @@ describe("fetchHelloaoComplete", () => {
 
     expect(result.translation.id).toBe("TST")
     expect(onRawSource).toHaveBeenCalledWith(raw)
+  })
+})
+
+describe("fetchHelloaoChapter", () => {
+  // AQU-849: a version that simply doesn't carry the chapter is an absence the
+  // sidebar renders as "no text", so it must be distinguishable from a failure.
+  it("reports a missing chapter as HelloaoChapterNotFoundError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
+
+    await expect(fetchHelloaoChapter("TST", "GEN", 99)).rejects.toBeInstanceOf(
+      HelloaoChapterNotFoundError,
+    )
+  })
+
+  it("reports any other bad status as a plain error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })))
+
+    const err = await fetchHelloaoChapter("TST", "EXO", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(HelloaoChapterNotFoundError)
+    expect((err as Error).message).toContain("503")
   })
 })
 

@@ -240,30 +240,13 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       // AQU-858: the mirror of `importing` above — the way a deliverable gets
       // back OUT of Aquilla without a human clicking Export in the app.
       mcpTool: 'export_file',
-      restEndpoint:
-        'GET /api/v1/external/projects/:projectId/files/:fileId/export?side=<source|target>&lane=<tag>',
+      restEndpoint: 'GET /api/v1/external/projects/:projectId/files/:fileId/export?lane=<tag>',
       minRoleLevel: ROLE.MAINTAINER,
       maxInlineBytes: MCP_EXPORT_MAX_BYTES,
-      // AQU-1454: the caller chooses the side, and never receives the source
-      // bundled with the target.
-      sides: {
-        values: ['source', 'target'],
-        default: 'target',
-        note:
-          'side=target (the default) is the translation round-trip for `lane`. side=source is ' +
-          'the CURATED SOURCE — source edits applied, hidden and deleted cells removed, no ' +
-          'translation anywhere — byte-identical to the in-app "Export source (.SFM)" download, ' +
-          'and what you want when seeding a second project from this one. USFM only today: ' +
-          'side=source on any other format fails with validation_failed naming the format. ' +
-          '`lane` has no meaning with side=source and is ignored. One call returns one side; no ' +
-          'response ever carries both. Any other value fails with validation_failed naming the ' +
-          'two that are accepted. The role floor below is the same for either side.',
-      },
       note:
         'export_file reconstructs one file from the ORIGINAL artifact preserved at import ' +
         'time with the current translations substituted in (untranslated segments keep their ' +
-        'source text, so the output stays valid) — or, with side=source, the curated source ' +
-        'with no translation in it. Export is gated HIGHER than reading: the ' +
+        'source text, so the output stays valid). Export is gated HIGHER than reading: the ' +
         'floor is the org\'s exportMinRole, MAINTAINER by default, and an org can raise or ' +
         'lower it — permission_denied here will not change on retry. A file imported without ' +
         'a preserved source artifact returns not_found and must be re-imported before it can ' +
@@ -1038,23 +1021,8 @@ async function exportFile(
   if (!fileId) return fail('validation_failed', 'fileId is required')
   if (!env.SNAPSHOTS) return fail('job_failed', 'SNAPSHOTS binding not configured')
 
-  // AQU-1454: the caller picks the side and always gets exactly that one.
-  // Validated against the RAW argument rather than `str`, so an empty string or
-  // a non-string is refused by name instead of quietly reading as "target".
-  const rawSide = args.side
-  if (rawSide !== undefined && rawSide !== null && rawSide !== 'source' && rawSide !== 'target') {
-    return fail(
-      'validation_failed',
-      `side must be "source" or "target" (got ${JSON.stringify(rawSide)}) — ` +
-        'one export returns one side, never both',
-    )
-  }
-  const sourceSide = rawSide === 'source'
-
   const lane = str(args, 'lane')
-  // The source side has no lane, so a lane passed with it is dropped rather
-  // than sent — the target-side query string is byte-identical to today's.
-  const qs = sourceSide ? '?side=source' : lane ? `?lane=${encodeURIComponent(lane)}` : ''
+  const qs = lane ? `?lane=${encodeURIComponent(lane)}` : ''
   const restPath = `/api/v1/external/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/export${qs}`
 
   const res = await handleExternalExportRequest(
@@ -1070,9 +1038,6 @@ async function exportFile(
   // back preserved bytes; its absence means translations WERE substituted.
   const exportMode = res.headers.get('X-Export-Mode') ?? 'round-trip'
   const lossyHeader = res.headers.get('X-Usfm-Lossy-Verse-Count')
-  // Read back off the response rather than off the argument: this is the side
-  // the bytes actually are, which is what the agent has to be able to trust.
-  const side = res.headers.get('X-Export-Side') === 'source' ? 'source' : 'target'
 
   if (!contentType.startsWith('text/')) {
     return fail(
@@ -1097,24 +1062,17 @@ async function exportFile(
   return ok({
     fileName,
     contentType,
-    side,
     exportMode,
     ...(lossyHeader === null ? {} : { lossyVerseCount: Number(lossyHeader) }),
     bytes,
     content,
-    ...(side === 'source'
-      ? {
-          note:
-            'This is the CURATED SOURCE: source edits applied, hidden and deleted cells removed, ' +
-            'and no translation in it anywhere. It is not a deliverable translation.',
-        }
-      : exportMode === 'round-trip'
-        ? {}
-        : {
-            warning:
-              'This is the preserved ORIGINAL artifact — no translations are substituted into it, ' +
-              'because this format has no server-side target serializer yet. Do not deliver it as a translation.',
-          }),
+    ...(exportMode === 'round-trip'
+      ? {}
+      : {
+          warning:
+            'This is the preserved ORIGINAL artifact — no translations are substituted into it, ' +
+            'because this format has no server-side target serializer yet. Do not deliver it as a translation.',
+        }),
   })
 }
 

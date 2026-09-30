@@ -40,6 +40,7 @@ import {
   useVideoSoundingCellId,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
@@ -737,6 +738,30 @@ export function MediaVideoPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, seekTarget])
 
+  // THE FILM TAKES THE FLOOR WHEN IT STARTS (2026-09-30), in the standalone
+  // arrangement, where it is the transport: a take playing on a waveform or a
+  // chip's preview stops, and the next thing to start stops the film. The play
+  // queue has done this since 09-29; the film did not, so a take went on
+  // sounding under it (found in the throttled browser pass). A SLAVED picture
+  // never claims — the queue it follows already holds the floor, and a claim
+  // here would pause that queue and, through it, the picture itself.
+  // `pause` goes through the registered controller, so a claim stops the film
+  // exactly as the bar's pause does (intent, stall ladder, readiness wait).
+  const registeredControllerRef = useRef<VideoController | null>(null)
+  const [filmAudio] = useState<ActiveAudioController>(() => ({
+    isPlaying: () => {
+      const video = videoRef.current
+      return Boolean(video && !video.paused)
+    },
+    play: async () => { registeredControllerRef.current?.play() },
+    pause: () => { registeredControllerRef.current?.pause() },
+  }))
+  useEffect(() => {
+    // Slaved, or gone: never the floor-holder.
+    if (slaved) clearActiveAudioIf(filmAudio)
+    return () => clearActiveAudioIf(filmAudio)
+  }, [slaved, filmAudio])
+
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
   // registers a controller reading the element live. Registered only in the
   // STANDALONE arrangement — a slaved picture is the queue's to command, and a
@@ -786,7 +811,11 @@ export function MediaVideoPane({
       },
     }
     setVideoController(controller)
-    return () => clearVideoControllerIf(controller)
+    registeredControllerRef.current = controller
+    return () => {
+      clearVideoControllerIf(controller)
+      if (registeredControllerRef.current === controller) registeredControllerRef.current = null
+    }
   }, [slaved, requestPlayWhenReady, cancelPendingPlay])
 
   // Space from the timeline. Only in the STANDALONE arrangement: when the queue
@@ -1135,11 +1164,12 @@ export function MediaVideoPane({
                   // click-to-start overlay permanently, however well the
                   // picture played afterwards.
                   playFailuresRef.current = 0
+                  claimActiveAudio(filmAudio)
                   onVideoPlaying?.(true)
                 }
           }
-          onPause={slaved ? undefined : () => onVideoPlaying?.(false)}
-          onEnded={slaved ? undefined : () => onVideoPlaying?.(false)}
+          onPause={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
+          onEnded={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
         />
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can

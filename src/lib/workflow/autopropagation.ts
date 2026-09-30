@@ -17,7 +17,17 @@ export interface PropagationUpdate {
   propagated: true
 }
 
-const normalize = (s: string): string => s.toLowerCase().replace(/\s+/g, " ").trim()
+/**
+ * The identity two source strings must share to count as the same repetition:
+ * case-folded, whitespace-collapsed, trimmed. Exported (AQU-1391) so the
+ * "Repetition ×N" indicator counts by exactly the key `propagateTranslation`
+ * matches on — a badge that disagreed with the propagation would be worse than
+ * no badge at all.
+ */
+export const normalizeRepetitionSource = (s: string): string =>
+  s.toLowerCase().replace(/\s+/g, " ").trim()
+
+const normalize = normalizeRepetitionSource
 
 /**
  * Segments receiving the confirmed translation: identical normalized source,

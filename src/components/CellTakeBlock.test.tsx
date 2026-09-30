@@ -397,27 +397,18 @@ describe("the take that plays", () => {
     expect(screen.getByText("Text changed")).toBeInTheDocument()
   })
 
-  // Sam, 2026-09-29: a courtesy — the take's validation in its own line,
-  // view only. The vote is the line's audio check's.
-  it("shows its validation in its line, view only", async () => {
-    const { default: userEvent } = await import("@testing-library/user-event")
-    draw()
-    const head = screen.getByTestId("cell-take-head")
-    const mark = head.querySelector('[data-testid="cell-take-validation"] [data-testid="audio-validation-button"]') as HTMLElement
-    expect(mark).not.toBeNull()
-    expect(mark.getAttribute("aria-label")).not.toMatch(/click/i)
-    await userEvent.hover(mark)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Validate it from the line’s audio check")
-  })
-
-  it("draws the vote for a heard line's take, which no row check covers", () => {
+  // Sam, 2026-09-29: the take's validation in its own line. Sam, 2026-09-30:
+  // and it takes the vote — this is the take that plays, heard right here.
+  it("takes the vote on the take that plays, in its line", () => {
     const owner = cueOwner()
     const id = owner.selectedAudioId!
     ;(owner.attachments as unknown as Record<string, Record<string, unknown>>)[id].validators = []
-    draw({ owner, validation: true })
-    // One mark, in the take's line — and there it is the vote.
+    draw({ owner })
+    const head = screen.getByTestId("cell-take-head")
+    const mark = head.querySelector('[data-testid="cell-take-validation"] [data-testid="audio-validation-button"]') as HTMLElement
+    // One mark, in the take's line — and it is the vote.
     expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(1)
-    expect(screen.getByTestId("audio-validation-button").getAttribute("aria-label")).toMatch(/click to validate/i)
+    expect(mark.getAttribute("aria-label")).toMatch(/click to validate/i)
   })
 
   // Sam, 2026-09-29: deletable even when it is the line's only take.

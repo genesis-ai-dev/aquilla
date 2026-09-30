@@ -736,11 +736,14 @@ export function TakesStrip({
                   "that older one was signed off by two people" is part of
                   the choice. Showing it on the circled take alone made it
                   look as though validation belonged to the selection.
-                  READ-ONLY since 2026-09-29 (Sam): a vote is cast only on the
-                  take that plays, from the line's audio check, where it can
-                  actually be heard — so here it is shown, never taken. */}
+                  A VOTE ONLY ON THE CIRCLED TAKE (Sam, 2026-09-29 and -30):
+                  a vote is cast only on the take that plays for the line,
+                  where it can be heard, so every other take shows its
+                  validation read-only. In the Recording tab's lists nothing
+                  is circled — the take that plays sits above them, with its
+                  own vote. */}
               <AudioValidationControl
-                  readOnly
+                  readOnly={readOnly || tab || !isCircled}
                   cellRef={cellId}
                   takes={audioValidation.takeFor(
                     { attachments: { [att.audioId]: att }, selectedBySlot: { [att.slot]: att.audioId } },

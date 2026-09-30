@@ -98,13 +98,6 @@ export interface CellTakeBlockProps {
   /** When and by whom the take was made, and whether the text has changed
    *  since — read once by the tab for all of a line's takes. */
   provenance?: RecordingTextDrift | null
-  /**
-   * Draw the vote on this take. Only a HEARD LINE's take asks for it: the
-   * subtitle row's audio check does not cover a take that lives on the cue
-   * performing it, so without this it could not be validated from the text at
-   * all. Provisional until heard lines are worked through (Sam, 2026-09-29).
-   */
-  validation?: boolean
   /** The owner's last RECORDING was deleted here — the workspace resets the
    *  target row it justified, as it does for a delete in the recorder. */
   onLastTakeRemoved?: (cellId: string) => void
@@ -145,7 +138,6 @@ function CellTakeBlockView({
   controller,
   targetLang,
   provenance = null,
-  validation = false,
   onLastTakeRemoved,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
@@ -415,9 +407,10 @@ function CellTakeBlockView({
           />
         )}
         {/* Its validation, in its own line (Sam, 2026-09-29), beside what
-            else is said about the take. View only: the vote is the line's
-            audio check's — except a heard line's take, which no row check
-            covers, so its vote is here. */}
+            else is said about the take — and the vote (Sam, 2026-09-30).
+            This is the take that PLAYS, heard right here, so it can be
+            validated here as from the line's audio check; the takes listed
+            under it show theirs read-only. */}
         {validationTakes.length > 0 && (
           <span data-testid="cell-take-validation" className="flex items-center">
             <AudioValidationControl
@@ -428,8 +421,6 @@ function CellTakeBlockView({
               canValidate={audioValidation.canValidate}
               onValidationChange={audioValidation.onValidationChange}
               variant="inline"
-              readOnly={!validation}
-              readOnlyFor="playing"
             />
           </span>
         )}

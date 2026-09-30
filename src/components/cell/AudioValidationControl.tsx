@@ -62,18 +62,13 @@ interface AudioValidationControlProps {
   variant?: "gutter" | "inline"
   /**
    * Show the take's validation without taking a vote (Sam, 2026-09-29). Only
-   * the take that PLAYS for the line can be validated — from the line's audio
-   * check, where it can be heard — so every list of takes shows the others'
-   * votes read-only. The icon and the "validated by" list are the same; the
-   * press, the withdraw buttons and "Validate this take" are not there.
+   * the take that PLAYS for the line can be validated — where it can be heard:
+   * the line's audio check, the top of the Recording tab, the recorder's
+   * circled take — so every list of takes shows the others' votes read-only.
+   * The icon and the "validated by" list are the same; the press, the
+   * withdraw buttons and "Validate this take" are not there.
    */
   readOnly?: boolean
-  /**
-   * What a read-only control says about voting. "listed": a take in a list,
-   * which cannot be validated until it plays. "playing": the take that plays,
-   * which IS validated — from the line's audio check, not from here.
-   */
-  readOnlyFor?: "listed" | "playing"
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -89,7 +84,6 @@ export function AudioValidationControl({
   onValidationChange,
   variant = "gutter",
   readOnly = false,
-  readOnlyFor = "listed",
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -224,7 +218,7 @@ export function AudioValidationControl({
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
   const tooltip = readOnly
-    ? t(readOnlyFor === "playing" ? "editor.audioValidation.playingNone" : "editor.audioValidation.readOnlyNone")
+    ? t("editor.audioValidation.readOnlyNone")
     : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
     : unrecorded[0]?.blockedReason
@@ -247,7 +241,7 @@ export function AudioValidationControl({
   // they can, or when every take already carries theirs. Read-only, it is
   // why nobody can vote HERE.
   const blockedNote = readOnly
-    ? t(readOnlyFor === "playing" ? "editor.audioValidation.playingNote" : "editor.audioValidation.readOnlyNote")
+    ? t("editor.audioValidation.readOnlyNote")
     : !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to

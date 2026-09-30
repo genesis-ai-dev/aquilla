@@ -67,15 +67,17 @@ describe("TakesStrip — audio validation", () => {
     expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(2)
   })
 
-  // Sam, 2026-09-29: READ-ONLY. A vote is cast only on the take that plays,
-  // from the line's audio check, where it can be heard — never from here.
-  it("takes no vote from the list, circled take or not", async () => {
+  // Sam, 2026-09-29 and -30: a vote is cast only on the take that plays,
+  // where it can be heard. In the recorder that is the CIRCLED take; the
+  // others show their validation read-only.
+  it("takes a vote on the circled take only", async () => {
     draw([
       take({ audioId: "a", validatorCount: 0, validators: [] }),
       take({ audioId: "b", validatorCount: 0, validators: [] }),
     ], "b")
     for (const mark of screen.getAllByTestId("audio-validation-button")) await userEvent.click(mark)
-    expect(emitValidate).not.toHaveBeenCalled()
+    expect(emitValidate).toHaveBeenCalledTimes(1)
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "b" })
   })
 
   // The imported programme audio is selected in the recording slot on every
@@ -85,14 +87,18 @@ describe("TakesStrip — audio validation", () => {
     expect(screen.queryByTestId("audio-validation-button")).toBeNull()
   })
 
-  it("shows a vote already cast, with no way to withdraw it here", async () => {
-    draw([take({ audioId: "b", validatorCount: 1, validators: ["ana"] })], "b")
-    await userEvent.hover(screen.getByTestId("audio-validation-button"))
+  it("shows a vote already cast on a take not circled, with no way to withdraw it", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 0, validators: [] }),
+      take({ audioId: "b", validatorCount: 1, validators: ["ana"] }),
+    ], "a")
+    const marks = screen.getAllByTestId("audio-validation-button")
+    await userEvent.hover(marks[1])
     // Scoped to the popover: AppTooltip mirrors the label into a portal.
     const list = await screen.findByRole("dialog")
     expect(within(list).getByText(/ana/)).toBeInTheDocument()
     expect(within(list).queryByRole("button", { name: /remove your validation/i })).toBeNull()
-    await userEvent.click(screen.getByTestId("audio-validation-button"))
+    await userEvent.click(marks[1])
     expect(emitUnvalidate).not.toHaveBeenCalled()
   })
 

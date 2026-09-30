@@ -484,18 +484,31 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
 // happened AND what is left, so it reports the last one; the workspace resets
 // the target row the recording justified, or a line whose work was deleted goes
 // on counting as finished on the server.
-// Sam, 2026-09-29: only the take that plays can be validated, from the line's
-// audio check. The list shows every take's validation and takes no vote.
-describe("TakesStrip — validation is shown, not taken", () => {
-  it("draws each take's validation read-only; a press casts nothing", () => {
+// Sam, 2026-09-29 and -30: only the take that plays can be validated. In the
+// recorder that is the circled take; every other take shows its validation
+// read-only. In the Recording tab's lists nothing takes a vote — the take that
+// plays sits above them, with its own.
+describe("TakesStrip — a vote on the circled take only", () => {
+  beforeEach(() => emitValidate.mockClear())
+
+  it("draws every take's validation; only the circled one takes a press", () => {
     render(<TakesStrip {...common} takes={[take("audio-c1-a.webm", 1000), take("audio-c1-b.webm", 1000)]} selectedAudioId="audio-c1-a.webm" />)
     const marks = screen.getAllByTestId("audio-validation-button")
     expect(marks).toHaveLength(2)
-    for (const mark of marks) {
-      expect(mark).toHaveAccessibleName("Audio not validated — c1.")
-      expect(mark).not.toHaveAttribute("aria-pressed")
-      fireEvent.click(mark)
-    }
+    expect(marks[0]).toHaveAccessibleName("Audio not validated — c1. Click to validate.")
+    expect(marks[1]).toHaveAccessibleName("Audio not validated — c1.")
+    expect(marks[1]).not.toHaveAttribute("aria-pressed")
+    fireEvent.click(marks[1])
+    expect(emitValidate).not.toHaveBeenCalled()
+    fireEvent.click(marks[0])
+    expect(emitValidate).toHaveBeenCalledTimes(1)
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "audio-c1-a.webm" })
+  })
+
+  it("takes no vote in the Recording tab's lists", () => {
+    // No session: the tab's rows would fetch each take's shape.
+    render(<TakesStrip {...common} session={null} variant="tab" takes={[take("audio-c1-a.webm", 1000), take("audio-c1-b.webm", 1000)]} selectedAudioId="audio-c1-a.webm" />)
+    for (const mark of screen.getAllByTestId("audio-validation-button")) fireEvent.click(mark)
     expect(emitValidate).not.toHaveBeenCalled()
   })
 })

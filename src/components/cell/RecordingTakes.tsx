@@ -10,8 +10,9 @@
 // its own, last.
 //
 // Making takes is the recorder's (New take opens it); placing them is the
-// timeline's; voice, volume and colour are the Audio view card's; validation
-// is the line's audio check, just above the expanded cell.
+// timeline's; voice, volume and colour are the Audio view card's. The take
+// that plays is validated here as from the line's audio check (Sam,
+// 2026-09-30); the listed takes show their validation read-only.
 
 import { useMemo } from "react"
 import { Mic } from "lucide-react"
@@ -99,7 +100,6 @@ const selectionsOf = (cell: CellData) => ({
 function OwnerTakes({
   owner,
   header,
-  validation = false,
   headings = true,
   players,
   offerWhenEmpty = false,
@@ -109,8 +109,6 @@ function OwnerTakes({
 }: Shared & {
   owner: CellData
   header?: React.ReactNode
-  /** The vote on the playing take (heard lines only — see CellTakeBlock). */
-  validation?: boolean
   /** Track headings once there is more than one track. */
   headings?: boolean
   /** The row's players, by take — the row's own cell only. */
@@ -199,7 +197,7 @@ function OwnerTakes({
       )}
       {/* A media line whose only audio is its section of the programme. */}
       {!defaultPlays && sourceClip && (
-        <CellTakeBlock {...shared} owner={owner} audioId={sourceClip.audioId} timings={owner.audioTimings?.[sourceClip.audioId]} validation={validation} controller={players?.get(sourceClip.audioId)} />
+        <CellTakeBlock {...shared} owner={owner} audioId={sourceClip.audioId} timings={owner.audioTimings?.[sourceClip.audioId]} controller={players?.get(sourceClip.audioId)} />
       )}
       {groups.map((group) => {
         const playing = playingTakeId(group, entry)
@@ -233,7 +231,6 @@ function OwnerTakes({
                 timings={owner.audioTimings?.[playing]}
                 readOnlyTranscript={generated}
                 provenance={history.get(playing) ?? null}
-                validation={validation}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
               />
             )}
@@ -276,9 +273,7 @@ export function RecordingTakes({ cell, linkedTakes, players, ...shared }: Record
           {...shared}
           owner={cue}
           // A heard line performs one or more subtitle lines at once; its take
-          // is recorded, chosen and validated there. Provisional: heard lines
-          // are still to be worked through (Sam, 2026-09-29).
-          validation
+          // is recorded, chosen and validated there.
           headings={false}
           offerWhenEmpty
           header={

@@ -71,6 +71,22 @@ describe("RecordingTakes", () => {
     expect(within(others).queryByTestId(`take-row-${REC}`)).toBeNull()
   })
 
+  // Sam, 2026-09-30: the take that plays is validated here, as from the
+  // line's audio check; the takes listed under it show theirs read-only.
+  it("takes a vote on the line's own playing take, and none from the list", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording", { label: "Take 1" }),
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+      },
+    }))
+    const playing = within(screen.getByTestId("cell-take-block")).getByTestId("audio-validation-button")
+    expect(playing.getAttribute("aria-label")).toMatch(/click to validate/i)
+    const listed = within(screen.getByTestId("tab-other-takes")).getByTestId("audio-validation-button")
+    expect(listed.getAttribute("aria-label")).not.toMatch(/click/i)
+  })
+
   // Found 2026-09-29, walking the tab as a viewer.
   it("lets someone who cannot edit only listen", () => {
     draw(cell({

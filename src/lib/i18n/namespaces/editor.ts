@@ -1484,9 +1484,6 @@ export const editor = defineNamespace({
     "editor.audioValidation.readOnlyNote": "Only the take that plays for the line can be validated",
     "editor.audioValidation.readOnlyNone":
       "Nobody has validated this take. Only the take that plays for the line can be validated.",
-    "editor.audioValidation.playingNote": "Validate this take from the line’s audio check",
-    "editor.audioValidation.playingNone":
-      "Nobody has validated this take yet. Validate it from the line’s audio check.",
     "editor.audio.addedTrackTakeHint": "Take on an added track",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
@@ -5584,28 +5581,15 @@ export const editor = defineNamespace({
         description:
           "Foot of the list of who validated a take, in lists of a line's takes (the " +
           "recorder's takes list, the Recording tab). Says why nobody can vote there: a " +
-          "vote can only be cast on the take that currently plays for the line, from the " +
-          "line's own audio check. A statement, not an instruction.",
+          "vote can only be cast on the take that currently plays for the line. A " +
+          "statement, not an instruction.",
         maxLength: 60,
-      },
-      "editor.audioValidation.playingNote": {
-        description:
-          "Foot of the list of who validated the take that plays for a line, shown on its " +
-          "waveform in the Recording tab. The vote itself is cast from the line's audio " +
-          "check (the audio validation column in the line's row), not from the waveform.",
-        maxLength: 60,
-      },
-      "editor.audioValidation.playingNone": {
-        description:
-          "Tooltip on the validation mark on the waveform of the take that plays for a line, " +
-          "when nobody has validated it. Points to where it is validated: the line's audio " +
-          "check (the audio validation column in the line's row).",
       },
       "editor.audioValidation.readOnlyNone": {
         description:
           "Tooltip on the validation mark of a take in a list of a line's takes when nobody " +
           "has validated it. First says that, then why it cannot be validated from the list: " +
-          "only the take that currently plays for the line can be, from the line's own audio check.",
+          "only the take that currently plays for the line can be.",
       },
       "editor.audioValidation.generatedTake": {
         description:

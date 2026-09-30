@@ -1,14 +1,3 @@
-// AQU-1449: the File menu's "Export source (.SFM)" downloads the CURATED
-// SOURCE — the original upload with source edits applied, hidden and deleted
-// cells dropped, and added cells' source text in place — so a lead can re-import
-// a file they curated as the source of another project.
-//
-// It used to return the active lane's translation injected into the upload,
-// which is what the Export dialog's own "Download (file name)" button already
-// gives you: the menu item was a second copy of the target export under a name
-// that promised the source. That dialog path is untouched (`side` omitted =
-// target), because nothing may produce both sides at once.
-
 import { toast } from "@/components/ui/toast"
 import type { FileReference } from "@/lib/parsers/types"
 import { downloadSourceFile, SourceExportError } from "@/lib/sync/source-export"
@@ -28,6 +17,7 @@ export async function exportSourceFile(args: {
   projectId: string
   file: FileReference
   getToken: (fileId: string) => Promise<string | null>
+  targetLang?: string
 }): Promise<void> {
   const name = sourceExportDownloadName(args.file.name)
   try {
@@ -36,8 +26,7 @@ export async function exportSourceFile(args: {
       fileId: args.file.id,
       downloadName: name,
       getToken: args.getToken,
-      // No lane: the source side is the same file whichever lane is active.
-      side: "source",
+      targetLang: args.targetLang ?? "",
     })
     toast.add({ type: "success", title: t("importExport.status.exportedFile", { fileName: name }) })
   } catch (err) {

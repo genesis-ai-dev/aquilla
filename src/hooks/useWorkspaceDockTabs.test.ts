@@ -81,3 +81,33 @@ describe("workspace dock persistence (FRO-308)", () => {
     expect(localStorage.getItem("aquilla:dockTab:p1")).toBe("search")
   })
 })
+
+describe("programmatic dock switches during the Agent takeover", () => {
+  // The workbench's "Choose file" picker opens Files for the user. Leaving the
+  // Agent surface must still restore the panel they had before, or they are
+  // stranded on Files (2026-08-28 live-review audit).
+  it("restores the saved panel after a programmatic switch", () => {
+    const { result, rerender } = renderHook(
+      ({ agent }) => useWorkspaceDockTabs(agent),
+      { initialProps: { agent: false } },
+    )
+    act(() => result.current.setActiveTab("search"))
+    rerender({ agent: true })
+    act(() => result.current.showProgrammatically("files"))
+    rerender({ agent: false })
+    expect(result.current.activeTab).toBe("search")
+  })
+
+  it("keeps a manual rail pick made after a programmatic switch", () => {
+    const { result, rerender } = renderHook(
+      ({ agent }) => useWorkspaceDockTabs(agent),
+      { initialProps: { agent: false } },
+    )
+    act(() => result.current.setActiveTab("search"))
+    rerender({ agent: true })
+    act(() => result.current.showProgrammatically("files"))
+    act(() => result.current.setActiveTab("voices"))
+    rerender({ agent: false })
+    expect(result.current.activeTab).toBe("voices")
+  })
+})

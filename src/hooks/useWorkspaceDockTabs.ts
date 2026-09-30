@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, type SetStateAction } from "react"
 import { readLastDockTab, writeLastDockTab } from "@/lib/dock-tab"
 import { useDockTabs, type DockTab } from "./useDockTabs"
 
@@ -16,7 +16,21 @@ export function useWorkspaceDockTabs(inAgentView: boolean, projectId?: string) {
   const previousAgentView = useRef(inAgentView)
   const panelBeforeAgent = useRef<DockTab>("files")
   const previousProjectId = useRef(projectId)
-  const { activeTab, lastOpenTab, setActiveTab, selectVisibleTab } = dock
+  // A switch the app made for the user mid-takeover (the workbench's "Choose
+  // file" picker) is not a manual pick: leaving Agent still restores the saved
+  // panel. A manual pick clears it.
+  const switchedProgrammatically = useRef(false)
+  const { activeTab, lastOpenTab, setActiveTab: setDockTab, selectVisibleTab } = dock
+
+  const setActiveTab = useCallback((update: SetStateAction<DockTab | null>) => {
+    switchedProgrammatically.current = false
+    setDockTab(update)
+  }, [setDockTab])
+
+  const showProgrammatically = useCallback((tab: DockTab) => {
+    switchedProgrammatically.current = true
+    setDockTab(tab)
+  }, [setDockTab])
 
   useEffect(() => {
     if (previousProjectId.current === projectId) return
@@ -33,11 +47,13 @@ export function useWorkspaceDockTabs(inAgentView: boolean, projectId?: string) {
     previousAgentView.current = inAgentView
     if (inAgentView) {
       panelBeforeAgent.current = lastOpenTab
+      switchedProgrammatically.current = false
       selectVisibleTab("agent")
-    } else if (activeTab === "agent") {
+    } else if (activeTab === "agent" || switchedProgrammatically.current) {
+      switchedProgrammatically.current = false
       selectVisibleTab(panelBeforeAgent.current)
     }
   }, [inAgentView, activeTab, lastOpenTab, selectVisibleTab])
 
-  return dock
+  return { ...dock, setActiveTab, showProgrammatically }
 }

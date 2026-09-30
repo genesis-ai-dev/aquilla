@@ -1100,6 +1100,7 @@ export function ProjectWorkspace() {
     setActiveTab: setDockTab,
     lastOpenTab: lastDockTab,
     selectVisibleTab: selectDockTab,
+    showProgrammatically: showDockTabProgrammatically,
   } = useWorkspaceDockTabs(centerSurface === "agent", projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
@@ -12551,7 +12552,7 @@ export function ProjectWorkspace() {
             fileNames={agentFileNames}
             editorHref={editorReturnPath ?? `/project/${project.id}/editor`}
             onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
-            onChooseFile={() => setDockTab("files")}
+            onChooseFile={() => showDockTabProgrammatically("files")}
             editorMode={{
               lens,
               timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,

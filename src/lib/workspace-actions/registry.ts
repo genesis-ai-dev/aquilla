@@ -4,6 +4,7 @@ import type {
 } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
+import { batchValidateConfirmDescription } from "@/lib/review/batch-validate-summary"
 
 // AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
@@ -120,18 +121,25 @@ export const workspaceActions: WorkspaceAction[] = [
     },
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.batchValidate.title",
-      description: (c, t) => {
+      // AQU-1507: this body used to be built from file progress —
+      // `total - validated` — which counts untranslated cells, untouched AI
+      // drafts, cells this reader had already signed off and cells outside
+      // their assignment, none of which the run touches. It promised "83 cells
+      // are currently unvalidated" on a file where the run validated zero.
+      // The count now comes from the very summary the run consumes
+      // (`ctx.batchValidateSummary`), so the two cannot drift: change the
+      // eligibility predicate and this number follows.
+      description: (c, t, joinList) => {
         if (!c.activeFileId) return ""
-        const p = c.fileProgress.get(c.activeFileId)
-        const unvalidated = p ? p.total - p.validated : 0
+        const summary = c.batchValidateSummary?.()
+        if (!summary) return t("editor.batchValidate.noTarget")
         // AQU-586: a project may cap how many eligible cells one batch-validate
-        // processes. 0/undefined keeps the "all eligible" behavior.
-        const cap = c.project.completionSettings?.validationBatchSize
-        const capNote =
-          typeof cap === "number" && cap > 0
-            ? t("nav.workspaceActions.batchValidate.capNote", { cap })
-            : ""
-        return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
+        // processes. 0/undefined keeps the "all eligible" behavior. The cap is
+        // already applied inside the summary; it is passed again so the note
+        // explaining "run again to continue" survives a run it did not trim.
+        return batchValidateConfirmDescription(
+          summary, t, joinList, c.project.completionSettings?.validationBatchSize,
+        )
       },
       // Same imperative as the selection toolbar's button — reuse it rather
       // than mint a duplicate string in this namespace. It names its half now

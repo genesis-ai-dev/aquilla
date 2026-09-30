@@ -163,7 +163,6 @@ export const zh_Hans: Catalog = {
   "nav.workspaceActions.completeAll.confirmLabel": "全部草拟",
   "nav.workspaceActions.batchValidate.label": "批量验证…",
   "nav.workspaceActions.batchValidate.title": "批量验证",
-  "nav.workspaceActions.batchValidate.description": {"forms":{"other":"这会以您的名义将符合条件的人工撰写或人工编辑的单元格标记为已验证。未经修改的 AI 草稿不包含在内，仍需逐一审阅。（目前有 {unvalidated} 个单元格尚未验证。）"},"countVar":"unvalidated"},
   "nav.workspaceActions.batchValidate.capNote": {"forms":{"other":" 每次运行最多验证 {cap} 个符合条件的单元格（依项目批量大小）；请再次运行以继续。"},"countVar":"cap"},
   "nav.workspaceActions.export": "导出",
   "nav.workspaceActions.importIntoFile": "将目标语言译文导入此文件",

@@ -152,19 +152,22 @@ So every issue carries a spec question:
 Whether an agent may pick an issue up is read straight off the **status** — there are no
 `ready-for-agent`/`ready-for-human` labels; status carries it:
 
-- **`Triage` = the human queue, and the only birthplace of new issues.** Anything that needs
-  a human *first* — an architectural or design decision, a review, external access, or
+- **`Triage` = the human queue, and the default birthplace of new issues.** Anything that
+  needs a human *first* — an architectural or design decision, a review, external access, or
   hands-on human implementation — plus any un-vetted incoming issue. Linear's Triage status
   sits *outside* the Backlog→Todo→… flow (an issue in Triage has no normal workflow status —
   that is the point). **Agents never pick up a Triage issue.** **Every newly created issue —
-  from `/issue debug|improve`, `to-issues`, `/swarm` decomposition, scheduled routines, or any
-  other automation — is created in `Triage`, never in `Todo`.** `/triage` moves an issue out
-  of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or explicitly a human's
-  to implement.
+  from `/issue debug|improve`, `/swarm` decomposition, scheduled routines, or any other
+  automation — is created in `Triage`, never in `Todo`.** The one exception is `to-issues`:
+  it classifies each slice itself, filing **HITL** slices in `Triage` and **AFK** slices
+  (acceptance criteria present, no human call outstanding) straight into `Todo`. `/triage`
+  moves an issue out of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or
+  explicitly a human's to implement.
 - **`Todo` = agent-ready (AFK).** Fully specified, acceptance criteria present, no human
   decision outstanding. This is the **only** queue `/issue next` and `/swarm` draw from — and
-  issues enter it **only by human promotion** (via `/triage` or an explicit human instruction),
-  never at creation. `Backlog` is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
+  issues enter it **only by human promotion** (via `/triage` or an explicit human instruction)
+  or as a `to-issues` **AFK** slice; no other automation creates issues in `Todo`. `Backlog`
+  is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
 
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
@@ -185,9 +188,10 @@ infra). The template applies the matching category label itself (`Task` carries
 pre-filled body wholesale, so author the body using the template's exact section headings
 with real content — never leave placeholder text, and never invent your own top-level
 structure (extra sections go *after* the template's). ⚠️ All three templates embed status
-`Todo`: always pass `state: Triage` explicitly on create (an explicit `state` overrides the
-template's — verified 2026-08-28) and **check the create response actually says `Triage`**;
-if it came back `Todo`, immediately re-save it. **Agent-created issues are also left
+`Todo`: always pass `state` explicitly on create — `Triage`, or `Todo` only for a
+`to-issues` AFK slice (an explicit `state` overrides the template's — verified 2026-08-28)
+— and **check the create response shows the status you intended**; if an issue meant for
+`Triage` came back `Todo`, immediately re-save it. **Agent-created issues are also left
 unassigned** — the team auto-assigns new issues on a rotation, which wins at create time
 even if you pass no assignee; when the create response shows an assignee, immediately
 re-save with `assignee: null` (the response omitting the assignee field confirms it's
@@ -197,9 +201,9 @@ Status pipeline:
 
 | Status | Meaning | Who/when |
 | --- | --- | --- |
-| **Triage** | Human queue — needs review/decision, or not yet vetted. **All new issues are created here; HITL work lives here.** | agents NEVER pick up from here |
+| **Triage** | Human queue — needs review/decision, or not yet vetted. **New issues are created here (except `to-issues` AFK slices); HITL work lives here.** | agents NEVER pick up from here |
 | **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
-| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered only by human promotion, never at creation | the ONLY queue `/issue next` & `/swarm` pull from |
+| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered by human promotion, or at creation only as a `to-issues` AFK slice | the ONLY queue `/issue next` & `/swarm` pull from |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
 | **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |

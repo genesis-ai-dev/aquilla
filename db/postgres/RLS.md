@@ -1,30 +1,73 @@
 # Row-Level Security backstop — Aquilla Postgres (AQU-289)
 
 Migration: `db/postgres/migrations/0034_rls_backstop.sql`
+(plus per-table additions in later migrations — see the table below)
 Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ---
 
 ## What is protected
 
-Eight project-scoped tables have RLS enabled:
+**21 of the schema's 55 project-scoped tables have RLS enabled.** The list below is
+generated from the migrations; `scripts/rls-coverage.test.ts` fails if this table and
+the migrations disagree, and if any project-scoped table is neither covered nor
+explicitly recorded as uncovered. Before that guard existed this section said "nine
+tables" and listed `snapshots`, which migration 0039 dropped — for 60+ migrations,
+while four OPSEC passes cited it as a live mitigation.
 
-| Table | RLS policy name |
-|---|---|
-| `cells` | `rls_cells_project_access` |
-| `events` | `rls_events_project_access` |
-| `files` | `rls_files_project_access` |
-| `comments` | `rls_comments_project_access` |
-| `cell_validators` | `rls_cell_validators_project_access` |
-| `cell_audio` | `rls_cell_audio_project_access` |
-| `project_settings` | `rls_project_settings_project_access` |
-| `snapshots` | `rls_snapshots_project_access` |
+| Table | RLS policy name | Migration |
+|---|---|---|
+| `artifact_bindings` | `rls_artifact_bindings_project_access` | 0066 |
+| `artifacts` | `rls_artifacts_project_access` | 0056 |
+| `cell_attachments` | `rls_cell_attachments_project_access` | 0112 |
+| `cell_audio` | `rls_cell_audio_project_access` | 0034 |
+| `cell_audio_validators` | `rls_cell_audio_validators_project_access` | 0096 |
+| `cell_validators` | `rls_cell_validators_project_access` | 0034 |
+| `cells` | `rls_cells_project_access` | 0034 |
+| `changesets` | `rls_changesets_project_access` | 0055 |
+| `comments` | `rls_comments_project_access` | 0034 |
+| `contextual_decisions` | `rls_contextual_decisions_select` / `_insert` / `_update` | 0076 |
+| `contextual_drafts` | `rls_contextual_drafts_select` / `_insert` / `_update` | 0074 |
+| `contextual_project_leases` | `rls_contextual_project_leases_select` / `_insert` / `_update` / `_delete` | 0074 |
+| `contextual_run_events` | `rls_contextual_run_events_select` / `_insert` | 0074 |
+| `contextual_runs` | `rls_contextual_runs_select` / `_insert` / `_update` | 0074 |
+| `contextual_steering` | `rls_contextual_steering_select` / `_insert` / `_update` | 0074 |
+| `events` | `rls_events_project_access` | 0034 |
+| `file_section_progress` | `rls_file_section_progress_project_access` | 0053 |
+| `files` | `rls_files_project_access` | 0034 |
+| `plan_units` | `rls_plan_units_project_access` | 0089 |
+| `project_settings` | `rls_project_settings_project_access` | 0034 |
+| `scene_briefs` | `rls_scene_briefs_select` / `_insert` / `_update` | 0074 |
 
-Every policy calls `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant.
+The 0034-family policies call `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant. The 0074-family (contextual/autopilot) policies additionally require `project_id = current_setting('app.project_id', true)` — exact-project rather than any-accessible-project.
 
-Tables NOT covered by RLS (intentional):
-- Identity/org tables (`users`, `organizations`, `org_members`, `groups`, …) — they are not project-scoped; callers already gate on user identity at the route level.
-- Cross-project tables (`assignments`, `cell_waivers`, `cell_backtranslations`, etc.) — they carry a `project_id` column but are accessed only from routes that have already verified project membership; adding RLS here is a follow-on task.
+### What is NOT protected
+
+Not covered *by design* — these are not project-scoped, and callers gate on user
+identity at the route level: identity/org tables (`users`, `organizations`,
+`org_members`, `groups`, `platform_settings`, `org_settings`, …).
+
+Not covered, **not** by design — the other **34 project-scoped tables**. Each is
+listed with a reason in `UNCOVERED` in `scripts/rls-coverage.test.ts`, which is the
+authoritative ledger; adding a project-scoped table without a policy fails that test
+until the decision is recorded. Two groups are worth naming here:
+
+- **`project_members` and `group_project_grants` cannot take 0034's policy shape at
+  all.** Reading them is *how* `app_user_can_access_project()` decides access, and the
+  function is `SECURITY INVOKER`, so its own reads are subject to the caller's
+  policies — a policy on either table that calls it recurses through itself. Covering
+  them needs a self-scoped predicate, or a `SECURITY DEFINER` helper with a pinned
+  `search_path`.
+- **19 of the 34 were never granted to `app_runtime`** (`lanes`, `api_credentials`,
+  `agent_memories`, `knowledge_docs`, `project_briefs`, `style_rules`, `concepts`,
+  `cell_links`, `project_access_links`, …). That is not a small gap: those tables are
+  on ordinary request paths, so a worker connected as `app_runtime` would fail
+  `permission denied` on them. See § Deployment status — it is the main evidence that
+  nothing connects as that role today, and therefore that adding policies is not yet
+  worth doing.
+
+Rows in `project_invites` and `project_access_links` are live credentials, so they are
+the two highest-value entries in that ledger.
 
 ---
 
@@ -84,7 +127,7 @@ ALTER TABLE comments         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE cell_validators  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE cell_audio       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE project_settings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE snapshots        DISABLE ROW LEVEL SECURITY;
+-- (repeat for the rest of the coverage table above; `snapshots` was dropped by 0039)
 
 -- Re-enable when all call sites are confirmed correct:
 ALTER TABLE cells            ENABLE ROW LEVEL SECURITY;
@@ -94,7 +137,7 @@ ALTER TABLE comments         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cell_validators  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cell_audio       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE snapshots        ENABLE ROW LEVEL SECURITY;
+-- (repeat for the rest of the coverage table above)
 ```
 
 ---
@@ -157,10 +200,55 @@ regression in features that return empty lists.  During staging soak:
 
 ---
 
-## NOT applied to live Neon
+## Deployment status
 
-This migration has **not** been applied to any live Neon database.  It exists
-only as a repo artifact.  See the Apply Procedure above.
+**Unknown from this repository, and probably inert. Do not cite RLS as a live
+mitigation without checking.** This section replaces a claim ("not applied to any
+live Neon database — it exists only as a repo artifact") that was left unrevised
+for ~90 migrations while review after review treated the backstop as enforced.
+
+What the repo does establish:
+
+- **The DDL has almost certainly been applied.** `db/postgres/migrations` is applied
+  wholesale by `pnpm neon:apply`, and 0066/0074/0096/0112 contain unguarded
+  `GRANT … TO app_runtime`, which errors if the role does not exist. So the role,
+  the policies and `ENABLE`/`FORCE` are expected to be live.
+- **But nothing can be connecting *as* `app_runtime`.** 19 project-scoped tables on
+  ordinary request paths were never granted to it (§ What is NOT protected), so a
+  worker using that role would fail `permission denied` on lane resolution, PAT
+  lookup, agent memory and briefs. The app works, so the connection uses another
+  role.
+- **Any other role bypasses these policies**, because every policy in this schema is
+  written `TO app_runtime`. `FORCE ROW LEVEL SECURITY` would otherwise make the
+  owner visible-to-nothing rather than see-everything; since reads succeed, the
+  connecting role must be `BYPASSRLS` (Neon's default owner is a member of
+  `neon_superuser`, which is).
+
+So the backstop is a coverage ledger, not a runtime control, until someone answers
+one question out of band. Steps 2–6 of the Apply Procedure above are manual, in the
+Neon and Cloudflare dashboards, and were never recorded anywhere in this repo.
+
+**To resolve it, run against each live database and record the answer here:**
+
+```sql
+-- Which role does this connection use, and can it bypass RLS?
+SELECT current_user, session_user,
+       (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS bypasses_rls;
+
+-- Does the runtime role exist, and can it log in?
+SELECT rolname, rolcanlogin, rolbypassrls FROM pg_roles WHERE rolname = 'app_runtime';
+
+-- Is the policy set actually live? (pnpm neon:status reports this as drift too,
+-- including the app_runtime grants since the 2026-09-28 contract fix.)
+SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
+ WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relrowsecurity;
+```
+
+If the answer is "the connection is an owner/BYPASSRLS role" — the expected
+outcome — then the options are, in order: finish the grants and cut over to
+`app_runtime` per the Apply Procedure (with the soak), or stop treating RLS as a
+layer and say so in `docs/OPSEC.md`. Either is fine; the current state, where it
+is cited but unenforced, is not.
 
 `SWARM-TODO(AQU-289): deploy-time — create runtime role on staging Neon branch,
 apply migration, soak, then prod; verify admin console + migrations still work

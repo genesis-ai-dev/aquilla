@@ -21,7 +21,7 @@ import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
-import type { AgentProposal } from "@/lib/agent/protocol"
+import type { AgentProposal, FileCandidate } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
 import {
   MessageScroller,
@@ -48,7 +48,7 @@ export interface AgentDockViewProps {
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
   /** Current file/cell location — automatically sent as run context. */
-  context: { fileId?: string; cellId?: string }
+  context: { fileId?: string; cellId?: string; lane?: string }
   /** Project's active rules for proposal lint. */
   rules: TranslationRule[]
   /** Live cell lookup from useCells. */
@@ -163,7 +163,7 @@ export function AgentDockView({
         jwt,
         request: {
           projectId,
-          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
+          ...(context.fileId || context.cellId || context.lane !== undefined ? { context: { ...context } } : {}),
           ...(translatorProfile ? { translatorProfile } : {}),
           ...(attachments.length > 0 ? { artifacts: attachments } : {}),
         },
@@ -172,6 +172,29 @@ export function AgentDockView({
       if (attachments.length > 0) setAttachments([])
     },
     [jwt, send, projectId, context, attachments],
+  )
+
+  // AQU-1468: a file button under the agent's "which file?" question. Sends the
+  // choice as a new turn scoped to that file, same as typing the name. Only
+  // the newest run's buttons work, and only while nothing is streaming.
+  const latestRunId = state.runs[state.runs.length - 1]?.localId
+  const chooseFile = useCallback(
+    (runLocalId: string, candidate: FileCandidate) => {
+      if (!jwt || state.isStreaming || runLocalId !== latestRunId) return
+      const text = t("agent.run.useFileMessage", { name: candidate.name })
+      const translatorProfile = profileForPrompt(getTranslatorProfile())
+      send({
+        wire: text,
+        display: text,
+        jwt,
+        request: {
+          projectId,
+          context: { fileId: candidate.id },
+          ...(translatorProfile ? { translatorProfile } : {}),
+        },
+      })
+    },
+    [jwt, state.isStreaming, latestRunId, send, projectId, t],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -263,6 +286,10 @@ export function AgentDockView({
                       }}
                       onReviewMemory={onReviewMemory}
                       onChangesetApplied={onApplied}
+                      onChooseFile={(candidate) => chooseFile(run.localId, candidate)}
+                      fileChoiceEnabled={
+                        Boolean(jwt) && !state.isStreaming && run.localId === latestRunId
+                      }
                     />
                   </MessageScrollerItem>
                 ))}

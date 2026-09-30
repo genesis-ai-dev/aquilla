@@ -133,7 +133,17 @@ crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): was 43200 (30 days). Lowered per
+# docs/OPSEC.md V8 — with server-side jti revocation now in place
+# (utils/token-revocation.ts), the 30-day fixed lifetime was a leftover from
+# before revocation existed, not a deliberate current tradeoff. 20160 (14
+# days) still comfortably covers the offline/diode-zone gap this domain
+# actually sees (see access-links.ts's 90-day link TTL for that flow, which
+# is unaffected) while roughly halving the worst-case exposure of a token
+# that leaks somewhere refresh can't reach it (server logs, browser history,
+# a shared machine) — an active client is unaffected, since useSessionRefresh
+# rolls the credential forward well before this lapses.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -234,7 +244,9 @@ name = "EMAIL"
 
 [env.production.vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
+# dropped from 43200 (30 days) — same reasoning applies to production.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -251,6 +263,9 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles in production. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -326,7 +341,9 @@ binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see top-level [vars] for why
+# this dropped from 43200 (30 days).
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -353,6 +370,9 @@ BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "development"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles on dev. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -385,6 +405,9 @@ bucket_name = "aquilla-snapshots-dev"
 
 [env.e2e.vars]
 ALGORITHM = "HS256"
+# Left at 30 days deliberately — not internet-reachable, so the shorter
+# prod/dev TTL's exposure argument doesn't apply here, and a longer lifetime
+# avoids mid-run token expiry flakiness.
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"

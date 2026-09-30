@@ -26,6 +26,11 @@ export type OutboxEventKind =
   | "source.cell.commit"
   | "source.cell.delete"
   | "source.cell.reorder"
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row, so nothing is deleted
+  // and no lane's translation goes stale. Hiding is per CELL, not per lane,
+  // which is why one source-side kind covers every language.
+  | "source.cell.visibility.set"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -45,6 +50,11 @@ export type OutboxEventKind =
   | "cell.audio.trim"
   | "cell.audio.place"
   | "cell.audio.measure"
+  // AQU-777: per-cell file attachments (screenshots / reference images).
+  // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
+  // time these land — same ordering contract as cell.audio.attach.
+  | "cell.attachment.add"
+  | "cell.attachment.remove"
   // AQU-490: a vote on a TAKE. Reviewer-level, unlike the contributor-level
   // audio kinds above — it is a review action, like the text pair.
   | "cell.audio.validate"
@@ -172,6 +182,10 @@ export interface OutboxEventPayloads {
   "source.cell.reorder": {
     anchorCellId: string | null
   }
+  "source.cell.visibility.set": {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
+  }
 
   "target.cell.create": {
     cellId: string
@@ -281,9 +295,13 @@ export interface OutboxEventPayloads {
   "cell.waive": {
     ruleId: string
     reason?: string
+    /** AQU-1462: lane the member was working in. Omitted for the default lane. */
+    targetLang?: string
   }
   "cell.unwaive": {
     ruleId: string
+    /** AQU-1462: see `cell.waive`. */
+    targetLang?: string
   }
 
   // Audio attachments. Bytes already live in R2 before these are emitted.
@@ -307,20 +325,28 @@ export interface OutboxEventPayloads {
     /** AQU-646: ASR transcript of the clip's trim window (media source segments
      *  only) — the server lands it on the source cell's `transcription`. */
     transcription?: string
+    /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
+    targetLang?: string
   }
   "cell.audio.select": {
     audioId: string
     /** Scopes the sibling-deselect only; it is never written onto the row, so
      *  select cannot move a clip between slots. Open string — see attach. */
     slot: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   "cell.audio.remove": {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // AQU-646 round 8: rename a take — label only, never selection/trims.
   "cell.audio.rename": {
     audioId: string
     label: string | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * The clip's COMPLETE playback trim window — both ends always stated, null
@@ -333,6 +359,8 @@ export interface OutboxEventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * AQU-646 stage 3: where THIS take sits against the line it performs, as an
@@ -355,6 +383,8 @@ export interface OutboxEventPayloads {
   "cell.audio.place": {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so
@@ -362,6 +392,8 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * AQU-490: one person's vote that this TAKE is good. Presence of the
@@ -370,6 +402,8 @@ export interface OutboxEventPayloads {
    */
   "cell.audio.validate": {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. The vote itself stays shared. */
+    targetLang?: string
   }
   /**
    * Withdrawing a vote. `targetUsername` names WHOSE, for a maintainer
@@ -380,6 +414,8 @@ export interface OutboxEventPayloads {
   "cell.audio.unvalidate": {
     audioId: string
     targetUsername?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue. The subtitle
@@ -398,6 +434,25 @@ export interface OutboxEventPayloads {
     confidence: number | null
   }
 
+  // ── Cell attachments (AQU-777; non-chain-mutating) ──────────────────────
+  // Bytes are PUT to R2 before the event is emitted, exactly as
+  // cell.audio.attach does it, so a projected row always points at an object
+  // that exists. A failed emit after a successful PUT is cleaned up by the
+  // client (see src/lib/attachments/attach-file.ts).
+  "cell.attachment.add": {
+    /** Client-generated uuidv7; the projection's key within the project. */
+    attachmentId: string
+    /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+    objectName: string
+    /** The user-visible file name, as picked. */
+    name: string
+    mimeType?: string
+    sizeBytes?: number
+  }
+  "cell.attachment.remove": {
+    attachmentId: string // soft-delete: stamps deleted_at
+  }
+
   /**
    * Back-translation event. Non-chain-mutating (parentId omitted).
    * Emitted by the BT tab when a statistical or polished BT is saved.
@@ -411,6 +466,8 @@ export interface OutboxEventPayloads {
     targetEventId: string
     /** True when the LLM polish pass has been applied. */
     polished: boolean
+    /** AQU-1462: lane whose translation this back-translation describes. */
+    targetLang?: string
   }
 
   "file.create": {
@@ -557,6 +614,8 @@ export interface OutboxEventPayloads {
     /** Legacy absolute dub anchor. Still projected so historical events replay
      *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
+    /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
+    targetLang?: string
   }
   // The file's audio timing mode (Original vs Free); null clears back to the
   // project-level default. Maintainer floor — structural, like the setting

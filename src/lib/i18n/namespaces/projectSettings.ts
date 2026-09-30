@@ -518,6 +518,21 @@ export const projectSettings = defineNamespace({
     "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
+    // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
+    "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "projectSettings.autoPropagateRepetitions.description":
+      "Whether validating a cell copies its translation into the other cells in " +
+      "the same file whose source text is identical. Filled-in cells are left " +
+      "unvalidated, and cells someone has already validated are never changed.",
+    "projectSettings.autoPropagateRepetitions.inherit": "Organization default",
+    "projectSettings.autoPropagateRepetitions.currentlyOn":
+      "The organization currently propagates them",
+    "projectSettings.autoPropagateRepetitions.currentlyOff":
+      "The organization currently leaves them alone",
+    "projectSettings.autoPropagateRepetitions.on": "Propagate",
+    "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
+    "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
+
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",

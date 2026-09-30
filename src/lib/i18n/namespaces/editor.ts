@@ -554,6 +554,8 @@ export const editor = defineNamespace({
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
+    "editor.selection.translateNoPermission":
+      "You need contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
@@ -3953,6 +3955,13 @@ export const editor = defineNamespace({
           "Tooltip when the bulk-translate button is disabled because the project " +
           "has no AI model configured. A state, with the implied fix being project " +
           "settings.",
+      },
+      "editor.selection.translateNoPermission": {
+        description:
+          "Tooltip when the bulk-translate button is disabled because the user's " +
+          "project role cannot save target text — a reviewer/validator can sign off " +
+          "on translations but not write them. 'Contributor' is a role name in this " +
+          "app.",
       },
       "editor.selection.allTranslated": {
         description:

@@ -27,6 +27,7 @@ const section = (key: string, over: Partial<PlanSection> = {}): PlanSection => (
 
 function renderGrid(sections: PlanSection[], over: {
   showAudio?: boolean
+  showText?: boolean
   nearlyComplete?: boolean
   selectedKey?: string | null
 } = {}) {
@@ -35,6 +36,7 @@ function renderGrid(sections: PlanSection[], over: {
     <PlanChapterGrid
       sections={sections}
       showAudio={over.showAudio ?? false}
+      showText={over.showText ?? true}
       nearlyComplete={over.nearlyComplete ?? false}
       selectedKey={over.selectedKey ?? null}
       onSelect={onSelect}
@@ -267,5 +269,57 @@ describe("the badge above its neighbours", () => {
     // overhang. Sam: "badges are still clipping."
     renderGrid([section("GEN 1", { validatedCount: 35 }), section("GEN 2")], { nearlyComplete: true })
     expect(screen.getByTestId("plan-tile-badge-GEN 1").className).toContain("z-10")
+  })
+})
+
+
+/**
+ * AQU-955: the grid on an AUDIO-ONLY file.
+ *
+ * Its chapters have takes and no target text, so with text still measured every
+ * tile was short by its whole cell count and the grid was a solid block of
+ * "outstanding" whatever had been recorded — the one view that was supposed to
+ * answer "which chapters still need recording" answered nothing.
+ */
+describe("an audio-only file (AQU-955)", () => {
+  const recorded = (key: string, over: Partial<PlanSection> = {}) =>
+    section(key, { filledCount: 0, validatedCount: 0, ...over })
+
+  it("draws a fully recorded chapter as complete instead of short", () => {
+    renderGrid([recorded("GEN 1")], { showAudio: true, showText: false })
+    expect(screen.getByTestId("plan-tile-GEN 1")).not.toHaveAttribute("data-short")
+  })
+
+  it("still marks a chapter whose takes are missing", () => {
+    renderGrid([recorded("GEN 1", { audioCount: 10, audioValidatedCount: 10 })], {
+      showAudio: true,
+      showText: false,
+    })
+    expect(screen.getByTestId("plan-tile-GEN 1")).toHaveAttribute("data-short", "true")
+  })
+
+  it("leaves the text half of the underline transparent and draws only the audio half", () => {
+    renderGrid([recorded("GEN 1", { audioCount: 10, audioValidatedCount: 10 })], {
+      showAudio: true,
+      showText: false,
+    })
+    expect(underline("GEN 1", "text")).toHaveStyle({ backgroundColor: "transparent" })
+    expect(underline("GEN 1", "audio")).not.toHaveStyle({ backgroundColor: "transparent" })
+  })
+
+  it("names only the swatches it can draw", () => {
+    render(<PlanGridLegend showAudio showText={false} />)
+    const legend = screen.getByTestId("plan-grid-legend")
+    expect(within(legend).queryByText(/text/i)).toBeNull()
+  })
+
+  it("is the same grid as before on a file that does carry text", () => {
+    // The guard on the other side: showText defaults to true, so every caller
+    // written before this renders byte-for-byte as it did.
+    renderGrid([section("GEN 1", { validatedCount: 10 })], { showAudio: false })
+    expect(screen.getByTestId("plan-tile-GEN 1")).toHaveAttribute("data-short", "true")
+    expect(underline("GEN 1", "text")).toHaveStyle({
+      backgroundColor: hexToRgba(TEXT_HUE, 1),
+    })
   })
 })

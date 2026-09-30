@@ -139,6 +139,18 @@ export interface HelloaoChapterResponse {
 
 const chapterCache = new Map<string, Promise<HelloaoChapterResponse>>()
 
+/**
+ * The upstream has no such chapter in this translation — the version omits the
+ * book, or stops short of that chapter. AQU-849: this is an absence, not a
+ * failure, so callers render "no text available" rather than an error.
+ */
+export class HelloaoChapterNotFoundError extends Error {
+  constructor(key: string) {
+    super(`No chapter ${key} in this translation`)
+    this.name = "HelloaoChapterNotFoundError"
+  }
+}
+
 // Per-chapter fetch for the helps sidebar. Cached by promise so concurrent
 // callers for the same chapter share one request; failed fetches are evicted
 // so a transient error doesn't poison the cache.
@@ -154,6 +166,9 @@ export function fetchHelloaoChapter(
 
   const promise = (async () => {
     const res = await fetch(`${API_BASE}/${translationId}/${book}/${chapter}.json`, { signal })
+    if (res.status === 404) {
+      throw new HelloaoChapterNotFoundError(key)
+    }
     if (!res.ok) {
       throw new Error(`Failed to fetch ${key} (${res.status})`)
     }

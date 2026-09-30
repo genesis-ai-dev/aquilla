@@ -276,6 +276,14 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    // AQU-515 — pericope suggestions, offered beside the division picker when
+    // the open file addresses scripture.
+    "editor.pericope.trigger": "Suggested passages",
+    "editor.pericope.heading": "Next passages to work on",
+    "editor.pericope.range": "{book} {start}–{end}",
+    "editor.pericope.agreement": "{count} of 20 Bibles break here",
+    "editor.pericope.continues": "Finishes the passage you are in",
+
     "editor.milestone.splitAria": "Split into milestones",
     "editor.milestone.splitHint":
       "Show only the cells in the current division. Use the arrows to move to the next one.",
@@ -434,6 +442,8 @@ export const editor = defineNamespace({
     "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
     "editor.bibles.searchLabel": "Search Bible versions",
     "editor.bibles.failedToLoad": "Failed to load: {error}",
+    "editor.bibles.retryVersion": "Retry {version}",
+    "editor.bibles.retryVersions": "Retry loading versions",
     "editor.bibles.loadingVersions": "Loading versions…",
     "editor.bibles.noMatches": "No matches.",
     "editor.bibles.closePicker": "Close picker",
@@ -456,6 +466,10 @@ export const editor = defineNamespace({
     "editor.resources.openExternal": "Open the full article",
     "editor.resources.openExternalAria": "Open the full article about {entity}",
     "editor.resources.attribution": "Reference data from the",
+
+    // — Shared failure state for the reference side panels (AQU-849) ————————
+    "editor.resourcePane.crashed":
+      "This panel stopped responding. Retry to reload it — your work is untouched.",
 
     // — Translation-notes reference sidebar ——————————————————————————
     "editor.tn.title": "Translation Notes",
@@ -1404,6 +1418,9 @@ export const editor = defineNamespace({
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // AQU-1163: why a target cell will not take your text — shown as the
+    // locked cell's tooltip and appended to its accessible name.
+    "editor.row.lockedBy": "Locked — {name} is editing this cell",
     // -- CellPresenceBadges: per-row live-collaborator chips --
     "editor.presence.viewing": "viewing",
     "editor.presence.editing": "editing",
@@ -2791,6 +2808,49 @@ export const editor = defineNamespace({
           range: MILESTONE_RANGE_PLACEHOLDER,
         },
       },
+      "editor.pericope.trigger": {
+        description:
+          "Label of the button in the editor header that opens the list of " +
+          "suggested next passages. Sits next to the chapter picker on the same " +
+          "short toolbar row, so it has to stay about as short as the English.",
+        maxLength: 24,
+      },
+      "editor.pericope.heading": {
+        description:
+          "Heading inside that button's popover, above the two-to-four suggested " +
+          "ranges. 'Passage' is a stretch of verses a translator takes on as one " +
+          "piece of work — not a chapter and not a single verse.",
+        maxLength: 32,
+      },
+      "editor.pericope.range": {
+        description:
+          "One suggested range, e.g. 'Genesis 1:1–2:3'. Reorder the parts if the " +
+          "language puts the book name after the numbers; keep the dash between " +
+          "the two references.",
+        placeholders: {
+          book: "Full book name, already localized where a localized name exists.",
+          start: "Chapter and verse the range starts at, e.g. '1:1'.",
+          end: "Chapter and verse the range ends at, inclusive, e.g. '2:3'.",
+        },
+      },
+      "editor.pericope.agreement": {
+        description:
+          "Second line under a suggested range: how many of the 20 surveyed " +
+          "Bible translations start a new section at that point. It is a measure " +
+          "of how widely agreed the boundary is, not a quality score. The 20 is " +
+          "fixed by the dataset, so it is written into the sentence.",
+        maxLength: 40,
+        placeholders: {
+          count: "How many of the 20 translations draw this section, 1 to 20.",
+        },
+      },
+      "editor.pericope.continues": {
+        description:
+          "Shown instead of the agreement count when the suggested range starts " +
+          "at the translator's own stopping point mid-passage rather than at a " +
+          "boundary: finishing it lands them on the next natural break.",
+        maxLength: 40,
+      },
       "editor.milestone.percentTranslated": {
         description:
           "First line of the two-line progress figure on the right of each picker " +
@@ -3497,6 +3557,22 @@ export const editor = defineNamespace({
           error: "Raw failure reason from the network layer; not translated.",
         },
       },
+      "editor.bibles.retryVersion": {
+        description:
+          "Screen-reader name of the Retry button shown under one pinned " +
+          "translation whose text failed to load. The visible label is the shared " +
+          "'Retry'; this names which translation it retries. Imperative.",
+        placeholders: {
+          version:
+            "The translation's identifier, e.g. 'BSB'. A code — never translate the " +
+            "substituted value.",
+        },
+      },
+      "editor.bibles.retryVersions": {
+        description:
+          "Screen-reader name of the Retry button beside the picker's 'could not " +
+          "fetch the list of translations' error. Imperative.",
+      },
       "editor.bibles.loadingVersions": {
         description:
           "Status text while the list of available translations is being fetched.",
@@ -3618,6 +3694,13 @@ export const editor = defineNamespace({
           "is followed immediately by links whose text is each data source's proper " +
           "name, which is not translated — so this string ends mid-phrase on purpose " +
           "and the names cannot be moved in front of it.",
+      },
+      "editor.resourcePane.crashed": {
+        description:
+          "Shown in place of a reference side panel (Parallel Bibles, Verse " +
+          "Resources) when the panel itself hit an unexpected error. Sits above a " +
+          "Retry button that reloads just that panel, so the second sentence must " +
+          "not suggest reloading the page. Reassure that nothing was lost.",
       },
       "editor.tn.title": {
         description:
@@ -5150,6 +5233,16 @@ export const editor = defineNamespace({
           ref: "Human reference or localized row number.",
           source: "A short excerpt of the source text. Do not translate.",
           state: "Already localized validation or empty state.",
+        },
+      },
+      "editor.row.lockedBy": {
+        description:
+          "Tooltip on a target cell that another person currently holds the edit " +
+          "lease on, and the suffix appended to that cell's accessible name. It " +
+          "answers \"why can't I type here?\" — the cell is read-only for now, not " +
+          "broken, and frees up when that person moves on.",
+        placeholders: {
+          name: "Display name of the collaborator holding the edit lease.",
         },
       },
       "editor.row.selectedTooltip": {

@@ -32,6 +32,11 @@ import {
   setUnresolvedCommentHighlight,
   useUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
+import {
+  setLowMemoryMode,
+  useLowMemoryMode,
+  type LowMemoryMode,
+} from "@/lib/perf/low-memory"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -133,6 +138,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   // and EditorTable is the only reader, so a prop pair through
   // ProjectWorkspace would be two more parameters carrying no extra meaning.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -441,6 +447,25 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               explicit={targetFontSizeExplicit}
               onChange={onTargetFontSizeChange}
               onReset={onTargetFontSizeReset}
+            />
+          </div>
+
+          {/* AQU-1191: a device setting, not a file one — it stays usable with
+              no file open, and it is stored per browser like the rest of this
+              popover. */}
+          <Separator />
+          <div className="flex flex-col gap-2">
+            <SectionLabel>{t("editor.view.lowMemory")}</SectionLabel>
+            <SegmentTabs<LowMemoryMode>
+              value={lowMemoryMode}
+              onValueChange={setLowMemoryMode}
+              aria-label={t("editor.view.lowMemory")}
+              listClassName="w-full"
+              options={[
+                { label: t("editor.view.lowMemoryAuto"), value: "auto" },
+                { label: t("editor.view.lowMemoryOn"), value: "on" },
+                { label: t("editor.view.lowMemoryOff"), value: "off" },
+              ]}
             />
           </div>
         </PopoverContent>

@@ -1,5 +1,5 @@
 import { useId, useState } from "react"
-import { X } from "lucide-react"
+import { AlertCircle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import type { CellData } from "@/hooks/useCells"
@@ -30,6 +30,21 @@ interface CommentsDrawerProps {
    * per-thread gate falls open and behaves exactly as before.
    */
   currentUsername?: string | null
+  /**
+   * AQU-1275: the comments feed failed to load. The drawer used to render the
+   * "No comments yet." empty state in this case, so a dropped request looked
+   * exactly like a cell whose threads had been deleted — the shape of the
+   * Pattani Malay report. Say the load failed and offer a retry instead.
+   */
+  isError?: boolean
+  /**
+   * AQU-1275: later pages of the project-wide comment list are still arriving.
+   * A cell whose threads haven't paged in yet is not an empty cell, so hold the
+   * empty state until the load finishes.
+   */
+  isLoadingRest?: boolean
+  /** Re-runs the comments load; wired to the error state's Retry button. */
+  onRetry?: () => void
 }
 
 /** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
@@ -65,7 +80,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername, isError = false, isLoadingRest = false, onRetry }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
   const newThreadHeadingId = useId()
@@ -169,8 +184,37 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
+        {/*
+          AQU-1275: a failed or half-finished load must never read as "this cell
+          has no comments". The error banner stays above whatever threads did
+          land, because a partial list is also untrustworthy — the reporter saw
+          verses 1–13 while 14–48 silently vanished.
+        */}
+        {isError && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-destructive p-2 text-xs text-destructive"
+            data-testid="comments-drawer-error"
+            role="status"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="space-y-1.5">
+              <p>{t("comments.drawer.loadError")}</p>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry} className="h-6 px-2 text-xs">
+                  {t("common.retry")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         {threads.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
+          isError ? null : isLoadingRest ? (
+            <p className="text-xs text-muted-foreground" data-testid="comments-drawer-loading">
+              {t("common.loading")}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
+          )
         ) : (
           threads.map((thread) => {
             const gate = resolveGateFor(thread)

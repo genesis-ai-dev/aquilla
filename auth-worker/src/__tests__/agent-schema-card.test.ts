@@ -201,6 +201,19 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(unfocused).toContain("Do not pick one")
   })
 
+  // AQU-1455 / AQU-1468 — the one-document auto-pick and the candidate-file
+  // buttons both hang off a read call. A prompt that says "ask before reading"
+  // makes the model ask from memory, so neither ever runs.
+  it("sends the unfocused agent through read before it asks which file", () => {
+    const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(unfocused).toContain("your FIRST step is read with no fileId and no ref")
+    expect(unfocused).toContain("call read with no fileId and no ref")
+    expect(unfocused).not.toContain("before reading")
+    // Project-wide questions must not be pushed through read: its failure
+    // would hang file buttons under an answer that asked nothing.
+    expect(unfocused).toContain("Questions about the project as a whole")
+  })
+
   it("makes 'which file' an explicit exception to prefer-acting-over-asking", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400, fileId: "f1" })
     expect(prompt).toContain("WHICH FILE is the one exception")

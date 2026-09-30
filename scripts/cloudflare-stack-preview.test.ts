@@ -20,7 +20,7 @@ describe("full-stack Cloudflare previews", () => {
       if (args.includes("base-config")) {
         const config = JSON.parse(readFileSync(args[args.indexOf("--config") + 1], "utf8"))
         expect(options.env.WRANGLER_CI_OVERRIDE_NAME).toBe(config.name)
-        return { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name, type: "secret_text" }))) }
+        return { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET", "OPENROUTER_API_KEY"].map((name) => ({ name, type: "secret_text" }))) }
       }
       if (args[1] === "vite") {
         expect(options.env.VITE_AUTH_BASE).toBe(`${authOrigin}/identity`)
@@ -90,7 +90,7 @@ describe("full-stack Cloudflare previews", () => {
   })
 
   it("does not publish a frontend after a failed backend deployment", async () => {
-    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name }))) }
+    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET", "OPENROUTER_API_KEY"].map((name) => ({ name }))) }
     const run = vi.fn().mockResolvedValueOnce(secrets).mockResolvedValueOnce(secrets)
       .mockRejectedValue(new Error("backend upload failed"))
     await expect(deployStackPreview({ env, run })).rejects.toThrow("backend upload failed")
@@ -98,7 +98,7 @@ describe("full-stack Cloudflare previews", () => {
   })
 
   it("sweeps stale previews after the secret check and before the first upload; a sweep failure never blocks the deploy", async () => {
-    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name }))) }
+    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET", "OPENROUTER_API_KEY"].map((name) => ({ name }))) }
     const order: string[] = []
     const run = vi.fn(async (_command: string, args: string[]) => {
       order.push(args.includes("base-config") ? "secrets" : "upload")
@@ -121,6 +121,13 @@ describe("full-stack Cloudflare previews", () => {
     const cleanup = vi.fn()
     await expect(deployStackPreview({ env, run, cleanup })).rejects.toThrow("Previews Base is missing")
     expect(cleanup).not.toHaveBeenCalled()
+  })
+
+  it("refuses to deploy an auth preview without the platform OpenRouter key", async () => {
+    // Without it hosted chat and transcription 503 on every preview (AQU-1500).
+    const secrets = { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name }))) }
+    const run = vi.fn().mockResolvedValue(secrets)
+    await expect(deployStackPreview({ env, run })).rejects.toThrow(`${PREVIEW_WORKERS.auth} Previews Base is missing: OPENROUTER_API_KEY`)
   })
 
   it("refuses to deploy a stack without its signing secrets", async () => {

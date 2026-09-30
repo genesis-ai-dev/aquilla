@@ -19,7 +19,7 @@ export const CELL_ROW_COLUMNS =
   "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
   "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
   "endorsement_count, start_ms, end_ms, " +
-  "medium, sequence_index, transcription, camera_state, metadata, lane_id"
+  "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"
 
 export interface CellRowRaw {
   cell_id: string
@@ -51,6 +51,10 @@ export interface CellRowRaw {
   metadata: Record<string, unknown> | string | null
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
   lane_id: string | null
+  /** AQU-1422: epoch-ms the cell was parked, NULL when visible. Only ever set
+   *  on the shared source row — see the column comment in db/postgres/schema.sql.
+   *  Absent on a pre-0112 database or a hand-built fixture. */
+  hidden_at?: number | null
 }
 
 export interface CellRowOut {
@@ -82,6 +86,15 @@ export interface CellRowOut {
   /** AQU-1240: opaque lanes.id. Null while backfill is in flight. Always
    *  emitted by {@link mapCellRow}; optional on hand-built fixtures. */
   laneId?: string | null
+  /**
+   * AQU-1422: true while this cell is parked. OMITTED (not `false`) on a visible
+   * row, deliberately: a 30k-cell Bible file would otherwise pay ~15 bytes per
+   * row for a field that is false on effectively all of them. Only ever emitted
+   * on the SOURCE row — consumers resolve a cell's visibility from that row, not
+   * from their own side, because a target row created after the hide has no flag
+   * of its own to read.
+   */
+  hidden?: boolean
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -142,5 +155,9 @@ export function mapCellRow(row: CellRowRaw): CellRowOut {
     cameraState: row.camera_state,
     metadata: parseMetadata(row.metadata),
     laneId: row.lane_id ?? null,
+    // Spread so the key is absent, not `undefined`, on a visible row — JSON.
+    // stringify drops `undefined` too, but an absent key also keeps the two
+    // serialisers' object shapes identical for the by-ids byte-identity test.
+    ...(row.hidden_at != null ? { hidden: true as const } : {}),
   }
 }

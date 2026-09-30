@@ -5,14 +5,17 @@ import { v4 as uuid } from "uuid"
 // the alignment/BT/terminology stack depends on source↔target cell correspondence.
 // See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D1,D2).
 
+// Every cut matches whitespace only (or nothing, after an unspaced dash): the
+// punctuation stays on the preceding segment through a lookbehind, so joining
+// segments with one space gives back the paragraph (AQU-1469).
 const BREAK_PATTERNS: RegExp[] = [
-  /\n\n+/,                  // paragraph
-  /\n/,                     // line
-  /(?<=[.!?])\s+/,          // sentence
-  /(?<=[;:])\s+/,           // clause
-  /,\s+/,                   // comma
-  /\s*[—–]\s*|\s+-\s+/,    // dash
-  /\s+/,                    // word
+  /\n\n+/,                     // paragraph
+  /\n/,                        // line
+  /(?<=[.!?])\s+/,             // sentence
+  /(?<=[;:])\s+/,              // clause
+  /(?<=,)\s+/,                 // comma
+  /(?<=[—–])\s*|(?<=\s-)\s+/,  // dash
+  /\s+/,                       // word
 ]
 
 export function splitIntoSegments(
@@ -33,22 +36,30 @@ function recursiveSplit(text: string, maxLength: number, level: number): string[
     return [text]
   }
 
-  const parts = text.split(BREAK_PATTERNS[level]).filter((p) => p.trim().length > 0)
+  // The capture group keeps each cut in the result, so the merge below can tell
+  // a whitespace cut (rejoined with one space) from an unspaced dash (rejoined
+  // with nothing, "a—b" stays "a—b").
+  const pieces = text.split(new RegExp(`(${BREAK_PATTERNS[level].source})`))
+  const parts: { text: string; spaced: boolean }[] = []
+  for (let i = 0; i < pieces.length; i += 2) {
+    if (pieces[i].trim().length === 0) continue
+    parts.push({ text: pieces[i], spaced: i > 0 && pieces[i - 1] !== "" })
+  }
 
   if (parts.length <= 1) {
     return recursiveSplit(text, maxLength, level + 1)
   }
 
   const merged: string[] = []
-  let current = parts[0]
+  let current = parts[0].text
 
   for (let i = 1; i < parts.length; i++) {
-    const combined = current + " " + parts[i]
+    const combined = current + (parts[i].spaced ? " " : "") + parts[i].text
     if (combined.length <= maxLength) {
       current = combined
     } else {
       merged.push(current)
-      current = parts[i]
+      current = parts[i].text
     }
   }
   merged.push(current)

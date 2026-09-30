@@ -7,7 +7,8 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
-import { Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
+import { Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Clock, ScrollText, Plus, BookOpen, Layers } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
@@ -24,7 +25,8 @@ import { RuleEditor } from "./RuleEditor"
 import { OrgRulesPanel } from "@/components/rules/OrgRulesPanel"
 import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
-import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
+import { rulesForLane, ruleLaneScope, type RuleLaneScope } from "@/lib/rules/rule-engine"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
@@ -61,6 +63,10 @@ interface Props {
   setEditingRuleId: (id: string | "new" | null) => void
   /** Settings pane: skip the in-main title toolbar; PageHeader owns the title. */
   embedded?: boolean
+  /** AQU-1509: the editor's active lane tag (`''` = default lane). When set
+   *  with `onActiveLaneChange`, switching lanes here switches the editor too. */
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function RulesSurface({
@@ -84,6 +90,8 @@ export function RulesSurface({
   editingRuleId,
   setEditingRuleId,
   embedded = false,
+  activeLane,
+  onActiveLaneChange,
 }: Props) {
   const t = useT()
   const navigate = useNavigate()
@@ -98,26 +106,45 @@ export function RulesSurface({
 
   // AQU-609: lane scope for PROJECT rules. Named lanes come from the project
   // record; `''` (the default lane) is labeled with the base target language.
-  const projectLanes = project.targetLanes ?? []
-  const defaultLaneLabel = project.targetLanguage || undefined
-  const laneBadgeLabel = (rule: TranslationRule): string =>
-    (rule.lane ?? "") === ""
-      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-      : rule.lane ?? ""
+  const projectLanes = extraRegistryLanes(project.targetLanes, project.targetLanguage)
+  const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
+  const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
+  const defaultLaneLabel = defaultLaneRow?.name || project.targetLanguage || undefined
+  const laneLabels = Object.fromEntries(
+    laneRows.map((lane) => [lane.legacyTag ?? "", lane.name]),
+  )
 
-  // AQU-609: display filter for the Project Rules list. Options list only
-  // lanes that actually hold rules — a 150-lane project must not produce a
-  // 150-item dropdown. Falls back to "all" if the selected lane's last rule
-  // was deleted (its option disappears with it).
-  const [laneFilter, setLaneFilter] = useState<string>("all")
-  const laneFilterLanes = lanesWithRules(userRules)
-  const effectiveLaneFilter =
-    laneFilter === "all" || laneFilter === "project" ||
-    laneFilterLanes.includes(laneFilter.slice("lane:".length))
-      ? laneFilter
-      : "all"
-  const visibleUserRules = filterRulesForDisplay(userRules, effectiveLaneFilter)
-  const showLaneFilter = projectLanes.length > 0 || laneFilterLanes.length > 0
+  const laneName = (tag: string): string =>
+    laneLabels[tag] || (tag === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : tag)
+
+  // AQU-1509: the page is always viewing ONE lane — the editor's active lane
+  // when the workspace shares it, else a local choice. Options are every
+  // target lane (same list and order as the editor's lane switcher), searched
+  // through LaneCombobox because projects can carry 150+ lanes.
+  const [localLane, setLocalLane] = useState("")
+  const laneOptions = (() => {
+    const tags = laneRows.length > 0
+      ? [...laneRows].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)).map((lane) => lane.legacyTag ?? "")
+      : projectLanes
+    const unique = [...new Set(tags)]
+    if (!unique.includes("")) unique.unshift("")
+    const archived = new Set(laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? ""))
+    return unique.map((tag) => ({ tag, archived: archived.has(tag) }))
+  })()
+  const requestedLane = activeLane ?? localLane
+  const viewLane = laneOptions.some((o) => o.tag === requestedLane) ? requestedLane : ""
+  const setViewLane = onActiveLaneChange ?? setLocalLane
+  const hasLaneRules = userRules.some((rule) => rule.scope === "lane")
+  const multiLane = laneOptions.length > 1 || hasLaneRules
+
+  // Default: only rules enforced in the viewed lane. Other lanes' rules are
+  // one click away and sort last, marked as not applied here.
+  const [showOtherLanes, setShowOtherLanes] = useState(false)
+  const appliedUserRules = rulesForLane(userRules, viewLane)
+  const otherLaneRules = userRules.filter((rule) => ruleLaneScope(rule, viewLane) === "other")
+  const visibleUserRules = !multiLane
+    ? userRules
+    : showOtherLanes ? [...appliedUserRules, ...otherLaneRules] : appliedUserRules
 
   useEffect(() => {
     const focusId = searchParams.get("ruleId")
@@ -245,6 +272,7 @@ export function RulesSurface({
             className="shrink-0 rounded-none border-0"
             cells={cells}
             lanes={projectLanes}
+            laneLabels={laneLabels}
             defaultLaneLabel={defaultLaneLabel}
             onSave={async (rule) => {
               await addRule(rule)
@@ -263,50 +291,61 @@ export function RulesSurface({
           </AppTooltip>
         )}
 
+        {multiLane && (
+          <section
+            aria-label={t("rules.surface.laneScope.ariaLabel")}
+            data-testid="rules-lane-scope"
+            className="flex flex-col gap-2 rounded-md border bg-muted/40 p-3"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Layers className="size-4 text-muted-foreground" aria-hidden />
+              <span className="text-sm font-medium">{t("rules.surface.laneScope.viewingLabel")}</span>
+              <LaneCombobox
+                options={laneOptions.map((o) => ({ value: o.tag, label: laneName(o.tag), archived: o.archived }))}
+                value={viewLane}
+                onValueChange={setViewLane}
+                searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                emptyText={t("editor.lane.searchEmpty")}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("rules.surface.laneScope.chooseLaneAriaLabel", { lane: laneName(viewLane) })}
+                  >
+                    {laneName(viewLane)}
+                    <ChevronDown className="size-3.5 text-muted-foreground" />
+                  </Button>
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("rules.surface.laneScope.explainer", { lane: laneName(viewLane) })}
+              {onActiveLaneChange && ` ${t("rules.surface.laneScope.sharedWithEditor")}`}
+            </p>
+          </section>
+        )}
+
         {/* Card order is most-specific scope first: project rules (incl.
             lane-scoped) → org rules → app built-ins (AQU-609 feedback). */}
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle>
-              {showLaneFilter && (
-                <LaneCombobox
-                  options={[
-                    { value: "all", label: t("rules.surface.laneFilter.all") },
-                    { value: "project", label: t("rules.surface.laneFilter.projectWide") },
-                    ...laneFilterLanes.map((lane) => ({
-                      value: `lane:${lane}`,
-                      label: lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane,
-                    })),
-                  ]}
-                  value={effectiveLaneFilter}
-                  onValueChange={setLaneFilter}
-                  searchPlaceholder={t("editor.lane.searchPlaceholder")}
-                  searchAriaLabel={t("editor.lane.searchAriaLabel")}
-                  emptyText={t("editor.lane.searchEmpty")}
-                  align="end"
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="ms-auto"
-                      aria-label={t("rules.surface.laneFilterAriaLabel")}
-                    >
-                      {effectiveLaneFilter === "all"
-                        ? t("rules.surface.laneFilter.all")
-                        : effectiveLaneFilter === "project"
-                          ? t("rules.surface.laneFilter.projectWide")
-                          : (() => {
-                              const lane = effectiveLaneFilter.slice("lane:".length)
-                              return lane === ""
-                                ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-                                : lane
-                            })()}
-                      <ChevronDown className="size-3.5 text-muted-foreground" />
-                    </Button>
-                  }
-                />
+              {multiLane && otherLaneRules.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ms-auto"
+                  aria-pressed={showOtherLanes}
+                  onClick={() => setShowOtherLanes((v) => !v)}
+                >
+                  {showOtherLanes
+                    ? t("rules.surface.laneScope.hideOtherLanes")
+                    : t("rules.surface.laneScope.showOtherLanes", { count: otherLaneRules.length })}
+                </Button>
               )}
             </div>
           </CardHeader>
@@ -326,15 +365,20 @@ export function RulesSurface({
               />
             ) : visibleUserRules.length === 0 ? (
               <p className="py-2 text-xs text-muted-foreground">
-                {t("rules.surface.laneFilterNoMatches")}
+                {t("rules.surface.laneScope.noRulesInLane", { lane: laneName(viewLane) })}
               </p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {visibleUserRules.map((rule) => {
                   const expanded = expandedRuleId === rule.id
-                  const laneScoped = rule.scope === "lane"
+                  const laneScope = ruleLaneScope(rule, viewLane)
                   return (
-                    <li key={rule.id} id={`rule-row-${rule.id}`} className="rounded-md border p-3">
+                    <li
+                      key={rule.id}
+                      id={`rule-row-${rule.id}`}
+                      data-lane-scope={multiLane ? laneScope : undefined}
+                      className={cn("rounded-md border p-3", multiLane && laneScope === "other" && "border-dashed bg-muted/30")}
+                    >
                       {/* Two-row layout: text + badges get the full width (with
                           compact icon actions on the right); the wide buttons
                           and the Enabled switch live on their own line below —
@@ -346,12 +390,15 @@ export function RulesSurface({
                             <span className="text-sm font-medium">{rule.name}</span>
                             <SeverityBadge severity={rule.severity} />
                             <Badge variant="secondary">{rule.source}</Badge>
-                            {laneScoped && (
-                              <Badge variant="outline">{laneBadgeLabel(rule)}</Badge>
-                            )}
+                            {multiLane && <LaneScopeBadge scope={laneScope} laneLabel={laneName(rule.lane ?? "")} />}
                             {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
+                          {multiLane && laneScope === "other" && (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {t("rules.surface.laneScope.notAppliedHere", { lane: laneName(viewLane) })}
+                            </p>
+                          )}
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                           <AppTooltip content={t("rules.editor.editRuleHeading")}>
@@ -447,6 +494,7 @@ export function RulesSurface({
                             initialRule={rule}
                             cells={cells}
                             lanes={projectLanes}
+                            laneLabels={laneLabels}
                             defaultLaneLabel={defaultLaneLabel}
                             onSave={async (updates) => {
                               await updateRule(rule.id, updates)
@@ -534,4 +582,12 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
       </div>
     </>
   )
+}
+
+/** AQU-1509: states a project rule's lane scope relative to the viewed lane. */
+function LaneScopeBadge({ scope, laneLabel }: { scope: RuleLaneScope; laneLabel: string }) {
+  const t = useT()
+  if (scope === "all") return <Badge variant="secondary">{t("rules.surface.laneScope.badgeAll")}</Badge>
+  if (scope === "this") return <Badge>{t("rules.surface.laneScope.badgeThis", { lane: laneLabel })}</Badge>
+  return <Badge variant="outline" className="border-dashed">{t("rules.surface.laneScope.badgeOther", { lane: laneLabel })}</Badge>
 }

@@ -126,8 +126,18 @@ describe("isDocsOrTestOnly", () => {
     expect(isDocsOrTestOnly([])).toBe(false)
   })
 
-  it("is true for a non-infra scripts-only diff", () => {
+  it("is true for an allowlisted scripts-only diff", () => {
     expect(isDocsOrTestOnly(["scripts/release-plan.mjs", "scripts/release-plan.d.mts"])).toBe(true)
+    expect(isDocsOrTestOnly(["scripts/qa/agent-evidence.mts", "scripts/smart-tests.ts", "scripts/e2e-up.ts"])).toBe(true)
+  })
+
+  // vite.config.ts imports these, so a change to them ships in the app.
+  it.each(["scripts/vite-html-branding.ts", "scripts/build-info.ts"])("is false for %s, which the app build imports", (file) => {
+    expect(isDocsOrTestOnly([file])).toBe(false)
+  })
+
+  it("is false for a script not on the allowlist", () => {
+    expect(isDocsOrTestOnly(["scripts/brand-new-tool.ts"])).toBe(false)
   })
 
   it("is false once a scripts file mixes in with app code", () => {
@@ -135,17 +145,16 @@ describe("isDocsOrTestOnly", () => {
   })
 })
 
-// An infra-area script (tag-release, verify-deploy, resolve-deployment,
-// cloudflare-*) is "no UI claim" too, but must still hold on its own via
-// pathHolds — isDocsOrTestOnly skipping the walk must not let it slip
-// through prHolds.
+// An infra-area script (tag-release, verify-*, resolve-deployment,
+// cloudflare-*) is off the no-UI allowlist, and it must hold on its own via
+// pathHolds even if a walk says PASS.
 describe("scripts-only PR that is also infra", () => {
-  it("holds even though it has no UI claim", () => {
+  it("holds on the infra path whatever the walk says", () => {
     const files = ["scripts/tag-release.sh"]
-    expect(isDocsOrTestOnly(files)).toBe(true)
+    expect(isDocsOrTestOnly(files)).toBe(false)
     const { pathHolds } = classifyFiles(files)
     expect(pathHolds).toBe(true)
-    expect(prHolds({ pathHolds, walk: "none" })).toBe(true)
+    expect(prHolds({ pathHolds, walk: "PASS" })).toBe(true)
   })
 })
 

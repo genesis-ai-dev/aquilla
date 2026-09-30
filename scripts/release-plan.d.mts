@@ -27,9 +27,10 @@ export interface UnreleasedPr extends FileClassification {
 export function prHolds(pr: Pick<UnreleasedPr, "pathHolds" | "walk">): boolean
 
 // A PR whose diff touches only docs, only test/journey files, or only
-// release/dev-tooling scripts has no UI claim, so the bot skips the walk
-// entirely — there is no walk comment to look up, and there never will be
-// one. An infra-area scripts change still holds via pathHolds regardless.
+// allowlisted tooling scripts (release-plan*, qa/, smart-test*, e2e-*) has no
+// UI claim, so the bot skips the walk entirely. There is no walk comment to
+// look up, and there never will be one. An infra-area script still holds via
+// pathHolds regardless.
 export function isDocsOrTestOnly(files: string[]): boolean
 
 export interface ReleasePlan {

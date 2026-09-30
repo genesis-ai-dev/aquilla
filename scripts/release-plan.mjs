@@ -51,21 +51,22 @@ export function prHolds(pr) {
 }
 
 // A PR whose diff touches only docs, only test/journey files, or only
-// release/dev-tooling scripts has no UI claim, so the bot skips the walk
-// entirely (PR-BOT.md) — there is no walk comment to look up, and there
-// never will be one. This is a path check, not a GitHub lookup, so it needs
-// no PAT and stays true even before the walk lookup script runs.
+// allowlisted tooling scripts has no UI claim, so the bot skips the walk
+// entirely (PR-BOT.md). There is no walk comment to look up, and there never
+// will be one. This is a path check, not a GitHub lookup, so it needs no PAT
+// and stays true even before the walk lookup script runs.
 //
-// scripts/ is included here, not exempted from walk requirements entirely:
-// a scripts-only PR that also trips the infra area (tag-release, verify-
-// deploy, resolve-deployment, cloudflare-*) still holds on its own, via
-// classifyFiles/pathHolds — that gate runs independently of walk. This only
-// stops a *non-infra* scripts change (like this file) from sitting at
-// walk: "unknown" forever because no UI walk will ever post for it.
-const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\/|^scripts\//
+// Scripts are allowlisted, not all of scripts/: vite.config.ts imports
+// scripts/vite-html-branding.ts and scripts/build-info.ts, so a change there
+// ships in the app and needs a walk. A new script needs a walk until someone
+// checks that nothing in the app or worker builds imports it and adds it
+// here. Infra scripts (cloudflare-*, verify-*, tag-release, ...) hold on
+// their own through classifyFiles/pathHolds, whatever this says.
+const NO_UI_SCRIPT = /^scripts\/(release-plan|qa\/|smart-test|e2e-)/
+const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\//
 
 export function isDocsOrTestOnly(files) {
-  return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file))
+  return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file) || NO_UI_SCRIPT.test(file))
 }
 
 function branchName(now, usedSuffixes) {

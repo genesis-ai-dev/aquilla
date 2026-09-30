@@ -30,6 +30,15 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     ],
   },
   {
+    // AQU-1153: the share / invite journey — Add a member (+ Invite link tab),
+    // the org members page's "Add to projects" dialog, the recipient typeahead
+    // they share, and /join/:token — has its own smoke spec, but none of these
+    // files carry a domain keyword above, so they fell through to the core
+    // sentinels and PR #882 shipped a stale locator in that spec ungated.
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectMembersPage|ProjectSettings\/AddProjectMemberDialog|SharePanel|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
+  },
+  {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
     // journey is the cross-layer contract (boot script + Preferences control).
     source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize|lib\/store\/file-view-prefs)|index\.html$)/,

@@ -162,14 +162,19 @@ test("each USFM download is the side it claims: original bytes, translation roun
 
   // The export dialog's primary action is the TARGET side: the committed
   // translation injected into the same file. Unchanged by AQU-1449.
+  // The dialog names a USFM export `<stem>.SFM` whatever extension the upload
+  // had (AQU-437), so this is NOT the `sample.usfm` that Download original
+  // hands back above — matched case-sensitively so the two cannot be confused.
   await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
-  const primary = dialog.getByRole("button", { name: /^Download sample\.usfm$/i })
+  const primary = dialog.getByRole("button", { name: /^Download sample\.SFM$/ })
   await expect(primary).toBeVisible()
   const [injectedDownload] = await Promise.all([
     alice.waitForEvent("download", { timeout: 15_000 }),
     primary.click(),
   ])
+  // The button delivers the name it promises.
+  expect(injectedDownload.suggestedFilename()).toBe("sample.SFM")
   const injectedPath = await injectedDownload.path()
   expect(injectedPath).not.toBeNull()
   expect(await readFile(injectedPath!, "utf8")).toContain(marker)

@@ -10,7 +10,15 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  CheckCheck,
+  CheckIcon,
+  CornerDownRight,
+  Languages,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -25,6 +33,8 @@ import {
 } from "@/components/ui/combobox"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 
@@ -239,20 +249,72 @@ function percent(part: number, total: number): number {
   return total > 0 ? Math.round((part / total) * 100) : 0
 }
 
+/**
+ * One progress line: a marker icon, then the percentage right-aligned in the
+ * column. `label` ("N% translated") is what the icon means — carried as hover
+ * text and, because the digits themselves are `aria-hidden`, as the only thing
+ * a screen reader reads out, so the announcement keeps the full wording.
+ */
+function ProgressLine({ icon: Icon, iconClassName, label, value }: {
+  icon: LucideIcon
+  iconClassName: string
+  label: string
+  value: string
+}) {
+  return (
+    <span className="flex items-center gap-1" title={label}>
+      <Icon aria-hidden="true" className={cn("size-3 shrink-0", iconClassName)} />
+      <span aria-hidden="true" className="flex-1 text-end">{value}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  )
+}
+
+/**
+ * AQU-1485: this column used to spell out "N% translated" / "N% validated" on
+ * every row. In a fixed-width dropdown that took over 40% of the row and left
+ * milestone titles about 12 characters, so a run of "1 Corinthians …"
+ * milestones all read "1 Corinthian…" and the picker couldn't be used to find
+ * one. The words are now the marker icons the file rows already use — amber
+ * for translated, emerald for validated — which makes the column's width
+ * independent of how long a locale's words for them are, and hands the space
+ * it saves to the title.
+ */
 function ProgressSummary({ translated, validated, total }: {
   translated: number
   validated: number
   total: number
 }) {
   const t = useT()
+  const f = useFormat()
+  const asPercent = (part: number) => f.percent(total > 0 ? part / total : 0)
   return (
-    <span className="w-[7.5rem] shrink-0 justify-self-end text-end text-xs tabular-nums text-muted-foreground">
-      <span className="block">
-        {t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
-      </span>
-      <span className="block">
-        {t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
-      </span>
+    <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
+      <ProgressLine
+        icon={Languages}
+        iconClassName="text-amber-500"
+        label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
+        value={asPercent(translated)}
+      />
+      <ProgressLine
+        icon={CheckCheck}
+        iconClassName="text-emerald-500"
+        label={t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
+        value={asPercent(validated)}
+      />
+    </span>
+  )
+}
+
+/**
+ * A label that still doesn't fit its box reveals its full text on hover
+ * (AQU-1485) — before, a clipped milestone title was unreachable.
+ */
+function TruncatedLabel({ text, className }: { text: string; className?: string }) {
+  const { ref, title } = useOverflowTitle(text)
+  return (
+    <span ref={ref} className={cn("block truncate", className)} title={title}>
+      {text}
     </span>
   )
 }
@@ -350,7 +412,7 @@ function VirtualizedMilestoneList({
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
                 className={cn(
-                  "relative flex w-full cursor-default items-center gap-3 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+                  "relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
                   // Cell ranges read as children of the milestone above them.
                   subsection && "ps-6",
                 )}
@@ -373,18 +435,19 @@ function VirtualizedMilestoneList({
                         aria-hidden="true"
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate">
-                        {t("editor.milestone.cellRange", { range: subsection.label })}
-                      </span>
+                      <TruncatedLabel
+                        text={t("editor.milestone.cellRange", { range: subsection.label })}
+                      />
                     </span>
                     <ProgressSummary {...subsection} />
                   </>
                 ) : (
                   <>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium tabular-nums">
-                        {row.milestone.label}
-                      </span>
+                      <TruncatedLabel
+                        text={row.milestone.label}
+                        className="font-medium tabular-nums"
+                      />
                       <span className="block text-xs text-muted-foreground">
                         {row.milestone.description}
                       </span>
@@ -448,6 +511,15 @@ export function MilestoneNavigator({
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
+  // AQU-1485: the trigger keeps its width, so a long title still clips (and
+  // disappears entirely in the icon-only state) — hover reveals it, and only
+  // when something is actually hidden. `iconOnlyTrigger` rechecks the measure
+  // because that flip hides the label with `display: none` rather than
+  // resizing it.
+  const { ref: triggerLabelRef, title: triggerLabelTitle } = useOverflowTitle(
+    active?.label ?? "",
+    iconOnlyTrigger,
+  )
   const activeSubsection = pageByMilestone
     ? undefined
     : active?.subsections?.find(
@@ -616,6 +688,7 @@ export function MilestoneNavigator({
               <Button
                 variant="outline"
                 data-icon-only={iconOnlyTrigger || undefined}
+                title={triggerLabelTitle}
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
@@ -641,7 +714,10 @@ export function MilestoneNavigator({
                   : "flex min-w-0 items-center gap-2 text-start"
               }
             >
-              <span className="min-w-0 truncate font-semibold leading-none">
+              <span
+                ref={triggerLabelRef}
+                className="min-w-0 truncate font-semibold leading-none"
+              >
                 {active.label}
               </span>
               {/* Below xl: chapter label only — drop the verse/cell summary. */}

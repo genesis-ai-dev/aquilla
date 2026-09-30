@@ -281,6 +281,42 @@ describe("GET /source?side=source — the curated source (AQU-1449)", () => {
     expect(body).not.toContain("Let there be light!")
   })
 
+  it("keeps an edited verse's parked notes when the file was imported content-only (AQU-1295)", async () => {
+    // An Agent API import lifts a verse's notes out of `value` into
+    // `metadata.usfmNotes`. Editing that verse's source makes it an override,
+    // which replaces the whole span — the footnote with it — unless the plan
+    // puts the parked note back, exactly as it does for a translation.
+    const footnote = "\\f + \\fr 1.1 \\ft Or: when God began.\\f*"
+    const usfmNotes = [{ kind: "footnote", caller: "+", ref: "1.1", text: "Or: when God began.", raw: footnote }]
+    const edited = SOURCE_CELLS.map((c) =>
+      c.cell_id === "c1"
+        ? { ...c, value: "In the beginning God made the heavens.", event_id: "ev-commit-c1", metadata: JSON.stringify({ usfmNotes }) }
+        : c,
+    )
+    const body = await (
+      await exportUsfm({
+        cells: [...edited, ...TARGET_CELLS],
+        events: [...EVENTS, event("ev-commit-c1", "source.cell.commit", "c1")],
+      })
+    ).text()
+    expect(body).toContain(`\\v 1 In the beginning God made the heavens. ${footnote}\n`)
+  })
+
+  it("writes a lossless import's edited verse exactly as edited — it parked no notes (AQU-1295)", async () => {
+    const edited = SOURCE_CELLS.map((c) =>
+      c.cell_id === "c1"
+        ? { ...c, value: "In the beginning God made the heavens.", event_id: "ev-commit-c1" }
+        : c,
+    )
+    const body = await (
+      await exportUsfm({
+        cells: [...edited, ...TARGET_CELLS],
+        events: [...EVENTS, event("ev-commit-c1", "source.cell.commit", "c1")],
+      })
+    ).text()
+    expect(body).toContain("\\v 1 In the beginning God made the heavens.\n")
+  })
+
   it("reports 0 lossy verses when no edited verse had intra-verse markers", async () => {
     const res = await exportUsfm()
     expect(res.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")

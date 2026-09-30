@@ -5184,6 +5184,7 @@ export const ru: Catalog = {
   "knowledgeBase.status.pending": "Индексация…",
   "knowledgeBase.status.ready": "Проиндексировано",
   "knowledgeBase.status.failed": "Индексация не удалась",
+  "knowledgeBase.status.stalled": "Индексация зависла",
   "knowledgeBase.open": "Посмотреть документ",
   "knowledgeBase.openOriginal": "Открыть оригинал",
   "knowledgeBase.reindex": "Повторить индексацию",

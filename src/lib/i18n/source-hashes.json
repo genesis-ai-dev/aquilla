@@ -29449,6 +29449,7 @@
     "knowledgeBase.status.pending": "740c08d6b6aca13d",
     "knowledgeBase.status.ready": "f13047c0218d3926",
     "knowledgeBase.status.failed": "8fda1d5a75f5e83a",
+    "knowledgeBase.status.stalled": "d8e9d488c1579f94",
     "knowledgeBase.open": "b5b8cb11a02602cf",
     "knowledgeBase.openOriginal": "44a915faf3a909dc",
     "knowledgeBase.reindex": "d9399bd62bde4319",

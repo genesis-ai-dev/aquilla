@@ -760,10 +760,12 @@ interface EditorTableProps {
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
-  /** AQU-1391: called after an EXPLICIT validate gesture lands, so the parent
-   *  can auto-propagate the confirmed translation to repeated source segments.
-   *  Not fired on unvalidate, nor by the commit path's auto-validate-on-edit —
-   *  see `handleCellValidated` in ProjectWorkspace for why. */
+  /** AQU-1391: called after a cell is validated, so the parent can
+   *  auto-propagate the confirmed translation to repeated source segments.
+   *  Fired by the explicit validate gesture and (AQU-1484) by the commit
+   *  path's auto-validate-on-edit once that edit is SETTLED — the editor has
+   *  been left. Never on unvalidate, never from an idle save mid-typing — see
+   *  `handleCellValidated` in ProjectWorkspace for why. */
   onValidated?: (cellId: string) => void | Promise<void>
   /** AQU-1391: cellId → how many cells in this file share its normalized
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
@@ -3485,8 +3487,9 @@ interface MemoizedRowProps {
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
-  /** AQU-1391: fires after an explicit validate lands; the workspace
-   *  auto-propagates the confirmed text to repeated source segments. */
+  /** AQU-1391: fires after a validation lands — the explicit gesture, or
+   *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
+   *  the confirmed text to repeated source segments. */
   onValidated?: (cellId: string) => void | Promise<void>
   /** AQU-1391: cellId -> count of cells in this file sharing its normalized
    *  source. Only repeated cells appear. */
@@ -3915,8 +3918,9 @@ interface EditorRowProps {
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
-  /** AQU-1391: fires after an explicit validate lands; the workspace
-   *  auto-propagates the confirmed text to repeated source segments. */
+  /** AQU-1391: fires after a validation lands — the explicit gesture, or
+   *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
+   *  the confirmed text to repeated source segments. */
   onValidated?: (cellId: string) => void | Promise<void>
   /** AQU-1391: how many cells in this file share THIS cell's normalized
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
@@ -5446,6 +5450,32 @@ function EditorRow({
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
+  // AQU-1484: the commit path below validates a human edit by itself, and that
+  // validation owes the file's repeated segments its text exactly as a click
+  // on the gutter check does ("Validating one fills the rest"). No click ever
+  // follows it — a self-validated row's check only opens the validator list —
+  // so without this a translator who simply types a translation gets a green
+  // check and empty repetitions.
+  //
+  // The debt is paid once the edit is SETTLED: the editor no longer holds
+  // focus. An idle save with the caret still in the cell only records it;
+  // paying there would re-broadcast half-typed text to every repetition on
+  // each pause (why AQU-1391 kept propagation off this path altogether).
+  const editorFocusedRef = useRef(false)
+  const repetitionOwedRef = useRef(false)
+  // Latest-ref, so settling never changes identity with the workspace's
+  // handler: it is called from the editor-focus effect's cleanup, and a
+  // dependency there would re-run that effect (releasing the focus lock).
+  const onValidatedRef = useRef(onValidated)
+  useEffect(() => { onValidatedRef.current = onValidated }, [onValidated])
+  const settleOwedRepetitions = useCallback(() => {
+    if (!repetitionOwedRef.current || editorFocusedRef.current) return
+    repetitionOwedRef.current = false
+    void Promise.resolve(onValidatedRef.current?.(cell.id)).catch((err) => {
+      console.warn("[repetition-propagation] failed:", err)
+    })
+  }, [cell.id])
+
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
   // We emit a `target.cell.commit` event chained off cell.targetEventId
@@ -5546,6 +5576,13 @@ function EditorRow({
           // landed on the MAIN language: editing Spanish silently validated the
           // German row, and a member limited to Spanish had it refused.
           targetLang: activeLane,
+        }).then(() => {
+          // AQU-1484: validated — the repetitions are owed this text. Paid
+          // right here when the commit came from a settled gesture (the blur
+          // commit, accepting a draft, inserting a footnote); an idle save
+          // with the caret still in the cell leaves it for the blur.
+          repetitionOwedRef.current = true
+          settleOwedRepetitions()
         }).catch((err) => {
           // Telemetry-adjacent, non-blocking: the commit already landed.
           console.warn("[auto-validate] emit failed:", err)
@@ -5570,7 +5607,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -5899,7 +5936,6 @@ function EditorRow({
     }
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
 
-  const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
@@ -5937,8 +5973,11 @@ function EditorRow({
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
     }
+    // AQU-1484: the translator left the cell — an edit an earlier idle save
+    // already validated is settled now.
+    settleOwedRepetitions()
     onDeactivateEditor(cell.id)
-  }, [cell.id, onDeactivateEditor, onReleaseCell])
+  }, [cell.id, onDeactivateEditor, onReleaseCell, settleOwedRepetitions])
 
   useEffect(() => {
     if (!isEditorActive) return
@@ -5974,8 +6013,11 @@ function EditorRow({
         editorFocusedRef.current = false
         onReleaseCell?.(cell.id)
       }
+      // AQU-1484: the editor can go away without a blur event (the row
+      // unmounts, another row takes over) — that settles the edit too.
+      settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell])
+  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)

@@ -229,6 +229,48 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
   })
 })
 
+describe("GET /api/v2/projects/:projectId/assignments/given (AQU-581)", () => {
+  it("lists only the open assignments the caller handed out, with who they went to", async () => {
+    await seedOrgWithAssignments()
+    // anna (a Contributor coordinator) handed one to bob, and took one back.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('by-anna', 'pa', 3, 'chapters', 'Genesis 2', 'es', 0, 2, 1200, NULL),
+        ('by-anna-gone', 'pa', 3, 'chapters', 'Genesis 3', 'es', 0, 2, 1300, 1400)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/given",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; assigneeUserId: number; username: string | null; targetLang: string }>
+    }
+    expect(body.assignments).toEqual([
+      expect.objectContaining({ assignmentId: "by-anna", assigneeUserId: 3, username: "bob", targetLang: "es" }),
+    ])
+
+    const wendi = await app.request(
+      "/api/v2/projects/pa/assignments/given",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const wendiBody = (await wendi.json()) as { assignments: Array<{ assignmentId: string }> }
+    expect(wendiBody.assignments.map((a) => a.assignmentId).sort()).toEqual(["as-anna", "as-bob"])
+  })
+
+  it("403s a user with no access to the project", async () => {
+    await seedOrgWithAssignments()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/given",
+      { headers: authHeader(await jwtFor("outsider")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+})
+
 describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
   it("returns distinct source-cell chapters, natural-sorted; 403s a non-member", async () => {
     await seedUser(1, "wendi")
@@ -325,6 +367,31 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
     expect(byUser[2]).toMatchObject({ username: "anna", openAssignments: 1, cellsTotal: 3, cellsDone: 2 })
     expect(byUser[3]).toMatchObject({ username: "bob", openAssignments: 1, cellsTotal: 2, cellsDone: 1 })
     expect(body.roster).toHaveLength(2)
+  })
+
+  it("403s a maintainer when the roster floor is owner-only", async () => {
+    await seedOrgWithAssignments()
+    // wendi created the project, so she resolves as owner (700). mia is a
+    // maintainer on both the org and the project, and not the creator.
+    await seedUser(4, "mia")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, '{\"rosterViewMinRole\":700}', 1, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("mia")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { rosterHidden?: boolean; roster?: unknown }
+    expect(body.rosterHidden).toBe(true)
+    expect(body.roster).toBeUndefined()
   })
 
   it("403s a contributor (anna) and a non-member (outsider)", async () => {

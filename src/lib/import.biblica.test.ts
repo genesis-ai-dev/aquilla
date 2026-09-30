@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  SAMPLE_SCRIPTURE,
   biblicaFrontBackMatterStory,
   bookTitle,
   divisionHeading,
@@ -70,7 +71,7 @@ function importBodies(requests: Array<{ url: string; init?: RequestInit }>) {
 }
 
 describe("Biblica study-notes import", () => {
-  it("commits only the study notes, preserving the original package as the source artifact", async () => {
+  it("commits the notes and the verse-keyed scripture, preserving the original package as the source artifact", async () => {
     const requests = captureRequests()
     const file = await biblicaFile()
     const originalBytes = new Uint8Array(await file.arrayBuffer())
@@ -84,7 +85,7 @@ describe("Biblica study-notes import", () => {
     expect(ref.type).toBe("idml")
     // The trailing "-notes" is dropped so the file reads as the book it covers.
     expect(ref.name).toBe("Genesis")
-    expect(ref.cellCount).toBe(9)
+    expect(ref.cellCount).toBe(14)
 
     const bodies = importBodies(requests)
     const meta = bodies.find((body) => body.file)?.file
@@ -97,9 +98,16 @@ describe("Biblica study-notes import", () => {
     })
 
     const cells = bodies.flatMap((body) => body.cells ?? [])
+    // AQU-1285: scripture is content, so a book volume commits the Bible text
+    // as verse cells interleaved with the notes about it, in document order.
     expect(cells.map((cell) => cell.value)).toEqual([
       SAMPLE_NOTES.preface,
+      SAMPLE_SCRIPTURE.genesisOneOne,
       SAMPLE_NOTES.afterChapterOne,
+      SAMPLE_SCRIPTURE.genesisTwoFive,
+      SAMPLE_SCRIPTURE.genesisTwoFiveContinued,
+      SAMPLE_SCRIPTURE.genesisTwoSix,
+      SAMPLE_SCRIPTURE.genesisThreeOne,
       SAMPLE_NOTES.afterChaptersTwoToThree,
       SAMPLE_NOTES.psalmHeading,
       SAMPLE_NOTES.psalmNote,
@@ -108,11 +116,15 @@ describe("Biblica study-notes import", () => {
       SAMPLE_NOTES.noteBlock,
     ])
 
-    // Scripture must never reach the project as a translatable cell.
-    const committed = cells.map((cell) => cell.value).join("\n")
-    expect(committed).not.toContain("In the beginning God created")
-    expect(committed).not.toContain("No shrub had yet appeared")
-    expect(committed).not.toContain("working the ground")
+    // Each verse arrives keyed to its own reference, and the printed chapter and
+    // verse numbers stay the publisher's — no cell holds a bare digit.
+    const scriptureCells = cells.filter((cell) => (
+      (cell.metadata?.biblica as { contentType?: string })?.contentType === "scripture"
+    ))
+    expect(scriptureCells.map((cell) => (
+      (cell.metadata?.biblica as { verseReference?: string })?.verseReference
+    ))).toEqual(["GEN 1:1", "GEN 2:5", "GEN 2:5", "GEN 2:6", "GEN 3:1"])
+    expect(cells.some((cell) => /^\s*\d+\s*$/.test(cell.value))).toBe(false)
 
     // Whole-package bytes are preserved under the IDML artifact format, so a
     // strict round-trip export still has the original to write back into.
@@ -134,7 +146,7 @@ describe("Biblica study-notes import", () => {
 
     const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
     expect(cells.map((cell) => (cell.metadata?.biblica as { chapterLabel?: string })?.chapterLabel))
-      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2", "2"])
+      .toEqual(["Preface", "1", "1", "2", "2", "2", "3", "2-3", "2", "2", "2", "2", "2", "2"])
     for (const cell of cells) {
       expect(cell.metadata?.idml).toMatchObject({ version: 2 })
       expect(cell.metadata?.aquillaImport).toMatchObject({
@@ -172,14 +184,19 @@ describe("Biblica study-notes import", () => {
     const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
     expect(cells.map((cell) => cell.value)).toEqual([
       SAMPLE_NOTES.preface,
+      SAMPLE_SCRIPTURE.genesisOneOne,
       SAMPLE_NOTES.afterChapterOne,
+      SAMPLE_SCRIPTURE.genesisTwoFive,
+      SAMPLE_SCRIPTURE.genesisTwoFiveContinued,
+      SAMPLE_SCRIPTURE.genesisTwoSix,
+      SAMPLE_SCRIPTURE.genesisThreeOne,
       SAMPLE_NOTES.afterChaptersTwoToThree,
       SAMPLE_NOTES.psalmHeading,
       SAMPLE_NOTES.psalmNote,
       ...SAMPLE_NOTES.referenceList,
       SAMPLE_NOTES.noteBlock,
     ])
-    expect(cells).toHaveLength(9)
+    expect(cells).toHaveLength(14)
     const block = cells.find((cell) => cell.value === SAMPLE_NOTES.noteBlock)
     expect(block?.metadata?.idmlRejoin).toBeUndefined()
   })

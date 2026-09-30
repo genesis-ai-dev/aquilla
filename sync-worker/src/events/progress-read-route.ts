@@ -1,12 +1,16 @@
 import { verifyTokenForProject } from '../auth'
+import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
+import { visibleSourceSql } from './hidden-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
+  LANE_READ_WALL?: string
 }
 
 interface ProgressRow {
@@ -544,7 +548,12 @@ export async function readFirstOpenCell(
        ${targetJoin}
       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
         ${unit ? `AND (${key} = ? OR ${key} LIKE ?)` : ''}
-        ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
+        ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
+        -- AQU-1424: a parked cell is never the NEXT THING TO WORK ON, whatever
+        -- state it is in. Unconditional, unlike the structural clause above it:
+        -- that one is project policy, this one is a person taking the row out of
+        -- the work, so no setting brings it back into this walk.
+        AND ${visibleSourceSql('s')}`,
   ).bind(...binds).all<FirstOpenRow>()
 
   const outstanding = (r: FirstOpenRow): boolean => {
@@ -590,6 +599,51 @@ export async function handleProgressReadRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
+  // AQU-730: a restricted caller may read only a lane they were granted.
+  // The unscoped `files` counter fallback below is not per-lane, so once the
+  // wall is on it must not run for a restricted caller — it would report
+  // another lane's totals. 600+ stays unrestricted (visible === null).
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  const laneAllowed = await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane)
+  if (!laneAllowed) {
+    const hiddenHeaders = { 'Cache-Control': 'private, no-store' }
+    if (firstOpenMatch) {
+      const kindParam = url.searchParams.get('kind') ?? ''
+      const kind = (PLAN_LANDING_KINDS as readonly string[]).includes(kindParam)
+        ? kindParam as PlanLandingKind
+        : 'first'
+      const body: PlanFirstOpenResponse = {
+        fileId,
+        unit: (url.searchParams.get('unit') ?? '').trim(),
+        kind,
+        cellId: null,
+      }
+      return Response.json(body, { headers: hiddenHeaders })
+    }
+    if (sectionMatch) {
+      const body: SectionProgressDetailResponse = {
+        fileId,
+        sectionKey: decodeURIComponent(sectionMatch[3]).trim(),
+        revision: 0,
+        validationCount: 1,
+        verses: [],
+      }
+      return Response.json(body, { headers: hiddenHeaders })
+    }
+    const body: FileProgressResponse = {
+      fileId,
+      revision: 0,
+      validationCount: 1,
+      file: {
+        totalCount: 0, filledCount: 0, validatedCount: 0, validationLevels: [0],
+        audioCount: 0, audioValidatedCount: 0, audioValidationLevels: [0],
+      },
+      sections: [],
+      source: 'projection',
+    }
+    return Response.json(body, { headers: hiddenHeaders })
+  }
+
   if (firstOpenMatch) {
     const unit = (url.searchParams.get('unit') ?? '').trim()
     const kindParam = url.searchParams.get('kind') ?? ''
@@ -631,7 +685,11 @@ export async function handleProgressReadRequest(
             AND ${targetLaneDualReadSql('t')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             AND ${chapterKeySql('s')} = ?
-            ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
+            ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
+            -- AQU-1424: and it is not one of the chapter's cells here either, so
+            -- this detail read agrees with the projection's own count for the
+            -- same chapter rather than listing a row the fraction excluded.
+            AND ${visibleSourceSql('s')}`,
       ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         cell_id: string
         canonical_ref: string | null

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { isLowMemoryActive, subscribeLowMemory } from "@/lib/perf/low-memory"
 
 /**
  * User-controlled switch for client-side health work: decay health, rule
@@ -8,6 +9,13 @@ import { useSyncExternalStore } from "react"
  * editor's view settings.
  *
  * On by default; the choice is per-browser (localStorage, `"0"` = off).
+ *
+ * AQU-1191: the *default* follows low-memory mode — on a device that mode calls
+ * constrained, health work starts off, because it is the heaviest of the live
+ * decorations. Only the default moves. An explicit choice is stored either way
+ * (`"1"` as well as `"0"`), so a user who turned health on keeps it on however
+ * the device reports itself, and one who turned it off is never re-enabled by
+ * leaving low-memory mode.
  */
 export const HEALTH_CALCULATIONS_STORAGE_KEY = "health-calculations"
 
@@ -18,11 +26,24 @@ let enabled = read()
 
 function read(): boolean {
   try {
-    return localStorage.getItem(HEALTH_CALCULATIONS_STORAGE_KEY) !== "0"
+    const stored = localStorage.getItem(HEALTH_CALCULATIONS_STORAGE_KEY)
+    if (stored === "0") return false
+    if (stored === "1") return true
   } catch {
     return true
   }
+  return !isLowMemoryActive()
 }
+
+// Flipping low-memory mode moves the default, so consumers re-render without a
+// reload. A stored choice makes `read()` mode-independent, so this is a no-op
+// for anyone who has used the health toggle.
+subscribeLowMemory(() => {
+  const next = read()
+  if (enabled === next) return
+  enabled = next
+  for (const listener of listeners) listener()
+})
 
 export function isHealthCalculationsEnabled(): boolean {
   return enabled

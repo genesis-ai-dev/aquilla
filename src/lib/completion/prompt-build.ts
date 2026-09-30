@@ -26,6 +26,8 @@
 // completion-service.ts re-exports everything here, so every existing call
 // site and test keeps importing from where it always did.
 
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+
 /** One OpenAI-style chat message. The copilot prompt is always exactly two:
  *  a system message then a user message. */
 export interface ChatMessage {
@@ -66,6 +68,32 @@ export interface PromptRule {
  * context. This is a TOTAL prompt budget, not a per-retriever allowance.
  */
 export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
+
+/**
+ * One row of the immediate discourse window.
+ *
+ * `draft` marks a target this same run produced and NOBODY has reviewed
+ * (AQU-1386 §3). Batch drafting sends several calls in sequence; without this,
+ * call N+1 could not see call N's output at all and every chunk started its
+ * discourse cold. Carrying it forward is what keeps connectives and participant
+ * reference consistent across a long file.
+ *
+ * It is labelled in the prompt rather than silently mixed in, because the model
+ * should weigh an unreviewed draft less than an approved translation. The rule
+ * that unapproved text never becomes a retrieval EXAMPLE is untouched: this is
+ * in-run context only, is never persisted, and never crosses runs.
+ */
+export interface PrecedingContextEntry {
+  source: string
+  target: string
+  /** In-run, unreviewed draft — labelled as such in the rendered prompt. */
+  draft?: boolean
+}
+
+/** Prompt label for one discourse-window row. */
+export function precedingContextLabel(entry: PrecedingContextEntry): string {
+  return entry.draft ? "Translation (unreviewed draft)" : "Translation"
+}
 
 function normalizedExampleSource(source: string): string {
   return source.trim().replace(/\s+/g, " ").toLowerCase()
@@ -224,7 +252,7 @@ export interface BuildPromptOptions {
    *  discourse window. Rendered last (closest to the live source) because it is
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
    *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Extra task instruction appended to the system prompt after the rules
    *  block. Must be placeholder-free — it is appended AFTER the
    *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
@@ -277,20 +305,22 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
 
   let user = ""
   if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
+    for (const ex of allExamples) user += `Target: ${stripTrailingBareMarkers(ex.target)}\n\n`
   } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+    for (const ex of allExamples) {
+      user += `Source: ${stripTrailingBareMarkers(ex.source)}\nTranslation: ${stripTrailingBareMarkers(ex.target)}\n\n`
+    }
   }
   // Immediately-preceding committed context (discourse window): render after the
   // few-shot examples and just before the live source so it sits closest to what
   // the model is about to translate. Skip blank pairs. (D4)
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
   if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
+  user += `Source: ${stripTrailingBareMarkers(options.sourceText)}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }

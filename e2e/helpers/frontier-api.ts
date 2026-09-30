@@ -96,7 +96,7 @@ export interface CreatedProject {
  * AND a server-side row, so subsequent member-add and sync calls succeed. */
 export async function createProjectServerSide(
   jwt: string,
-  args: { id: string; name: string },
+  args: { id: string; name: string; orgId?: number },
 ): Promise<CreatedProject> {
   // The caller supplies a stable project id and the worker insert uses
   // ON CONFLICT(id) DO NOTHING, so replaying this byte-identical fixture POST

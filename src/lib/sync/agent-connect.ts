@@ -31,7 +31,7 @@ export function buildConnectionInstructions(authBase: string, syncOrigin: string
   const api = `${syncOrigin.replace(/\/+$/, "")}/api/v1/external`
   return `Connect to my Aquilla project using browser authorization.
 
-First fetch ${connect} for the current connection protocol and ${api} for the Agent API and MCP discovery map.
+First fetch ${connect} for the current connection protocol and ${api} for the Agent API and MCP discovery map. Send a descriptive User-Agent header on every request (for example "my-agent/1.0"); some HTTP libraries' default user agents are blocked.
 
 Request access by POSTing JSON to ${connect}/device_authorization:
 {"client_id":"aquilla-agent","agent_name":"<your agent name>","scope":"ask"}

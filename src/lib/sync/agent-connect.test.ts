@@ -18,6 +18,8 @@ describe("secret-free agent setup", () => {
     expect(prompt).toContain("MCP server")
     expect(prompt).toContain("does not expire")
     expect(prompt).not.toContain("30 days")
+    // Python-urllib's default UA gets a non-JSON 403 from the edge (AQU-1512).
+    expect(prompt).toContain("User-Agent")
   })
   it("tells a stalled agent to redeem without handing it any secret", () => {
     const message = buildApprovedMessage("https://auth.example/identity/", "ABCD-EFGH")

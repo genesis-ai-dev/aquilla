@@ -27,6 +27,11 @@ const emptyPresence = (): Map<string, PresenceState> => new Map()
 const who = (name: string) => ({ connId: name, userId: name })
 
 describe("parseProjectDoClientMessage", () => {
+  it("parses a heartbeat ping, keeping a numeric ts to echo", () => {
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: 42 }))).toEqual({ t: "ping", ts: 42 })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping" }))).toEqual({ t: "ping" })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: "x" }))).toEqual({ t: "ping" })
+  })
   it("parses focus.claim with leaseMs", () => {
     const m = parseProjectDoClientMessage(
       JSON.stringify({ t: "focus.claim", cellId: "c", leaseMs: 1000 }),

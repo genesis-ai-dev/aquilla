@@ -9,12 +9,13 @@
 // path as a hand emit. One tool call is one human-review package; the verdict
 // tells the orchestrator how much work remains.
 
+import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
-import type { ToolOutcome } from "./types"
+import type { FileCandidate, ToolOutcome } from "./types"
 
 export interface DraftArgs {
   fileId?: unknown
@@ -80,7 +81,7 @@ export interface DraftEmit {
 }
 
 export type DraftGeneration =
-  | { ok: false; error: string }
+  | { ok: false; error: string; candidates?: FileCandidate[] }
   | {
       ok: true
       fileId: string
@@ -93,6 +94,8 @@ export type DraftGeneration =
       drafted: CellPair[]
       /** True when nothing in scope needed drafting (not an error). */
       empty: boolean
+      /** AQU-1455: set when a failed ref widened the scope to the whole file. */
+      notice?: string
     }
 
 // Keep agent proposals in the same human-review package used by the editor.
@@ -249,7 +252,7 @@ export async function generateDrafts(
     lane: ctx.lane,
     aliases: ctx.aliases,
   })
-  if (!scope.ok) return { ok: false, error: scope.error }
+  if (!scope.ok) return { ok: false, error: scope.error, ...(scope.candidates ? { candidates: scope.candidates } : {}) }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
@@ -271,7 +274,7 @@ export async function generateDrafts(
   work = work.slice(0, limit)
 
   if (work.length === 0) {
-    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true }
+    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.
@@ -283,7 +286,7 @@ export async function generateDrafts(
   const precedingBlock =
     preceding.length > 0
       ? `\nImmediately preceding, validated context (continue its discourse flow):\n${preceding
-          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
+          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(p.source))} → ${JSON.stringify(stripTrailingBareMarkers(p.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -297,7 +300,7 @@ export async function generateDrafts(
   const examplesBlock =
     examplePairs.length > 0
       ? `\nTranslation pairs from this project (imitate them):\n${examplePairs
-          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
+          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(e.source))} → ${JSON.stringify(stripTrailingBareMarkers(e.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -306,7 +309,7 @@ export async function generateDrafts(
       ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
       : ""
   const numbered = work
-    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${p.source}`)
+    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)
     .join("\n")
 
   // Preserve the benchmarked causal structure: research finishes before the
@@ -362,14 +365,14 @@ export async function generateDrafts(
   const emits: DraftEmit[] = []
   const missed: string[] = []
   work.forEach((p, i) => {
-    const t = drafts.get(i + 1)
-    if (t && t.trim()) {
+    const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    if (t) {
       emits.push({
         kind: "target.cell.commit",
         fileId: scope.fileId,
         cellId: p.cellId,
         payload: {
-          value: t.trim(),
+          value: t,
           ai_draft: {
             model: modelCfg.model,
             provider: "platform",
@@ -399,6 +402,7 @@ export async function generateDrafts(
     remaining,
     drafted: work.filter((_, i) => drafts.has(i + 1)),
     empty: false,
+    notice: scope.notice,
   }
 }
 
@@ -409,14 +413,22 @@ export async function executeDraft(
   modelCfg: DraftModelConfig,
 ): Promise<DraftOutcome> {
   const gen = await generateDrafts(db, args, ctx, modelCfg)
-  if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
-  if (gen.empty) return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+  if (!gen.ok) {
+    return {
+      ok: false,
+      text: `error: ${gen.error}`,
+      ...(gen.candidates ? { data: { candidates: gen.candidates } } : {}),
+    }
+  }
+  if (gen.empty) {
+    return { ok: true, text: `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope.` }
+  }
 
   // Stage through the SAME path as a hand emit: role floors, staleness
   // pre-check, provenance injection, and rule lint all apply.
   const { proposal, modelVerdictBlock } = await stageEvents(db, gen.emits, ctx.stageCtx)
 
-  const lines = [modelVerdictBlock]
+  const lines = gen.notice ? [gen.notice, modelVerdictBlock] : [modelVerdictBlock]
   if (gen.missed.length > 0) lines.push(`No draft returned for: ${gen.missed.join(", ")} — re-run draft with their cellIds.`)
   if (gen.remaining > 0) lines.push(`${gen.remaining} more untranslated cells remain in scope — call draft again to continue.`)
 

@@ -3707,8 +3707,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   const cellId = cell.id
   if (isPerfLogEnabled()) {
-    const key = cellId.slice(0, 8)
-    rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
+    // AQU-1069: keyed by the full cell id — a leading UUIDv7 slice is the
+    // millisecond clock, so it is shared by every cell of one import and
+    // collapsed all rows into a single bucket.
+    rowRenders.set(cellId, (rowRenders.get(cellId) ?? 0) + 1)
   }
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])

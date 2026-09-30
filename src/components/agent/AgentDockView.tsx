@@ -31,6 +31,7 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerEndOnSignal,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
@@ -109,6 +110,10 @@ function ScopedAgentDockView({
 }: AgentDockViewProps & { draftScope: ComposerDraftScope }) {
   const t = useT()
   const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
+  // Bumped on every own-send: the scroller snaps to the end so the sent
+  // message (and the reply about to stream) is in view even if the user had
+  // scrolled up to read history.
+  const [sendSignal, setSendSignal] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
   const draftStore = composerDraftStore(draftScope)
   const { attachments, attachmentError: attachError } = useComposerDraft(draftStore)
@@ -164,6 +169,7 @@ function ScopedAgentDockView({
       })
       if (!options) return false
       send(options)
+      setSendSignal((s) => s + 1)
       // Attachments belong to the message that carried them — clear after send.
       if (batch.length > 0) draftStore.removeAttachments(batch.map((attachment) => attachment.artifactId))
       return true
@@ -238,16 +244,21 @@ function ScopedAgentDockView({
           </div>
         )
       ) : (
-        <MessageScrollerProvider>
+        // Stick-to-bottom (2026-08-31 review): follow new content while the
+        // reader is at the bottom; any upward scroll breaks the follow and the
+        // ArrowDown button re-engages it. scrollAnchor is deliberately OFF —
+        // anchoring the sent message to the top would hold the viewport still
+        // while tool activity streams below the fold.
+        <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
           <MessageScroller className="flex-1">
+            <MessageScrollerEndOnSignal signal={sendSignal} />
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
                 {conversationPrelude}
-                {state.runs.map((run) => (
+                {state.runs.map((run, runIndex) => (
                   <MessageScrollerItem
                     key={run.localId}
                     messageId={run.localId}
-                    scrollAnchor
                     className="border-b border-border/40 pb-4 last:border-b-0"
                   >
                     <AgentRunView
@@ -290,6 +301,11 @@ function ScopedAgentDockView({
                       onChooseFile={(candidate) => chooseFile(run.localId, candidate)}
                       fileChoiceEnabled={
                         Boolean(jwt) && !state.isStreaming && run.localId === latestRunId
+                      }
+                      onSuggestionSend={
+                        runIndex === state.runs.length - 1 && jwt
+                          ? (text) => sendPrompt(text)
+                          : undefined
                       }
                     />
                   </MessageScrollerItem>

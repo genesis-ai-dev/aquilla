@@ -12,7 +12,13 @@ import { ChevronRight, Info } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -183,9 +189,13 @@ export function TeamThreadDetail({
   const reviewHref = agentConversationHref(projectId, runThreadId(run.runId), "review")
   const groups = groupRunFeed(feed)
   return (
-    <ScrollArea className="min-h-0 flex-1" data-testid="team-thread-detail">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
-        {feed.length === 0 ? (
+    // Stick-to-bottom feed — same contract as TeamChannel: follow while at the
+    // bottom, break on upward scroll, ArrowDown re-engages.
+    <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
+      <MessageScroller className="min-h-0 flex-1" data-testid="team-thread-detail">
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
+            {feed.length === 0 ? (
           feedLoading ? (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-56" />
@@ -238,7 +248,10 @@ export function TeamThreadDetail({
             </div>
           ))
         )}
-      </div>
-    </ScrollArea>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton className="shadow-sm" />
+      </MessageScroller>
+    </MessageScrollerProvider>
   )
 }

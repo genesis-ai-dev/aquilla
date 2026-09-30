@@ -28,6 +28,7 @@ import { Spinner } from "@/components/ui/spinner"
 import type { AgentProposal, AquiferPublishProposal, FileCandidate } from "@/lib/agent/protocol"
 import { latestFileCandidates } from "@/lib/agent/file-candidates"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
+import { splitNextSteps } from "@/lib/agent/suggestions"
 import { AGENT_PERSONAS, personaForToolKind } from "@/lib/agent/personas"
 import { BudgetMeter } from "./BudgetMeter"
 import { ChangesetCard } from "./ChangesetCard"
@@ -143,6 +144,10 @@ export interface AgentRunViewProps {
   /** False once the run is no longer the newest or a run is streaming: the
    *  buttons stay visible but disabled. */
   fileChoiceEnabled?: boolean
+  /** Sends a suggested next step ("NEXT:" lines in the final reply) back as
+   *  the next user message. Only the latest run of a conversation gets this —
+   *  older runs strip the marker lines but render no buttons. */
+  onSuggestionSend?: (text: string) => void
 }
 
 export function AgentRunView({
@@ -154,9 +159,24 @@ export function AgentRunView({
   onChangesetApplied,
   onChooseFile,
   fileChoiceEnabled = false,
+  onSuggestionSend,
 }: AgentRunViewProps) {
   const { locale, t } = useI18n()
   const fileCandidates = onChooseFile ? latestFileCandidates(run) : []
+  // Trailing NEXT: lines live in the LAST prose item; strip them from display
+  // there (including mid-stream partials) and surface them as buttons once the
+  // run has settled ok.
+  let lastTextIndex = -1
+  for (let i = run.items.length - 1; i >= 0; i--) {
+    if (run.items[i].kind === "text") {
+      lastTextIndex = i
+      break
+    }
+  }
+  const lastText = lastTextIndex >= 0 ? run.items[lastTextIndex] : null
+  const parsed = lastText?.kind === "text" ? splitNextSteps(lastText.text) : null
+  const suggestions =
+    run.status === "ok" && onSuggestionSend && parsed ? parsed.suggestions.slice(0, 2) : []
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -171,7 +191,8 @@ export function AgentRunView({
       {run.items.map((item, index) => {
         switch (item.kind) {
           case "text": {
-            if (!item.text.trim()) return null
+            const displayText = index === lastTextIndex && parsed ? parsed.body : item.text
+            if (!displayText.trim()) return null
             // Discord-style attribution: the Coordinator's name heads each
             // block of prose, re-shown after any interleaved activity.
             const previous = index > 0 ? run.items[index - 1] : null
@@ -193,7 +214,7 @@ export function AgentRunView({
                   )}
                   <Bubble variant="ghost">
                     <BubbleContent>
-                      <ChatMarkdown content={item.text} />
+                      <ChatMarkdown content={displayText} />
                     </BubbleContent>
                   </Bubble>
                 </MessageContent>
@@ -227,6 +248,26 @@ export function AgentRunView({
           enabled={fileChoiceEnabled && run.status !== "running"}
           onChoose={onChooseFile}
         />
+      )}
+      {suggestions.length > 0 && (
+        // Quiet outline chips, monochrome by design — the model's own "what
+        // now?" answers, one tap from becoming the next message.
+        <div
+          role="group"
+          aria-label={t("agent.run.suggestionsAriaLabel")}
+          className="flex flex-wrap items-center gap-1.5 ps-1"
+        >
+          {suggestions.map((text) => (
+            <button
+              key={text}
+              type="button"
+              onClick={() => onSuggestionSend?.(text)}
+              className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+            >
+              {text}
+            </button>
+          ))}
+        </div>
       )}
 
       {run.status === "running" && (

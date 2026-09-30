@@ -6,7 +6,7 @@
  * half of the propose-then-apply trust model.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { AgentRunUi } from "@/lib/agent/run-state"
 import { AgentRunView } from "./AgentRunView"
@@ -186,5 +186,34 @@ describe("AgentRunView", () => {
       />,
     )
     expect(screen.getByText("Drafting MRK 4 — 3/12")).toBeInTheDocument()
+  })
+
+  // The model closes with "NEXT:" lines in the user's voice. They are an
+  // offer, not prose: shown as one-tap buttons on the latest settled run, and
+  // never printed as raw marker lines in the reply.
+  it("turns trailing NEXT: lines into buttons that send the suggestion", () => {
+    const onSuggestionSend = vi.fn()
+    render(
+      <AgentRunView
+        run={makeRun({
+          items: [{ id: "t1", kind: "text", text: "Drafted 4 verses.\nNEXT: Check MRK 4:1–4:8\nNEXT: Draft the next chapter" }],
+        })}
+        onSuggestionSend={onSuggestionSend}
+      />,
+    )
+    expect(screen.getByText("Drafted 4 verses.")).toBeInTheDocument()
+    expect(screen.queryByText(/NEXT:/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Check MRK 4:1–4:8" }))
+    expect(onSuggestionSend).toHaveBeenCalledWith("Check MRK 4:1–4:8")
+  })
+
+  it("offers no suggestion buttons on an older run, but still hides the markers", () => {
+    render(
+      <AgentRunView
+        run={makeRun({ items: [{ id: "t1", kind: "text", text: "Done.\nNEXT: Draft the next chapter" }] })}
+      />,
+    )
+    expect(screen.queryByRole("button", { name: "Draft the next chapter" })).toBeNull()
+    expect(screen.queryByText(/NEXT:/)).toBeNull()
   })
 })

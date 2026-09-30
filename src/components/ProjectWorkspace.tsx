@@ -11168,11 +11168,14 @@ export function ProjectWorkspace() {
    * AQU-1391: carry a just-validated cell's translation to every repeated
    * source segment in the open file, the way Trados/memoQ/Matecat do.
    *
-   * Deliberately hung off the EXPLICIT validate gesture only. The commit path
-   * also auto-validates a human edit (`shouldAutoValidateHumanEdit`), and
-   * propagating from there would re-broadcast half-typed text on every idle
-   * commit — the repetitions would flicker through the author's keystrokes
-   * instead of receiving a translation they decided was done.
+   * Runs on a validation the translator has SETTLED: the explicit validate
+   * gesture, or (AQU-1484) a human edit the commit path auto-validated
+   * (`shouldAutoValidateHumanEdit`) once the editor has been left. Never from
+   * an idle commit with the caret still in the cell — that would re-broadcast
+   * half-typed text on every pause, and the repetitions would flicker through
+   * the author's keystrokes instead of receiving a translation they decided
+   * was done. The row owns that timing (`settleOwedRepetitions` in
+   * EditorTable); this handler only ever sees a settled cell.
    *
    * Propagated cells land UNVALIDATED: this fills work in, it does not sign
    * it off. The commits carry `propagatedFromCellId` so history can say where

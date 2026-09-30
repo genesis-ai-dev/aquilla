@@ -23,6 +23,14 @@ import {
   type ChainSlot,
 } from './chain-claims'
 import { allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
+import {
+  classifyMatchBands,
+  matchImportContent,
+  normalizeForMatch,
+  orderSourceCellsByAnchor,
+  type ContentMatchCell,
+  type MatchBand,
+} from './import-content-match'
 import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { fullProgressRecomputeStmts } from './progress-projection'
@@ -113,7 +121,9 @@ export interface ReconcilePlannedCell {
   finalCellId: string
   parentId: string | null
   changed: boolean
-  matchKind: 'unit-key' | 'cell-id' | 'canonical-ref' | 'new'
+  matchKind: 'unit-key' | 'cell-id' | 'canonical-ref' | 'content-ice' | 'content-exact' | 'new'
+  /** AQU-1394: how this unit's source text compares to the previous version. */
+  matchBand: MatchBand
 }
 
 export interface ReconciliationPlan {
@@ -238,7 +248,14 @@ export function planImportReconciliation(
   const existingByCellId = new Map(existing.map((cell) => [cell.cellId, cell]))
   const existingByCanonicalRef = uniqueIndex(existing, (cell) => cell.canonicalRef?.trim() || null)
   const usedExisting = new Set<string>()
-  const preliminary = incoming.map((cell) => {
+  interface PreliminaryMatch {
+    incoming: ReconcileImportCell
+    existing: ExistingImportCell | undefined
+    finalCellId: string
+    parentId: string | null
+    matchKind: ReconcilePlannedCell['matchKind']
+  }
+  const preliminary: PreliminaryMatch[] = incoming.map((cell) => {
     const key = unitKey(cell.metadata)!
     let matched = existingByUnitKey.get(key)
     let matchKind: ReconcilePlannedCell['matchKind'] = 'unit-key'
@@ -261,9 +278,79 @@ export function planImportReconciliation(
         existingByCellId.has(cell.cellId) ? crypto.randomUUID() : cell.cellId
       ),
       parentId: matched?.eventId ?? null,
-      matchKind: matched ? matchKind : 'new' as const,
+      matchKind: matched ? matchKind : 'new',
     }
   })
+
+  // AQU-1394 — content matching, the second half of the pairing.
+  //
+  // Identity is authoritative only while the parser's key still means the same
+  // unit. A docx unit key is derived from paragraph position, so inserting a
+  // paragraph slides every key down one: v2's keys all still resolve, but each
+  // now points at the previous paragraph's cell, and every translation would
+  // be filed against text it doesn't translate.
+  //
+  // So a pair is *locked* only when identity matched AND the source text is
+  // unchanged. Everything else is offered to content matching, which pairs on
+  // the text itself plus its neighbours. Keeping the old cell id is what
+  // carries the translation forward — targets, comments, audio and assignments
+  // are all keyed by the logical cell and follow it for free, while the old
+  // source event stays in the chain as history.
+  const contentCells = (cells: readonly { cellId: string; value?: string }[]): ContentMatchCell[] =>
+    cells.map((cell) => ({ cellId: cell.cellId, value: cell.value ?? '' }))
+  const incomingContent = contentCells(incoming)
+  const existingContent = contentCells(orderSourceCellsByAnchor(existing))
+
+  const lockedExistingByIncoming = new Map<string, string>()
+  for (const cell of preliminary) {
+    if (!cell.existing) continue
+    if (normalizeForMatch(cell.existing.value) !== normalizeForMatch(cell.incoming.value ?? '')) continue
+    lockedExistingByIncoming.set(cell.incoming.cellId, cell.existing.cellId)
+  }
+  const { adopted } = matchImportContent(incomingContent, existingContent, lockedExistingByIncoming)
+
+  // Settle every content adoption before any unlocked identity pair is kept —
+  // otherwise the first unit in the file keeps a cell that the unit two rows
+  // down has an exact-text claim on, and the reshuffle stops one short.
+  const claimed = new Set(lockedExistingByIncoming.values())
+  for (const cell of preliminary) {
+    if (lockedExistingByIncoming.has(cell.incoming.cellId)) continue
+    const adoption = adopted.get(cell.incoming.cellId)
+    const adoptedCell = adoption ? existingByCellId.get(adoption.cellId) : undefined
+    if (!adoption || !adoptedCell || claimed.has(adoptedCell.cellId)) continue
+    claimed.add(adoptedCell.cellId)
+    cell.existing = adoptedCell
+    cell.finalCellId = adoptedCell.cellId
+    cell.parentId = adoptedCell.eventId
+    cell.matchKind = adoption.quality === 'ice' ? 'content-ice' : 'content-exact'
+  }
+  for (const cell of preliminary) {
+    if (lockedExistingByIncoming.has(cell.incoming.cellId)) continue
+    if (adopted.has(cell.incoming.cellId) && cell.existing) continue
+    // No content match: keep the identity pair, unless content matching handed
+    // that cell to a unit with better evidence.
+    if (cell.existing && !claimed.has(cell.existing.cellId)) {
+      claimed.add(cell.existing.cellId)
+      continue
+    }
+    if (!cell.existing) continue
+    // Displaced — its identity pair went to the unit whose text actually
+    // matches, so this one is genuinely new content.
+    cell.existing = undefined
+    cell.parentId = null
+    cell.matchKind = 'new'
+    cell.finalCellId = existingByCellId.has(cell.incoming.cellId)
+      ? crypto.randomUUID()
+      : cell.incoming.cellId
+  }
+
+  const bands = classifyMatchBands(
+    incomingContent,
+    existingContent,
+    new Map(preliminary.flatMap((cell) => (
+      cell.existing ? [[cell.incoming.cellId, cell.existing.cellId] as const] : []
+    ))),
+  )
 
   const finalIdByIncomingId = new Map(preliminary.map((cell) => [cell.incoming.cellId, cell.finalCellId]))
   const cells: ReconcilePlannedCell[] = preliminary.map((cell) => {
@@ -290,12 +377,13 @@ export function planImportReconciliation(
         ? !sameProjectedSource(normalizedIncoming, cell.existing, mappedAnchor)
         : true,
       matchKind: cell.matchKind,
+      matchBand: bands.get(cell.incoming.cellId) ?? 'new',
     }
   })
 
   return {
     cells,
-    retainedMissing: existing.filter((cell) => !usedExisting.has(cell.cellId)).map((cell) => cell.cellId),
+    retainedMissing: existing.filter((cell) => !claimed.has(cell.cellId)).map((cell) => cell.cellId),
   }
 }
 
@@ -699,6 +787,8 @@ export async function handleImportReconcileRequest(
       added: 0,
       changed: 0,
       unchanged: 0,
+      ice: 0,
+      exact: 0,
       retainedMissing: 0,
       importedTargets: 0,
     }), request)
@@ -1012,6 +1102,10 @@ export async function handleImportReconcileRequest(
     added,
     changed,
     unchanged: plan.cells.length - changed,
+    // AQU-1394 import summary bands — how v2's source text compares to v1's,
+    // independent of `changed` (which also counts metadata/anchor drift).
+    ice: plan.cells.filter((cell) => cell.matchBand === 'ice').length,
+    exact: plan.cells.filter((cell) => cell.matchBand === 'exact').length,
     retainedMissing: plan.retainedMissing.length,
     importedTargets: targetEvents.length,
   }), request)

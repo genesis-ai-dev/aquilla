@@ -112,3 +112,21 @@ describe("hosted transcription", () => {
     expect(response.status).toBe(502)
   })
 })
+
+describe("hosted transcription — browser preflight", () => {
+  // The SPA (src/lib/audio/transcribe-hosted.ts) sends Idempotency-Key; a
+  // preflight that omits it makes every browser request fail before the route.
+  it("allows the client's idempotency header", async () => {
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,content-type,idempotency-key",
+      },
+    }, env)
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase()).toContain("idempotency-key")
+  })
+})

@@ -50,15 +50,23 @@ export function prHolds(pr) {
   return pr.pathHolds || (pr.walk !== "PASS" && pr.walk !== "none")
 }
 
-// A PR whose diff touches only docs or only test/journey files has no UI
-// claim, so the bot skips the walk entirely (PR-BOT.md) — there is no walk
-// comment to look up, and there never will be one. This is a path check, not
-// a GitHub lookup, so it needs no PAT and stays true even before the walk
-// lookup script runs.
+// A PR whose diff touches only docs, only test/journey files, or only
+// allowlisted tooling scripts has no UI claim, so the bot skips the walk
+// entirely (PR-BOT.md). There is no walk comment to look up, and there never
+// will be one. This is a path check, not a GitHub lookup, so it needs no PAT
+// and stays true even before the walk lookup script runs.
+//
+// Scripts are allowlisted, not all of scripts/: vite.config.ts imports
+// scripts/vite-html-branding.ts and scripts/build-info.ts, so a change there
+// ships in the app and needs a walk. A new script needs a walk until someone
+// checks that nothing in the app or worker builds imports it and adds it
+// here. Infra scripts (cloudflare-*, verify-*, tag-release, ...) hold on
+// their own through classifyFiles/pathHolds, whatever this says.
+const NO_UI_SCRIPT = /^scripts\/(release-plan|qa\/|smart-test|e2e-)/
 const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\//
 
 export function isDocsOrTestOnly(files) {
-  return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file))
+  return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file) || NO_UI_SCRIPT.test(file))
 }
 
 function branchName(now, usedSuffixes) {

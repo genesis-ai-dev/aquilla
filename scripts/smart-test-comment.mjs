@@ -10,7 +10,38 @@ const UNAVAILABLE = "**HARNESS UNAVAILABLE — this run produced no journey cove
 const NOT_A_FINDING = "The harness could not collect trustworthy evidence on this commit, so this run reports nothing about these changes. It is not a product finding, and it is not a pass."
 /** The oracle self-test qualifies every other verdict a run emits. */
 const isSelfTest = (title) => typeof title === "string" && title.startsWith("oracle qualification:")
-const CONCLUSIVE = ["VERIFIED PASS", "PASS (model-free check)", "PRODUCT FAILURE"]
+const CONCLUSIVE = ["VERIFIED PASS", "PASS (model-free check)", "FAIL (model-free check)", "PRODUCT FAILURE"]
+const brief = (value) => escape(typeof value === "string" ? value.slice(0, 40)
+  : JSON.stringify(value ?? null).slice(0, 40))
+
+/**
+ * Name the precondition that disqualified the evidence.
+ *
+ * AQU-1354: one opaque sentence covered every shape of setup failure, so a
+ * harness image older than the evidence schema, a run against the wrong
+ * commit, a dirty checkout and a suite that never started all read identically
+ * on the PR. Nobody could root-cause the wholesale mode from the comment.
+ * Returns null when the evidence is usable.
+ */
+export function evidenceDefect(suite, sha) {
+  if (!suite) {
+    return "No evidence file reached the reporter, so setup, execution, or evidence collection failed before the suite finished."
+  }
+  if (suite.schemaVersion !== 2) {
+    return `Evidence declares schema version ${brief(suite.schemaVersion)}, not 2, so the deployed harness image does not match this reporter.`
+  }
+  if (suite.build !== sha) {
+    return `Evidence was collected for commit ${brief(suite.build)}, not this PR head, so it does not report on this commit.`
+  }
+  if (suite.dirty !== false) {
+    return "The tested checkout was not clean, so the run did not measure this commit alone."
+  }
+  if (!Array.isArray(suite.planned) || suite.planned.length === 0) {
+    return "The run collected no journey plan, so no outcome was attempted."
+  }
+  if (!Array.isArray(suite.tests)) return "The evidence carries no journey results."
+  return null
+}
 
 export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
@@ -25,11 +56,10 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (phase === "running") {
     lines.push("**Starting.** The runner has started setup. No outcome has passed yet.")
   } else {
-    const valid = suite?.schemaVersion === 2 && suite.build === sha && suite.dirty === false
-      && Array.isArray(suite.planned) && suite.planned.length > 0 && Array.isArray(suite.tests)
-    if (!valid) {
+    const defect = evidenceDefect(suite, sha)
+    if (defect) {
       lines.push(UNAVAILABLE, "", NOT_A_FINDING, "",
-        "No complete, clean-checkout evidence matches this commit. Setup, execution, or evidence collection failed.")
+        `No complete, clean-checkout evidence matches this commit. ${defect}`)
     } else {
       const remaining = [...suite.planned]
       let verified = suite.status === "passed" && (!jobStatus || jobStatus === "success")
@@ -45,7 +75,13 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
         else remaining.splice(index, 1)
         const evidence = test.evidence?.["smart-testing-evidence"]
         const live = test.title?.startsWith("Jev ") && !test.evidence?.["dom-audit"]
-        let verdict = test.status === "passed" ? "PASS (model-free check)" : "INCONCLUSIVE"
+        // AQU-1354: a model-free journey that ran and failed an assertion is a
+        // real failure. Calling it INCONCLUSIVE — the same word used when the
+        // harness never started — is why weeks of DOM-audit failures read as
+        // infrastructure noise. Only statuses that prove nothing about the
+        // product (a test timeout, an interrupted run, a skip) stay unknown.
+        let verdict = test.status === "passed" ? "PASS (model-free check)"
+          : test.status === "failed" ? "FAIL (model-free check)" : "INCONCLUSIVE"
         if (live) {
           const sameBuild = evidence?.build === sha && evidence?.dirty === false
           const checks = evidence?.outcome?.checks
@@ -103,6 +139,10 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (runUrl) lines.push("", hostedEvidence
     ? `[Download outcome evidence](${runUrl}) (private bearer link; expires after seven days).`
     : `[Run logs and downloadable evidence](${runUrl}).`)
+  lines.push("", "**Re-runs on this commit are not available.** The QA host queues one job per PR and commit, "
+    + "so a repeat event for this commit is discarded as a duplicate; reopening the PR does not requeue it. "
+    + "Push a new commit to dispatch a fresh run, or ask the QA host operator — the account that posted this "
+    + "comment — to requeue the job. A transient failure cannot be retried away, so read this report as it stands.")
   lines.push("", "Advisory coverage, not a release guarantee. No retries convert a failed journey into a pass. Preview deployment and workflows outside these journeys are not verified by this run.")
   return lines.join("\n")
 }

@@ -66,6 +66,12 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import type { ProjectLaneRecord } from '../../../db/shared/lanes'
+import {
+  archivedLaneReason,
+  archivedTagsFromSettings,
+  type ArchiveLaneRow,
+} from '../../../src/lib/lanes/archived-lane'
 import { echoableLaneLabels } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
@@ -75,6 +81,17 @@ import { resolveAssignmentAuthority } from '../events/assignment-authority'
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
 export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
+
+function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
+  return lanes
+    .filter((lane) => lane.role === 'target')
+    .map((lane) => ({
+      id: lane.id,
+      name: lane.name,
+      legacyTag: lane.legacyTag,
+      archivedAt: lane.archivedAt,
+    }))
+}
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -600,6 +617,8 @@ export async function prepareChangesetCore(
         ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
         : [],
     )
+    const archivedRows = archiveRows(projectSettings.lanes ?? [])
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
     for (const [index, c] of setCommands.entries()) {
       if (c.laneId && !registeredLanes.has(c.laneId)) {
         const echoable = await echoableLaneLabels(
@@ -617,6 +636,12 @@ export async function prepareChangesetCore(
           `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
           { registeredLanes: listedLanes },
         )
+      }
+      if (c.laneId) {
+        const archived = archivedLaneReason({ tag: c.laneId, lanes: archivedRows, archivedTags })
+        if (archived) {
+          return errorResponse('validation_failed', `commands[${index}] ${archived}`)
+        }
       }
     }
   }
@@ -728,6 +753,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+    ...(cmd.laneId !== undefined ? { laneId: cmd.laneId } : {}),
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -849,6 +875,8 @@ async function preparePlanImport(
       ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
       : [],
   )
+  const archivedRows = archiveRows(projectSettings.lanes ?? [])
+  const archivedTags = archivedTagsFromSettings(projectSettings.settings)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       if (variant.laneId && !registeredLanes.has(variant.laneId)) {
@@ -856,6 +884,15 @@ async function preparePlanImport(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
         )
+      }
+      if (variant.laneId) {
+        const archived = archivedLaneReason({ tag: variant.laneId, lanes: archivedRows, archivedTags })
+        if (archived) {
+          return errorResponse(
+            'validation_failed',
+            `PlanImport.cells[${cellIndex}].variants[${variantIndex}] ${archived}`,
+          )
+        }
       }
       const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
       if (variant.languageTag && variant.languageTag !== effectiveLanguage) {

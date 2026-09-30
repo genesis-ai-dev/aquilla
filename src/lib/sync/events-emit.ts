@@ -36,6 +36,14 @@ import type { CameraState } from "@/lib/sync/cells-read-types"
 let _firstCommitFired = false
 let _firstValidateFired = false
 
+/**
+ * AQU-1462: a non-empty lane tag rides on the event so an archived lane can
+ * refuse it. The default lane is omitted. An absent tag is a shared write.
+ */
+function namedTargetLane(targetLang: string | undefined): { targetLang: string } | Record<string, never> {
+  return targetLang ? { targetLang } : {}
+}
+
 // ── Envelope construction ─────────────────────────────────────────────────
 
 export interface BuildEventInput<K extends OutboxEventKind> {
@@ -385,6 +393,8 @@ export interface CellWaiveInput {
   ruleId: string
   /** Optional human-entered justification. */
   reason?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -401,6 +411,7 @@ export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
     payload: {
       ruleId: input.ruleId,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })
@@ -412,6 +423,8 @@ export interface CellUnwaiveInput {
   fileId: string
   cellId: string
   ruleId: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -425,7 +438,7 @@ export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> 
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { ruleId: input.ruleId },
+    payload: { ruleId: input.ruleId, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -462,6 +475,8 @@ export interface CellAudioAttachInput {
    * recorded takes on target cells.
    */
   transcription?: string
+  /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -488,6 +503,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })
@@ -501,6 +517,8 @@ export interface CellAudioRenameInput {
   audioId: string
   /** The take's new permanent name; null clears back to unnamed. */
   label: string | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -514,7 +532,7 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, label: input.label },
+    payload: { audioId: input.audioId, label: input.label, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -528,6 +546,8 @@ export interface CellAudioTrimInput {
   /** The COMPLETE window. null on either end = back to the clip's own edge. */
   trimStartMs: number | null
   trimEndMs: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -555,6 +575,7 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
       audioId: input.audioId,
       trimStartMs: input.trimStartMs,
       trimEndMs: input.trimEndMs,
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })
@@ -570,6 +591,8 @@ export interface CellAudioPlaceInput {
    *  leads its line), `0` is a real placement, and `null` clears it back to the
    *  line's start. */
   targetOffsetMs: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -598,7 +621,7 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs },
+    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -660,6 +683,8 @@ export interface CellAudioMeasureInput {
   audioId: string
   /** The clip's decoded length. The server fills only a NULL duration. */
   durationMs: number
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -677,7 +702,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs) },
+    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -690,6 +715,8 @@ export interface CellAudioSelectInput {
   audioId: string
   /** Open string (AQU-646): a track id addresses an extra target track. */
   slot: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -703,7 +730,7 @@ export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, slot: input.slot },
+    payload: { audioId: input.audioId, slot: input.slot, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -750,6 +777,8 @@ export interface CellLaneRetimeInput {
    *  historical events keep projecting. See lane-timing.ts for why the read
    *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -779,6 +808,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
       ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })
@@ -891,6 +921,8 @@ export interface CellAudioRemoveInput {
   fileId: string
   cellId: string
   audioId: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -904,7 +936,7 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId },
+    payload: { audioId: input.audioId, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -925,6 +957,8 @@ export interface CellAudioValidateInput {
   fileId: string
   cellId: string
   audioId: string
+  /** AQU-1462: lane the member is working in. The vote itself stays shared. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -938,7 +972,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId },
+    payload: { audioId: input.audioId, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -966,6 +1000,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     payload: {
       audioId: input.audioId,
       ...(input.targetUsername ? { targetUsername: input.targetUsername } : {}),
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })
@@ -983,6 +1018,8 @@ export interface CellBacktranslationSetInput {
   /** The target.cell.commit event_id this BT describes. */
   targetEventId: string
   polished: boolean
+  /** AQU-1462: lane whose translation this back-translation describes. */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -1007,6 +1044,7 @@ export async function emitCellBacktranslationSet(
       ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
       targetEventId: input.targetEventId,
       polished: input.polished,
+      ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
   })

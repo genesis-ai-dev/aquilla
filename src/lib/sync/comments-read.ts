@@ -3,6 +3,7 @@
 // Pattern follows search-read.ts.
 
 import { syncWorkerHttpOrigin } from './sync-worker-url'
+import { timeoutSignal } from './fetch-timeout'
 import type { CommentCounts, CommentRecord, CommentsResponse, FetchCommentsOptions } from './comments-read-types'
 
 export class CommentsReadError extends Error {
@@ -28,6 +29,51 @@ function authHeaders(jwt: string): HeadersInit {
   return { Authorization: `Bearer ${jwt}` }
 }
 
+// AQU-1275: this path had no timeout at all, so a connection that hung (the
+// reported case was a VPN dropping one page request mid-flight) wedged the
+// whole project-wide refresh until the browser's multi-minute socket timeout.
+// The caller kept the rows it already had and the drawer rendered them as
+// "No comments yet" — a partial load that reads as deleted data. Same contract
+// as cells-read.ts: a hard timeout plus a bounded retry of the errors that can
+// recover on their own; deterministic 4xx still fails immediately.
+const COMMENTS_READ_TIMEOUT_MS = 15_000
+const COMMENTS_READ_ATTEMPTS = 3
+const COMMENTS_READ_RETRY_DELAYS_MS = [100, 400] as const
+
+function fetchInit(jwt: string): RequestInit {
+  return { headers: authHeaders(jwt), signal: timeoutSignal(COMMENTS_READ_TIMEOUT_MS) }
+}
+
+function isTransientCommentsReadError(error: unknown): boolean {
+  if (error instanceof CommentsReadError) {
+    return error.status === 408
+      || error.status === 425
+      || error.status === 429
+      || error.status >= 500
+  }
+  // Browser fetch rejects with TypeError for transport and CORS failures.
+  // AbortError/TimeoutError are the timeoutSignal watchdog firing.
+  return error instanceof TypeError
+    || (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'))
+}
+
+async function fetchCommentsJson<T>(url: string, jwt: string): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < COMMENTS_READ_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, fetchInit(jwt))
+      return await readJson<T>(res)
+    } catch (error) {
+      lastError = error
+      if (!isTransientCommentsReadError(error) || attempt === COMMENTS_READ_ATTEMPTS - 1) {
+        throw error
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, COMMENTS_READ_RETRY_DELAYS_MS[attempt]))
+    }
+  }
+  throw lastError
+}
+
 /**
  * GET /api/v1/projects/:projectId/comments?fileId=&cellId=
  *
@@ -48,8 +94,7 @@ export async function fetchCommentsForCell(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/comments?${params.toString()}`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
-  const body = await readJson<CommentsResponse>(res)
+  const body = await fetchCommentsJson<CommentsResponse>(url, jwt)
   return body.comments
 }
 
@@ -74,8 +119,7 @@ export async function fetchCommentsPage(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/comments${qs ? `?${qs}` : ''}`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
-  const body = await readJson<CommentsResponse>(res)
+  const body = await fetchCommentsJson<CommentsResponse>(url, jwt)
   return { comments: body.comments, nextCursor: body.nextCursor ?? null }
 }
 
@@ -109,6 +153,5 @@ export async function fetchCommentsForProject(
 export async function fetchCommentCounts(projectId: string, jwt: string): Promise<CommentCounts> {
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/comments/counts`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
-  return readJson<CommentCounts>(res)
+  return fetchCommentsJson<CommentCounts>(url, jwt)
 }

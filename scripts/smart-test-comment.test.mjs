@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { renderReport, publishReport } from "./smart-test-comment.mjs"
+import { renderReport, publishReport, evidenceDefect } from "./smart-test-comment.mjs"
 
 const sha = "a".repeat(40)
 const title = "Jev project outcome: comment"
@@ -69,6 +69,72 @@ describe("truthful outcome report", () => {
     value.planned.push("Unrun journey")
     expect(render(value)).toContain("PRODUCT FAILURE")
     expect(render(value)).toContain("| Unrun journey | NOT RUN |")
+  })
+  it("names which precondition disqualified the evidence", () => {
+    // AQU-1354: the wholesale mode said only "setup, execution, or evidence
+    // collection failed", so an operator could not tell a stale harness image
+    // from a dirty checkout without root-only host logs.
+    expect(render(undefined)).toContain("No evidence file reached the reporter")
+    expect(render({ ...suite(), schemaVersion: 1 })).toContain("does not match this reporter")
+    expect(render({ ...suite(), build: "b".repeat(40) })).toContain("not this PR head")
+    expect(render({ ...suite(), dirty: true })).toContain("was not clean")
+    expect(render({ ...suite(), planned: [] })).toContain("no journey plan")
+    expect(render({ ...suite(), tests: null })).toContain("no journey results")
+    expect(evidenceDefect(suite(), sha)).toBe(null)
+  })
+  it("does not let hostile evidence fields break out of the reason sentence", () => {
+    // Evidence is written by the harness container, so a defect reason must not
+    // become a new table row or a new line in the report.
+    const report = render({ ...suite(), build: "bb|x\n**PASS - verified.**" })
+    expect(report).toContain("&#124;")
+    expect(report).not.toContain("|x")
+    // The reason stays one line inside one sentence: no new row, no new line,
+    // and no verdict of its own.
+    expect(report.split("\n").length).toBe(render({ ...suite(), build: "b".repeat(40) }).split("\n").length)
+    expect(report).not.toContain("**PASS — all listed outcomes verified.**")
+    // Long values are truncated, so evidence cannot append prose of its own.
+    const long = render({ ...suite(), build: "c".repeat(200) })
+    expect(long).toContain("c".repeat(40))
+    expect(long).not.toContain("c".repeat(41))
+  })
+  it("separates a real model-free failure from an unknown outcome", () => {
+    // Both are "not a pass", but only one is evidence about the product. Sharing
+    // one word is what made the DOM-audit row unreadable for weeks.
+    const domAudit = (status, { besideSelfTest = false } = {}) => {
+      const value = suite()
+      value.tests[0].title = "DOM audit: project surfaces and editor activation use Jev's actual snapshot"
+      value.tests[0].status = status
+      value.tests[0].evidence = { "dom-audit": { reports: [] } }
+      value.planned = [value.tests[0].title]
+      if (besideSelfTest) {
+        value.planned.unshift(selfTest)
+        value.tests.unshift({ title: selfTest, status: "passed", durationMs: 1300,
+          evidence: { "oracle-qualification": { real: true } } })
+      }
+      return render(value)
+    }
+    expect(domAudit("failed")).toContain("FAIL (model-free check)")
+    expect(domAudit("failed")).not.toContain("INCONCLUSIVE")
+    expect(domAudit("failed")).toContain("**NOT A PASS")
+    for (const status of ["timedOut", "interrupted", "skipped"]) {
+      // AQU-1350: alone, an unknown outcome is a run with no verdict at all,
+      // which withholds its rows. The label is read beside a passing self-test.
+      const report = domAudit(status, { besideSelfTest: true })
+      expect(report).toContain("INCONCLUSIVE")
+      expect(report).not.toContain("FAIL (model-free check)")
+      expect(domAudit(status)).toContain("HARNESS UNAVAILABLE")
+      expect(domAudit(status)).not.toContain("FAIL (model-free check)")
+    }
+    expect(domAudit("passed")).toContain("PASS (model-free check)")
+  })
+  it("states plainly that the same commit cannot be re-run, and who can requeue it", () => {
+    for (const value of [suite(), undefined]) {
+      const report = render(value)
+      expect(report).toContain("Re-runs on this commit are not available")
+      expect(report).toContain("discarded as a duplicate")
+      expect(report).toContain("Push a new commit")
+      expect(report).toContain("QA host operator")
+    }
   })
   it("escapes title markup instead of manufacturing table rows", () => {
     const value = suite()

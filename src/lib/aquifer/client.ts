@@ -158,3 +158,38 @@ export async function aquiferPublishAnswer(
   if (!res.ok) throw await readError(res)
   return (await res.json()) as AquiferPublishAnswerResponse
 }
+
+// ── TaBiThA Copilot (mirror auth-worker/src/lib/tabitha/client.ts) ─────────
+
+export interface TabithaNote {
+  topic: string
+  meaning: string
+  check: string
+  quotedText: string
+}
+
+export interface TabithaVerseBrief {
+  /** False when TaBiThA has no encoded text for this verse. */
+  available: boolean
+  lwcText: string
+  notes: TabithaNote[]
+  translatorNotes: string[]
+  culturalBackground: { term: string; summary: string }[]
+}
+
+/** GET /api/v1/aquifer/tabitha — one verse's TaBiThA translator brief. */
+export async function tabithaVerseBrief(
+  jwt: string,
+  projectId: string,
+  ref: { book: string; chapter: number; verse: number },
+): Promise<TabithaVerseBrief> {
+  const params = new URLSearchParams({
+    projectId,
+    book: ref.book,
+    chapter: String(ref.chapter),
+    verse: String(ref.verse),
+  })
+  const res = await fetch(`${BASE}/tabitha?${params.toString()}`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as TabithaVerseBrief
+}

@@ -179,7 +179,8 @@ export const terminology = defineNamespace({
     // reset button reuses onboarding.checklist.aiInstructions.resetToDefault.
     "terminology.livingMemory.section.brief.title": "Brief",
     "terminology.livingMemory.section.brief.description":
-      "Audience, purpose, and scope of this translation",
+      "Optional — who this translation is for and what it must achieve. The AI " +
+      "reads it as context, not as its instructions.",
     "terminology.livingMemory.section.brief.statusNone": "Not started",
     "terminology.livingMemory.section.brief.statusDraft": "Draft",
     "terminology.livingMemory.section.brief.statusComplete": "Complete",

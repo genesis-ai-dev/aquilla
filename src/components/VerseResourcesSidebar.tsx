@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { TabithaBriefSection } from "./TabithaBriefSection"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   buildMapMosaic,
@@ -367,6 +368,9 @@ export function VerseResourcesSidebar({
               ))}
             </div>
           )}
+          {debouncedPath && (
+            <TabithaBriefSection projectId={projectId} passagePath={debouncedPath} getJwt={getJwt} />
+          )}
         </div>
 
         {/* Footer: attribution for both upstreams the panel draws from. */}
@@ -381,6 +385,11 @@ export function VerseResourcesSidebar({
             >
               {/* i18n-exempt: proper-noun name of the external corpus this data is sourced from */}
               Bible Aquifer
+            </a>
+            {" · "}
+            <a href="https://tabitha.bible/" target="_blank" rel="noreferrer" className="underline">
+              {/* i18n-exempt: proper-noun name of the translation-checks data source (CanIL) */}
+              TaBiThA
             </a>
             {" · "}
             <a

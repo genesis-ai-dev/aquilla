@@ -166,9 +166,10 @@ function CellTakeBlockView({
       selectedAudioId: owner.selectedAudioId,
       trimStartMs: trimMs(start),
       trimEndMs: trimMs(end),
+      ...(targetLang ? { targetLang } : {}),
       author: username,
     })
-  }, [selectedAudioId, attachment, project.id, owner.fileId, owner.id, owner.selectedAudioId, username])
+  }, [selectedAudioId, attachment, project.id, owner.fileId, owner.id, owner.selectedAudioId, username, targetLang])
 
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"

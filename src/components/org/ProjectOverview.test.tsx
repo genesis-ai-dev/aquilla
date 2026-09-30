@@ -234,6 +234,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowSelfAssignment: false,
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
+  autoPropagateRepetitions: true,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.

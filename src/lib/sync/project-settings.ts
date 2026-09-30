@@ -70,6 +70,16 @@ export interface ProjectWideSettings {
    * did before this existed.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1391: does validating a cell copy its translation into the other cells
+   * in the same file whose source text is identical?
+   *
+   * ABSENT means "use the organization's default" (which is ON unless the org
+   * opted out) — the same three-state shape as `countStructuralCells` above,
+   * and for the same reason: null would be a fourth thing the resolver has no
+   * meaning for, so choosing the default deletes the key.
+   */
+  autoPropagateRepetitions?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean

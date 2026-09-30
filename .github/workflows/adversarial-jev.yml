@@ -77,20 +77,40 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - name: Check the suite can run
+        id: gate
+        run: |
+          # Decide before the preview wait, which can hold the runner for 25 minutes.
+          # This job runs the head commit, so it needs the suite and the Chromium action from dev.
+          if [ ! -f smart-tests/adversarial/comment.ts ] || [ ! -f .github/actions/playwright-chromium/action.yml ]; then
+            echo "state=stale" >> "$GITHUB_OUTPUT"
+          elif [ -z "$TYPESAFE_API_KEY" ] || [ -z "$TEXT_MODEL_API_KEY" ] \
+            || [ -z "$ADVERSARIAL_USER_1" ] || [ -z "$ADVERSARIAL_USER_2" ] || [ -z "$ADVERSARIAL_USER_3" ]; then
+            echo "::warning::Adversarial secrets are missing; see smart-tests/adversarial/README.md."
+            echo "state=unconfigured" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=ok" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        if: steps.gate.outputs.state == 'ok'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: steps.gate.outputs.state == 'ok'
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - if: steps.gate.outputs.state == 'ok'
+        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/playwright-chromium
+        if: steps.gate.outputs.state == 'ok'
       - name: Install pinned Jev
+        if: steps.gate.outputs.state == 'ok'
         run: |
           python3 -m venv "$RUNNER_TEMP/smart-tools"
           "$RUNNER_TEMP/smart-tools/bin/pip" install uv==0.9.9
           "$RUNNER_TEMP/smart-tools/bin/uv" sync --project smart-tests --frozen
       - name: Wait for this commit's preview build
         id: preview
+        if: steps.gate.outputs.state == 'ok'
         run: |
           # Cloudflare reports the preview build as a check run on the head commit.
           # A failed build means nothing to attack; say so at once instead of waiting.
@@ -117,13 +137,20 @@ jobs:
         env:
           ATTACK_CODE: ${{ steps.attack.outputs.code }}
           PREVIEW_STATE: ${{ steps.preview.outputs.state }}
+          GATE_STATE: ${{ steps.gate.outputs.state }}
         run: |
           set -euo pipefail
           # One comment per head: a run for an older commit must not overwrite a newer one.
           current=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
           if [ "$current" != "$HEAD_SHA" ]; then echo "Head moved to $current; not posting."; exit 0; fi
           results=$(ls -td smart-tests/results/adv-*/ 2>/dev/null | head -1 || true)
-          if [ "$PREVIEW_STATE" = "failed" ]; then
+          # Gate failures skip pnpm install (and a stale branch has no comment.ts), so write these inline.
+          not_run() { printf '<!-- aquilla-adversarial -->\n## Adversarial Jev\n\nCommit `%s` · [run log](%s)\n\n**NOT RUN.** %s\n' "${HEAD_SHA:0:8}" "$RUN_URL" "$1"; }
+          if [ "$GATE_STATE" = "stale" ]; then
+            body=$(not_run "This branch predates the current adversarial workflow. Merge dev into it to get attacked.")
+          elif [ "$GATE_STATE" = "unconfigured" ]; then
+            body=$(not_run "The repository's adversarial secrets are not set, so nothing was attacked. See smart-tests/adversarial/README.md.")
+          elif [ "$PREVIEW_STATE" = "failed" ]; then
             body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "This commit's Cloudflare preview build failed, so there was nothing to attack.")
           elif [ "$PREVIEW_STATE" != "ready" ]; then
             body=$(pnpm -s exec tsx smart-tests/adversarial/comment.ts "$HEAD_SHA" "$RUN_URL" --not-run "This commit's preview build did not finish within 25 minutes.")
@@ -160,13 +187,13 @@ jobs:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/playwright-chromium
       - name: Install pinned Jev
         run: |
           python3 -m venv "$RUNNER_TEMP/smart-tools"

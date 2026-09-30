@@ -9,6 +9,7 @@ import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
 import { SyncTokenError, type fetchSyncToken } from "@/lib/sync/sync-token"
 import type { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { FakeZipWorker, zipWorkerFactory } from "./__fixtures__/fake-zip-worker"
 import { purgeEgressExportCache, readEgressCache } from "./export-cache"
 import type { buildProjectExport } from "./build-project-export"
 import { runOrgEgress, type RunOrgEgressDeps } from "./org-egress"
@@ -239,6 +240,36 @@ describe("runOrgEgress", () => {
     expect(zip.files["Alpha_2/fr/f2.txt"]).toBeTruthy()
     // Without folder attribution, two same-named reports are indistinguishable.
     expect(result.manifest.projects.map((p) => p.folder)).toEqual(["Alpha", "Alpha_2"])
+  })
+
+  it("hands ALL zip compression to the worker — packaging must never run on the main thread (AQU-1269)", async () => {
+    const worker = new FakeZipWorker()
+    const deps = makeDeps({ createZipWorker: zipWorkerFactory(worker) })
+
+    const first = await runOrgEgress(args(), deps)
+
+    // One pack for the per-project cache zip, one for the org zip. No
+    // generateAsync on the UI thread in between.
+    expect(worker.ops).toEqual(["pack", "pack"])
+    const zip = await loadZip(first.blob)
+    expect(await zip.files["Project-One/fr/f1.txt"].async("string")).toBe("text-f1")
+    expect(zip.files["manifest.json"]).toBeTruthy()
+    // The worker is per-run, so a cache replay inflates there too.
+    const replayWorker = new FakeZipWorker()
+    const second = await runOrgEgress(
+      args(),
+      makeDeps({ createZipWorker: zipWorkerFactory(replayWorker) }),
+    )
+    expect(second.manifest.projects[0].fromCache).toBe(true)
+    expect(replayWorker.ops).toEqual(["unpack", "pack"])
+    expect(replayWorker.terminated).toBe(true)
+  })
+
+  it("still exports when no zip worker can be created — packaging degrades inline", async () => {
+    const result = await runOrgEgress(args(), makeDeps({ createZipWorker: async () => null }))
+
+    const zip = await loadZip(result.blob)
+    expect(await zip.files["Project-One/fr/f1.txt"].async("string")).toBe("text-f1")
   })
 
   it("an abort cancels the run instead of being swallowed as a project error", async () => {

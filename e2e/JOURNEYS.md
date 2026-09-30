@@ -24,7 +24,7 @@ not a micro-spec farm.
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
-| Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
+| Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including hosted Whisper admission and settlement from real client WAVs, charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
@@ -150,6 +150,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
 | Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
+| Repetition auto-propagation: typing a translation into a repeated segment (validated by the edit itself) fills the file's other identical-source rows once the cell is left; filled rows stay unvalidated; the projection and a cold reload agree (AQU-1484 — not smoke: a regression leaves rows unfilled, it loses nothing. The settle-on-leave timing, the mid-typing hold and the self-validation-off gate are covered in RTL, `EditorTable.repetitionTrigger.test.tsx`; the per-cell chain/pin planning in `repetition-propagation.test.ts`) | `e2e/specs/validation/repetition-propagation.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
@@ -162,6 +163,11 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- The Assigned-to-me inbox never reports an answer it does not have: no
+  "You have no open assignments." while the scoped read is outstanding (the org
+  directory resolves asynchronously, so this is the normal cold-load path), and
+  an org switch returns to the skeleton rather than showing the previous org's
+  rows (AQU-1251 — `AssignedToMe.test.tsx`, `AssignedToMe.orgSwitch.test.tsx`).
 - DOM navigation and editing: plan inspector editor link, filename keyboard
   access, corpus rename input, read-surface button activation, and cell labels
   (`PlanInspector.test.tsx`, `ProjectOverview.test.tsx`, `FileRow.test.tsx`,
@@ -172,6 +178,13 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- AI availability after an offline → online cycle (AQU-1377): a health probe forced
+  while the browser is offline records no snapshot, the browser `online` event forces
+  a fresh probe that re-enables the AI controls, and a batch refused because the
+  service is unreachable surfaces an explicit banner instead of a silent no-op
+  (`frontier-health.test.tsx`, `useCompletion.unavailable.test.ts`). UI gating only —
+  no data, access or committed artifact is at risk, so per the rules above this stays
+  RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
   Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
@@ -183,10 +196,11 @@ UI chrome that used to be one smoke file per click is covered under
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
+- Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
-- Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
+- Back-translation generation, editing, stale/provenance, statistical-pairs comparison, and — AQU-1408 — the two-reading order (statistical gloss above the AI reading) plus each section's visible descriptor (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
@@ -224,6 +238,7 @@ UI chrome that used to be one smoke file per click is covered under
   and the dialog's per-format note, and
   `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
   plan against real Postgres.
+- In-app feedback (AQU-1028): the shell's Feedback button opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

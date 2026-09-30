@@ -4,6 +4,7 @@ import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useProject } from "@/hooks/useProject"
 import {
@@ -347,7 +348,6 @@ import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
-import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
@@ -422,7 +422,14 @@ import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { planRepetitionPropagation, buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
-import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
+import {
+  batchValidateTelemetry,
+  batchValidateToast,
+  summarizeBatchValidate,
+  type BatchValidateSummary,
+} from "@/lib/review/batch-validate-summary"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+import posthog from "@/lib/posthog"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
@@ -579,6 +586,9 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 
 export function ProjectWorkspace() {
   const t = useT()
+  // AQU-1503: the batch-validate skip clauses are joined the way a list is
+  // written in the reader's language, not with a hardcoded "; ".
+  const { list: formatLocaleList } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   // Declared up here because effects further down set and read them long before
@@ -9001,6 +9011,24 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
+  /**
+   * AQU-1507: the eligibility split for the OPEN file, computed exactly as
+   * `runBatchValidate` computes it, so the confirmation dialog promises the
+   * number the run will deliver. Lazy on purpose — it walks every cell, and the
+   * dialog it feeds is opened far less often than this context is rebuilt.
+   */
+  const batchValidateSummary = useCallback(() => summarizeBatchValidate(
+    project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+    {
+      username: currentUsername,
+      myScopes,
+      activeLane,
+      cap: project?.completionSettings?.validationBatchSize,
+      canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
+      hasTarget: Boolean(project?.id && activeFileId),
+    },
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -9009,7 +9037,8 @@ export function ProjectWorkspace() {
     // The registry reads one shape; the two halves are counted apart only
     // because they read different maps (see validatableTakes above).
     audioCounts: { ...audioCounts, validatableTakes },
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes])
+    batchValidateSummary,
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -9045,6 +9074,26 @@ export function ProjectWorkspace() {
     setExportOpen(true)
   }, [orgSettingsFetched])
 
+  /**
+   * AQU-1503: the single exit of a batch text validation — ONE visible message
+   * and ONE PostHog event, on every outcome, including the outcomes that
+   * validate nothing. Having exits that did neither is the whole defect: the
+   * repro could only be characterised by the absence of events, which cannot
+   * tell "the click did nothing" apart from "nobody clicked".
+   */
+  const reportBatchValidate = useCallback(
+    (summary: BatchValidateSummary, source: "selection" | "workspace-action") => {
+      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
+      const message = batchValidateToast(summary, t, formatLocaleList)
+      toast.add({
+        type: message.type,
+        title: message.title,
+        ...(message.description ? { description: message.description } : {}),
+      })
+    },
+    [t, formatLocaleList],
+  )
+
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
     // AQU-1424: `draftTargets` is the shared rule for "what is left to draft" —
@@ -9072,36 +9121,50 @@ export function ProjectWorkspace() {
     // server-side; we mirror-check here to avoid queueing guaranteed-403
     // events (same pattern as emitValidationChange in EditorTable).
     runBatchValidate: () => {
-      if (!project?.id || !activeFileId) return
-      if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
-      // AQU-490: the SAME predicate the selection toolbar uses. This path used
-      // to carry neither of its two guards — see bulk-validation.ts.
-      const eligible = cellSummaries.filter(
-        (c) =>
-          c.fileId === activeFileId
-          && isBulkValidatableByMe(c, currentUsername, myScopes, activeLane),
-      )
-      // AQU-586: cap how many eligible cells one batch-validate processes.
-      // 0/undefined = validate all eligible (unchanged default behavior).
-      const cap = project.completionSettings?.validationBatchSize
-      const validatable =
-        typeof cap === "number" && cap > 0 ? eligible.slice(0, cap) : eligible
-      if (validatable.length === 0) return
+      // AQU-1503: this handler used to bail on FOUR branches with a bare
+      // `return` and raise no toast on any path, success included. The
+      // confirmation dialog counted every unvalidated cell in the file, while
+      // the run below drops untouched AI drafts, out-of-scope cells and cells
+      // already signed off by this reader — so a file whose unvalidated cells
+      // were all AI drafts promised "12 cells" and then did nothing at all: no
+      // events, no error, and no telemetry to prove the click had happened.
+      //
+      // Every branch now ends in a visible message and one PostHog event.
+      // `summarizeBatchValidate` owns the eligibility split so this path and
+      // the selection toolbar's button report the same counts in the same
+      // words (lib/review/batch-validate-summary.ts).
+      //
+      // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
+      // so the number the dialog promised is by construction the number this
+      // loop validates — the divergence was the rest of the reported bug.
+      const summary = batchValidateSummary()
+      const projectId = project?.id
+      if (summary.validatable.length === 0 || !projectId) {
+        reportBatchValidate(summary, "workspace-action")
+        return
+      }
       void (async () => {
-        for (const cell of validatable) {
-          await emitCellValidate({
-            projectId: project.id,
-            fileId: cell.fileId,
-            cellId: cell.id,
-            editEventId: cell.targetEventId!,
-            author: currentUsername,
-            targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-          })
+        try {
+          for (const cell of summary.validatable) {
+            await emitCellValidate({
+              projectId,
+              fileId: cell.fileId,
+              cellId: cell.id,
+              editEventId: cell.targetEventId!,
+              author: currentUsername,
+              targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+            })
+          }
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          await refreshOutboxPending()
+          revalidateAuditStats()
+          for (const cell of summary.validatable) revalidateCell(cell.id)
+          reportBatchValidate(summary, "workspace-action")
+        } catch {
+          // A throw part-way leaves SOME cells queued, so the message says the
+          // run may be partial rather than inviting a blind retry.
+          reportBatchValidate({ ...summary, outcome: "failed" }, "workspace-action")
         }
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        await refreshOutboxPending()
-        revalidateAuditStats()
-        for (const cell of validatable) revalidateCell(cell.id)
       })()
     },
     // AQU-490: bulk audio validation — a SEPARATE action beside the text one,
@@ -9281,7 +9344,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate, batchValidateSummary])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11169,11 +11232,14 @@ export function ProjectWorkspace() {
    * AQU-1391: carry a just-validated cell's translation to every repeated
    * source segment in the open file, the way Trados/memoQ/Matecat do.
    *
-   * Deliberately hung off the EXPLICIT validate gesture only. The commit path
-   * also auto-validates a human edit (`shouldAutoValidateHumanEdit`), and
-   * propagating from there would re-broadcast half-typed text on every idle
-   * commit — the repetitions would flicker through the author's keystrokes
-   * instead of receiving a translation they decided was done.
+   * Runs on a validation the translator has SETTLED: the explicit validate
+   * gesture, or (AQU-1484) a human edit the commit path auto-validated
+   * (`shouldAutoValidateHumanEdit`) once the editor has been left. Never from
+   * an idle commit with the caret still in the cell — that would re-broadcast
+   * half-typed text on every pause, and the repetitions would flicker through
+   * the author's keystrokes instead of receiving a translation they decided
+   * was done. The row owns that timing (`settleOwedRepetitions` in
+   * EditorTable); this handler only ever sees a settled cell.
    *
    * Propagated cells land UNVALIDATED: this fills work in, it does not sign
    * it off. The commits carry `propagatedFromCellId` so history can say where
@@ -11583,22 +11649,6 @@ export function ProjectWorkspace() {
       icon: Download,
       onClick: openExportFlow,
     })
-    if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
-      items.push({
-        id: "file-export-source",
-        label: t("fileDetails.exportSource"),
-        icon: Download,
-        onClick: () => {
-          if (!projectId) return
-          void exportSourceFile({
-            projectId,
-            file: activeFile,
-            getToken: getTokenForFile,
-            targetLang: activeLane,
-          })
-        },
-      })
-    }
     if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
@@ -12072,10 +12122,20 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
+            // AQU-1079: the Agent workbench lives in the center pane, not the
+            // dock, so the rail used to render its icon inactive and swallow
+            // the click while the workbench was open — the sidebar entry read
+            // as dead. Mark it active while its surface is up, and let the
+            // click toggle that surface off like any other rail tab.
+            surfaceTab={centerSurface === "agent" ? "agent" : null}
+            onSurfaceTabToggle={() => closeAgentTab()}
             onActiveTabChange={(t) => {
               // Agent rail: while the workbench is showing, re-focus it;
               // otherwise open the compact panel in the dock (even if an
-              // Agent editor tab is still sitting in the strip).
+              // Agent editor tab is still sitting in the strip). The rail's
+              // own click on an active Agent surface no longer lands here —
+              // it goes to onSurfaceTabToggle above — so this branch is now
+              // only the expand affordance restoring its last tab.
               if (t === "agent") {
                 if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
                   openAgentTab()
@@ -12128,7 +12188,6 @@ export function ProjectWorkspace() {
                   validationCount={validationCount}
                   countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
-                  targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}
@@ -12561,6 +12620,8 @@ export function ProjectWorkspace() {
                 project={project}
                 refreshProject={refresh}
                 projectSettings={projectSettings}
+                activeLane={activeLane}
+                onActiveLaneChange={setActiveLane}
               />
             </Suspense>
           </div>
@@ -13853,7 +13914,7 @@ export function ProjectWorkspace() {
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t)}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}

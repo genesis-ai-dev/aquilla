@@ -19,11 +19,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.rename": "Rename",
     "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
-    "fileDetails.exportSource": "Export source (.SFM)",
     "fileDetails.downloadOriginal": "Download original",
-    "fileDetails.exportDisabledType": "Only USFM files support round-trip source export.",
-    "fileDetails.exportDisabledPolicy":
-      "Source export is disabled by your organization's export policy.",
     "fileDetails.deleteRequiresRole":
       "Deleting files requires the Project Lead role or above.",
   },
@@ -141,27 +137,11 @@ export const fileDetails = defineNamespace({
           "(named file group). Ends with an ellipsis because a dialog follows.",
         maxLength: 30,
       },
-      "fileDetails.exportSource": {
-        description:
-          "Action button that downloads the file back in its source format. '.SFM' is " +
-          "a file extension — keep it verbatim.",
-        maxLength: 30,
-      },
       "fileDetails.downloadOriginal": {
         description:
           "Sidebar and overview action that downloads the exact original file that was imported, " +
           "without injecting translations. Imperative verb plus noun.",
         maxLength: 28,
-      },
-      "fileDetails.exportDisabledType": {
-        description:
-          "Sentence under the disabled export button explaining that only USFM-format " +
-          "files can be exported. 'USFM' is a format name — keep it verbatim.",
-      },
-      "fileDetails.exportDisabledPolicy": {
-        description:
-          "Sentence under the disabled export button explaining that the user's " +
-          "organization has turned off source export for members.",
       },
       "fileDetails.deleteRequiresRole": {
         description:

@@ -22,7 +22,7 @@ vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: async () => [
   { id: 2, name: "Guest org", role: { level: 100 } },
 ] }))
 const api = vi.mocked(connectionRequest)
-const request = { agentName: "My agent", mode: "ask", requestedProjectId: "p", expiresAt: "2030-01-01", tokenExpiresIn: 2592000 }
+const request = { agentName: "My agent", mode: "ask", requestedProjectId: "p", expiresAt: "2030-01-01" }
 const mount = () => render(<MemoryRouter initialEntries={["/connect-agent#user_code=ABCD-EFGH"]}><ConnectAgent /></MemoryRouter>)
 const review = async () => {
   mount()

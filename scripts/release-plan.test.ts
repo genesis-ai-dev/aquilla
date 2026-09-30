@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest"
-import { classifyFiles, isDocsOrTestOnly, planRelease, prHolds } from "./release-plan.mjs"
+import { execFileSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import {
+  classifyFiles,
+  isDocsOrTestOnly,
+  planRelease,
+  prHolds,
+  prNumberFromSubject,
+  releasedMarks,
+  splitReleased,
+  unreleasedPrs,
+} from "./release-plan.mjs"
 
 const pr = (
   number: number,
@@ -125,6 +138,37 @@ describe("isDocsOrTestOnly", () => {
   it("is false for an empty diff", () => {
     expect(isDocsOrTestOnly([])).toBe(false)
   })
+
+  it("is true for an allowlisted scripts-only diff", () => {
+    expect(isDocsOrTestOnly(["scripts/release-plan.mjs", "scripts/release-plan.d.mts"])).toBe(true)
+    expect(isDocsOrTestOnly(["scripts/qa/agent-evidence.mts", "scripts/smart-tests.ts", "scripts/e2e-up.ts"])).toBe(true)
+  })
+
+  // vite.config.ts imports these, so a change to them ships in the app.
+  it.each(["scripts/vite-html-branding.ts", "scripts/build-info.ts"])("is false for %s, which the app build imports", (file) => {
+    expect(isDocsOrTestOnly([file])).toBe(false)
+  })
+
+  it("is false for a script not on the allowlist", () => {
+    expect(isDocsOrTestOnly(["scripts/brand-new-tool.ts"])).toBe(false)
+  })
+
+  it("is false once a scripts file mixes in with app code", () => {
+    expect(isDocsOrTestOnly(["scripts/release-plan.mjs", "src/components/Editor.tsx"])).toBe(false)
+  })
+})
+
+// An infra-area script (tag-release, verify-*, resolve-deployment,
+// cloudflare-*) is off the no-UI allowlist, and it must hold on its own via
+// pathHolds even if a walk says PASS.
+describe("scripts-only PR that is also infra", () => {
+  it("holds on the infra path whatever the walk says", () => {
+    const files = ["scripts/tag-release.sh"]
+    expect(isDocsOrTestOnly(files)).toBe(false)
+    const { pathHolds } = classifyFiles(files)
+    expect(pathHolds).toBe(true)
+    expect(prHolds({ pathHolds, walk: "PASS" })).toBe(true)
+  })
 })
 
 // A misclassified migration or deploy-infra change would skip the one gate
@@ -181,5 +225,224 @@ describe("a 29-PR day shaped like 2026-09-23", () => {
     expect(plan.cut).toBe(true)
     expect(plan.hold).toBe(false)
     expect(plan.prs).toHaveLength(29)
+  })
+})
+
+// A release branch is built by `git cherry-pick -x -m 1 <dev merge sha>`
+// (docs/DEPLOYMENT-ENVIRONMENTS.md "Cutting a release"), so the calver tag
+// sits on a pick off dev's first-parent line and `<tag>..origin/dev` never
+// shrinks. release/2026/09/29-01 and 30-01 were both cut from dev merges
+// (#769, #751) that production tag 2026.09.29.01 already carried: every PR
+// since the last on-dev tag looked unreleased, and "oldest holds, cut it
+// alone" produced one stale single-PR slice per run. These pin the fix: a
+// dev PR is released once the tagged tip carries its pick (by provenance in
+// the body, or by the same "Merge pull request #N" subject), and no slice
+// cuts below the newest dev commit production already runs.
+const devSha = (n: number) => `d${n}`.padEnd(40, "0")
+const pickSha = (n: number) => `c${n}`.padEnd(40, "0")
+const devMerge = (n: number) => ({ sha: devSha(n), subject: `Merge pull request #${n} from genesis-ai-dev/agent/AQU-${n}` })
+const pickOf = (n: number, { x = true } = {}) => ({
+  sha: pickSha(n),
+  subject: `Merge pull request #${n} from genesis-ai-dev/agent/AQU-${n}`,
+  body: x ? `AQU-${n} title\n\n(cherry picked from commit ${devSha(n)})\n` : `AQU-${n} title\n`,
+})
+
+describe("prNumberFromSubject", () => {
+  it("reads GitHub merge and squash subjects", () => {
+    expect(prNumberFromSubject("Merge pull request #912 from genesis-ai-dev/hotfix/agent-connect-handoff")).toBe(912)
+    expect(prNumberFromSubject("fix: stop on ruleset rejections (#908)")).toBe(908)
+  })
+
+  it("is undefined for anything else", () => {
+    expect(prNumberFromSubject("Merge branch 'dev' into release/2026/09/28-03")).toBeUndefined()
+    expect(prNumberFromSubject("chore: bump")).toBeUndefined()
+  })
+})
+
+describe("releasedMarks", () => {
+  it("reads pick provenance out of the body, where -x puts it (it is not a trailer)", () => {
+    const marks = releasedMarks([pickOf(781)])
+    expect(marks.shas).toEqual(new Set([devSha(781)]))
+    expect(marks.numbers).toEqual(new Set([781]))
+  })
+
+  it("still keys a pick made without -x by its PR number", () => {
+    const marks = releasedMarks([pickOf(956, { x: false })])
+    expect(marks.shas.size).toBe(0)
+    expect(marks.numbers).toEqual(new Set([956]))
+  })
+
+  it("ignores commits that are neither", () => {
+    const marks = releasedMarks([{ subject: "chore: bump version", body: "" }])
+    expect(marks.shas.size + marks.numbers.size).toBe(0)
+  })
+})
+
+describe("splitReleased", () => {
+  it("tag directly on dev: nothing is off dev, so every PR above the cut point waits", () => {
+    const cutPoint = devSha(769)
+    const { unreleased, floor } = splitReleased({ devEntries: [devMerge(770), devMerge(771)], marks: releasedMarks([]), cutPoint })
+    expect(unreleased.map((e) => e.sha)).toEqual([devSha(770), devSha(771)])
+    expect(unreleased.every((e) => !e.behindFloor)).toBe(true)
+    expect(floor).toBe(cutPoint)
+  })
+
+  it("tag on a cherry-pick tip: picked dev merges are released and the floor is the newest of them", () => {
+    const devEntries = [devMerge(772), devMerge(774), devMerge(781), devMerge(900), devMerge(901)]
+    const marks = releasedMarks([pickOf(772), pickOf(774), pickOf(781)])
+    const { unreleased, floor } = splitReleased({ devEntries, marks, cutPoint: devSha(769) })
+    expect(unreleased.map((e) => e.sha)).toEqual([devSha(900), devSha(901)])
+    expect(unreleased.every((e) => !e.behindFloor)).toBe(true)
+    expect(floor).toBe(devSha(781))
+  })
+
+  // 2026.09.28.03's shape: a cut at #724 plus picks of #910 (without -x) and
+  // #912, while the dev merges between them, #776's migration among them,
+  // were never picked. They stay in the plan, behind the floor.
+  it("mixed: a hotfix picked ahead of its dev order leaves the older PRs waiting behind the floor", () => {
+    const devEntries = [devMerge(900), devMerge(776), devMerge(910), devMerge(911), devMerge(912), devMerge(920)]
+    const marks = releasedMarks([pickOf(910, { x: false }), pickOf(912)])
+    const { unreleased, floor } = splitReleased({ devEntries, marks, cutPoint: devSha(724) })
+    expect(unreleased.map((e) => [e.sha, e.behindFloor])).toEqual([
+      [devSha(900), true],
+      [devSha(776), true],
+      [devSha(911), true],
+      [devSha(920), false],
+    ])
+    expect(floor).toBe(devSha(912))
+  })
+})
+
+describe("planRelease with a deploy floor", () => {
+  type Opts = Parameters<typeof pr>[2]
+  const behind = (number: number, opts?: Opts) => ({ ...pr(number, recent, opts), sha: devSha(number), behindFloor: true })
+  const ahead = (number: number, opts?: Opts) => ({ ...pr(number, recent, opts), sha: devSha(number), behindFloor: false })
+  const floor = devSha(912)
+
+  it("never cuts below the floor: a ready run that ends behind it cuts at the floor", () => {
+    const plan = planRelease({ openReleases: [], prs: [behind(900), behind(911)], now: NOW, floor })
+    expect(plan.cut).toBe(true)
+    expect(plan.hold).toBe(false)
+    expect(plan.sha).toBe(floor)
+    expect(plan.prs.map((p) => p.number)).toEqual([900, 911])
+    expect(plan.floor).toBe(floor)
+  })
+
+  it("a run that reaches past the floor cuts at its own tail", () => {
+    const plan = planRelease({ openReleases: [], prs: [behind(900), behind(911), ahead(920)], now: NOW, floor })
+    expect(plan.sha).toBe(devSha(920))
+    expect(plan.prs).toHaveLength(3)
+  })
+
+  it("a hold behind the floor cuts every PR behind the floor together, at the floor, held", () => {
+    const prs = [behind(900), behind(776, { areas: ["migration"], pathHolds: true }), behind(911), ahead(920)]
+    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
+    expect(plan.cut).toBe(true)
+    expect(plan.hold).toBe(true)
+    expect(plan.sha).toBe(floor)
+    expect(plan.prs.map((p) => p.number)).toEqual([900, 776, 911])
+    expect(plan.reason).toBe("a PR behind the deployed floor holds")
+  })
+
+  it("with nothing behind the floor the oldest-holds rule is unchanged", () => {
+    const prs = [ahead(920, { areas: ["migration"], pathHolds: true }), ahead(921)]
+    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
+    expect(plan.hold).toBe(true)
+    expect(plan.sha).toBe(devSha(920))
+    expect(plan.prs.map((p) => p.number)).toEqual([920])
+    expect(plan.reason).toBe("oldest unreleased PR holds")
+  })
+
+  it("does not leak the flag into the reported PRs", () => {
+    const plan = planRelease({ openReleases: [], prs: [behind(900)], now: NOW, floor })
+    expect(plan.prs[0]).not.toHaveProperty("behindFloor")
+  })
+})
+
+// The bug lived in the git plumbing, not the pure rules: the range was
+// `<tag>..origin/dev`. This builds each tag shape in a scratch repo and runs
+// the real command against it.
+describe("unreleasedPrs against a scratch repo", () => {
+  let root: string
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim()
+
+  // A dev merge of PR #number touching one file, GitHub's merge subject and
+  // all, with origin/dev advanced to it.
+  const mergePr = (number: number, file: string) => {
+    git("checkout", "-q", "-b", `pr-${number}`, "dev")
+    mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+    writeFileSync(path.join(root, file), `${number}\n`)
+    git("add", "-A")
+    git("commit", "-qm", `AQU-${number}: change`)
+    git("checkout", "-q", "dev")
+    git("merge", "-q", "--no-ff", "-m", `Merge pull request #${number} from genesis-ai-dev/agent/AQU-${number}`, `pr-${number}`)
+    git("update-ref", "refs/remotes/origin/dev", "dev")
+    return git("rev-parse", "HEAD")
+  }
+  // A release branch cut at `at`, built the documented way, then tagged.
+  const release = (at: string, picks: { sha: string; x?: boolean }[], tag: string) => {
+    git("checkout", "-q", "-b", `release/${tag.slice(0, 10).replaceAll(".", "/")}-01`, at)
+    for (const { sha, x = true } of picks) git("cherry-pick", ...(x ? ["-x"] : []), "-m", "1", sha)
+    git("tag", tag)
+    git("checkout", "-q", "dev")
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "aquilla-release-plan-"))
+    git("init", "-q", "-b", "dev")
+    writeFileSync(path.join(root, "README.md"), "base\n")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("update-ref", "refs/remotes/origin/dev", "dev")
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it("tag directly on dev: the range is <tag>..origin/dev, as before", () => {
+    const m1 = mergePr(1, "docs/one.md")
+    mergePr(2, "docs/two.md")
+    mergePr(3, "docs/three.md")
+    git("tag", "2026.09.28.01", m1)
+    const { prs, floor } = unreleasedPrs({ cwd: root })
+    expect(prs.map((p) => p.number)).toEqual([2, 3])
+    expect(prs.map((p) => p.behindFloor)).toEqual([false, false])
+    expect(floor).toBe(m1)
+  })
+
+  it("tag on a cherry-pick tip: picked PRs are released; the next slice starts after the newest pick", () => {
+    const m1 = mergePr(1, "docs/one.md")
+    const m2 = mergePr(2, "docs/two.md")
+    const m3 = mergePr(3, "docs/three.md")
+    const m4 = mergePr(4, "docs/four.md")
+    release(m1, [{ sha: m2 }, { sha: m3 }], "2026.09.28.01")
+    const { prs, floor } = unreleasedPrs({ cwd: root })
+    expect(prs.map((p) => p.number)).toEqual([4])
+    expect(floor).toBe(m3)
+    // Before the fix this cut #2 alone, at a dev commit production already ran.
+    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
+    expect(plan.prs.map((p) => p.number)).toEqual([4])
+    expect(plan.sha).toBe(m4)
+  })
+
+  it("mixed: a pick without -x and a hotfix picked ahead of its order", () => {
+    const m1 = mergePr(1, "docs/one.md")
+    const m2 = mergePr(2, "docs/two.md")
+    mergePr(3, "db/postgres/migrations/0001_x.sql")
+    const m4 = mergePr(4, "docs/four.md")
+    mergePr(5, "docs/five.md")
+    release(m1, [{ sha: m2, x: false }, { sha: m4 }], "2026.09.28.02")
+    const { prs, floor } = unreleasedPrs({ cwd: root })
+    expect(prs.map((p) => [p.number, p.behindFloor])).toEqual([[3, true], [5, false]])
+    expect(floor).toBe(m4)
+    // #3 holds on its migration and sits behind the deployed hotfix #4, so
+    // the held slice cuts at #4's dev merge, not #3's: cutting at #3 would
+    // take the hotfix back out of production.
+    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
+    expect(plan.hold).toBe(true)
+    expect(plan.prs.map((p) => p.number)).toEqual([3])
+    expect(plan.sha).toBe(m4)
   })
 })

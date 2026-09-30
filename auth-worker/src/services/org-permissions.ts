@@ -18,6 +18,7 @@ import {
   visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1127,6 +1128,8 @@ export interface PortfolioLane {
   laneId?: string | null
   /** Display order from `lanes.position`. */
   position?: number
+  /** AQU-1458: archived lanes stay in the payload so the overview can tuck them away. */
+  archived?: boolean
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1227,6 +1230,9 @@ interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  archived_lanes: unknown
+  /** The default lane's language. The same string may also sit in target_lanes. */
+  target_language: string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
@@ -1299,6 +1305,8 @@ async function fetchPortfolioLanes(
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
               ps.target_lanes AS target_lanes,
+              (ps.settings::jsonb)->'archivedLanes' AS archived_lanes,
+              ps.target_language AS target_language,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1307,7 +1315,8 @@ async function fetchPortfolioLanes(
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
     env.AQUILLA_PG.prepare(
       `SELECT l.project_id AS project_id, l.id AS id, l.name AS name,
-              l.legacy_tag AS legacy_tag, l.position AS position
+              l.legacy_tag AS legacy_tag, l.position AS position,
+              l.archived_at AS archived_at
          FROM lanes l
          JOIN projects p ON p.id = l.project_id
         WHERE l.role = 'target' AND p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
@@ -1317,6 +1326,7 @@ async function fetchPortfolioLanes(
       name: string
       legacy_tag: string | null
       position: number
+      archived_at: string | null
     }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
@@ -1360,8 +1370,10 @@ async function fetchPortfolioLanes(
   // first translation lands. The denominator is borrowed from the '' row
   // (source-cell count is lane-independent); no '' row means the project has
   // no progress rows at all and the registered lane stays 0/0.
+  // AQU-1473: the primary language is the '' lane even when create also wrote
+  // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.target_lanes)
+    const registered = extraRegistryLanes(readTargetLanes(row.target_lanes), row.target_language)
     if (registered.length === 0) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) {
@@ -1370,7 +1382,7 @@ async function fetchPortfolioLanes(
     }
     const denominator = lanes.get("")?.totalCells ?? 0
     for (const lane of registered) {
-      if (lane === "" || lanes.has(lane)) continue
+      if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
     }
   }
@@ -1390,6 +1402,36 @@ async function fetchPortfolioLanes(
     entry.name = row.name
     entry.laneId = row.id
     entry.position = Number(row.position) || 0
+  }
+  // AQU-1458: a lane is archived when its row says so, or when an older
+  // project only recorded the tag in settings.archivedLanes. The default
+  // lane ('') cannot be archived.
+  const archivedTagsByProject = new Map<string, Set<string>>()
+  for (const row of settingsRows.results ?? []) {
+    const tags = new Set(readTargetLanes(row.archived_lanes).map((tag) => tag.toLowerCase()))
+    if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
+  }
+  const archivedRowTags = new Map<string, Set<string>>()
+  for (const row of nameRows.results ?? []) {
+    if (row.archived_at == null || row.archived_at === "") continue
+    const tag = (row.legacy_tag ?? "").trim().toLowerCase()
+    if (!tag) continue
+    let tags = archivedRowTags.get(row.project_id)
+    if (!tags) {
+      tags = new Set()
+      archivedRowTags.set(row.project_id, tags)
+    }
+    tags.add(tag)
+  }
+  for (const [projectId, lanes] of acc) {
+    const fromSettings = archivedTagsByProject.get(projectId)
+    const fromRows = archivedRowTags.get(projectId)
+    if (!fromSettings && !fromRows) continue
+    for (const entry of lanes.values()) {
+      if (!entry.lane) continue
+      const key = entry.lane.toLowerCase()
+      if (fromRows?.has(key) || fromSettings?.has(key)) entry.archived = true
+    }
   }
   for (const [projectId, lanes] of acc) {
     byProject.set(

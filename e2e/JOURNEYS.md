@@ -36,7 +36,7 @@ not a micro-spec farm.
 | Editor | Re-import updates source while preserving target | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` |
 | Editor | eBible import persists across reload | `e2e/specs/editor/import-ebible-persists-reload.smoke.spec.ts` |
 | Editor | Comment writes through events | `e2e/specs/editor/comments.smoke.spec.ts` |
-| Editor | Export downloads (own-format, original blob vs injected USFM) | `e2e/specs/editor/export.smoke.spec.ts` |
+| Editor | Export downloads (own-format; original blob vs injected target vs curated source) | `e2e/specs/editor/export.smoke.spec.ts` |
 | Editor | Workspace actions dropdown (E2E harness sentinel) | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts` |
 | Rules | Enable built-in rule, see violation in editor | `e2e/specs/rules/violation.smoke.spec.ts` |
 | Rules | Custom rule create / edit / toggle (surface session) | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
@@ -173,7 +173,13 @@ UI chrome that used to be one smoke file per click is covered under
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
-- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
+- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
+  copy with word-for-word identical wording whichever datastore reserved the identity,
+  and the Sign in action carries the typed identifier into the login field
+  (`FrontierSignupForm.identityTaken.test.tsx`, `FrontierLoginForm.prefill.test.tsx`).
+  The migration itself on that subsequent login is unchanged by that work and stays
+  covered where it already was.
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)

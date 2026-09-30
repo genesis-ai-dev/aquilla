@@ -63,7 +63,7 @@ export interface LaneIdentity {
  * Language codes do not fan out: "es" does not match a lane named Spanish
  * unless that lane's tag or name is exactly "es".
  */
-export function lanesForRequestedTag(lanes: readonly LaneIdentity[], tag: string): LaneIdentity[] {
+export function lanesForRequestedTag<T extends LaneIdentity>(lanes: readonly T[], tag: string): T[] {
   return lanes.filter((lane) => {
     const legacy = lane.legacyTag ?? ""
     if (tag === "") return legacy === ""

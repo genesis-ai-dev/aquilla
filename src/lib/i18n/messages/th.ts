@@ -4425,6 +4425,7 @@ export const th: Catalog = {
   "knowledgeBase.status.pending": "กำลังจัดทำดัชนี…",
   "knowledgeBase.status.ready": "จัดทำดัชนีแล้ว",
   "knowledgeBase.status.failed": "จัดทำดัชนีไม่สำเร็จ",
+  "knowledgeBase.status.stalled": "การจัดทำดัชนีหยุดค้าง",
   "knowledgeBase.open": "ดูเอกสาร",
   "knowledgeBase.openOriginal": "เปิดไฟล์ต้นฉบับ",
   "knowledgeBase.reindex": "ลองจัดทำดัชนีอีกครั้ง",

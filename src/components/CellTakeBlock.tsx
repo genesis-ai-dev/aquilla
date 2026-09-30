@@ -78,6 +78,8 @@ export interface CellTakeBlockProps {
   /** Generated voice: no transcribe, no denoise, no correcting — it is not a
    *  performance anybody recorded. */
   readOnlyTranscript?: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export function CellTakeBlock({
@@ -95,6 +97,7 @@ export function CellTakeBlock({
   header,
   recordLabel,
   readOnlyTranscript = false,
+  targetLang,
 }: CellTakeBlockProps) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -111,6 +114,7 @@ export function CellTakeBlock({
     username,
     onCommitted,
     jwt: session?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 
@@ -175,12 +179,13 @@ export function CellTakeBlock({
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(isSourceSegmentSelected(owner) ? { transcription: corrected } : {}),
+        ...(targetLang ? { targetLang } : {}),
         author: username,
       }).catch((err) => {
         console.warn("[transcript] correct emit failed:", err)
       })
     },
-    [owner, selectedAudioId, timings, attachment, project.id, username],
+    [owner, selectedAudioId, timings, attachment, project.id, username, targetLang],
   )
 
   return (
@@ -272,6 +277,7 @@ export function CellTakeBlock({
                 author={username}
                 session={session}
                 editable={editable}
+                targetLang={targetLang}
               />
             )}
           </>

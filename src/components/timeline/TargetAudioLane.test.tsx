@@ -3,7 +3,7 @@
 // resize-as-trim commits.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 const pauseAllTransports = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
@@ -1532,6 +1532,37 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
     // The second press must be another attempt to PLAY, not a stop of a
     // handle that was never sounding.
     expect(play).toHaveBeenCalledTimes(2)
+  })
+
+  // 2026-09-30: fetching the clip took 14.6s on a slow connection with the
+  // button still saying "Play this clip". It says it is loading now, and a
+  // second press gives up the wait.
+  it("says it is loading while the clip arrives, and a second press gives up", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    expect(button).toHaveAttribute("aria-busy", "true")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Play this clip"))
+    await act(async () => { arrive("ready") })
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it("plays once the clip has arrived", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    await act(async () => { arrive("ready") })
+    expect(play).toHaveBeenCalledTimes(1)
+    expect(button).toHaveAttribute("aria-label", "Stop")
   })
 
   it("leaves room for the record button on a chip wide enough for both", () => {

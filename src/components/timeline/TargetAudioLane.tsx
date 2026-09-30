@@ -273,6 +273,14 @@ function TargetAudioChip({
    */
   const [previewing, setPreviewing] = useState(false)
   const previewRef = useRef<ClipPreviewHandle | null>(null)
+  /**
+   * Fetching the clip before it can sound (2026-09-30). On a slow connection
+   * that took 14.6s with the button still saying "Play this clip" — nothing on
+   * screen said anything had happened. It shows a spinner now, and a second
+   * press gives up the wait.
+   */
+  const [priming, setPriming] = useState(false)
+  const primingRef = useRef<{ cancelled: boolean } | null>(null)
   useEffect(() => () => { previewRef.current?.stop() }, [])
   /** The mini-playhead's DOM node — positioned imperatively per frame, so the
    *  60Hz ride never re-renders the chip. */
@@ -633,6 +641,13 @@ function TargetAudioChip({
       setPreviewing(false)
       return
     }
+    // A press while the clip is still arriving gives up waiting for it.
+    if (primingRef.current) {
+      primingRef.current.cancelled = true
+      primingRef.current = null
+      setPriming(false)
+      return
+    }
     if (!preview) return
     // ASK FIRST, AND SAY SO WHEN THE ANSWER IS NO (2026-08-28). This used to
     // play straight into whatever happened: a clip nobody has measured that is
@@ -640,7 +655,19 @@ function TargetAudioChip({
     // button made no sound and offered no reason. The device is already
     // resumed by the pointerdown handler, which runs inside the gesture, so
     // awaiting here costs nothing a browser cares about.
-    const ready = await preview.prime()
+    const attempt = { cancelled: false }
+    primingRef.current = attempt
+    setPriming(true)
+    let ready: Awaited<ReturnType<typeof preview.prime>>
+    try {
+      ready = await preview.prime()
+    } finally {
+      if (primingRef.current === attempt) {
+        primingRef.current = null
+        setPriming(false)
+      }
+    }
+    if (attempt.cancelled) return
     if (ready !== "ready") {
       toast.add({
         type: "info",
@@ -996,8 +1023,9 @@ function TargetAudioChip({
         <span
           role="button"
           tabIndex={0}
-          title={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
-          aria-label={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-busy={priming || undefined}
           data-testid={`tl-target-${cell.id}-play`}
           onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
           onClick={(e) => { e.stopPropagation(); togglePreview() }}
@@ -1010,7 +1038,9 @@ function TargetAudioChip({
           }}
           className={chipCornerButtonClass("left")}
         >
-          {previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
+          {priming
+            ? <Spinner className="h-2.5 w-2.5" />
+            : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
         </span>
       )}
       {showRecordButton && onOpenRecording && (

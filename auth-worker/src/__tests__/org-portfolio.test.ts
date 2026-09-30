@@ -228,8 +228,6 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes.find((l) => l.lane === "")?.name).toBe("Spanish")
   })
 
-  })
-
   it("AQU-1473: a primary stored as a language code still collapses onto the default lane", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

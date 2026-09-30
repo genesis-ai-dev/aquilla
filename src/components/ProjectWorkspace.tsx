@@ -27,6 +27,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
@@ -13406,7 +13407,7 @@ export function ProjectWorkspace() {
           projectId={project.id}
           activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
-          targetLanes={project.targetLanes}
+          targetLanes={extraRegistryLanes(project.targetLanes, project.targetLanguage)}
           laneLabels={laneLabels}
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}

@@ -233,6 +233,7 @@ UI chrome that used to be one smoke file per click is covered under
   and the dialog's per-format note, and
   `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
   plan against real Postgres.
+- In-app feedback (AQU-1028): the shell's Feedback button opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

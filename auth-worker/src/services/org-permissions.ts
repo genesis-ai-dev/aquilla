@@ -18,6 +18,7 @@ import {
   visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1227,6 +1228,8 @@ interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  /** The default lane's language. The same string may also sit in target_lanes. */
+  target_language: string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
@@ -1299,6 +1302,7 @@ async function fetchPortfolioLanes(
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
               ps.target_lanes AS target_lanes,
+              ps.target_language AS target_language,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1360,8 +1364,10 @@ async function fetchPortfolioLanes(
   // first translation lands. The denominator is borrowed from the '' row
   // (source-cell count is lane-independent); no '' row means the project has
   // no progress rows at all and the registered lane stays 0/0.
+  // AQU-1473: the primary language is the '' lane even when create also wrote
+  // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.target_lanes)
+    const registered = extraRegistryLanes(readTargetLanes(row.target_lanes), row.target_language)
     if (registered.length === 0) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) {
@@ -1370,7 +1376,7 @@ async function fetchPortfolioLanes(
     }
     const denominator = lanes.get("")?.totalCells ?? 0
     for (const lane of registered) {
-      if (lane === "" || lanes.has(lane)) continue
+      if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
     }
   }

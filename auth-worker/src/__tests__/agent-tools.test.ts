@@ -265,7 +265,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
 // document), "practise1 file" could not be named, and a non-Bible book made the
 // agent guess MRK. These pin the server half of the fix.
 describe("resolveScope — file names and non-canonical books (AQU-1455)", () => {
-  const noFocus = () => ({ projectId: PROJECT, aliases: new AliasMap() })
+  const noFocus = () => ({ projectId: PROJECT, aliases: new AliasMap(), lane: "" })
   const XXB_FILE = "77777777-7777-4777-8777-777777777777"
 
   async function addFile(id: string, name: string, bookCode: string | null, extra = "", binds: unknown[] = []) {
@@ -480,6 +480,7 @@ describe("resolveScope — file names and non-canonical books (AQU-1455)", () =>
         projectId: PROJECT,
         focusedFileId: XXB_FILE,
         aliases: new AliasMap(),
+        lane: "",
       })
       expect(scope.ok).toBe(false)
       expect(scope.ok === false && scope.error).toContain('"Genesis"')

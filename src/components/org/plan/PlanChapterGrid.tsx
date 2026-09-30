@@ -68,7 +68,12 @@ export const planTileChapter = planChapterNumber
  * audio counts validation at all. When AQU-490 lands and that constant flips,
  * the tiles flip with it instead of contradicting the row above them.
  */
-export function planSectionShortfall(section: PlanSection, hasAudio: boolean): PlanShortfall {
+export function planSectionShortfall(
+  section: PlanSection,
+  hasAudio: boolean,
+  /** AQU-955: false on an audio-only file — see `textFileIds`. */
+  hasText = true,
+): PlanShortfall {
   return planUnitShortfall(
     {
       fileId: "",
@@ -85,6 +90,7 @@ export function planSectionShortfall(section: PlanSection, hasAudio: boolean): P
       doneBy: null,
     },
     hasAudio,
+    hasText,
   )
 }
 
@@ -97,8 +103,8 @@ interface TileFacts {
   worst: number
 }
 
-function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
-  const s = planSectionShortfall(section, hasAudio)
+function tileFacts(section: PlanSection, hasAudio: boolean, hasText: boolean): TileFacts {
+  const s = planSectionShortfall(section, hasAudio, hasText)
   return {
     textShort: s.toTranslate + s.toValidate,
     audioShort: s.toRecord + s.toAudioValidate,
@@ -107,7 +113,7 @@ function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
 }
 
 export function PlanChapterGrid({
-  sections, showAudio, nearlyComplete, selectedKey, onSelect,
+  sections, showAudio, showText = true, nearlyComplete, selectedKey, onSelect,
 }: {
   /**
    * Already narrowed to this unit by `usePlanUnitSections`, and never empty:
@@ -120,6 +126,15 @@ export function PlanChapterGrid({
   sections: readonly PlanSection[]
   /** Whether this project records audio at all; the right half is drawn only then. */
   showAudio: boolean
+  /**
+   * AQU-955: whether this FILE carries text work — false on an audio-only file.
+   * The left half of every underline is then transparent and no tile is short
+   * on text it will never have, so the grid finally answers "which chapters
+   * still need recording" instead of reading fully short everywhere.
+   *
+   * Defaults to true so a caller written before this behaves exactly as it did.
+   */
+  showText?: boolean
   /**
    * AQU-1278: only a nearly-complete unit's tiles carry a count.
    *
@@ -192,6 +207,7 @@ export function PlanChapterGrid({
                 label={String(chapter)}
                 ariaSubject={String(chapter)}
                 showAudio={showAudio}
+                showText={showText}
                 showCount={nearlyComplete}
                 selected={selectedKey === section.key}
                 onSelect={onSelect}
@@ -222,6 +238,7 @@ export function PlanChapterGrid({
                 ariaSubject={label}
                 wide
                 showAudio={showAudio}
+                showText={showText}
                 showCount={nearlyComplete}
                 selected={selectedKey === section.key}
                 onSelect={onSelect}
@@ -243,7 +260,14 @@ export function PlanChapterGrid({
  * grid it competed with the summary line directly beneath for the same glance.
  * A component export, so the file keeps its fast-refresh guarantee.
  */
-export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
+export function PlanGridLegend({
+  showAudio,
+  showText = true,
+}: {
+  showAudio: boolean
+  /** AQU-955: false on an audio-only file — the text swatch names nothing there. */
+  showText?: boolean
+}) {
   const t = useT()
   return (
     <div
@@ -254,14 +278,19 @@ export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
         <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-muted" />
         {t("org.projectOverview.plan.gridLegendComplete")}
       </span>
-      <span className="flex items-center gap-1">
-        <span
-          aria-hidden
-          className="h-2.5 w-2.5 rounded-[2px]"
-          style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
-        />
-        {t("org.projectOverview.plan.gridLegendTextShort")}
-      </span>
+      {/* Named only where the grid can draw it — the same rule the audio
+          swatch below has always followed. On an audio-only file the text half
+          of every underline is transparent. */}
+      {showText && (
+        <span className="flex items-center gap-1">
+          <span
+            aria-hidden
+            className="h-2.5 w-2.5 rounded-[2px]"
+            style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
+          />
+          {t("org.projectOverview.plan.gridLegendTextShort")}
+        </span>
+      )}
       {/* Named only where the grid can draw it. On a text-only project the
           audio half of every underline is transparent, and a legend entry for
           a colour that is nowhere on screen is a question, not an answer. */}
@@ -291,7 +320,7 @@ export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
  * two hues is a third colour belonging to neither.
  */
 function PlanTile({
-  section, label, ariaSubject, wide = false, showAudio, showCount, selected, onSelect,
+  section, label, ariaSubject, wide = false, showAudio, showText = true, showCount, selected, onSelect,
 }: {
   section: PlanSection
   /** What the tile prints: the chapter number, or the whole key off the grid. */
@@ -301,12 +330,14 @@ function PlanTile({
   /** Off the numbered grid, where a key like "Scene 4" needs room to be read. */
   wide?: boolean
   showAudio: boolean
+  /** AQU-955: false on an audio-only file; the text half goes transparent. */
+  showText?: boolean
   showCount: boolean
   selected: boolean
   onSelect: (key: string) => void
 }) {
   const t = useT()
-  const { textShort, audioShort, worst } = tileFacts(section, showAudio)
+  const { textShort, audioShort, worst } = tileFacts(section, showAudio, showText)
   const complete = worst === 0
   // A numbered chapter names itself as one; anything off the numbered grid —
   // front matter, a one-chapter book, a document's own section — names itself

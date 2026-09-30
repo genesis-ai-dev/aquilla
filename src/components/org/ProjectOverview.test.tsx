@@ -234,7 +234,9 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
   countStructuralCells: true,
+  autoPropagateRepetitions: true,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
@@ -1227,10 +1229,7 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
   // the original gates: manager, not archived, and the roster-visibility floor.
 
   function teamCard(): HTMLElement {
-    const heading = screen.getByRole("heading", { name: "Team" })
-    const card = heading.closest(".rounded-lg")
-    if (!card) throw new Error("Team heading is not inside a card")
-    return card as HTMLElement
+    return screen.getByTestId("overview-team-card")
   }
 
   it("starts collapsed under the Team card and reveals the settings roster when opened", async () => {
@@ -1482,6 +1481,261 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    // AQU-1172: the collapse affordance must not leak a header-only Team card
+    // to a below-floor viewer.
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
+
+describe("ProjectOverview Team card collapse (AQU-1172)", () => {
+  // WHY: managers can tuck the assignments surface away without leaving the
+  // overview. Unlike Members (AQU-1171), Team starts expanded so first load
+  // is the working surface plus a chevron — collapse is per-page-load only.
+
+  async function withWorkload() {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([
+      { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
+    ])
+  }
+
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("starts expanded and hides the body when the header is clicked", async () => {
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "true")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+  })
+
+  it("hides the Team card from a maintainer when the roster floor is owner-only", async () => {
+    // The progress floor can still say maintainer. Leaving the card open
+    // under "Only maintainers & owners can see this" is the roster choice
+    // appearing not to stick.
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: false,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+  })
+
+  it("keeps the Team badge on owners after the roster floor is raised", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: true,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/only owners can see this/i)
+    expect(within(card).getByTestId("section-visibility-badge")).not.toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("lets an org owner change the Team floor and withholds the picker from a project owner who is not an org owner", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
+      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+    })
+    const ownerView = renderOverview()
+
+    const ownerCard = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
+    const ownerBadge = within(ownerCard).getByTestId("section-visibility-badge")
+    expect(ownerBadge.tagName).toBe("BUTTON")
+    expect(ownerBadge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
+    ownerView.unmount()
+
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+
+  it("persists an owner-only Team floor from the header", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      rosterViewMinRole: ROLE.MAINTAINER,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /owners only/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+  })
+
+  it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    const view = renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-team-toggle"))
+    expect(screen.getByTestId("overview-team-card")).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    view.unmount()
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("overview-members-card")).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("keeps Team and Members collapse independent", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const team = await screen.findByTestId("overview-team-card")
+    const members = await screen.findByTestId("overview-members-card")
+    expect(team.nextElementSibling).toBe(members)
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "false")
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "false")
+    expect(team.nextElementSibling).toBe(members)
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+  })
+
+  it("restores teammate activity after a collapse/expand cycle", async () => {
+    await withWorkload()
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    fetchMemberActivity.mockResolvedValue({
+      recentEvents: [
+        { id: "e1", kind: "target.cell.commit", fileId: "f1", cellId: "c1", clientTs: 1, serverTs: 1700000000000, serverSeq: 2 },
+      ],
+      fileRollup: [
+        { fileId: "f1", fileName: "Genesis", cellsTouched: 12, wordCount: 340, lastActivityAt: 1700000000000 },
+      ],
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    const panel = await screen.findByTestId("member-activity-panel")
+    expect(within(panel).getByText("Genesis")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
   })
 })
 
@@ -1549,6 +1803,48 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+  })
+
+  it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      lanes: [
+        { lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW },
+        { lane: "sw", name: "Swahili", totalCells: 100, filledCells: 20, validatedCells: 8, lastEditAt: NOW, archived: true, position: 1 },
+        { lane: "fr", name: "French", totalCells: 100, filledCells: 10, validatedCells: 4, lastEditAt: NOW, archived: true, position: 2 },
+      ],
+    })])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).getByTestId("overview-lane-row-default")).toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-row-sw")).not.toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+
+    const toggle = within(table).getByTestId("overview-lane-archived-toggle")
+    expect(toggle).toHaveTextContent("Archived (2)")
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    const sw = within(table).getByTestId("overview-lane-archived-row-sw")
+    const fr = within(table).getByTestId("overview-lane-archived-row-fr")
+    expect(sw).toHaveTextContent("Swahili")
+    expect(sw).toHaveTextContent("Archived")
+    expect(sw).toHaveTextContent("20%")
+    expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+  })
+
+  it("does not render an archived group when every lane is active", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
   it("does not render the lane table (or tabs) for a single-lane project", async () => {

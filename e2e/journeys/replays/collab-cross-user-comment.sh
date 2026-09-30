@@ -95,7 +95,11 @@ abA wait "[data-cell-id]" >/dev/null || fail "editor did not show cells"
 openRef=$(abA snapshot -i -c | grep -o 'button "Open cell details" \[ref=e[0-9]*' | grep -o 'e[0-9]*$' | head -1)
 [ -n "$openRef" ] || fail "Open cell details button not in snapshot"
 abA click "@$openRef" >/dev/null || fail "click Open cell details"
-abA wait --fn "document.body.innerText.includes('Retrieval support')" >/dev/null || fail "row did not expand"
+# AQU-764: the expansion panel's first tab is named "Health" (was "Retrieval
+# support"). Match the tab itself rather than body text — "Health" is a short
+# word that also appears on the project health surfaces, so an innerText probe
+# could pass before the row actually expanded.
+abA wait --fn "[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.trim() === 'Health')" >/dev/null || fail "row did not expand"
 addRef=$(abA snapshot -i -c | grep -o 'button "Add comment" \[ref=e[0-9]*' | grep -o 'e[0-9]*$' | head -1)
 [ -n "$addRef" ] || fail "Add comment button not in snapshot"
 abA click "@$addRef" >/dev/null || fail "click Add comment"

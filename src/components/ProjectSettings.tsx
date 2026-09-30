@@ -65,6 +65,12 @@ import {
   normalizeCompletionMaxTokens,
   resolveProvider,
 } from "@/lib/completion/completion-service"
+import {
+  CUSTOM_PRESETS,
+  endpointForPresetChange,
+  presetIdForEndpoint,
+  presetLabel,
+} from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -80,8 +86,9 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveTimingLocked, createProjectLane, renameProjectLane, setProjectLaneArchived } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
@@ -112,7 +119,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -174,30 +181,6 @@ const CELL_EDITING_FLOOR_OPTIONS: readonly {
   { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
 ]
 
-// Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
-// set per entry: `labelKey` for the two real English descriptions ("Local /
-// self-hosted…", "Other…"), translated at render via presetLabel() below.
-// The rest are brand names — i18n-exempt, left untranslated in every locale
-// like any other product/company name (OpenRouter and OpenAI are already in
-// ATOMIC_TERMS; Groq/Together AI/Mistral/DeepSeek aren't yet, but are the
-// same kind of string).
-const CUSTOM_PRESETS: { id: string; label?: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
-  { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
-  { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
-  { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
-  { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
-  { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
-  { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
-]
-
-/** Resolves a CUSTOM_PRESETS entry's display label: translated when `labelKey`
- * is set, else the literal (untranslated brand name). */
-function presetLabel(t: TFunction, preset: { label?: string; labelKey?: MessageKey }): string {
-  return preset.labelKey ? t(preset.labelKey) : (preset.label ?? "")
-}
-
 /**
  * Re-wraps already-known literal substrings of a translated sentence in inline
  * styling — `t()` only ever returns a plain string, so a template whose English
@@ -228,17 +211,6 @@ function withStyledTerms(
     }
     return <strong key={i}>{part}</strong>
   })
-}
-
-function presetIdForEndpoint(endpoint: string): string {
-  const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
-  if (!trimmed) return "local"
-  for (const p of CUSTOM_PRESETS) {
-    if (!p.endpoint) continue
-    const base = p.endpoint.toLowerCase()
-    if (trimmed === base || trimmed.startsWith(base)) return p.id
-  }
-  return "custom"
 }
 
 interface Baseline {
@@ -420,6 +392,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    lanes: sharedLanes,
+    refresh: refreshSharedSettings,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
@@ -441,7 +415,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
   // row. Local (unsynced) projects have no org floor, so the pane stays.
   const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
-  const { canViewRoster } = useOrgSettings(
+  const { canViewRoster, autoPropagateRepetitions: orgAutoPropagateRepetitions } = useOrgSettings(
     rosterOrgId,
     activeOrg?.activeOrg?.role?.level,
     project?.syncRole?.level ?? null,
@@ -458,6 +432,37 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+
+  const renameLane = useCallback(async (laneId: string, name: string) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await renameProjectLane(jwt, id, laneId, name)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const createLane = useCallback(async (input: { name: string; language: string }) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await createProjectLane(jwt, id, input)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return false
+    const result = await setProjectLaneArchived(jwt, id, laneId, archived)
+    if (result.kind !== "ok") return false
+    await refreshSharedSettings()
+    return true
+  }, [session?.jwt, id, refreshSharedSettings])
   const {
     metrics: postEditMetrics,
     isLoading: metricsLoading,
@@ -914,8 +919,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setPresetId(nextPresetId)
     const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
     if (!preset) return
-    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
-    setEndpoint(nextEndpoint)
+    setEndpoint(endpointForPresetChange(nextPresetId, endpoint))
     setConnected(false)
     setConnectionError(null)
     setModels([])
@@ -1269,11 +1273,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
+    { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
-    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
+    // AQU-1272: the affix inventory and fold defaults live in this section, so
+    // the words a user searches for them by have to reach it.
+    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
     // Monday.com board sync — cloud (synced) projects only: the link lives on
@@ -1824,6 +1830,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             canEdit={canEditLanguages}
             disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
+            laneRecords={isCloudProject ? sharedLanes ?? undefined : undefined}
+            onRenameLane={isCloudProject ? renameLane : undefined}
+            onCreateLane={isCloudProject ? createLane : undefined}
+            onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
           />
         )}
 
@@ -2483,6 +2493,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
                   orgDefault={orgCountStructuralCells ?? true}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
+              // AQU-1391: same slot treatment, same card — validation is the
+              // gesture that triggers propagation.
+              repetitionPropagationRow={
+                <RepetitionPropagationProjectSection
+                  value={sharedSettingsBlob?.autoPropagateRepetitions}
+                  orgDefault={orgAutoPropagateRepetitions}
                   disabled={!canEditShared}
                   disabledTooltip={sharedDisabledTooltip ?? undefined}
                   onPatch={patchShared}

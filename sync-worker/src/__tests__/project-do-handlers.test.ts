@@ -7,11 +7,13 @@ import {
   applyPresenceUpdate,
   parseProjectDoClientMessage,
   PresenceDraftThrottle,
+  presenceFrameOwnerConnId,
   presenceSnapshot,
   PRESENCE_DRAFT_THROTTLE_MS,
   resolveConnId,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
+  sweepOrphanedPresence,
   unpackBroadcastBody,
   type LockState,
   type PresenceState,
@@ -26,6 +28,11 @@ const emptyPresence = (): Map<string, PresenceState> => new Map()
 const who = (name: string) => ({ connId: name, userId: name })
 
 describe("parseProjectDoClientMessage", () => {
+  it("parses a heartbeat ping, keeping a numeric ts to echo", () => {
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: 42 }))).toEqual({ t: "ping", ts: 42 })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping" }))).toEqual({ t: "ping" })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: "x" }))).toEqual({ t: "ping" })
+  })
   it("parses focus.claim with leaseMs", () => {
     const m = parseProjectDoClientMessage(
       JSON.stringify({ t: "focus.claim", cellId: "c", leaseMs: 1000 }),
@@ -467,6 +474,65 @@ describe("PresenceDraftThrottle", () => {
   })
 })
 
+describe("presenceFrameOwnerConnId (AQU-1162 — no self-echo)", () => {
+  it("names the connection a presence.diff describes", () => {
+    const { emit } = applyPresenceUpdate(
+      emptyPresence(),
+      who("alice"),
+      { t: "presence.update", viewingCell: "c1" },
+      1_000,
+    )
+    expect(emit).toHaveLength(1)
+    expect(presenceFrameOwnerConnId(emit[0])).toBe("alice")
+  })
+
+  it("names the connection a presence.draft describes", () => {
+    const frame: ServerPresenceDraft = {
+      t: "presence.draft",
+      userId: "alice",
+      connId: "alice-tab-2",
+      cellId: "c1",
+      draftText: "hola",
+      ts: 7,
+    }
+    // Keyed by connId, not userId: a second tab is a separate peer and still
+    // needs the other tab's drafts.
+    expect(presenceFrameOwnerConnId(frame)).toBe("alice-tab-2")
+  })
+
+  it("leaves every non-presence frame addressed to everyone", () => {
+    const frames: ProjectDoServerMessage[] = [
+      { t: "presence.left", userId: "alice", connId: "alice" },
+      { t: "lock.claimed", cellId: "c1", by: { userId: "alice", ts: 1 } },
+      { t: "lock.released", cellId: "c1", by: { userId: "alice", ts: 1 } },
+      { t: "presence", users: [] },
+    ]
+    for (const f of frames) expect(presenceFrameOwnerConnId(f)).toBeUndefined()
+  })
+
+  it("excludes only the originating socket when the DO fans a frame out", () => {
+    // Mirrors ProjectSync.broadcast(): one roster, one sender, everyone else
+    // receives. A user's own presence tells them nothing — every client
+    // consumer filters self rows out again — so the echo is pure cost.
+    const roster = ["alice", "alice-tab-2", "bob"]
+    const fanOut = (msg: ProjectDoServerMessage): string[] => {
+      const except = presenceFrameOwnerConnId(msg)
+      return roster.filter((connId) => connId !== except)
+    }
+    const { emit } = applyPresenceUpdate(
+      emptyPresence(),
+      who("alice"),
+      { t: "presence.update", viewingCell: "c1" },
+      1_000,
+    )
+    expect(fanOut(emit[0])).toEqual(["alice-tab-2", "bob"])
+    // A lock frame still reaches the claimer: it acts on its own grant.
+    expect(fanOut({ t: "lock.claimed", cellId: "c1", by: { userId: "alice", ts: 1 } })).toEqual(
+      roster,
+    )
+  })
+})
+
 describe("applyFocusRenew", () => {
   it("extends the lease for the holder", () => {
     const locks = new Map<string, LockState>([
@@ -725,6 +791,58 @@ describe("sweepExpiredLeases", () => {
       t: "presence.diff",
       user: { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 5_000 },
     })
+  })
+})
+
+describe("sweepOrphanedPresence (AQU-1374)", () => {
+  /** One person, one tab, reconnecting under a fresh connId each time. */
+  const sixSilentReconnects = () =>
+    new Map<string, PresenceState>(
+      ["conn-1", "conn-2", "conn-3", "conn-4", "conn-5", "conn-6"].map((connId) => [
+        connId,
+        { connId, userId: "fatimah", currentFileId: "file-1", viewingCell: "cell-1", ts: 1 },
+      ]),
+    )
+
+  it("collapses a user's abandoned rows down to the one live socket", () => {
+    const r = sweepOrphanedPresence(sixSilentReconnects(), new Set(["conn-6"]))
+    expect([...r.presence.keys()]).toEqual(["conn-6"])
+    expect(r.emit).toEqual([
+      { t: "presence.left", userId: "fatimah", connId: "conn-1" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-2" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-3" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-4" },
+      { t: "presence.left", userId: "fatimah", connId: "conn-5" },
+    ])
+  })
+
+  it("keeps every row that still has a live socket, idle or not", () => {
+    // No heartbeat exists on the client (presence.update is sent on change
+    // only), so a stale `ts` must never be grounds for eviction.
+    const presence = new Map<string, PresenceState>([
+      ["tab-a", { connId: "tab-a", userId: "alice", ts: 1 }],
+      ["tab-b", { connId: "tab-b", userId: "alice", ts: 1 }],
+      ["bob-1", { connId: "bob-1", userId: "bob", focusedCell: "cell-1", ts: 1 }],
+    ])
+    const r = sweepOrphanedPresence(presence, new Set(["tab-a", "tab-b", "bob-1"]))
+    expect(r.emit).toEqual([])
+    expect(r.presence).toEqual(presence)
+  })
+
+  it("drops one tab's orphan without disturbing the user's other live tab", () => {
+    const presence = new Map<string, PresenceState>([
+      ["tab-a", { connId: "tab-a", userId: "alice", viewingCell: "cell-1", ts: 1 }],
+      ["tab-b", { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 1 }],
+    ])
+    const r = sweepOrphanedPresence(presence, new Set(["tab-b"]))
+    expect([...r.presence.keys()]).toEqual(["tab-b"])
+    expect(r.emit).toEqual([{ t: "presence.left", userId: "alice", connId: "tab-a" }])
+  })
+
+  it("does not mutate the map it was given", () => {
+    const presence = sixSilentReconnects()
+    sweepOrphanedPresence(presence, new Set(["conn-6"]))
+    expect(presence.size).toBe(6)
   })
 })
 

@@ -49,6 +49,7 @@ const LEDGER = "schema_migrations"
 
 /** Fill missing NEON_PG_* from .env so npm scripts work without `set -a`. */
 function loadDotEnv(): void {
+  if (process.env.AQUILLA_LOCAL_PG_URL) return
   if (process.env.NEON_PG_HOST && process.env.NEON_PG_PASSWORD) return
   const envFile = path.join(REPO_ROOT, ".env")
   if (!fs.existsSync(envFile)) return
@@ -133,7 +134,30 @@ async function status(client: Client): Promise<number> {
   return failures ? 1 : 0
 }
 
+/**
+ * Local dev containers predate the ledger, and replaying every historical file
+ * is unsafe (see apply). `LOCAL_BASELINE_BEFORE=0097` records the files sorting
+ * before 0097 as applied without running them, then apply runs the rest.
+ */
+async function baselineLocalBefore(client: Client, prefix: string): Promise<void> {
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS ${LEDGER} (
+       name       TEXT PRIMARY KEY,
+       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+  )
+  const skipped = migrationFiles().filter((f) => f < prefix)
+  for (const f of skipped) {
+    await client.query(`INSERT INTO ${LEDGER} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [f])
+  }
+  console.log(`✓ local ledger created; ${skipped.length} files before ${prefix} recorded without running`)
+}
+
 async function apply(client: Client): Promise<number> {
+  const localBaseline = process.env.LOCAL_BASELINE_BEFORE?.trim()
+  if (process.env.AQUILLA_LOCAL_PG_URL && localBaseline && !(await ledgerExists(client))) {
+    await baselineLocalBefore(client, localBaseline)
+  }
   if (!(await ledgerExists(client))) {
     console.error(
       `✗ ${LEDGER} does not exist. Refusing to apply: a first run would re-execute ALL ` +
@@ -191,7 +215,9 @@ async function main() {
   const client = neonClient()
   await client.connect()
   try {
-    const host = process.env.NEON_PG_HOST
+    const host = process.env.AQUILLA_LOCAL_PG_URL
+      ? `local ${process.env.AQUILLA_LOCAL_PG_URL.replace(/:[^:@/]*@/, ":***@")}`
+      : process.env.NEON_PG_HOST
     console.log(`neon-migrate ${cmd} → ${host}\n`)
     const fns = { status, apply, baseline, "prepare-comments-key": prepareCommentsKey } as const
     process.exitCode = await fns[cmd as keyof typeof fns](client)

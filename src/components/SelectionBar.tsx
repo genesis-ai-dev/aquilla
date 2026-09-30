@@ -33,6 +33,14 @@ import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import {
+  batchValidateTelemetry,
+  batchValidateToast,
+  summarizeBatchValidate,
+} from "@/lib/review/batch-validate-summary"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+import posthog from "@/lib/posthog"
 
 interface Props {
   project: ProjectRecord
@@ -98,6 +106,9 @@ type Running =
 
 export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const t = useT()
+  // AQU-1503: skip clauses join the way a list is written in the reader's
+  // language rather than with a hardcoded separator.
+  const { list: formatLocaleList } = useFormat()
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
@@ -183,6 +194,24 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   )
   const isBusy = running.kind !== "idle"
 
+  /**
+   * AQU-1459: the SAME permission `commitCompletedCells` applies, asked BEFORE
+   * the model is called instead of after it answers. A validator (Reviewer)
+   * passes the `cell.validate` check that keeps the whole bar on screen, so
+   * Translate used to stay live for them: the click spent tokens on drafts the
+   * commit then refused with "You do not have permission to commit target
+   * cells". The header's Run completions / Complete all already gate on this
+   * (`workspace-actions/registry.ts`); this is the affordance that did not.
+   *
+   * `canPerform` fails OPEN on an unknown role, so local/legacy projects with
+   * no `syncRole` keep Translate — same convention as the suppression check
+   * below. `project.syncRole` is re-read on every render, so a role downgrade
+   * or lane grant that lands through the app's usual refresh takes effect here
+   * without a reload.
+   */
+  const roleLevel = project.syncRole?.level ?? null
+  const canCommitTarget = canPerform("target.cell.commit", roleLevel)
+
   // AQU-490: bulk AUDIO validation — a SEPARATE action beside the text one,
   // per Sam's ruling. Never merged: a reviewer signing off translations has
   // not listened to the recordings, and one button doing both would collect
@@ -255,6 +284,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           fileId: target.fileId,
           cellId: target.cellId,
           audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
       }
@@ -270,7 +300,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t])
+  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
 
   /** The opposite action, which the audio side simply did not have. */
   const onUnvalidateAudio = useCallback(async () => {
@@ -280,14 +310,15 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     try {
       for (const target of audioRemoveTargets) {
         // No `targetUsername`: absent means "my own vote", and removing
-        // somebody else's is a maintainer action that lives elsewhere. No
-        // `targetLang` either — a recording is shared by every language, so a
-        // vote on it is not per-lane and the wire carries none.
+        // somebody else's is a maintainer action that lives elsewhere.
+        // AQU-1462 stamps the lane so an archived lane can refuse the vote.
+        // The vote itself stays shared across languages.
         await emitCellAudioUnvalidate({
           projectId: project.id,
           fileId: target.fileId,
           cellId: target.cellId,
           audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
       }
@@ -299,10 +330,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t])
+  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
 
   const onTranslate = useCallback(async () => {
     if (isBusy) return
+    // AQU-1459: never call the model for someone whose commit is already denied.
+    if (!canCommitTarget) return
     setRunning({ kind: "translate" })
     try {
       const missing = selectedCells.filter(
@@ -314,7 +347,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, completeBatch, isBusy])
+  }, [selectedCells, completeBatch, isBusy, canCommitTarget])
 
   const onVoice = useCallback(async () => {
     if (isBusy || !onVoiceTogether) return
@@ -328,37 +361,44 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
 
   const onValidate = useCallback(() => {
     if (isBusy) return
-    if (validatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      let validated = 0
-      let alreadyValidated = 0
-      for (const cell of selectedCells) {
-        if (!isBulkValidationEligible(cell)) continue
-        if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
-        if (!isBulkValidatableByMe(cell, username, myScopes, activeLane)) continue
-        if (!cell.targetEventId || !project.id) continue
+      // AQU-1503: the eligibility split, the toast wording and the telemetry
+      // now come from the same summary the "Batch validate text…" workspace
+      // action uses, so the two surfaces can no longer disagree about what a
+      // batch did — and neither can end in silence. The old loop reported only
+      // one class of skip ("already validated"); an AI draft, an out-of-scope
+      // cell or an unsaved edit fell out of the count with nothing said.
+      const summary = summarizeBatchValidate(selectedCells, {
+        username,
+        myScopes,
+        activeLane,
+        hasTarget: Boolean(project.id),
+      })
+      for (const cell of summary.validatable) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
-          editEventId: cell.targetEventId,
+          editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
-        validated++
       }
-      const msg = alreadyValidated > 0
-        ? t("editor.selection.validatedToastSkipped", { count: validated, already: alreadyValidated })
-        : t("editor.selection.validatedToast", { count: validated })
-      toast.add({ type: "success", title: msg })
+      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
+      const message = batchValidateToast(summary, t, formatLocaleList)
+      toast.add({
+        type: message.type,
+        title: message.title,
+        ...(message.description ? { description: message.description } : {}),
+      })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
-      if (validated > 0) onValidationCommitted?.()
+      if (summary.validatable.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted, t])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -397,8 +437,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // canPerform fails OPEN when the role is unknown (local/legacy projects
   // with no syncRole), so this only suppresses the bar for a KNOWN
   // sub-reviewer role — never blocks legacy non-cloud projects.
-  const roleLevel = project.syncRole?.level ?? null
-  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canPerform("target.cell.commit", roleLevel)) {
+  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canCommitTarget) {
     return null
   }
 
@@ -455,6 +494,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       {!audioMode && (
         <>
       <AppTooltip content={
+        // AQU-1459: the permission reason comes FIRST. A validator sees why the
+        // button is dark in the terms of their role, not "all translated".
+        !canCommitTarget ? t("editor.selection.translateNoPermission") :
         !completeBatch ? t("editor.selection.translateNotConfigured") :
         missingCount === 0 ? t("editor.selection.allTranslated") :
         t("editor.selection.translateTooltip", { count: missingCount })
@@ -464,7 +506,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           size="sm"
           variant="default"
           onClick={onTranslate}
-          disabled={isBusy || missingCount === 0 || !completeBatch}
+          disabled={isBusy || missingCount === 0 || !completeBatch || !canCommitTarget}
         >
           {running.kind === "translate" ? (
             <Spinner className="me-1 size-3.5" />

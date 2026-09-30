@@ -87,6 +87,11 @@ export function stripMarks(s: string): string {
   return s.normalize("NFD").replace(/\p{M}+/gu, "").normalize("NFC")
 }
 
+/** Code points once combining marks are gone — an affix's length in letters. */
+function letterLength(s: string): number {
+  return Array.from(stripMarks(s)).length
+}
+
 /**
  * Escape a literal segment for the regex. When folding, marks are removed from
  * the segment and `\p{M}*` is emitted after every remaining character, so the
@@ -126,6 +131,12 @@ export function termToRegexSource(term: string, opts: TermRegexOptions = {}): st
  * Bounded alternation of affixes. Returns "" when the list is empty so a term
  * with no inventory compiles exactly as before. Longest first so `ים` is
  * preferred over `י` when both could match.
+ *
+ * "Longest" is counted on the MARK-STRIPPED string (AQU-1272). Raw `.length`
+ * counts combining marks, so a one-letter affix carrying a vowel point and an
+ * accent (3 code points) sorted ahead of a genuinely two-letter one — and since
+ * the alternation is ordered, the regex would then prefer the shorter affix.
+ * Letters are what an affix is; the marks on them are not part of its length.
  */
 function affixGroup(
   affixes: string[] | undefined,
@@ -140,7 +151,7 @@ function affixGroup(
   // and a mark-only affix folds away to nothing — an empty alternative would
   // make the group match the empty string everywhere.
   const folded = [...new Set(list)]
-    .sort((a, b) => b.length - a.length)
+    .sort((a, b) => letterLength(b) - letterLength(a) || b.length - a.length)
     .map((a) => literalSegment(a, fold))
   const alts = [...new Set(folded)].filter((p) => p.length > 0).join("|")
   if (alts.length === 0) return ""

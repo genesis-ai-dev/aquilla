@@ -24,6 +24,18 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    "settings.transcription.title": "Transcription",
+    "settings.transcription.scope":
+      "This choice applies to your account in this browser.",
+    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hostedDescription":
+      "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
+    "settings.transcription.local": "Local Whisper in this browser",
+    "settings.transcription.localDescription":
+      "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
+    "settings.transcription.capacityExceeded":
+      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
     "settings.structuralCells.description":

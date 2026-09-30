@@ -19,6 +19,7 @@ describe("hosted transcription client", () => {
       expect(url).toBe("http://identity/api/v1/audio/transcriptions")
       expect(new Headers(init?.headers).get("Authorization"))
         .toBe("Bearer session-jwt")
+      expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/)
       expect(JSON.parse(String(init?.body))).toMatchObject({
         projectId: "project", language: "en", input_audio: { format: "wav" },
       })
@@ -27,6 +28,15 @@ describe("hosted transcription client", () => {
       { text: "hello", start: 0, end: 0.5 },
       { text: "hello", start: 60, end: 60.5 },
     ] })
+  })
+
+  it("explains exhausted capacity without starting another request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ error: "weekly_ai_allowance_exhausted" }, { status: 429 }),
+    )
+    await expect(transcribeHostedPcm(new Float32Array(61000), "jwt", "p"))
+      .rejects.toThrow(/AI capacity/)
+    expect(fetchSpy).toHaveBeenCalledOnce()
   })
 
   it("surfaces hosted failures without silently starting a model download", async () => {

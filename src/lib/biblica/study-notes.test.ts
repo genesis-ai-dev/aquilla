@@ -11,6 +11,7 @@ import {
   biblicaFrontBackMatterStory,
   biblicaSampleStory,
   bookTitle,
+  chapterStraddle,
   closedVerse,
   divisionHeading,
   layoutText,
@@ -663,5 +664,159 @@ describe("Biblica study-note selection", () => {
 
     expect(selection.notes).toEqual([])
     expect(selection.verseUnitCount).toBeGreaterThan(0)
+  })
+})
+
+describe("scripture as verse-keyed cells (AQU-1285)", () => {
+  const referencesOf = (
+    selection: ReturnType<typeof selectBiblicaStudyNotes>,
+  ): (string | undefined)[] => selection.notes.map((entry) => entry.verse?.reference)
+
+  it("keys every verse of a book volume to its own reference, in document order", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml())
+    const selection = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
+
+    expect(selection.notes
+      .filter((entry) => entry.kind === "scripture")
+      .map((entry) => [entry.verse?.reference, entry.unit.sourceText]))
+      .toEqual([
+        ["GEN 1:1", "In the beginning God created the heavens and the earth."],
+        // The drop cap opens chapter 2 before the verse it belongs to; the
+        // run-on verse keeps its key across the paragraph break.
+        ["GEN 2:5", "No shrub had yet appeared,"],
+        ["GEN 2:5", " and no one was working the ground."],
+        // No anchor of its own: the chapter carries over from the verse before.
+        ["GEN 2:6", "But streams came up from the earth."],
+        ["GEN 3:1", "Now the serpent was more crafty than any other."],
+      ])
+    expect(selection.scriptureUnitCount).toBe(5)
+    expect(selection.verseUnitCount).toBe(0)
+  })
+
+  it("holds the verse's words only — the printed chapter and verse numbers stay the publisher's", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      closedVerse("p-v1", "1", "In the beginning God created the heavens and the earth.", "1"),
+    ]))
+    const [cell] = selectBiblicaStudyNotes(parsed.units, { includeScripture: true }).notes
+
+    expect(cell!.unit.sourceText).toBe("In the beginning God created the heavens and the earth.")
+    // The drop cap "1" and the verse number "1" are coordinates, not content,
+    // so no cell covers them and export leaves their slots untouched.
+    expect(cell!.unit.sourceText).not.toContain("1")
+    // One verse of a paragraph that also holds those numbers, so the cell has to
+    // say which part of the paragraph it owns.
+    expect(cell!.rejoin).toMatchObject({ index: 0, count: 1 })
+  })
+
+  it("keys each side of a chapter-straddling paragraph to its own chapter", async () => {
+    // LAM 1:22 → 2:1 and NEH 8 straddle a chapter boundary inside one
+    // paragraph. Reading the coordinates in order is what keeps 2:1 out of
+    // chapter 1 — the last anchor in the paragraph is the one that used to win.
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "LAM")),
+      chapterStraddle(
+        "p-straddle",
+        { chapter: "1", verse: "22", body: "Let all their wickedness come before you." },
+        { chapter: "2", verse: "1", body: "How the Lord has covered Zion with the cloud of his anger!" },
+      ),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
+
+    expect(selection.notes.map((entry) => [entry.verse?.reference, entry.chapterLabel]))
+      .toEqual([["LAM 1:22", "1"], ["LAM 2:1", "2"]])
+    // Both halves share one paragraph, so they are siblings of one rejoin group.
+    expect(selection.notes.map((entry) => entry.rejoin?.index)).toEqual([0, 1])
+    expect(selection.notes.every((entry) => entry.rejoin?.count === 2)).toBe(true)
+  })
+
+  it("keys a Psalms verse by the chapter marker that follows its verse number", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA"),),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+      psalmsVerse("p-v2", "2", "1", "Why do the nations rage?"),
+    ]))
+
+    expect(referencesOf(selectBiblicaStudyNotes(parsed.units, { includeScripture: true })))
+      .toEqual(["PSA 1:1", "PSA 2:1"])
+  })
+
+  it("keys a psalm superscription to the verse it introduces, not to the chapter alone", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      scriptureHeading("p-cl3", "Psalm 3"),
+      scriptureHeading("p-d", SAMPLE_NOTES.psalmSuperscription, "head%3ad_h"),
+      psalmsVerse("p-v1", "3", "1", "LORD, how many are my foes!"),
+      note("p-n", "3:1-8 A cry for help when enemies close in.", "intro%3aimi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
+
+    // The superscription carries no verse number of its own — the layout sets it
+    // ahead of verse 1, so that is the verse it belongs to. The chapter label
+    // ("Psalm 3") and the note about the passage stay keyed to no single verse.
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.kind,
+      entry.verse?.reference,
+    ])).toEqual([
+      ["Psalm 3", "note", undefined],
+      [SAMPLE_NOTES.psalmSuperscription, "note", "PSA 3:1"],
+      ["LORD, how many are my foes!", "scripture", "PSA 3:1"],
+      ["3:1-8 A cry for help when enemies close in.", "note", undefined],
+    ])
+  })
+
+  it("never lets a superscription borrow a verse from the next book or chapter", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      scriptureHeading("p-cl150", "Psalm 150"),
+      // A trailing superscription with no verse after it in this book.
+      scriptureHeading("p-d", SAMPLE_NOTES.psalmSuperscription, "head%3ad_h"),
+      paragraph("p-bk2", "meta%3abk", run("$ID/[No character style]", "PRO")),
+      closedVerse("p-v1", "1", "The proverbs of Solomon son of David.", "1"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
+
+    const superscription = selection.notes
+      .find((entry) => entry.unit.sourceText === SAMPLE_NOTES.psalmSuperscription)
+    expect(superscription?.verse).toBeUndefined()
+    expect(referencesOf(selection).filter(Boolean)).toEqual(["PRO 1:1"])
+  })
+
+  it("leaves scripture the layout gives no verse number to as the publisher set it", async () => {
+    // A poetry line ahead of the chapter's first verse marker has no verse to be
+    // keyed to. Guessing one would put a translator's edit on the wrong verse,
+    // so it stays uncovered and exports byte-for-byte.
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      paragraph("p-q", "text%3aq1", run("$ID/[No character style]", "A line with no verse marker.")),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["Blessed is the person who obeys the law of the LORD."])
+    expect(selection.otherUnitCount).toBeGreaterThan(0)
+  })
+
+  it("produces no scripture cell for a front/back matter volume", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml(biblicaFrontBackMatterStory))
+    const selection = selectBiblicaStudyNotes(parsed.units, {
+      frontBackMatter: true,
+      includeScripture: true,
+    })
+
+    expect(selection.notes.every((entry) => entry.kind === "note")).toBe(true)
+    expect(selection.scriptureUnitCount).toBe(0)
+    expect(selection.notes.length).toBeGreaterThan(0)
+  })
+
+  it("keeps the notes-only projection when scripture is not asked for", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml())
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.every((entry) => entry.kind === "note")).toBe(true)
+    expect(selection.scriptureUnitCount).toBe(0)
+    expect(selection.verseUnitCount).toBe(5)
   })
 })

@@ -1,6 +1,8 @@
 import { useCallback, useState, type SetStateAction } from "react"
 
-export type DockTab = "files" | "agent" | "search" | "voices"
+import type { DockTab } from "@/lib/dock-tab"
+
+export type { DockTab }
 
 /** Keep panel visibility separate from the last selected panel. */
 export function useDockTabs(initialTab: DockTab = "files") {

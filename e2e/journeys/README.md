@@ -102,10 +102,12 @@ everyone. Name them in stories; never paste an id.
   `qa-bot-2` (a plain member, for two-user and presence stories).
   Passwords live with the bot runner, not in this repo.
 - **Projects:** `english to burmese` (Bible in Basic English from eBible)
-  for Scripture stories; `QA Scripture Verse Resources` (Berean Standard
-  Bible) for Verse Resources and Parallel Bibles; `QA Smoke Project` and
-  `QA Org Search B`, both empty, for org, search, and import stories;
-  `subtitle-test` for media.
+  for Scripture stories; `QA Scripture Verse Resources` for Verse
+  Resources, Parallel Bibles, and every **cross-file** story — it carries
+  two multi-chapter files, the Berean Standard Bible and `sample.usfm`
+  (Genesis 1-2, four verse cells), so a chapter row under a file that is
+  not open can be clicked; `QA Smoke Project` and `QA Org Search B`, both
+  empty, for org, search, and import stories; `subtitle-test` for media.
 - **Media:** in `subtitle-test`, files `001` to `012` are the repo's
   synthetic parity corpus (`parity/corpus/files/vtt/`). They have no
   film, no audio cues, and no takes; silence there is not a bug.
@@ -123,6 +125,59 @@ everyone. Name them in stories; never paste an id.
 - Leave the workspace as you found it. Create throwaways under your own
   prefix and archive them when the walk ends. Never rename, archive, or
   delete the standing projects or the accounts.
+
+### Rebuilding the standing fixtures
+
+Nothing in this repo seeds the development database. These projects were
+made by hand and will not come back on their own if it is reset, so the
+recipe is here. Rebuild them as `qa-bot` in `QA Bot Workspace`, and keep
+every project and file name exactly as spelled above — the stories quote
+them.
+
+- `QA Smoke Project` and `QA Org Search B` — create empty. No import.
+- `english to burmese` — import the Bible in Basic English (`eng-engBBE`)
+  from the eBible catalogue in the import dialog.
+- `QA Scripture Verse Resources` — import the Berean Standard Bible
+  (`eng-engBSB`) from the same catalogue, then upload
+  `e2e/fixtures/sample.usfm` as a second source file. **Both are
+  required.** The second file is the whole point of the project: it is
+  what makes a cross-file story walkable at all, and because `sample.usfm`
+  is Genesis 1-2 its chapter rows are distinguishable from the BSB's, so a
+  jump that lands on the wrong file or the wrong chapter is visible rather
+  than ambiguous.
+- `subtitle-test` — upload `parity/corpus/files/vtt/vtt-001.vtt` through
+  `vtt-012.vtt` (they appear as files `001` to `012`) and
+  `e2e/fixtures/voices-roundtrip.vtt`. The film,
+  `voices-roundtrip-film.mp4`, is **not** in the repo: regenerate any
+  ten-second test pattern with a sound track — for example `ffmpeg -f
+  lavfi -i testsrc=d=10:s=320x240 -f lavfi -i sine=d=10 -shortest
+  voices-roundtrip-film.mp4` — and import it as its own `video` file.
+  Stories that must hear something only need it to have audio, not to be
+  that exact clip.
+
+### The two gaps that are still open, and what to do about each
+
+AQU-1244 left two acceptance criteria unwalkable for want of a fixture.
+They are not the same kind of gap.
+
+- **IDML sub-sections — a file to add, when a story asks for one.** IDML
+  milestones are one per story (`idmlStoryMilestones` in
+  `src/lib/import/milestones.ts`), so the fixture has to be a multi-story
+  document. `packages/idml-roundtrip/fixtures/valid/feature-rich.idml` is
+  one: seven stories, and it already round-trips in CI. Upload it to
+  `QA Scripture Verse Resources` as a third file when an IDML story needs
+  walking. It is deliberately not there now — a third file changes what
+  every Files-panel and tab-strip story sees, and no story asks for it
+  yet, so it would cost more than it buys.
+- **Contextual-run range chips — no fixture to add.** A contextual run is
+  not an imported file, so nothing can be seeded for it. It needs the
+  project-wide **Try Autopilot** opt-in (Settings > Experimental, owner or
+  lead only) and then Play on the run pill, which is the sequence
+  `e2e/specs/contextual/run-pill.spec.ts` drives. So the recipe is the
+  deliverable: opt the project in, run the pill, walk the chips it
+  produces, then **turn the opt-in back off**. It is a server-stored
+  project-wide setting, not a device switch, so leaving it on would put
+  the Autopilot surface in front of every other story in that project.
 
 ## Running a story by hand
 

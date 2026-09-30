@@ -11,6 +11,7 @@
 //                      `projectId` (this project's own targets, paired
 //                      with the upstream's sources by cell_id)
 
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../../events/lane-id-sql"
 import type { CorpusCell } from "./algorithm"
 
 export interface CorpusLoaderEnv {
@@ -99,13 +100,13 @@ export async function loadCorpus(
     "  ON t.project_id = ?",  // bind: projectId (target side always local)
     " AND t.cell_id    = s.cell_id",
     " AND t.side       = 'target'",
-    " AND t.target_lang = ?",  // bind: targetLang ('' = default lane)
+    ` AND ${targetLaneDualReadSql("t")}`,  // binds: projectId, tag, tag ('' = default lane)
     "WHERE s.project_id = COALESCE(?, ?)",  // bind: upstream, projectId
     "  AND s.side = 'source'",
   ]
   const binds: unknown[] = [
     args.projectId,
-    args.targetLang ?? "",
+    ...targetLaneDualReadBinds(args.projectId, args.targetLang ?? ""),
     upstreamProjectId,
     args.projectId,
   ]

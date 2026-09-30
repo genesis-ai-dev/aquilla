@@ -456,15 +456,15 @@ function dropStandalonePageNumberSlots(unit: IdmlTranslationUnit): IdmlTranslati
   if (unit.slots.length < 2) return unit
   const keep = unit.slots.flatMap((slot, index) => (isPageNumberRun(slot.text) ? [] : [index]))
   if (keep.length === 0 || keep.length === unit.slots.length) return unit
-  if (isNonTextualContent(keep.map((index) => unit.slots[index]!.text))) return unit
+  if (isNonTextualContent(keep.map((index) => unit.slots[index].text))) return unit
   while (keep.length > 1) {
     const last = keep.at(-1)!
-    if (unit.slots[last]!.text.replace(/\s+/g, "").length > 0) break
+    if (unit.slots[last].text.replace(/\s+/g, "").length > 0) break
     keep.pop()
   }
   const locator = {
     ...unit.locator,
-    slotIndexes: keep.map((index) => unit.locator.slotIndexes[index]!),
+    slotIndexes: keep.map((index) => unit.locator.slotIndexes[index]),
   }
   return projectIdmlUnitToLocator(unit, locator) ?? unit
 }

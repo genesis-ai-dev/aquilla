@@ -27,7 +27,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
+├── infra/modal/        # Modal services: diarization.py, seed_vc.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
@@ -156,7 +156,7 @@ repository commands; unnamed profiles use local-only Worker names. See
   (sync-worker `external/*`) with PAT credentials scoped org/project.
 - **Other major subsystems:** comments (`src/lib/sync/comments-read.ts`, `useComments`),
   search (`src/lib/search/` dual-index + replace), DCS linked-project sync (`src/lib/dcs/`,
-  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Kokoro),
+  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Inworld),
   export (`src/lib/export/`), rules/health/completion (`src/lib/rules|health|completion/`),
   local prefs (`src/lib/store/`, localStorage-backed).
 - **React Compiler gotcha:** the compiler memoizes away version-only dependencies; when

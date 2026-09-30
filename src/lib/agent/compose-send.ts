@@ -22,8 +22,8 @@ export interface ComposeAgentSendInput {
   /** Frontier session JWT; null/empty → nothing is sent. */
   jwt: string | null
   projectId: string
-  /** Current file/cell location, sent as run context when present. */
-  context?: { fileId?: string; cellId?: string }
+  /** Current file/cell/lane location, sent as run context when present. */
+  context?: { fileId?: string; cellId?: string; lane?: string }
   /** Artifacts uploaded alongside this message. */
   artifacts?: { artifactId: string; fileName: string }[]
 }
@@ -53,7 +53,7 @@ export function composeAgentSend({
     jwt,
     request: {
       projectId,
-      ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
+      ...(context.fileId || context.cellId || context.lane !== undefined ? { context: { ...context } } : {}),
       ...(translatorProfile ? { translatorProfile } : {}),
       ...(artifacts.length > 0 ? { artifacts } : {}),
     },

@@ -445,9 +445,13 @@ Three things to check on the way out:
 
 | Signal | Meaning |
 | --- | --- |
-| `X-Export-Mode` absent (MCP: `exportMode: "round-trip"`) | Translations were substituted. This is the real deliverable. |
+| `X-Export-Mode` absent (MCP: `exportMode: "round-trip"`) | Translations were substituted. This is the real deliverable. USFM and plain text (`.txt`) export this way. |
 | `X-Export-Mode: raw-original` / `raw-sidecar` | The format has no server-side target serializer yet, so you are getting the preserved **original** bytes with **no translations in them**. Do not deliver it as a translation. |
 | `X-Usfm-Lossy-Verse-Count` > 0 | USFM only: that many verses had intra-verse markers (footnotes, poetry, character markers) that the plain-text substitution dropped. `0` = clean round trip. |
+
+A plain-text export matches the in-app plain-text export byte for byte (AQU-1472): one
+paragraph per blank-line-separated block, segments split from one paragraph rejoined with a
+space, untranslated segments filled with their source text, and hidden cells left out.
 
 Gates and refusals:
 

@@ -19,7 +19,7 @@ function pct(loaded: number, total: number): number | null {
   return Math.round((loaded / total) * 100)
 }
 
-const MODEL_ORDER: ModelId[] = ["whisper", "kokoro", "mms"]
+const MODEL_ORDER: ModelId[] = ["whisper", "mms"]
 
 interface ModelView {
   id: ModelId
@@ -36,15 +36,13 @@ interface ErrorView {
 }
 
 // i18n-exempt product/model names — "Whisper" (OpenAI's ASR model) is the
-// same category of atomic proper noun as its siblings here ("Kokoro" is
-// already in ATOMIC_TERMS, tools/eslint-rules/allowlist.cjs; "MMS" is an
+// same category of atomic proper noun as its sibling here ("MMS" is an
 // all-caps acronym the scanner's own heuristic skips). Never translated.
-const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro", mms: "MMS" }
+const LABELS: Record<ModelId, string> = { whisper: "Whisper", mms: "MMS" }
 
 export function AiModelDownloadChip() {
   const t = useT()
   const whisper = useModelStatus("whisper")
-  const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
   const [dismissed, setDismissed] = useState(false)
   const [readyFlash, setReadyFlash] = useState<ModelId[]>([])
@@ -63,9 +61,8 @@ export function AiModelDownloadChip() {
       }
     }
     checkOne("whisper", whisper.kind)
-    checkOne("kokoro", kokoro.kind)
     checkOne("mms", mms.kind)
-  }, [whisper.kind, kokoro.kind, mms.kind])
+  }, [whisper.kind, mms.kind])
 
   // Hold completed rows in the same list until every model in the batch is
   // done. Only then flash the all-ready confirmation and auto-hide.
@@ -73,10 +70,8 @@ export function AiModelDownloadChip() {
     if (readyFlash.length === 0) return
     const stillGoing =
       whisper.kind === "downloading" ||
-      kokoro.kind === "downloading" ||
       mms.kind === "downloading" ||
       whisper.kind === "error" ||
-      kokoro.kind === "error" ||
       mms.kind === "error"
     if (stillGoing) return
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current)
@@ -84,9 +79,9 @@ export function AiModelDownloadChip() {
     return () => {
       if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current)
     }
-  }, [readyFlash, whisper.kind, kokoro.kind, mms.kind])
+  }, [readyFlash, whisper.kind, mms.kind])
 
-  const byId: Record<ModelId, typeof whisper> = { whisper, kokoro, mms }
+  const byId: Record<ModelId, typeof whisper> = { whisper, mms }
   const rows: ModelView[] = MODEL_ORDER.flatMap((id): ModelView[] => {
     const status = byId[id]
     if (status.kind === "downloading") {
@@ -101,7 +96,6 @@ export function AiModelDownloadChip() {
 
   const errors: ErrorView[] = []
   if (whisper.kind === "error") errors.push({ id: "whisper", label: LABELS.whisper, message: whisper.message })
-  if (kokoro.kind === "error") errors.push({ id: "kokoro", label: LABELS.kokoro, message: kokoro.message })
   if (mms.kind === "error") errors.push({ id: "mms", label: LABELS.mms, message: mms.message })
 
   // Re-show the chip if a new failure happens after the user dismissed an
@@ -109,7 +103,7 @@ export function AiModelDownloadChip() {
   useEffect(() => {
     if (errors.length > 0) setDismissed(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [whisper.kind, kokoro.kind, mms.kind])
+  }, [whisper.kind, mms.kind])
 
   if (dismissed) return null
   if (downloads.length === 0 && readyFlash.length === 0 && errors.length === 0) return null

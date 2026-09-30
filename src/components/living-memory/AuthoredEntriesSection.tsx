@@ -64,13 +64,31 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
 
 // ── Role-lock icon with tooltip ────────────────────────────────────────────
 
-export function RoleLockTooltip({ reason }: { reason: "offline" | "role" | null }) {
+/** Which floor a locked control is actually gated on. */
+export type LockedRole = "maintainer" | "projectLead" | "contributor"
+
+const ROLE_TOOLTIP_KEY = {
+  maintainer: "terminology.livingMemory.maintainerRequiredTooltip",
+  projectLead: "terminology.livingMemory.projectLeadRequiredTooltip",
+  contributor: "terminology.livingMemory.contributorRequiredTooltip",
+} as const
+
+export function RoleLockTooltip({
+  reason,
+  // Entries and the prediction prompt are maintainer-gated; the style-rule
+  // library gates on lower floors, so the lock must name the real one rather
+  // than overstate it.
+  requiredRole = "maintainer",
+}: {
+  reason: "offline" | "role" | null
+  requiredRole?: LockedRole
+}) {
   const t = useT()
   if (reason === null) return null
   const message =
     reason === "offline"
       ? t("terminology.livingMemory.offlineTooltip")
-      : t("terminology.livingMemory.maintainerRequiredTooltip")
+      : t(ROLE_TOOLTIP_KEY[requiredRole])
   return (
     <Tooltip>
       <TooltipTrigger

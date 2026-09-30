@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { CreditCard, ExternalLink } from "lucide-react"
+import { ExternalLink } from "lucide-react"
+import { BillingWorkspaceDetails } from "@/components/org/BillingWorkspaceSummary"
+import { getBillingWorkspace, startWorkspaceBillingPortal, type BillingWorkspace } from "@/lib/sync/billing-workspace"
+import { billingOfferLabels } from "../../../db/shared/billing-offers"
+import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -9,15 +13,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  TIER_CREDITS,
-  formatAgentCredits,
-  formatUsdFromCents,
   normalizeBillingPlan,
 } from "@/lib/billing/plans"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   getOrgBilling,
-  startBillingCheckout,
   startBillingPortal,
   type OrgBilling,
 } from "@/lib/sync/billing"
@@ -25,16 +25,11 @@ import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-function usagePct(used: number, allowance: number | null): number {
-  if (allowance == null || allowance <= 0) return 0
-  return Math.min(100, Math.round((used / allowance) * 100))
-}
-
 function planLabel(plan: OrgBilling["plan"]): string {
   const resolved = normalizeBillingPlan(plan)
   if (resolved === "field") return "Field Plan"
   if (resolved === "enterprise") return "Enterprise"
-  return "Explore"
+  return "Free"
 }
 
 export function OrgSettingsBilling() {
@@ -44,63 +39,68 @@ export function OrgSettingsBilling() {
   const jwt = session?.jwt ?? null
   const canManage = (activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER
 
-  const [data, setData] = useState<OrgBilling | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [result, setResult] = useState<{
+    jwt: string; orgId: number; workspace: BillingWorkspace; legacy: OrgBilling | null
+  } | null>(null)
+  const [reload, setReload] = useState(0)
+  const request = useRef(0)
+  const current = result?.jwt === jwt && result.orgId === activeOrgId ? result : null
+  const data = current?.legacy ?? null
+  const workspace = current?.workspace ?? null
+  const paid = workspace?.entitlement ?? null
+  const [pending, setPending] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<"field" | "addon" | "portal" | null>(null)
+  const [busy, setBusy] = useState<"portal" | null>(null)
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const checkout = searchParams.get("checkout")
-    if (checkout !== "success" && checkout !== "cancel") return
-    setNotice(checkout === "success" ? "Payment received. Usage updates in a moment." : "Checkout canceled.")
+    if (!["success", "cancel", "rehearsal"].includes(checkout ?? "")) return
+    setNotice(checkout === "rehearsal" ? "Test checkout returned. Refresh billing to check payment confirmation." : checkout === "success" ? "Checkout completed. Your plan updates after payment is confirmed." : "Checkout canceled.")
     const next = new URLSearchParams(searchParams)
     next.delete("checkout")
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
-  const load = useCallback(async () => {
-    if (!jwt || activeOrgId == null) return
-    setLoading(true)
-    setError(null)
-    try {
-      setData(await getOrgBilling(jwt, activeOrgId))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't load billing.")
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [jwt, activeOrgId])
-
   useEffect(() => {
-    void load()
-  }, [load])
+    const generation = ++request.current
+    setResult(null)
+    setError(null)
+    setBusy(null)
+    setPending(true)
+    if (!jwt || activeOrgId == null || !canManage) return
+    void (async () => {
+      const workspace = await getBillingWorkspace(jwt, activeOrgId)
+      const legacy = workspace.entitlement ? null : await getOrgBilling(jwt, activeOrgId)
+      if (!workspace.entitlement && !legacy) throw new Error("Billing details are unavailable.")
+      if (request.current === generation) setResult({ jwt, orgId: activeOrgId, workspace, legacy })
+    })().catch(() => {
+      if (request.current === generation) setError("Billing details are unavailable. Try again; your access stays unchanged.")
+    }).finally(() => {
+      if (request.current === generation) setPending(false)
+    })
+    return () => { request.current++ }
+  }, [jwt, activeOrgId, canManage, reload])
 
-  async function go(kind: "field" | "addon" | "portal") {
+  async function go(kind: "portal") {
     if (!jwt || activeOrgId == null) return
+    const generation = request.current
     setBusy(kind)
     setError(null)
     try {
-      const url =
-        kind === "portal"
-          ? await startBillingPortal(jwt, activeOrgId)
-          : await startBillingCheckout(jwt, activeOrgId, kind)
-      window.location.assign(url)
+      const url = paid && workspace?.portalEnabled === true
+        ? await startWorkspaceBillingPortal(jwt, activeOrgId)
+        : await startBillingPortal(jwt, activeOrgId)
+      if (request.current === generation) window.location.assign(url)
     } catch (err) {
+      if (request.current !== generation) return
       setError(err instanceof Error ? err.message : "Couldn't start Stripe.")
       setBusy(null)
     }
   }
 
-  const allowance = data?.allowanceCredits ?? null
-  const used = data?.creditsUsed ?? 0
-  const pct = usagePct(used, allowance)
-  const fieldCredits = data?.fieldPlan.fieldCreditsPerCycle ?? TIER_CREDITS.field.creditsPerCycle
-  const addonCredits = data?.fieldPlan.addonCredits ?? TIER_CREDITS.field.creditsPerCycle
-  const checkoutEnabled = data?.checkoutEnabled === true
 
   return (
     <OrgSettingsDetailPage
@@ -113,133 +113,84 @@ export function OrgSettingsBilling() {
         </p>
       ) : null}
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-muted-foreground">
+      {!canManage ? (
+        <p className="text-sm text-muted-foreground">{t("billing.maintainersOnly")}</p>
+      ) : pending || (!current && !error) ? (
+        <div className="flex items-center gap-2 text-muted-foreground" role="status">
           <Spinner className="size-3.5" />
           <span className="text-sm">{t("billing.loading")}</span>
         </div>
-      ) : !canManage || data == null ? (
-        <p className="text-sm text-muted-foreground">
-          {t("billing.maintainersOnly")}
-        </p>
+      ) : !workspace ? (
+        <Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry billing</Button>
       ) : (
         <div className="flex flex-col gap-10">
           <SettingsGroup label={t("billing.plan.group")}>
             <SettingsRow
               label={t("billing.plan.current")}
               description={
-                data.plan === "field"
-                  ? `${formatUsdFromCents(data.fieldPlan.priceCents)} every ${data.fieldPlan.intervalDays} days, including ${formatAgentCredits(fieldCredits)} agent credits.`
-                  : data.plan === "enterprise"
-                    ? "Billed offline. Agent credits scale with each target-language lane."
-                    : `${formatAgentCredits(data.fieldPlan.exploreCreditsPerCycle ?? TIER_CREDITS.explore.creditsPerCycle)} agent credits each 4-week cycle on Explore.`
+                paid ? (paid.billingInterval === "year" ? "Billed annually." : "Billed monthly.")
+                  : data?.plan === "enterprise"
+                  ? "Custom annual quote for support and platform usage."
+                  : "Your organization’s plan covers its projects and collaborators."
               }
               control={
-                <Badge variant={normalizeBillingPlan(data.plan) === "explore" ? "outline" : "default"} data-testid="billing-plan">
-                  {planLabel(data.plan)}
+                <Badge variant={!paid && normalizeBillingPlan(data?.plan ?? "none") === "explore" ? "outline" : "default"} data-testid="billing-plan">
+                  {paid ? billingOfferLabels[paid.offer] : planLabel(data!.plan)}
                 </Badge>
               }
             />
-            {normalizeBillingPlan(data.plan) === "explore" ? (
-              <SettingsRow
-                label={t("billing.plan.field")}
-                description={`${formatUsdFromCents(data.fieldPlan.priceCents)} / 4 weeks · ${formatAgentCredits(fieldCredits)} agent credits included · ${formatUsdFromCents(data.fieldPlan.addonPriceCents)} per extra ${formatAgentCredits(addonCredits)} credits.`}
-                control={
-                  <Button
-                    onClick={() => void go("field")}
-                    disabled={!checkoutEnabled || !data.canSubscribe || busy != null}
-                    data-testid="subscribe-field-plan"
-                  >
-                    <CreditCard data-icon="inline-start" />
-                    {busy === "field" ? "Redirecting…" : "Coming soon"}
-                  </Button>
-                }
-              />
-            ) : (
+            {(paid ? workspace.portalEnabled === true : data?.canManage) ? (
               <SettingsRow
                 label={t("billing.plan.manage")}
-                description={t("billing.plan.manageHelp")}
+                description={paid ? "Manage your plan, invoices, and payment methods securely with Stripe." : t("billing.plan.manageHelp")}
                 control={
                   <Button
                     variant="outline"
                     onClick={() => void go("portal")}
-                    disabled={!data.canManage || busy != null}
+                    disabled={busy != null}
                     data-testid="manage-billing"
                   >
                     <ExternalLink data-icon="inline-start" />
-                    {busy === "portal" ? "Redirecting…" : "Open customer portal"}
+                    {busy === "portal" ? "Redirecting…" : paid ? "Manage billing" : "Open customer portal"}
                   </Button>
                 }
               />
-            )}
+            ) : null}
           </SettingsGroup>
 
-          <SettingsGroup label={t("billing.usage.period")}>
-            <SettingsRow label={t("billing.usage.label")} block>
-              <div className="space-y-3" data-testid="billing-usage">
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-2xl font-heading font-semibold tabular-nums">
-                    {formatAgentCredits(used)}
-                    <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                      {allowance == null ? "credits recorded" : `/ ${formatAgentCredits(allowance)}`}
-                    </span>
-                  </p>
-                  {allowance != null ? (
-                    <span className="text-xs tabular-nums text-muted-foreground">{pct}%</span>
-                  ) : null}
-                </div>
-                {allowance != null ? (
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${pct}%` }}
-                      aria-hidden
-                    />
-                  </div>
-                ) : null}
-                {data.plan === "field" ? (
-                  <p className="text-xs text-muted-foreground">
-                    {data.addonPacks > 0
-                      ? `${data.addonPacks} add-on pack${data.addonPacks === 1 ? "" : "s"} this period.`
-                      : "No add-on packs this period."}
-                  </p>
-                ) : null}
-              </div>
-            </SettingsRow>
-            {data.plan === "field" && !data.talkToUs ? (
-              <SettingsRow
-                label={t("billing.addon.prompt")}
-                description={`${formatUsdFromCents(data.fieldPlan.addonPriceCents)} adds ${formatAgentCredits(addonCredits)} agent credits to this period only.`}
-                control={
-                  <Button
-                    variant="outline"
-                    onClick={() => void go("addon")}
-                    disabled={!checkoutEnabled || !data.canBuyAddon || busy != null}
-                    data-testid="buy-word-addon"
-                  >
-                    {busy === "addon" ? "Redirecting…" : `Add ${formatAgentCredits(addonCredits)} credits`}
-                  </Button>
-                }
-              />
-            ) : null}
-            {data.talkToUs || data.plan === "enterprise" ? (
-              <SettingsRow
-                label={t("billing.contact.prompt")}
-                description={
-                  data.plan === "enterprise"
-                    ? "Enterprise credits are set per target-language lane. A human raises the ceiling."
-                    : "At this volume, Field Plan add-ons stop and we route the deal."
-                }
-                control={
-                  <a
-                    href="mailto:support@aquilla.app"
-                    className={cn(buttonVariants({ variant: "outline" }))}
-                  >
-                    {t("billing.contact.email")}
-                  </a>
-                }
-              />
-            ) : null}
+          <Button variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
+          <BillingWorkspaceDetails data={workspace} />
+          {!paid && jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
+          <SettingsGroup label="Plans and covered access">
+            <SettingsRow
+              label="ETEN affiliate or Bible-translation team?"
+              description="Your organization’s access may already be covered. Contact us to confirm coverage and arrange access without paying for a subscription."
+              control={
+                <a
+                  href="mailto:hello@aquilla.app?subject=ETEN%20affiliate%20or%20Bible-translation%20access"
+                  className={cn(buttonVariants({ variant: "outline" }))}
+                >
+                  Check covered access
+                </a>
+              }
+            />
+            <SettingsRow
+              label="Compare plans"
+              description="See Individual and Team pricing or discuss a custom annual Enterprise quote."
+              control={<a href="https://aquilla.app/pricing" className={cn(buttonVariants({ variant: "outline" }))}>View plans</a>}
+            />
+          </SettingsGroup>
+          <SettingsGroup label="AI usage">
+            <div data-testid="billing-usage" className="flex flex-col gap-3 text-sm text-muted-foreground">
+              <p>Collaborators share your organization’s AI allowance across its projects.</p>
+              {paid ? <>
+                <p>AI capacity resets every seven days from your plan’s activation, with no rollover. Monthly or annual billing does not change this schedule.</p>
+                <p>Usage measurement is not available yet.</p>
+              </> : <p>Weekly limits use a rolling seven-day window. Capacity returns as older usage leaves the window. Daily limits may also apply.</p>}
+              <p>Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.</p>
+              <p>Self-service allowance purchases are not available. Contact us if your organization needs more capacity.</p>
+              <a href="mailto:support@aquilla.app?subject=Organization%20AI%20capacity" className="underline">Discuss AI capacity</a>
+            </div>
           </SettingsGroup>
         </div>
       )}

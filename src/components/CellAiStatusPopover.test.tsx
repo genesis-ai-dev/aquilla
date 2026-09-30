@@ -5,8 +5,8 @@ import type { ActionableError } from "@/lib/audio/ai-error"
 
 const error: ActionableError = {
   category: "provider-unavailable",
-  title: "OmniVoice isn't configured",
-  body: "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it.",
+  title: "Inworld TTS isn't configured",
+  body: "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it.",
   raw: "TTS not configured",
 }
 

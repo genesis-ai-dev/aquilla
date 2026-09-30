@@ -9,6 +9,12 @@ vi.mock("@/lib/rules/rule-engine", { spy: true })
 
 import { useHealth } from "./useHealth"
 import type { CellData } from "./useCells"
+import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
+import type {
+  CellCoordinates,
+  RuleApplicability,
+  StyleRule,
+} from "@/lib/rules/style-rule-types"
 import type { TranslationRule } from "@/lib/parsers/types"
 
 function cell(id: string, translated: string, endorsementCount = 0): CellData {
@@ -199,6 +205,157 @@ describe("useHealth — enabled: false kill switch", () => {
     const fileCells = new Map([["f", [cell("a", "bonjour", 5)]]])
     const { result } = renderHook(() => useHealth(fileCells, [forbidRule], { enabled: true }))
     expect(result.current.infractions.get("a")?.length).toBe(1)
+  })
+})
+
+// AQU-934 phase 3a: style-library checks lint only where the applicability
+// graph puts them in force.
+describe("useHealth — library rules via rulesForCell", () => {
+  const BANNED_RULE: StyleRule = {
+    id: "lib-1",
+    orgId: null,
+    projectId: "p1",
+    instruction: "Never write the word banned.",
+    category: "style",
+    scope: "segment",
+    conditions: null,
+    examples: null,
+    exceptions: null,
+    source: null,
+    checkSpec: { type: "target-forbids", targetPattern: "\\bbanned\\b" },
+    severity: "minor",
+    enabled: true,
+    status: "approved",
+    humanEdited: false,
+    provenance: null,
+    createdBy: null,
+    reviewedBy: null,
+    version: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  }
+
+  function row(cellId: string): RuleApplicability {
+    return {
+      id: `row-${cellId}`,
+      ruleId: BANNED_RULE.id,
+      targetType: "segment",
+      targetId: cellId,
+      relationship: "applies",
+      confidence: null,
+      reason: null,
+      assignedBy: "human",
+      createdBy: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    }
+  }
+
+  /** Coordinates without file metadata — segment + file is all these cells have. */
+  const coordsFor = (c: { id: string; fileId: string }): CellCoordinates => ({
+    segment: c.id,
+    file: c.fileId,
+  })
+
+  function resolver(rules: StyleRule[], rows: RuleApplicability[]) {
+    return buildLibraryLintResolver({ styleRules: rules, applicability: rows, coordsFor })
+  }
+
+  it("lints the cell the graph selects and not its sibling, with no project rules", async () => {
+    const fileCells = new Map([["f", [cell("a", "a banned word"), cell("b", "a banned word")]]])
+    const { rulesForCell, signature } = resolver([BANNED_RULE], [row("a")])
+
+    const { result } = renderHook(() =>
+      useHealth(fileCells, [], { rulesForCell, rulesForCellSig: signature }),
+    )
+
+    await waitFor(() => expect(result.current.healthMap.size).toBe(2))
+    expect(result.current.infractions.get("a")?.map((i) => i.ruleId)).toEqual(["lib:lib-1"])
+    expect(result.current.infractions.has("b")).toBe(false)
+  })
+
+  it("re-lints every cached cell when the library signature changes", async () => {
+    const fileCells = new Map([["f", [cell("a", "a banned word")]]])
+    const dormant = resolver([BANNED_RULE], [row("other-cell")])
+    const live = resolver([BANNED_RULE], [row("a")])
+
+    const { result, rerender } = renderHook(
+      ({ r }: { r: ReturnType<typeof resolver> }) =>
+        useHealth(fileCells, [], { rulesForCell: r.rulesForCell, rulesForCellSig: r.signature }),
+      { initialProps: { r: dormant } },
+    )
+    await waitFor(() => expect(result.current.healthMap.size).toBe(1))
+    expect(result.current.infractions.has("a")).toBe(false)
+
+    // Same cells, same content: only the graph moved.
+    rerender({ r: live })
+    await waitFor(() => expect(result.current.infractions.has("a")).toBe(true))
+    expect(result.current.infractions.get("a")?.map((i) => i.ruleId)).toEqual(["lib:lib-1"])
+  })
+
+  it("never consults the resolver when the library signature says nothing can lint", async () => {
+    const fileCells = new Map([["f", [cell("a", "a banned word")]]])
+    const empty = resolver([], [])
+    const spy = vi.fn(empty.rulesForCell)
+
+    const { result } = renderHook(() =>
+      useHealth(fileCells, [], { rulesForCell: spy, rulesForCellSig: empty.signature }),
+    )
+
+    await waitFor(() => expect(result.current.healthMap.size).toBe(1))
+    expect(spy).not.toHaveBeenCalled()
+    expect(result.current.infractions.size).toBe(0)
+  })
+
+  it("resolves each cell once per content change, not once per pass", async () => {
+    const first = new Map([["f", [cell("a", "one"), cell("b", "two")]]])
+    const { rulesForCell } = resolver([BANNED_RULE], [row("a")])
+    const spy = vi.fn(rulesForCell)
+
+    const { result, rerender } = renderHook(
+      ({ cells }: { cells: Map<string, CellData[]> }) =>
+        useHealth(cells, [], { rulesForCell: spy, rulesForCellSig: "sig-1" }),
+      { initialProps: { cells: first } },
+    )
+    await waitFor(() => expect(result.current.healthMap.size).toBe(2))
+    const afterFirstPass = spy.mock.calls.length
+
+    // A keystroke in "a": new Map, new array, one changed cell.
+    rerender({ cells: new Map([["f", [cell("a", "one more"), cell("b", "two")]]]) })
+    await waitFor(() => expect(result.current.healthMap.size).toBe(2))
+
+    expect(afterFirstPass).toBe(2)
+    expect(spy.mock.calls.length - afterFirstPass).toBe(1)
+    expect(spy.mock.calls[spy.mock.calls.length - 1][0].id).toBe("a")
+  })
+
+  it("keeps today's behaviour byte-identical when the new options are omitted", async () => {
+    const projectRule: TranslationRule = {
+      id: "user:1",
+      name: "No banned word",
+      description: "",
+      severity: "minor",
+      source: "user",
+      scope: "project",
+      check: { type: "target-forbids", targetPattern: "\\bbanned\\b" },
+      enabled: true,
+      createdAt: "2026-01-01T00:00:00Z",
+    }
+    const fileCells = new Map([["f", [cell("a", "a banned word"), cell("b", "fine")]]])
+
+    const withRules = renderHook(() => useHealth(fileCells, [projectRule]))
+    await waitFor(() => expect(withRules.result.current.healthMap.size).toBe(2))
+    expect(withRules.result.current.infractions.get("a")?.map((i) => i.ruleId)).toEqual(["user:1"])
+    expect(withRules.result.current.infractions.has("b")).toBe(false)
+
+    // No rules at all: the early return still yields an empty surface, and the
+    // structural-stability contract still hands back the same reference.
+    const noRules = renderHook(() => useHealth(fileCells, []))
+    await waitFor(() => expect(noRules.result.current.healthMap.size).toBe(2))
+    expect(noRules.result.current.infractions.size).toBe(0)
+    const before = noRules.result.current
+    noRules.rerender()
+    expect(noRules.result.current).toBe(before)
   })
 })
 

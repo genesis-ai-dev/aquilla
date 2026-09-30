@@ -50,7 +50,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
@@ -128,7 +130,7 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Shared with you" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
@@ -174,7 +176,7 @@ describe("OrgSidebar Data egress entry (AQU-907)", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
   })
 
   it("hides the entry when the egress policy excludes the caller", async () => {
@@ -227,7 +229,7 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
 
     renderSidebar("/orgs/1")
 
-    await waitFor(() => expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("link", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Archived" })).toBeInTheDocument()
   })
@@ -239,5 +241,22 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
+  })
+})
+
+describe("OrgSidebar settings link — AQU-1338 ambiguous link purpose", () => {
+  /**
+   * A project view also renders a control labelled "Settings". Two links
+   * with the same name and different destinations cannot be told apart by a
+   * screen reader's link list, and a live Jev journey followed the wrong one
+   * into organization settings and gave up.
+   */
+  it("names the org settings link for its destination while keeping the visible text", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    renderSidebar("/orgs/1")
+    const link = await screen.findByRole("link", { name: "Organization settings" })
+    expect(link).toHaveTextContent("Settings")
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
   })
 })

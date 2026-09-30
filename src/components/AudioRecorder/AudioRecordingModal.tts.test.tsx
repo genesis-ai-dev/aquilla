@@ -43,6 +43,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioValidate: vi.fn(async () => "evt"),
   emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
@@ -459,9 +460,9 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
     renderModal(cellWith("bonjour"))
     const line = screen.getByTestId("rec-tts-error")
     // What it IS, then what to do about it. AQU-1001 names the engine: the
-    // default engine's 503 reads as OmniVoice not configured, never as a
+    // default engine's 503 reads as Inworld TTS not configured, never as a
     // missing Gemini key.
-    expect(line).toHaveTextContent(/OmniVoice isn't configured/i)
+    expect(line).toHaveTextContent(/Inworld TTS isn't configured/i)
     expect(line).toHaveTextContent(/will not fix/i)
     // NOT the raw fragment. That is support's text, not the performer's, and it
     // lives in the tooltip.

@@ -19,7 +19,7 @@ import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/clou
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 
@@ -27,7 +27,11 @@ import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/pro
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
  * Mutates a shallow copy — never the input.
  */
-function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): ProjectRecord {
+function overlaySettings(
+  record: ProjectRecord,
+  settings: ProjectWideSettings,
+  lanes?: ProjectLaneView[] | null,
+): ProjectRecord {
   let next: ProjectRecord | null = null
   const draft = () => {
     next ??= { ...record }
@@ -46,6 +50,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   // AQU-601: archived-lane markers overlay alongside the registry so the
   // workspace switcher can hide archived lanes by default.
   assign("archivedLanes", settings.archivedLanes)
+  if (lanes) {
+    draft().lanes = lanes
+  }
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
       draft().completionSettings = buildCompletionSettings(
@@ -59,6 +66,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("algorithmicChecks", settings.algorithmicChecks)
   assign("terminology", settings.terminology)
   assign("termMatching", settings.termMatching)
+  assign("fileGenres", settings.fileGenres)
   // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
   // workspace or the glosser and the alignment panel both read an empty list:
   // a confirmation then persisted server-side but never fed the BT, never
@@ -72,6 +80,12 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
+  // AQU-490: the audio policy. Must reach the workspace or the gutter control
+  // would apply the TEXT project's rules to recordings — the one thing Sam's
+  // "separate settings" ruling exists to prevent.
+  assign("validationRoleFloorAudio", settings.validationRoleFloorAudio)
+  assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
+  assign("allowSelfValidationAudio", settings.allowSelfValidationAudio)
   assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
@@ -315,8 +329,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(
-    () => project ? overlaySettings(project, syncedSettings) : null,
-    [project, syncedSettings],
+    () => project ? overlaySettings(project, syncedSettings, projectSettings.lanes) : null,
+    [project, syncedSettings, projectSettings.lanes],
   )
 
   return {

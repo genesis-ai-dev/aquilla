@@ -361,6 +361,33 @@ describe('files.structural_* — the heading/paratext subset (AQU-1083)', () => 
     expect(await counts(db)).toEqual(perFile)
   })
 
+  it('narrows the per-project form to the files a scope names (AQU-557)', async () => {
+    // POST /migrate/finalize passes the files a push touched. Those must land
+    // exactly what the per-file form lands, and a file outside the scope must
+    // keep its row as it was — the unscoped form would have zeroed it.
+    const OTHER = 'file-untouched'
+    const { db } = await makeTestDb({
+      files: [
+        { id: F, project_id: P, name: 'GEN', event_id: 'f-evt' },
+        { id: OTHER, project_id: P, name: 'EXO', event_id: 'o-evt', cell_count: 7, updated_at: 1 },
+      ],
+      cells: [
+        source('v1', 'verse'), target('v1', 'uno', 1),
+        source('h1', 'heading'), target('h1', 'titulo', 1),
+      ],
+    })
+    await projectFileCountersRecomputeStmt(db, P, 99, [F]).run()
+    const c = await counts(db)
+    expect(Number(c?.cell_count)).toBe(2)
+    expect(Number(c?.structural_cell_count)).toBe(1)
+    const other = await db
+      .prepare(`SELECT cell_count, updated_at FROM files WHERE id = ? AND project_id = ?`)
+      .bind(OTHER, P)
+      .first<{ cell_count: number; updated_at: number }>()
+    expect(Number(other?.cell_count)).toBe(7)
+    expect(Number(other?.updated_at)).toBe(1)
+  })
+
   it('zeroes a file whose cells have all gone', async () => {
     // Driven FROM files rather than from cells, so an emptied file is reset
     // rather than left holding its last known numbers — which is what the

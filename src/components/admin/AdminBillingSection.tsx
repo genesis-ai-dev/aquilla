@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Section } from "@/components/ui/page"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { AdminSectionSkeleton } from "./shared"
 import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/lib/billing/plans"
 import {
   getAdminBillingOrgs,
@@ -233,7 +234,12 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     [act, jwt],
   )
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading billing…</p>
+  // AQU-942: only a first load that has resolved nothing may replace the
+  // section. Every grant/reset/save round-trips through `refresh`, which flips
+  // `loading` back on — gating on it alone unmounted the catalog form and the
+  // org table after each action, losing the table's sort/scroll and flashing
+  // the whole tab. Errors already render inline inside the shell below.
+  if (loading && !catalog && !orgs) return <AdminSectionSkeleton label="Loading billing" />
   if (error && !catalog) return <p className="text-sm text-destructive">{error}</p>
 
   return (

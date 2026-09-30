@@ -70,9 +70,23 @@ export interface ProjectWideSettings {
    * did before this existed.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1391: does validating a cell copy its translation into the other cells
+   * in the same file whose source text is identical?
+   *
+   * ABSENT means "use the organization's default" (which is ON unless the org
+   * opted out) — the same three-state shape as `countStructuralCells` above,
+   * and for the same reason: null would be a fourth thing the resolver has no
+   * meaning for, so choosing the default deletes the key.
+   */
+  autoPropagateRepetitions?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /** AQU-490: the audio twins. Separate keys, never fallbacks for each other. */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-1068: who may add and remove cells in this project's files?
    *
@@ -225,8 +239,10 @@ export interface ProjectWideSettings {
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
   /**
-   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
-   * Opaque BCP-47-ish tags; order = display order.
+   * Complete target-language lane registry, including the project's primary
+   * lane (the same tag as `targetLanguage`). There is no implicit '' default
+   * lane — every lane is an explicit entry. Opaque BCP-47-ish tags; order =
+   * display order (primary first).
    */
   targetLanes?: string[]
   /**
@@ -276,6 +292,18 @@ export interface ProjectWideSettings {
    * (pseudonymous ids). Not agent-writable (`POLICY_SETTINGS_KEYS`).
    */
   agentAuthorship?: "none"
+  /**
+   * AQU-934: per-file genre assignment — fileId → genre id from the vocabulary
+   * in `src/lib/rules/file-genre.ts`. Human-set (a model may only suggest); an
+   * entry OVERRIDES the genre derived from a scripture book code and is the
+   * ONLY way a non-scripture document gets one, so genre-scoped style rules
+   * reach every cell of a classified document. Files with no entry keep
+   * deriving from their book code, so this map stays small — bounded by file
+   * count (tens of entries), not by content, which is why it belongs in the
+   * settings blob rather than its own table. Replacing this key replaces the
+   * whole map: writers must send the full merged object.
+   */
+  fileGenres?: Record<string, string>
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -352,6 +380,18 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
+  lanes?: ProjectLaneView[]
+}
+
+export interface ProjectLaneView {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
 }
 
 export type PatchResult =
@@ -365,6 +405,96 @@ function authHeaders(jwt: string): HeadersInit {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
   }
+}
+
+export type RenameLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  name: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<RenameLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ name }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) {
+    return { kind: "error", message: `rename failed (${res.status})` }
+  }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type CreateLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** POST /api/v2/projects/:id/lanes. Language-edit floor. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  input: { name: string; language: string },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CreateLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(input),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+/** POST /api/v2/projects/:id/lanes/:laneId/archive. */
+export async function setProjectLaneArchived(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/archive`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ archived }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `archive failed (${res.status})` }
+  return { kind: "ok" }
 }
 
 /**
@@ -431,9 +561,11 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
- * Caller must include `ifMatchVersion`; mismatched version returns
- * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
+ * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
+ * settings blob (no per-key merge) — send a complete blob. Per-key merge is
+ * only available via the `useProjectSettings` hook and the Agent API
+ * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
+ * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
  */
 export async function patchProjectSettings(

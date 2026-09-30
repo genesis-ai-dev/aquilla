@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest"
 import {
-  OMNIVOICE_NOT_CONFIGURED_BODY,
+  HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_NOT_CONFIGURED_BODY,
-  errorFromOmnivoiceTts,
+  errorFromHostedTts,
   errorFromVoiceConvert,
 } from "./tts-engine-error"
 
-describe("errorFromOmnivoiceTts", () => {
-  it("names OmniVoice when the local worker has no Modal endpoint", () => {
-    const message = errorFromOmnivoiceTts(503, "TTS not configured").message
-    expect(message).toBe(OMNIVOICE_NOT_CONFIGURED_BODY)
-    expect(message).toMatch(/omnivoice/i)
+describe("errorFromHostedTts", () => {
+  it("names Inworld when the local worker has no Inworld API key", () => {
+    const message = errorFromHostedTts(503, "TTS not configured").message
+    expect(message).toBe(HOSTED_TTS_NOT_CONFIGURED_BODY)
+    expect(message).toMatch(/inworld/i)
     expect(message).toMatch(/not gemini/i)
   })
 
-  it("still names OmniVoice on a later Modal failure", () => {
-    const err = errorFromOmnivoiceTts(502, "upstream timeout")
-    expect(err.message).toMatch(/^OmniVoice TTS failed \(502\)/)
+  it("still names Inworld on a later upstream failure", () => {
+    const err = errorFromHostedTts(502, "upstream timeout")
+    expect(err.message).toMatch(/^Inworld TTS failed \(502\)/)
     expect(err.message).toContain("upstream timeout")
   })
 })

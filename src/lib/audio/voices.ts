@@ -21,8 +21,7 @@ export const DEFAULT_PROMPT_TEMPLATE = [
  * pre-stuffed with stock moods. Editable in place.
  *
  * Round 5 (AQU-646): deliberately NO `provider` — the Narrator follows the
- * project's engine setting (a pinned "gemini" here silently overrode the
- * OmniVoice default and demanded a Gemini key on every fresh project). The
+ * Inworld default and demanded a Gemini key on every fresh project). The
  * voiceName only applies when the resolved engine is Gemini; other engines
  * normalize it away (normalizeVoiceForProvider).
  */

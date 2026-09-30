@@ -26,6 +26,8 @@
 // completion-service.ts re-exports everything here, so every existing call
 // site and test keeps importing from where it always did.
 
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+
 /** One OpenAI-style chat message. The copilot prompt is always exactly two:
  *  a system message then a user message. */
 export interface ChatMessage {
@@ -67,8 +69,52 @@ export interface PromptRule {
  */
 export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
 
+/**
+ * One row of the immediate discourse window.
+ *
+ * `draft` marks a target this same run produced and NOBODY has reviewed
+ * (AQU-1386 §3). Batch drafting sends several calls in sequence; without this,
+ * call N+1 could not see call N's output at all and every chunk started its
+ * discourse cold. Carrying it forward is what keeps connectives and participant
+ * reference consistent across a long file.
+ *
+ * It is labelled in the prompt rather than silently mixed in, because the model
+ * should weigh an unreviewed draft less than an approved translation. The rule
+ * that unapproved text never becomes a retrieval EXAMPLE is untouched: this is
+ * in-run context only, is never persisted, and never crosses runs.
+ */
+export interface PrecedingContextEntry {
+  source: string
+  target: string
+  /** In-run, unreviewed draft — labelled as such in the rendered prompt. */
+  draft?: boolean
+}
+
+/** Prompt label for one discourse-window row. */
+export function precedingContextLabel(entry: PrecedingContextEntry): string {
+  return entry.draft ? "Translation (unreviewed draft)" : "Translation"
+}
+
 function normalizedExampleSource(source: string): string {
   return source.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+/**
+ * AQU-153: a retrieval hit only becomes a translation example once it carries
+ * a real source→target pair. Branching search ranks SOURCE cells, so an
+ * untranslated cell is a legitimate hit — it is just not an example, because
+ * there is nothing for the model to imitate. Callers that count or display
+ * "examples" run their hits through here so the number they report is the
+ * number of actual pairs, never the raw source-side hit count. (Without it, a
+ * brand-new project with nothing translated still claimed "5 examples used.")
+ *
+ * `selectApprovedExamples` applies the same rule to the prompt pool; this is
+ * the same invariant for the evidence surfaces, so the two cannot drift.
+ */
+export function retainTranslationPairs<T extends { source: string; target: string }>(
+  hits: readonly T[],
+): T[] {
+  return hits.filter((hit) => hit.source.trim() !== "" && hit.target.trim() !== "")
 }
 
 /**
@@ -136,6 +182,28 @@ export function buildRulesBlock(rules: PromptRule[]): string {
 }
 
 /**
+ * Render the style-rule instructions in force for the cell(s) being drafted
+ * (AQU-934). Unlike `buildRulesBlock`, which can only speak the three regex
+ * check shapes, these are natural-language rules resolved per passage from the
+ * applicability graph — so the block carries exactly the guidance that applies
+ * here, instead of every project rule on every call.
+ *
+ * Blank/duplicate instructions are dropped; empty input → "" (caller skips).
+ */
+export function buildStyleRulesBlock(instructions: string[] | undefined | null): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const raw of instructions ?? []) {
+    const instruction = raw.trim()
+    if (!instruction || seen.has(instruction)) continue
+    seen.add(instruction)
+    lines.push(`- ${instruction}`)
+  }
+  if (!lines.length) return ""
+  return "Style rules that apply to this passage (MUST follow):\n" + lines.join("\n")
+}
+
+/**
  * Render the brief's L1 summary as a labeled block for the system prompt.
  * Empty/blank input → "" (caller skips injection). The brief states the
  * project's purpose, audience, register, and constraints; it sits ABOVE the
@@ -171,6 +239,9 @@ export interface BuildPromptOptions {
   examples: { source: string; target: string }[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: PromptRule[]
+  /** Style-rule instructions resolved for this cell from the applicability
+   *  graph (AQU-934) — injected after the rules block. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended to examples. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -181,7 +252,7 @@ export interface BuildPromptOptions {
    *  discourse window. Rendered last (closest to the live source) because it is
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
    *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Extra task instruction appended to the system prompt after the rules
    *  block. Must be placeholder-free — it is appended AFTER the
    *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
@@ -209,6 +280,9 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
     if (block) sys = sys + "\n\n" + block
   }
 
+  const styleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (styleBlock) sys = sys + "\n\n" + styleBlock
+
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   const targetOnly = options.exampleFormat === "target-only"
@@ -231,20 +305,22 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
 
   let user = ""
   if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
+    for (const ex of allExamples) user += `Target: ${stripTrailingBareMarkers(ex.target)}\n\n`
   } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+    for (const ex of allExamples) {
+      user += `Source: ${stripTrailingBareMarkers(ex.source)}\nTranslation: ${stripTrailingBareMarkers(ex.target)}\n\n`
+    }
   }
   // Immediately-preceding committed context (discourse window): render after the
   // few-shot examples and just before the live source so it sits closest to what
   // the model is about to translate. Skip blank pairs. (D4)
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
   if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
+  user += `Source: ${stripTrailingBareMarkers(options.sourceText)}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }

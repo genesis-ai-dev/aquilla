@@ -23,6 +23,7 @@ import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { patchProjectSettingsShared } from '../../../db/shared/projects'
 import { BRIEF_SETTINGS_KEY, type TranslationBriefRecord } from '../../../db/shared/brief'
+import { buildPromptPreview } from '../external/prompt-preview'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const PROJECT = 'proj-setup'
@@ -82,10 +83,22 @@ function makeEnv(db: AquillaDb, bucket: StubBucket, opts: { briefBackend?: boole
 }
 
 /** Stub the auth-worker brief-summary bridge so the L1 render succeeds. */
-function stubBriefBackend(summary = 'A meaning-based translation for rural youth.') {
+function stubBriefBackend(
+  summary = 'A meaning-based translation for rural youth.',
+  opts: { truncated?: boolean } = {},
+) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => Response.json({ summary, model: 'model-x' })),
+    vi.fn(async () => Response.json({ summary, model: 'model-x', truncated: opts.truncated === true })),
+  )
+}
+
+/** Stub the bridge so the L1 render FAILS — the AQU-1323 production shape: the
+ *  brief sections commit, the summary the copilot reads stays yesterday's. */
+function stubBriefBackendDown() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ error: 'job_failed', message: 'model unreachable' }, { status: 502 })),
   )
 }
 
@@ -352,6 +365,181 @@ describe('ProjectSetup — one plan, one approval', () => {
     const { res, body: denied } = await commit(env, caller.token, body.changeset.id)
     expect(res.status).toBe(428)
     expect(denied.error?.code).toBe('confirmation_required')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AQU-1323 — the composite command's central promise is that the brief reaches
+// the AI without a human clicking "Regenerate summary". In production the brief
+// step committed the sections, silently failed to re-render the L1, and the
+// receipt still said briefReachesCopilot: true — so the agent reading it stopped
+// checking. These tests pin both halves: the render must actually land, and when
+// it does not the receipt must say so.
+
+/** A brief whose L1 was rendered two days ago — the stale-summary starting
+ *  state from the production repro. Returns the settings version after seeding. */
+async function seedStaleBrief(): Promise<{ version: number; l1GeneratedAt: string }> {
+  const l1GeneratedAt = '2026-09-16T14:00:41.000Z'
+  const stale: TranslationBriefRecord = {
+    version: 3,
+    updatedAt: l1GeneratedAt,
+    updatedBy: 'ryder',
+    parameters: { audience: 'Rural youth, 15–25' },
+    freeformNotes: '',
+    l2Markdown: '# Translation Brief\n\n## Purpose & audience\n\n### Audience / addressees\nRural youth, 15–25',
+    l1Summary: 'Translate for rural youth aged 15-25. Prefer natural, contemporary phrasing.',
+    l1GeneratedAt,
+    l1ModelId: 'model-old',
+  }
+  const result = await patchProjectSettingsShared(tdb.db, {
+    projectId: PROJECT,
+    ops: [{ key: BRIEF_SETTINGS_KEY, value: stale }],
+    ifMatchVersion: 1,
+    updatedBy: 99,
+  })
+  if (result.status !== 'ok') throw new Error(`seed failed: ${result.status}`)
+  return { version: result.settings.version, l1GeneratedAt }
+}
+
+async function firstSourceCellId(fileId: string): Promise<string> {
+  const row = await tdb.db
+    .prepare(
+      `SELECT cell_id FROM cells WHERE project_id = ? AND file_id = ? AND side = 'source'
+        ORDER BY sequence_index ASC, cell_id ASC LIMIT 1`,
+    )
+    .bind(PROJECT, fileId)
+    .first<{ cell_id: string }>()
+  if (!row) throw new Error('no source cell')
+  return row.cell_id
+}
+
+function storedBrief(settings: Record<string, unknown>): TranslationBriefRecord {
+  return settings[BRIEF_SETTINGS_KEY] as TranslationBriefRecord
+}
+
+interface SetupVerification {
+  briefReachesCopilot: boolean
+  briefDetails?: { reason?: string; truncated?: boolean; l1GeneratedAt?: string | null }
+}
+
+describe('ProjectSetup — the brief reaches the copilot (AQU-1323)', () => {
+  it('re-renders the L1 in the same commit, so the new sections reach prompt-preview', async () => {
+    const env = makeEnv(tdb.db, bucket, { briefBackend: true })
+    // The render the agent is owed: a summary carrying the key terms it just wrote.
+    stubBriefBackend('Render "Алла" for God and "Иске Рух" for the Holy Spirit.')
+    const { l1GeneratedAt: staleAt } = await seedStaleBrief()
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'Acts.usfm', USFM_ACTS)
+    const startedAt = new Date().toISOString()
+
+    const { body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        settings: { targetLanguage: 'tt' },
+        brief: { parameters: { keyTerms: 'God → Алла; Holy Spirit → Иске Рух' } },
+        imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
+      }),
+    )
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { res, body: committed } = await commit(env, caller.token, body.changeset.id)
+    expect(res.status).toBe(200)
+
+    const receipt = committed.receipt as { appliedAt: string; verification: SetupVerification }
+    expect(receipt.verification.briefReachesCopilot).toBe(true)
+    expect(receipt.verification.briefDetails?.truncated).toBeUndefined()
+
+    // The sections landed AND the summary advanced past the two-day-old render.
+    const { settings } = await storedSettings()
+    const brief = storedBrief(settings)
+    expect(brief.parameters.keyTerms).toContain('Алла')
+    expect(brief.l1GeneratedAt).not.toBe(staleAt)
+    expect(brief.l1GeneratedAt! >= startedAt).toBe(true)
+    expect(brief.l1GeneratedAt! <= receipt.appliedAt).toBe(true)
+    expect(brief.l1Summary).toContain('Алла')
+    expect(receipt.verification.briefDetails?.l1GeneratedAt).toBe(brief.l1GeneratedAt)
+
+    // …and what the copilot actually reads carries it.
+    const fileId = (await tdb.rows<{ id: string }>('files'))[0].id
+    const preview = await buildPromptPreview(tdb.db, {
+      projectId: PROJECT,
+      cellId: await firstSourceCellId(fileId),
+      targetLang: 'tt',
+      fileId,
+    })
+    expect(preview.ok).toBe(true)
+    if (preview.ok) expect(preview.body.parts.brief).toContain('Алла')
+  })
+
+  it('reports briefReachesCopilot=false with a reason when the render fails and the L1 stays stale', async () => {
+    const env = makeEnv(tdb.db, bucket, { briefBackend: true })
+    stubBriefBackendDown()
+    const { l1GeneratedAt: staleAt } = await seedStaleBrief()
+    const caller = await memberToken(700)
+
+    const { body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({ brief: { parameters: { keyTerms: 'God → Алла; Holy Spirit → Иске Рух' } } }),
+    )
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { res, body: committed } = await commit(env, caller.token, body.changeset.id)
+
+    // The step still APPLIES — the sections landed and unwinding them is worse.
+    expect(res.status).toBe(200)
+    const receipt = committed.receipt as {
+      completedSteps: { kind: string; status: string }[]
+      verification: SetupVerification
+    }
+    expect(receipt.completedSteps).toEqual([{ index: 0, kind: 'brief', status: 'applied' }])
+
+    // …but the receipt does NOT claim the brief reached the copilot.
+    expect(receipt.verification.briefReachesCopilot).toBe(false)
+    expect(receipt.verification.briefDetails?.reason).toContain('RegenerateBriefSummary')
+    expect(receipt.verification.briefDetails?.l1GeneratedAt).toBe(staleAt)
+
+    // The world matches the receipt: new sections, old summary.
+    const { settings } = await storedSettings()
+    const brief = storedBrief(settings)
+    expect(brief.parameters.keyTerms).toContain('Алла')
+    expect(brief.l1GeneratedAt).toBe(staleAt)
+    expect(brief.l1Summary).not.toContain('Алла')
+  })
+
+  it('reports briefReachesCopilot=false when the brief backend is not configured at all', async () => {
+    const env = makeEnv(tdb.db, bucket) // no AUTH_WORKER_URL
+    await seedStaleBrief()
+    const caller = await memberToken(700)
+
+    const { body } = await prepare(env, caller.token, setupCommand({ brief: { freeformNotes: 'Keep verse numbers.' } }))
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { body: committed } = await commit(env, caller.token, body.changeset.id)
+
+    const receipt = committed.receipt as { verification: SetupVerification }
+    expect(receipt.verification.briefReachesCopilot).toBe(false)
+    expect(receipt.verification.briefDetails?.reason).toContain('not_configured')
+  })
+
+  it('flags a capped L1 as truncated rather than reporting a clean success', async () => {
+    const env = makeEnv(tdb.db, bucket, { briefBackend: true })
+    stubBriefBackend('Render "Алла" for God.', { truncated: true })
+    await seedStaleBrief()
+    const caller = await memberToken(700)
+
+    const { body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({ brief: { parameters: { keyTerms: 'God → Алла' } } }),
+    )
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { body: committed } = await commit(env, caller.token, body.changeset.id)
+
+    const receipt = committed.receipt as { verification: SetupVerification }
+    // The summary IS fresh, so it does reach the copilot — but incomplete, and
+    // the operator is the only one who can judge whether that matters.
+    expect(receipt.verification.briefReachesCopilot).toBe(true)
+    expect(receipt.verification.briefDetails?.truncated).toBe(true)
+    expect(receipt.verification.briefDetails?.reason).toContain('1600')
   })
 })
 

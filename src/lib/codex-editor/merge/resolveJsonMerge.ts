@@ -20,12 +20,22 @@ function dedupeArray(arr: JsonVal[]): JsonVal[] {
   return out
 }
 
+// Keys that would otherwise repoint `out`'s prototype (or shadow its
+// constructor) via `out[k] = …` — JSON.parse creates them as ordinary own
+// data properties, not prototype mutations, so a merged document containing
+// `"__proto__"` reaches this assignment as attacker-controlled input. Skip
+// them rather than merge them: no legitimate two-way JSON diff needs to set
+// a literal `__proto__`/`constructor`/`prototype` key. (AQU pen-test finding,
+// 2026-09-23.)
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"])
+
 function deepMerge(a: JsonVal, b: JsonVal, path = ""): JsonVal {
   if (a === undefined) return b
   if (b === undefined) return a
   if (isObj(a) && isObj(b)) {
     const out: Record<string, JsonVal> = { ...a }
     for (const k of Object.keys(b)) {
+      if (UNSAFE_KEYS.has(k)) continue
       out[k] = deepMerge(a[k], b[k], path ? `${path}.${k}` : k)
     }
     return out

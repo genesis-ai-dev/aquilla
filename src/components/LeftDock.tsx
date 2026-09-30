@@ -29,16 +29,17 @@ import {
 import { cn } from "@/lib/utils"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
-import { useDockTabs, type DockTab } from "@/hooks/useDockTabs"
+import { useDockTabs } from "@/hooks/useDockTabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { DockTab } from "@/lib/dock-tab"
+
+export type { DockTab }
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { DockTab } from "@/hooks/useDockTabs"
 
 export interface LeftDockProps {
   /** Slot rendered when "files" tab is active */
@@ -229,12 +230,12 @@ export function LeftDock({
   // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
   // on the collapsed 40px icon strip.
   const expandButton = (
-    <AppTooltip content={t("nav.dock.showPanel")} side="right">
+    <AppTooltip content={t("nav.dock.expandSidebar")} side="right">
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={t("nav.dock.showPanel")}
+        aria-label={t("nav.dock.expandSidebar")}
         disabled={!tabToRestore}
         onClick={() => { if (tabToRestore) setActiveTab(tabToRestore) }}
         className="mt-3"

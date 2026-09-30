@@ -188,6 +188,7 @@ export type ContextualRunEventKind =
   | "steering_queued"
   | "run_command"
   | "draft_reviewed"
+  | "memories_proposed"
 
 export type ContextualRunEventPhase = "reading" | "drafting" | "checking" | "staging"
 
@@ -662,6 +663,14 @@ function sanitizeEventDetails(input: AppendContextualRunEventInput): ContextualR
     case "run_command":
       details = d.command === "pause" || d.command === "stop" ? { command: d.command } : {}
       break
+    case "memories_proposed":
+      // One line per reflection, never one per note. The note text and its
+      // memory path are reviewable rows in the Memory tab, not durable
+      // activity — the count is the whole fact this event carries.
+      details = {
+        ...(safeCount(d.count) !== undefined ? { count: safeCount(d.count) } : {}),
+      }
+      break
     case "draft_reviewed": {
       const draftId = safeEventString(d.draftId)
       const cellId = safeEventString(d.cellId)
@@ -746,6 +755,11 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
     case "run_command":
       summary = details.command === "pause" ? "Pause asked for in chat" : "Stop asked for in chat"
       break
+    case "memories_proposed": {
+      const count = details.count ?? 0
+      summary = `Proposed ${count} note${count === 1 ? "" : "s"} for review`
+      break
+    }
     case "draft_reviewed":
       summary = details.outcome === "applied"
         ? "Draft applied"
@@ -888,10 +902,14 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   try {
     const row = await db
       .prepare(
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
+        // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
         `INSERT INTO contextual_runs
             (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
-             anchor_cell_id, scope_group, span_allowance)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?)
+             anchor_cell_id, scope_group, span_allowance, lane_id)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -910,6 +928,9 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
           : input.spanAllowance === null
             ? null
             : Math.max(0, Math.round(input.spanAllowance)),
+        // AQU-1240 slice 8: resolve lane_id from (project, target_lang).
+        input.projectId,
+        lane,
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1148,6 +1169,85 @@ export const parkRun = (
 /** Any active state → failed, recording the error. */
 export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
+
+/**
+ * Reflection bookkeeping (AQU-1302), deliberately kept OFF `RUN_COLS`.
+ *
+ * `reflected_at` / `reflected_done_spans` arrive with migration `0094`, which
+ * this repo applies to Neon BY HAND — so there is always a window where the
+ * code is deployed and the columns are not there yet. Every run read goes
+ * through `RUN_COLS`, so selecting them there would turn that window into a
+ * 500 on the run list and the pill: reflection is a bonus, and a bonus must
+ * never be able to break the feature it decorates. Only the reflection step
+ * reads them, through these two functions, and both fail soft.
+ */
+export interface ContextualRunReflection {
+  /** When this run last reflected. NULL (never) means the caller falls back to
+   *  the run's own `createdAt`, so a first reflection sees the whole run. */
+  reflectedAt: string | null
+  /** `doneSpans` as of that reflection. The "at least 2 passages since the
+   *  last reflection" gate is a difference against this, so one passage that
+   *  staged nine cells still counts as one passage. */
+  reflectedDoneSpans: number
+}
+
+interface ReflectionRow {
+  reflected_at: unknown
+  reflected_done_spans: number | null
+}
+
+/** Read the watermark. `null` means the bookkeeping is unavailable (migration
+ *  not applied yet), which the caller treats as "do not reflect this time" —
+ *  never as "never reflected", which would re-propose the same notes. */
+export async function getRunReflection(
+  db: AquillaDb,
+  runId: string,
+): Promise<ContextualRunReflection | null> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT reflected_at, reflected_done_spans FROM contextual_runs WHERE id = ?`,
+      )
+      .bind(runId)
+      .first<ReflectionRow>()
+    if (!row) return null
+    return {
+      reflectedAt: row.reflected_at == null ? null : toIso(row.reflected_at),
+      reflectedDoneSpans: Number(row.reflected_done_spans ?? 0),
+    }
+  } catch (err) {
+    console.warn(`[contextual] reflection bookkeeping unavailable for run ${runId}:`, err)
+    return null
+  }
+}
+
+/**
+ * Move the watermark forward. Called once a park's reflection has actually run
+ * — whether it proposed notes or (just as validly) proposed none. Leaving it
+ * where it was on a FAILED reflection is deliberate: the next park retries over
+ * the same evidence rather than losing it.
+ *
+ * `reflected_done_spans` is written from the row itself, not from a caller's
+ * snapshot, so a wave that landed between gathering the evidence and marking
+ * cannot be skipped — it is simply counted toward the NEXT reflection.
+ * Status is untouched: reflection is bookkeeping about a park, not a transition.
+ */
+export async function markRunReflected(db: AquillaDb, runId: string): Promise<boolean> {
+  try {
+    await db
+      .prepare(
+        `UPDATE contextual_runs
+            SET reflected_at = now(), reflected_done_spans = done_spans
+          WHERE id = ?`,
+      )
+      .bind(runId)
+      .run()
+    return true
+  } catch (err) {
+    console.warn(`[contextual] reflection watermark not written for run ${runId}:`, err)
+    return false
+  }
+}
 
 /** Block a live run on a decision (§4.5). `waiting` means "something left to
  *  do, but it needs a human" — distinct from `parked`, which means there is
@@ -1527,9 +1627,13 @@ export async function insertDrafts(
     ...input.drafts.map((d) =>
       db
         .prepare(
-          `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+          // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
+        // (db/shared cannot import sync-worker's lane-id-sql). COALESCE on
+        // conflict so a resolved id is never regressed to NULL.
+        `INSERT INTO contextual_drafts
+              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb,
+                   (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
            ON CONFLICT (project_id, file_id, cell_id, target_lang) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
@@ -1538,6 +1642,7 @@ export async function insertDrafts(
              text = EXCLUDED.text,
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
+             lane_id = COALESCE(EXCLUDED.lane_id, contextual_drafts.lane_id),
              created_at = now()`,
         )
         .bind(
@@ -1551,6 +1656,8 @@ export async function insertDrafts(
           d.text,
           d.verdicts ?? null,
           d.provenance ?? null,
+          input.projectId,
+          lane,
         ),
     ),
   ]
@@ -2016,12 +2123,20 @@ export interface ActiveAutopilotRunFile {
   workQueued: boolean
 }
 
-/** Active default-lane files are still candidates (their staged drafts have
+/** Active files in THIS lane are still candidates (their staged drafts have
  * not changed target cells), but a project fan-out must not let them consume
- * its bounded batch. The active partial index makes this one row per file. */
+ * its bounded batch. The active partial index makes this one row per file.
+ *
+ * AQU-935: the lane is a parameter rather than a hardcoded `''`. A run in the
+ * Burmese lane says nothing about whether the Thai lane is free — conflating
+ * them made a second lane's project-wide start report every file as "already
+ * running" and start nothing at all. `''` (the project default lane) remains
+ * the default argument, so a single-language project is unchanged.
+ */
 export async function listActiveAutopilotRunFiles(
   db: AquillaDb,
   projectId: string,
+  targetLang = "",
 ): Promise<ActiveAutopilotRunFile[]> {
   const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const { results } = await db
@@ -2029,11 +2144,11 @@ export async function listActiveAutopilotRunFiles(
       `SELECT file_id, id, status,
               (status = 'parked' AND done_spans + failed_spans < total_spans) AS work_queued
          FROM contextual_runs
-        WHERE project_id = ? AND target_lang = ''
+        WHERE project_id = ? AND target_lang = ?
           AND status IN (${activePlaceholders})
         ORDER BY file_id ASC`,
     )
-    .bind(projectId, ...ACTIVE_STATUSES)
+    .bind(projectId, targetLang, ...ACTIVE_STATUSES)
     .all<{
       file_id: string
       id: string
@@ -2057,10 +2172,17 @@ export async function listActiveAutopilotRunFiles(
  * This is the unit that makes fan-out worth its overhead: one file is a chain
  * of spans, but a project is dozens of files that share nothing at all — no
  * briefs, no cells, no ordering. Whole books can run at once.
+ *
+ * AQU-935: "work left" is a question about ONE lane. The source side is always
+ * lane `''` — source cells have no target language — but the target side and
+ * the least-recent-attempt ordering must both read the lane being started, or
+ * a second lane inherits the default lane's progress and Autopilot declares a
+ * wholly untranslated language already finished.
  */
 export async function listAutopilotCandidateFiles(
   db: AquillaDb,
   projectId: string,
+  targetLang = "",
 ): Promise<AutopilotCandidateFile[]> {
   const placeholders = NON_DISCOURSE_KINDS.map(() => "?").join(",")
   const { results } = await db
@@ -2074,7 +2196,7 @@ export async function listAutopilotCandidateFiles(
           AND s.side = 'source' AND s.target_lang = ''
          LEFT JOIN cells t
            ON t.project_id = s.project_id AND t.file_id = s.file_id
-          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
+          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?
         WHERE f.project_id = ? AND f.deleted_at IS NULL
           AND COALESCE(f.kind, '') NOT IN (${placeholders})
         GROUP BY f.id, f.name, f.kind
@@ -2083,12 +2205,12 @@ export async function listAutopilotCandidateFiles(
                    SELECT MAX(prior.created_at) FROM contextual_runs prior
                     WHERE prior.project_id = f.project_id
                       AND prior.file_id = f.id
-                      AND prior.target_lang = ''
+                      AND prior.target_lang = ?
                  ) ASC NULLS FIRST,
                  untranslated DESC,
                  f.id ASC`,
     )
-    .bind(projectId, ...NON_DISCOURSE_KINDS)
+    .bind(targetLang, projectId, ...NON_DISCOURSE_KINDS, targetLang)
     .all<{ id: string; name: string; kind: string; untranslated: number; has_refs: boolean | null }>()
 
   return results
@@ -2119,6 +2241,16 @@ export interface ProjectAutopilotFileRow {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** The span of this run's most recently staged proposal — the passage the
+   *  run got to before it parked (AQU-1301). Null when nothing is pending. */
+  currentSpanId: string | null
+  /** Human passage reference for `currentSpanId`, from the run's own event log
+   *  (no cell load: the overview is polled project-wide). Null when the run
+   *  never logged a label for that span. */
+  currentSpanLabel: string | null
+  /** Proposed drafts belonging to `currentSpanId`. The rest of
+   *  `proposedDrafts` is backlog behind it. */
+  currentSpanDrafts: number
   /** Why this file's newest run parked (AQU-1300); null on any other status. */
   parkReason: ContextualParkReason | null
 }
@@ -2132,6 +2264,10 @@ export interface ProjectAutopilotSummary {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  /** Drafts sitting in the passage each run parked on, summed across lanes.
+   *  The actionable set; `proposedDrafts - currentSpanDrafts` is the backlog
+   *  the reviewer opens on purpose rather than is handed (AQU-1301). */
+  currentSpanDrafts: number
 }
 
 /**
@@ -2166,17 +2302,52 @@ export async function getProjectAutopilotSummary(
          SELECT COALESCE(SUM(proposed), 0) AS proposed,
                 COALESCE(SUM(applied), 0) AS applied
            FROM drafts_by_run
+       ),
+       -- AQU-1301: the passage each run parked on is its most recently staged
+       -- proposal. A draft with no span in provenance buckets under '' — one
+       -- unlabelled group, never silently merged into a labelled passage.
+       parked_span AS MATERIALIZED (
+         SELECT DISTINCT ON (d.run_id)
+                d.run_id,
+                COALESCE(d.provenance ->> 'spanId', '') AS span_id
+           FROM contextual_drafts d
+          WHERE d.project_id = ? AND d.status = 'proposed'
+          ORDER BY d.run_id, d.created_at DESC, d.id DESC
+       ),
+       parked_counts AS (
+         SELECT d.run_id, COUNT(*) AS drafts
+           FROM contextual_drafts d
+           JOIN parked_span s ON s.run_id = d.run_id
+          WHERE d.project_id = ? AND d.status = 'proposed'
+            AND COALESCE(d.provenance ->> 'spanId', '') = s.span_id
+          GROUP BY d.run_id
+       ),
+       -- The human passage reference already lives in the run's event log, so
+       -- the project-wide poll never loads a file's cells to render one.
+       parked_labels AS (
+         SELECT DISTINCT ON (e.run_id)
+                e.run_id, e.span_label
+           FROM contextual_run_events e
+           JOIN parked_span s ON s.run_id = e.run_id AND s.span_id = e.span_id
+          WHERE e.project_id = ? AND e.span_label IS NOT NULL
+          ORDER BY e.run_id, e.created_at DESC, e.id DESC
        )
        SELECT n.*, COALESCE(d.proposed, 0) AS proposed,
               COALESCE(d.applied, 0) AS applied,
               COALESCE(p.proposed, 0) AS project_proposed,
-              COALESCE(p.applied, 0) AS project_applied
+              COALESCE(p.applied, 0) AS project_applied,
+              s.span_id AS current_span_id,
+              l.span_label AS current_span_label,
+              COALESCE(c.drafts, 0) AS current_span_drafts
          FROM newest n
          LEFT JOIN drafts_by_run d ON d.run_id = n.id
+         LEFT JOIN parked_span s ON s.run_id = n.id
+         LEFT JOIN parked_counts c ON c.run_id = n.id
+         LEFT JOIN parked_labels l ON l.run_id = n.id
          CROSS JOIN project_drafts p
         ORDER BY n.updated_at DESC, n.id DESC`,
     )
-    .bind(projectId, projectId)
+    .bind(projectId, projectId, projectId, projectId, projectId)
     .all<{
       id: string
       file_id: string
@@ -2193,6 +2364,9 @@ export async function getProjectAutopilotSummary(
       applied: number
       project_proposed: number
       project_applied: number
+      current_span_id: string | null
+      current_span_label: string | null
+      current_span_drafts: number
     }>()
 
   const files: ProjectAutopilotFileRow[] = results.map((r) => ({
@@ -2210,6 +2384,10 @@ export async function getProjectAutopilotSummary(
     // Summary rows bypass rowToRun, so keep the same legacy-read privacy
     // boundary here as snapshots/activity.
     lastError: sanitizeRunError(r.last_error),
+    // '' is the no-span bucket, not a span id — report it as absent.
+    currentSpanId: r.current_span_id ? r.current_span_id : null,
+    currentSpanLabel: r.current_span_label ?? null,
+    currentSpanDrafts: Number(r.current_span_drafts ?? 0),
     // AQU-1300: a project-wide start fans out one run per file, and the
     // overview is where those are seen. Without the reason every parked file
     // reads "Idle" — including the ones holding for an answer.
@@ -2227,6 +2405,7 @@ export async function getProjectAutopilotSummary(
     unitsSpent: sum((f) => f.unitsSpent),
     proposedDrafts: Number(results[0]?.project_proposed ?? 0),
     appliedDrafts: Number(results[0]?.project_applied ?? 0),
+    currentSpanDrafts: sum((f) => f.currentSpanDrafts),
   }
 }
 

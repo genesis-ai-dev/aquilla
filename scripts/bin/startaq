@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPTS="$(cd "$(dirname "$0")/.." && pwd)"
+exec bash "$SCRIPTS/dev-ctl.sh" watch-start "$@"

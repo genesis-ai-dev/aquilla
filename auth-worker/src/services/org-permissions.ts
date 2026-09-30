@@ -5,6 +5,20 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import { orgPathContribution } from "../../../db/shared/project-roles"
+import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
+import {
+  loadLaneGrantsForProjects,
+  loadTargetLaneIdentitiesForProjects,
+} from "../../../db/shared/lane-visibility"
+import {
+  READ_WALL_MAINTAINER,
+  laneReadWallEnabled,
+  legacyTagsForVisibleLanes,
+  portfolioTextFromVisibleLanes,
+  visibleDefaultLaneLanguage,
+  visibleLaneTags,
+} from "../../../src/lib/lanes/read-wall"
+import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -43,8 +57,10 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_PG.prepare(
-    `INSERT INTO organizations (name, owner_user_id)
-     VALUES (?, ?) RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id, billing_scope)
+     VALUES (?, ?, 'personal')
+     ON CONFLICT (owner_user_id) WHERE billing_scope = 'personal'
+     DO UPDATE SET billing_scope = EXCLUDED.billing_scope RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()
@@ -63,7 +79,7 @@ export async function getOrCreateUserOrg(
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
   const inserted = await env.AQUILLA_PG.prepare(
-    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+    "INSERT INTO organizations (name, owner_user_id, billing_scope) VALUES (?, ?, 'team') RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
   await env.AQUILLA_PG.prepare(
@@ -1106,6 +1122,14 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the `lanes` row. Absent when the project has no row yet. */
+  name?: string | null
+  /** Opaque lane id. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
+  /** AQU-1458: archived lanes stay in the payload so the overview can tuck them away. */
+  archived?: boolean
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1144,17 +1168,33 @@ interface PortfolioDbRow {
   units_total: number
   units_done: number
   units_overdue: number
+  created_by: number | string | null
 }
 
-function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
+/** Text totals recomputed from the lanes this caller may see. */
+interface VisiblePortfolioText {
+  lanes: PortfolioLane[]
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+  aiDraftedCells: number
+  targetLanguage: string | null
+}
+
+function mapPortfolioRow(
+  r: PortfolioDbRow,
+  lanesByProject: Map<string, PortfolioLane[]>,
+  visibleText?: VisiblePortfolioText,
+): PortfolioRow {
   return {
     id: r.id,
     name: r.name,
-    totalCells: r.total_cells,
-    validatedCells: r.validated_cells,
-    filledCells: r.filled_cells,
-    aiDraftedCells: r.ai_drafted_cells,
-    lastEditAt: r.last_edit_at,
+    totalCells: visibleText ? visibleText.totalCells : r.total_cells,
+    validatedCells: visibleText ? visibleText.validatedCells : r.validated_cells,
+    filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
+    aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
+    lastEditAt: visibleText ? visibleText.lastEditAt : r.last_edit_at,
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1162,8 +1202,8 @@ function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, Portfoli
     // "" (empty settings default) is normalized to null so the client shows a
     // graceful "no language set" rather than a blank/broken "→" (AQU-523).
     sourceLanguage: r.source_language || null,
-    targetLanguage: r.target_language || null,
-    lanes: lanesByProject.get(r.id) ?? [],
+    targetLanguage: visibleText ? visibleText.targetLanguage : (r.target_language || null),
+    lanes: visibleText ? visibleText.lanes : (lanesByProject.get(r.id) ?? []),
     unitsTotal: Number(r.units_total) || 0,
     unitsDone: Number(r.units_done) || 0,
     unitsOverdue: Number(r.units_overdue) || 0,
@@ -1190,6 +1230,9 @@ interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  archived_lanes: unknown
+  /** The default lane's language. The same string may also sit in target_lanes. */
+  target_language: string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
@@ -1241,7 +1284,7 @@ async function fetchPortfolioLanes(
       : ""
   const orgBinds: unknown[] = [...orgIds]
   const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
-  const [laneRows, settingsRows] = await Promise.all([
+  const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
@@ -1262,12 +1305,29 @@ async function fetchPortfolioLanes(
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
               ps.target_lanes AS target_lanes,
+              (ps.settings::jsonb)->'archivedLanes' AS archived_lanes,
+              ps.target_language AS target_language,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT l.project_id AS project_id, l.id AS id, l.name AS name,
+              l.legacy_tag AS legacy_tag, l.position AS position,
+              l.archived_at AS archived_at
+         FROM lanes l
+         JOIN projects p ON p.id = l.project_id
+        WHERE l.role = 'target' AND p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<{
+      project_id: string
+      id: string
+      name: string
+      legacy_tag: string | null
+      position: number
+      archived_at: string | null
+    }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
   // AQU-1083: which projects leave structural cells out. Absent = count them,
@@ -1310,8 +1370,10 @@ async function fetchPortfolioLanes(
   // first translation lands. The denominator is borrowed from the '' row
   // (source-cell count is lane-independent); no '' row means the project has
   // no progress rows at all and the registered lane stays 0/0.
+  // AQU-1473: the primary language is the '' lane even when create also wrote
+  // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.target_lanes)
+    const registered = extraRegistryLanes(readTargetLanes(row.target_lanes), row.target_language)
     if (registered.length === 0) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) {
@@ -1320,14 +1382,69 @@ async function fetchPortfolioLanes(
     }
     const denominator = lanes.get("")?.totalCells ?? 0
     for (const lane of registered) {
-      if (lane === "" || lanes.has(lane)) continue
+      if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
+    }
+  }
+  for (const row of nameRows.results ?? []) {
+    const tag = row.legacy_tag ?? ""
+    let lanes = acc.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      acc.set(row.project_id, lanes)
+    }
+    let entry = lanes.get(tag)
+    if (!entry) {
+      const denominator = lanes.get("")?.totalCells ?? 0
+      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
+      lanes.set(tag, entry)
+    }
+    entry.name = row.name
+    entry.laneId = row.id
+    entry.position = Number(row.position) || 0
+  }
+  // AQU-1458: a lane is archived when its row says so, or when an older
+  // project only recorded the tag in settings.archivedLanes. The default
+  // lane ('') cannot be archived.
+  const archivedTagsByProject = new Map<string, Set<string>>()
+  for (const row of settingsRows.results ?? []) {
+    const tags = new Set(readTargetLanes(row.archived_lanes).map((tag) => tag.toLowerCase()))
+    if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
+  }
+  const archivedRowTags = new Map<string, Set<string>>()
+  for (const row of nameRows.results ?? []) {
+    if (row.archived_at == null || row.archived_at === "") continue
+    const tag = (row.legacy_tag ?? "").trim().toLowerCase()
+    if (!tag) continue
+    let tags = archivedRowTags.get(row.project_id)
+    if (!tags) {
+      tags = new Set()
+      archivedRowTags.set(row.project_id, tags)
+    }
+    tags.add(tag)
+  }
+  for (const [projectId, lanes] of acc) {
+    const fromSettings = archivedTagsByProject.get(projectId)
+    const fromRows = archivedRowTags.get(projectId)
+    if (!fromSettings && !fromRows) continue
+    for (const entry of lanes.values()) {
+      if (!entry.lane) continue
+      const key = entry.lane.toLowerCase()
+      if (fromRows?.has(key) || fromSettings?.has(key)) entry.archived = true
     }
   }
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
-      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+      [...lanes.values()].sort((a, b) => {
+        const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
+        const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
+        if (ap !== bp) return ap - bp
+        if (a.lane === b.lane) return 0
+        if (a.lane === "") return -1
+        if (b.lane === "") return 1
+        return a.lane < b.lane ? -1 : 1
+      }),
     )
   }
   return byProject
@@ -1434,7 +1551,17 @@ const PORTFOLIO_UNIT_COLUMNS = `
 const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
        SELECT p.id AS project_id,
-              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded,
+              -- AQU-490: how many validators a TAKE needs on this project, read
+              -- from the generated column rather than the settings blob, which
+              -- runs to several megabytes and is what timed this dashboard out
+              -- at fifteen seconds once already. The regex guard is not
+              -- decoration: the column is TEXT off a jsonb ->>, so a project
+              -- that ever stored a non-integer would abort the whole portfolio
+              -- query with a cast error rather than just reading wrong.
+              GREATEST(1, LEAST(15, COALESCE(
+                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
+                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
@@ -1444,25 +1571,52 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM cells c
          JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
         WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+     ), au_cells AS MATERIALIZED (
+       -- AQU-490, level one: one row per CELL, carrying the minimum vote count
+       -- across its selected dub takes. Two tracks sound together, so a cell is
+       -- only as validated as its least-validated track, and the minimum turns
+       -- that into a number the level above can simply compare.
+       --
+       -- The role filter is what keeps a media project honest. The shared
+       -- programme audio is attached, selected, to every cell of an imported
+       -- file, so counting it made audio-first-test read as fully recorded with
+       -- 52.9 hours of work done — one clip's duration multiplied across 508
+       -- cells — when almost nothing had been dubbed.
+       -- ONE TAKE PER TRACK. The third of three readers of this definition,
+       -- and the last to get the rule: a generated voice left selected beside
+       -- a real recording is silent, so nobody can judge it, and counting it
+       -- held whole projects' tiles below the board's own number (adversarial
+       -- review, 2026-09-22). The recorded-milliseconds sum below deliberately
+       -- keeps every selected dub take: that is hours of audio present, not
+       -- hours left to judge.
+       SELECT a.project_id, a.file_id, a.cell_id,
+              MIN(a.validator_count) FILTER (
+                WHERE ${takeSoundsOnItsTrackSql('a')}
+              ) AS dub_votes,
+              SUM(a.duration_ms) AS recorded_ms,
+              BOOL_OR(sc.cell_id IS NOT NULL) AS structural
+         FROM cell_audio a
+         LEFT JOIN structural_cells sc
+           ON sc.project_id = a.project_id
+          AND sc.file_id = a.file_id
+          AND sc.cell_id = a.cell_id
+        WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
+        GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE NOT ca.structural) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (
-                WHERE ca.selected = 1 AND ca.approved = 1 AND NOT ca.structural
+       -- Level two: count those cells per project, against the project's own
+       -- threshold. A plain join to policy, deliberately -- asking for the
+       -- threshold with a correlated subquery per row is the shape that caused
+       -- the timeout, and it must not come back through this door.
+       SELECT c.project_id,
+              COUNT(*) FILTER (WHERE NOT c.structural) AS audio_cells,
+              COUNT(*) FILTER (
+                WHERE NOT c.structural AND c.dub_votes >= pol.audio_threshold
               ) AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM (
-           SELECT a.project_id, a.cell_id, a.selected, a.approved, a.duration_ms,
-                  sc.cell_id IS NOT NULL AS structural
-             FROM cell_audio a
-             LEFT JOIN structural_cells sc
-               ON sc.project_id = a.project_id
-              AND sc.file_id = a.file_id
-              AND sc.cell_id = a.cell_id
-            WHERE a.deleted = 0
-              AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
-         ) ca
-        GROUP BY ca.project_id
+              COALESCE(SUM(c.recorded_ms), 0) AS recorded_ms
+         FROM au_cells c
+         JOIN policy pol ON pol.project_id = c.project_id
+        GROUP BY c.project_id
      ), pu AS MATERIALIZED (
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`
@@ -1471,6 +1625,129 @@ export type PortfolioPageOpts = {
   q: string
   limit: number
   cursor: { id: string; name: string } | null
+}
+
+/**
+ * Machine-drafted target cells per lane, for the projects a below-Maintainer
+ * caller is about to see. Skipped entirely when the wall does not restrict
+ * anyone on the page. Structural cells drop out only when the project excludes
+ * them, matching the portfolio's own text totals.
+ */
+async function aiDraftedByLane(
+  env: Env,
+  projectIds: readonly string[],
+): Promise<Map<string, Map<string, number>>> {
+  const byProject = new Map<string, Map<string, number>>()
+  if (projectIds.length === 0) return byProject
+  const placeholders = projectIds.map(() => "?").join(", ")
+  const { results } = await env.AQUILLA_PG.prepare(
+    `WITH pol AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural, 'true') = 'false' AS excluded
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id IN (${placeholders})
+     )
+     SELECT c.project_id AS project_id,
+            COALESCE(c.target_lang, '') AS target_lang,
+            COUNT(*)::int AS n
+       FROM cells c
+       JOIN pol ON pol.project_id = c.project_id
+      WHERE c.side = 'target' AND c.ai_drafted = 1
+        AND NOT (
+          pol.excluded AND EXISTS (
+            SELECT 1 FROM cells src
+             WHERE src.project_id = c.project_id
+               AND src.file_id = c.file_id
+               AND src.cell_id = c.cell_id
+               AND src.side = 'source'
+               AND src.type IN ('heading', 'paratext')
+          )
+        )
+      GROUP BY c.project_id, COALESCE(c.target_lang, '')`,
+  ).bind(...projectIds).all<{ project_id: string; target_lang: string; n: number }>()
+  for (const row of results ?? []) {
+    let lanes = byProject.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      byProject.set(row.project_id, lanes)
+    }
+    lanes.set(row.target_lang ?? "", Number(row.n) || 0)
+  }
+  return byProject
+}
+
+/**
+ * Per-project text the caller may see. Null when the wall is off, the caller
+ * is a platform admin, or every project on the page is already unrestricted
+ * (org Maintainer+, creator, or a resolved role at Maintainer+). A missing map
+ * entry means that project stays on the SQL totals.
+ */
+async function visiblePortfolioText(
+  env: Env,
+  viewer: { userId: number; isAdmin: boolean },
+  rows: PortfolioDbRow[],
+  lanesByProject: Map<string, PortfolioLane[]>,
+): Promise<Map<string, VisiblePortfolioText> | null> {
+  if (viewer.isAdmin || !laneReadWallEnabled(env.LANE_READ_WALL) || rows.length === 0) return null
+
+  const orgIds = [...new Set(rows.map((row) => row.org_id))]
+  const orgPlaceholders = orgIds.map(() => "?").join(", ")
+  const orgRoles = await env.AQUILLA_PG.prepare(
+    `SELECT org_id, role_level FROM org_members
+      WHERE user_id = ? AND org_id IN (${orgPlaceholders})`,
+  ).bind(viewer.userId, ...orgIds).all<{ org_id: number; role_level: number }>()
+  const orgLevel = new Map(
+    (orgRoles.results ?? []).map((row) => [Number(row.org_id), Number(row.role_level)]),
+  )
+
+  // resolveProjectRole reads user.id and user.email. Platform admins are
+  // already handled by viewer.isAdmin, so an empty email cannot match the
+  // allowlist and widen this caller.
+  const user = { id: viewer.userId, email: "" } as AuthUser
+  const restricted: PortfolioDbRow[] = []
+  await Promise.all(rows.map(async (row) => {
+    if ((orgLevel.get(Number(row.org_id)) ?? 0) >= READ_WALL_MAINTAINER) return
+    if (Number(row.created_by) === viewer.userId) return
+    const role = await resolveProjectRole(env, user, row.id)
+    if (role != null && role.level >= READ_WALL_MAINTAINER) return
+    restricted.push(row)
+  }))
+  if (restricted.length === 0) return null
+
+  const projectIds = restricted.map((row) => row.id)
+  const [identities, grants, aiCounts] = await Promise.all([
+    loadTargetLaneIdentitiesForProjects(env.AQUILLA_PG, projectIds),
+    loadLaneGrantsForProjects(env.AQUILLA_PG, viewer.userId, projectIds),
+    aiDraftedByLane(env, projectIds),
+  ])
+
+  const overrides = new Map<string, VisiblePortfolioText>()
+  for (const row of restricted) {
+    const role = await resolveProjectRole(env, user, row.id)
+    const visible = visibleLaneTags({
+      enabled: true,
+      role: role?.level ?? 0,
+      laneGrants: grants.get(row.id) ?? [],
+    })
+    const tags = legacyTagsForVisibleLanes(identities.get(row.id) ?? [], visible) ?? new Set<string>()
+    const text = portfolioTextFromVisibleLanes(lanesByProject.get(row.id) ?? [], tags)
+    let aiDraftedCells = 0
+    for (const [lane, count] of aiCounts.get(row.id) ?? []) {
+      if (tags.has(lane)) aiDraftedCells += count
+    }
+    overrides.set(row.id, {
+      lanes: text?.lanes ?? [],
+      totalCells: text?.totalCells ?? 0,
+      filledCells: text?.filledCells ?? 0,
+      validatedCells: text?.validatedCells ?? 0,
+      lastEditAt: text?.lastEditAt ?? null,
+      aiDraftedCells,
+      targetLanguage: visibleDefaultLaneLanguage(row.target_language || null, tags),
+    })
+  }
+  return overrides
 }
 
 /**
@@ -1522,6 +1799,7 @@ export async function listOrgPortfolioPage(
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
+            MAX(p.created_by)                       AS created_by,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
@@ -1552,8 +1830,16 @@ export async function listOrgPortfolioPage(
     uniqueOrgIds,
     page ? pageRows.map((row) => row.id) : undefined,
   )
+  // AQU-1421: below Maintainer, with the read wall on, lane names and the text
+  // totals that sum them come from the granted lanes only. Audio stays (a take
+  // is keyed by cell, not by lane). Plan-unit counts stay (a unit is a file
+  // section, not a lane). Wall off is the query as written.
+  const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
   return {
-    projects: pageRows.map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id })),
+    projects: pageRows.map((row) => ({
+      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id)),
+      orgId: row.org_id,
+    })),
     nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
   }
 }
@@ -2041,6 +2327,36 @@ export async function getAssignmentMinRoleForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return DEFAULT_ASSIGNMENT_MIN_ROLE
   return getAssignmentMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1308: the assign-work picker IS the roster — you cannot route work to
+ * someone you cannot name. `rosterViewMinRole` (AQU-485, default MAINTAINER
+ * 600) and `assignmentMinRole` (AQU-1037, default PROJECT_LEAD 500) are
+ * independent floors, and the assignment floor ships *below* the roster
+ * floor. So out of the box a project lead is authorized to assign work while
+ * being forbidden to read the roster the picker needs: the API gate
+ * contradicts the UI gate, the members fetch 403s with `rosterHidden`, and
+ * every partner org's Assignee dropdown renders empty.
+ *
+ * Resolve the effective project-roster floor as the LOWER of the two: anyone
+ * the org lets assign work may enumerate that project's members. An org that
+ * genuinely wants the roster hidden from its leads must raise
+ * `assignmentMinRole` to match — one coherent contract instead of two
+ * silently-conflicting defaults. Everyone below the assignment floor stays
+ * subject to `rosterViewMinRole` exactly as before, so AQU-485's
+ * safe-by-default promise for contributors/reviewers/viewers is untouched.
+ *
+ * Scoped to the per-project roster (the picker's source). The org-wide
+ * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
+ * project-scoped authority and confers no org-wide roster visibility.
+ */
+export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const [rosterFloor, assignmentFloor] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+  ])
+  return Math.min(rosterFloor, assignmentFloor)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

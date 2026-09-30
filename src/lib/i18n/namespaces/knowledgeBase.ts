@@ -30,6 +30,7 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.status.pending": "Indexing…",
     "knowledgeBase.status.ready": "Indexed",
     "knowledgeBase.status.failed": "Indexing failed",
+    "knowledgeBase.status.stalled": "Indexing stalled",
     "knowledgeBase.open": "View document",
     "knowledgeBase.openOriginal": "Open original",
     "knowledgeBase.reindex": "Try indexing again",
@@ -54,6 +55,14 @@ export const knowledgeBase = defineNamespace({
         "Knowledge Base controls, document states, dialogs, and notifications in the Living Memory project-settings surface.",
     },
     keys: {
+      "knowledgeBase.status.stalled": {
+        description:
+          "Badge on a document whose indexing job never reported back, so it is "
+          + "neither indexed nor formally failed. Distinct from "
+          + "knowledgeBase.status.pending (\"Indexing…\", still running) and from "
+          + "knowledgeBase.status.failed (the job reported an error). Shown with a "
+          + "retry action.",
+      },
       "knowledgeBase.uploadSuccess": {
         description: "Toast shown after a knowledge document upload succeeds.",
         placeholders: { name: "Uploaded document filename." },

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 describe("generateCombinedVoice routing", () => {
-  it("omnivoice voice uses server TTS path and attaches to all cells", async () => {
+  it("inworld voice uses server TTS path and attaches to all cells", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({
       audioId: "a", durationSeconds: 1,
@@ -16,7 +16,7 @@ describe("generateCombinedVoice routing", () => {
       ttsStatusKey: (s: string) => s,
     }))
     vi.doMock("./voices", () => ({
-      resolveCastVoice: () => ({ id: "v", name: "N", provider: "omnivoice" }),
+      resolveCastVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
     }))
     vi.doMock("./upload", () => ({
       buildAudioId: () => "id",
@@ -83,7 +83,10 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./voices", () => ({
       resolveCastVoice: () => ({ id: "v", name: "N", provider: "gemini" }),
     }))
-    vi.doMock("./tts-providers", () => ({ resolveTtsProvider: () => "gemini" }))
+    vi.doMock("./tts-providers", () => ({
+      resolveTtsProvider: () => "gemini",
+      isServerTtsProvider: () => false,
+    }))
     vi.doMock("./opus-encode", () => ({
       canEncodeOpus: () => true,
       encodeMonoToWebmOpus: vi.fn(async () => ({

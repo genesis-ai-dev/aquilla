@@ -5,7 +5,7 @@ name: Manual Deploy Workers
 # package.json and is the usable path while GitHub-hosted runners are unavailable.
 #
 # Branch → environment mapping for an explicit dispatch:
-#   main    → production
+#   release/YYYY/MM/DD → production
 #   dev     → development
 #
 # DEVEX-1: deploy steps are ordered after their test steps in the same job,

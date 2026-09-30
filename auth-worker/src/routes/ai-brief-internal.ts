@@ -149,9 +149,14 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
   if (!text) {
     return c.json({ error: "job_failed", message: "brief summary model returned no text" }, 502)
   }
-  const summary = text.length > BRIEF_L1_MAX_CHARS ? text.slice(0, BRIEF_L1_MAX_CHARS).trimEnd() : text
+  // AQU-1323: the caller cannot infer the cap from the returned length (the
+  // slice is trimEnd'd, so a truncated summary can come back under the cap).
+  // Report the fact, so a receipt can say "the summary dropped content" rather
+  // than presenting a clipped L1 as a clean render.
+  const truncated = text.length > BRIEF_L1_MAX_CHARS
+  const summary = truncated ? text.slice(0, BRIEF_L1_MAX_CHARS).trimEnd() : text
 
-  return c.json({ summary, model })
+  return c.json({ summary, model, truncated })
 })
 
 export default aiBriefInternal

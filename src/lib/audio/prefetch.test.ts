@@ -50,17 +50,17 @@ describe("on-demand synth download reporting", () => {
   beforeEach(async () => { await clearPrefetchStatus() })
 
   it("surfaces a synth-triggered download, then flips to ready once the largest file completes", () => {
-    noteModelDownloading("kokoro", { loaded: 10_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
-    expect(getModelStatus("kokoro").kind).toBe("downloading")
+    noteModelDownloading("mms", { loaded: 10_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
+    expect(getModelStatus("mms").kind).toBe("downloading")
 
     // A small sibling file completing must NOT mark the model ready — the
     // monotonic guard keeps the largest total, so loaded<total still holds.
-    noteModelDownloading("kokoro", { loaded: 44, total: 44, file: "config.json" })
-    expect(getModelStatus("kokoro").kind).toBe("downloading")
+    noteModelDownloading("mms", { loaded: 44, total: 44, file: "config.json" })
+    expect(getModelStatus("mms").kind).toBe("downloading")
 
     // The big weight finishing means the download is done → ready.
-    noteModelDownloading("kokoro", { loaded: 92_000_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
-    expect(getModelStatus("kokoro").kind).toBe("ready")
+    noteModelDownloading("mms", { loaded: 92_000_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
+    expect(getModelStatus("mms").kind).toBe("ready")
   })
 
   it("settles a Content-Length-less download (total stays 0) to ready on success", () => {
@@ -78,16 +78,16 @@ describe("on-demand synth download reporting", () => {
   })
 
   it("does not re-open the chip for an already-ready model", () => {
-    noteModelDownloading("kokoro", { loaded: 1, total: 100, file: "f" })
-    noteModelDownloadSettled("kokoro", true)
-    expect(getModelStatus("kokoro").kind).toBe("ready")
+    noteModelDownloading("whisper", { loaded: 1, total: 100, file: "f" })
+    noteModelDownloadSettled("whisper", true)
+    expect(getModelStatus("whisper").kind).toBe("ready")
     // A later cached-read progress event must not flip ready→downloading.
-    noteModelDownloading("kokoro", { loaded: 1, total: 100, file: "f" })
-    expect(getModelStatus("kokoro").kind).toBe("ready")
+    noteModelDownloading("whisper", { loaded: 1, total: 100, file: "f" })
+    expect(getModelStatus("whisper").kind).toBe("ready")
   })
 
   it("is a no-op to settle a model that was never downloading", () => {
-    noteModelDownloadSettled("kokoro", true)
-    expect(getModelStatus("kokoro").kind).toBe("idle")
+    noteModelDownloadSettled("whisper", true)
+    expect(getModelStatus("whisper").kind).toBe("idle")
   })
 })

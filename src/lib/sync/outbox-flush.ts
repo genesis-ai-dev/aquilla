@@ -6,6 +6,7 @@ import type { CqrsRawEvent } from "./outbox-types"
 import {
   markOutboxAttempt,
   getActiveOutboxOwnerVersion,
+  getOutboxRecords,
   peekPendingOutboxBatch,
   quarantineOutboxEvents,
   removeOutboxEvents,
@@ -14,6 +15,7 @@ import {
   type OutboxOwnerScope,
   type OutboxRecord,
 } from "./outbox"
+import { sanitizeStoredEvents } from "./outbox-sanitize"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
@@ -164,6 +166,28 @@ function forbiddenEntriesFor(
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   if (records.length === 0) return []
+  // AQU-1368: ISOLATE A HEAD THE SERVER HAS ALREADY REFUSED.
+  //
+  // The /events INSERT is atomic, so one event the database will never accept
+  // takes its whole batch down with it — including brand-new, perfectly valid
+  // audio events that happen to be queued behind it. That is what turned a
+  // single 2026-08-15 row into five weeks of "audio can't upload" for the
+  // partner on AQU-1368: the poison sat at the head of every batch and the
+  // valid events never got a request of their own.
+  //
+  // `attempts > 0` is the right trigger because of who bumps it. Transient
+  // failures — offline, 5xx, a stale token, a timeout — go through
+  // `stampOutboxError`, which deliberately does NOT burn the budget. Only a
+  // deterministic refusal (a non-401 4xx, a malformed response, or a
+  // server-rejected event inside a 200) reaches `markOutboxAttempt`. So a
+  // non-zero count means the server saw this record and would not take it,
+  // and batching it with anything else only spreads the damage.
+  //
+  // Posting it alone costs throughput on the failure path and buys the
+  // queue's liveness: the record burns its own retries to the cap, flips to
+  // `failed`, and stops being peeked — after which the events behind it flush
+  // on their own merits.
+  if ((records[0].attempts ?? 0) > 0) return [records[0]]
   const fid = records[0].event.fileId
   // BLOCKER 2 fix: when the head record has no fileId (project-scoped comment.* event),
   // only include other no-fileId comment.* records from the same project in the batch.
@@ -256,6 +280,83 @@ export function flushOutboxBatch(deps: FlushDeps): Promise<FlushOutboxResult> {
   return run
 }
 
+/** Rounds `flushOutboxUntilSettled` will run before handing back to the
+ *  background flusher. Each round posts at most MAX_BATCH events, so this
+ *  drains up to 600 queued rows while still bounding a pathological queue. */
+const MAX_SETTLE_ROUNDS = 6
+
+export type FlushUntilSettledResult = FlushOutboxResult & {
+  /** True when none of the requested events are `pending` in the outbox any
+   *  more — each was accepted, dead-lettered or quarantined, so the caller's
+   *  `onStaleSiblings`/`onRejected` bookkeeping has seen its final outcome. */
+  settled: boolean
+}
+
+async function watchedEventsSettled(ids: readonly string[]): Promise<boolean> {
+  if (ids.length === 0) return true
+  const records = await getOutboxRecords(ids)
+  return records.every((record) => record.status !== "pending")
+}
+
+/**
+ * AQU-579: flush until *these* events have actually been posted.
+ *
+ * `flushOutboxBatch` posts one file group — the file of the OLDEST pending
+ * row, capped at MAX_BATCH. A caller that enqueues a write and then flushes
+ * once therefore has no guarantee its own events went out: any older pending
+ * row for a different file (or a 100+ backlog on the same file) wins the
+ * batch instead. The caller then observes no `stale[]`/rejection entries for
+ * its events and reports success, while the events go out later under the
+ * background flusher — where a dead-letter reaches only the tab-wide
+ * `subscribeStaleSiblings` listener, which drops the optimistic shadow with
+ * no rebase-and-retry. For an AI completion that is the reported data loss:
+ * the progress bar finishes, the drafts render, and moments later the text
+ * disappears with no error and no way back.
+ *
+ * Looping until the watched ids leave the pending queue keeps that outcome
+ * inside the caller's own flush, so its existing rebase-retry sees it. The
+ * loop stops early when a round posts nothing (no progress to be made) or the
+ * transport is down; `settled: false` then means the background flusher owns
+ * the rest, exactly as before this call existed.
+ */
+export async function flushOutboxUntilSettled(
+  eventIds: readonly string[],
+  deps: FlushDeps,
+  opts: { maxRounds?: number } = {},
+): Promise<FlushUntilSettledResult> {
+  const maxRounds = Math.max(1, opts.maxRounds ?? MAX_SETTLE_ROUNDS)
+  const watched = [...new Set(eventIds.filter(Boolean))]
+  const total: FlushOutboxResult = {
+    posted: 0,
+    accepted: 0,
+    networkError: false,
+    authError: false,
+    quarantined: 0,
+    staleSiblingCount: 0,
+    staleSourceCount: 0,
+  }
+  let settled = watched.length === 0
+  for (let round = 0; round < maxRounds && !settled; round++) {
+    const result = await flushOutboxBatch(deps)
+    total.posted += result.posted
+    total.accepted += result.accepted
+    total.quarantined += result.quarantined
+    total.staleSiblingCount += result.staleSiblingCount
+    total.staleSourceCount += result.staleSourceCount
+    // Transport flags describe the LAST round — an earlier transient failure
+    // that a later round recovered from is not the caller's outcome.
+    total.networkError = result.networkError
+    total.authError = result.authError
+    if (result.authStatus !== undefined) total.authStatus = result.authStatus
+    settled = await watchedEventsSettled(watched)
+    if (settled) break
+    // Nothing posted, or the transport is down: another round would re-peek
+    // the same rows and fail the same way.
+    if (result.posted === 0 || result.networkError || result.authError) break
+  }
+  return { ...total, settled }
+}
+
 async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutboxResult> {
   const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
   const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
@@ -344,7 +445,11 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     return { posted: 0, accepted: 0, networkError: false, authError: true, authStatus: mint.status, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const token = mint.token
-  const events: CqrsRawEvent[] = batch.map((r) => r.event)
+  // AQU-1368: repair what was stored before AQU-927's emit-time guard existed.
+  // A payload carrying `durationMs: 2403.5` is refused by the bigint column on
+  // every flush, forever; rounding it here lands the user's stranded audio
+  // instead of dead-lettering it. No-op for every event minted since that fix.
+  const events: CqrsRawEvent[] = sanitizeStoredEvents(batch.map((r) => r.event))
   const url = `${syncWorkerHttpOrigin()}/events`
   let res: Response
   try {

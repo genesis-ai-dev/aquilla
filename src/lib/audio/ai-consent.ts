@@ -1,5 +1,5 @@
 // Page-local consent gate for the heavy in-browser AI models. The first
-// time a user kicks off Whisper, Kokoro, or MMS we surface a dialog explaining
+// time a user kicks off Whisper or MMS we surface a dialog explaining
 // the download size; subsequent uses (in this browser) skip it.
 //
 // Lives outside React so workers and orchestrators can call
@@ -20,7 +20,7 @@ export class AiModelConsentDeniedError extends Error {
 
 export interface AiModelInfo {
   /** Stable id used for the localStorage key. */
-  id: "whisper" | "kokoro" | "mms"
+  id: "whisper" | "mms"
   /** MessageKey for the display name shown in the dialog — this table is
    *  module scope, so `t()` (locale-frozen-at-import) can't be called here;
    *  resolve with `t(model.labelKey)` at the render site instead. */
@@ -60,7 +60,7 @@ function storeConsent(id: AiModelInfo["id"]): void {
 
 /**
  * Stores the "all AI features" consent flag. Setting this skips the per-
- * model consent dialog for Whisper, Kokoro, and MMS. Used by the onboarding
+ * model consent dialog for Whisper and MMS. Used by the onboarding
  * "Enable AI voice & transcription" step which asks once for both.
  */
 export function storeAllFeaturesConsent(): void {
@@ -69,7 +69,6 @@ export function storeAllFeaturesConsent(): void {
     localStorage.setItem(ALL_FEATURES_KEY, "1")
     // Also set per-model so legacy checks elsewhere stay consistent.
     localStorage.setItem(KEY_PREFIX + "whisper", "1")
-    localStorage.setItem(KEY_PREFIX + "kokoro", "1")
     localStorage.setItem(KEY_PREFIX + "mms", "1")
   } catch { /* private mode */ }
 }
@@ -139,14 +138,6 @@ export const WHISPER_MODEL: AiModelInfo = {
   sizeMb: 140,
   rationale:
     "Powers automatic word-level timing of recordings so you can scrub and karaoke playback. Runs entirely in your browser — recordings never leave your device.",
-}
-
-export const KOKORO_MODEL: AiModelInfo = {
-  id: "kokoro",
-  labelKey: "audio.consent.kokoroLabel",
-  sizeMb: 80,
-  rationale:
-    "Generates a clean voice rendering of cell text. Runs entirely in your browser — your text isn't sent to any server.",
 }
 
 export const MMS_MODEL: AiModelInfo = {

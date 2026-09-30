@@ -1,0 +1,28 @@
+{
+  "accountId": "acct_1U47kG7SR91OrWMS",
+  "configurations": {
+    "personal": "bpc_1UFaLs7SR91OrWMSnutbMG9O",
+    "team": "bpc_1UFaLs7SR91OrWMSCZXi6WlL"
+  },
+  "verifiedAt": "2026-09-14",
+  "livemode": false,
+  "features": {
+    "invoice_history": true,
+    "payment_method_update": true,
+    "subscription_update": true,
+    "subscription_cancel": true
+  },
+  "catalogReady": true,
+  "limitedConfigurations": {
+    "personal": "bpc_1UFa3g7SR91OrWMS1h3q73NA",
+    "team": "bpc_1UFa3g7SR91OrWMSwwoRyyWP"
+  },
+  "catalog": "stripe-sandbox-native.json",
+  "policy": {
+    "proration_behavior": "always_invoice",
+    "billing_cycle_anchor": "unchanged",
+    "schedule_at_period_end": false,
+    "cancel_mode": "at_period_end",
+    "adjustable_quantity": false
+  }
+}

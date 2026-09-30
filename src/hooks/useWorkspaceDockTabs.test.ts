@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { useWorkspaceDockTabs } from "./useWorkspaceDockTabs"
 
 describe("workspace dock navigation", () => {
@@ -50,5 +50,34 @@ describe("workspace dock navigation", () => {
     act(() => result.current.setActiveTab("search"))
     rerender({ agent: false })
     expect(result.current.activeTab).toBe("search")
+  })
+})
+
+describe("workspace dock persistence (FRO-308)", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("reopens the tab a project last had open, so reload doesn't reset to Files", () => {
+    localStorage.setItem("aquilla:dockTab:p1", "voices")
+    const { result } = renderHook(() => useWorkspaceDockTabs(false, "p1"))
+    expect(result.current.activeTab).toBe("voices")
+  })
+
+  it("remembers the last real tab but never stores a collapse", () => {
+    const { result } = renderHook(() => useWorkspaceDockTabs(false, "p1"))
+    act(() => result.current.setActiveTab("search"))
+    act(() => result.current.setActiveTab(null))
+    expect(localStorage.getItem("aquilla:dockTab:p1")).toBe("search")
+  })
+
+  it("switching projects restores the other project's tab, not this one's", () => {
+    localStorage.setItem("aquilla:dockTab:p2", "voices")
+    const { result, rerender } = renderHook(
+      ({ id }) => useWorkspaceDockTabs(false, id),
+      { initialProps: { id: "p1" } },
+    )
+    act(() => result.current.setActiveTab("search"))
+    rerender({ id: "p2" })
+    expect(result.current.activeTab).toBe("voices")
+    expect(localStorage.getItem("aquilla:dockTab:p1")).toBe("search")
   })
 })

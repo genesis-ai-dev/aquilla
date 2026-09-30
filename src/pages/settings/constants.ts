@@ -53,7 +53,7 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
   "project-defaults":
     "Settings every project in this organization follows unless it chooses its own.",
   billing:
-    "Explore / Field / Enterprise agent credits for this organization.",
+    "Your workspace’s plan, billing, and AI usage.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:

@@ -6,7 +6,10 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
-import { guardSql, runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import path from "node:path"
+import { guardSql, runGuardedSql, READABLE_TABLES, type SqlVarContext } from "../lib/agent/sql-guard"
 import { AliasMap, ROW_CAP } from "../lib/agent/compress"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -19,12 +22,18 @@ function guard(sql: string, v: SqlVarContext = vars, aliases = new AliasMap()) {
 }
 
 describe("guardSql — accepts", () => {
-  it("accepts a plain SELECT referencing :project and binds it", () => {
+  // Since 2026-09-28 every readable-table reference is rewritten into a
+  // project-scoped derived table (READABLE_TABLES), so the emitted statement
+  // carries one extra bound :project per relation — that rewrite, not the
+  // caller's own predicate, is what keeps the read inside one project.
+  it("accepts a plain SELECT referencing :project, scoping the relation and binding it", () => {
     const r = guard("SELECT cell_id, value FROM cells WHERE project_id = :project")
     expect(r).toEqual({
       ok: true,
-      sql: "SELECT cell_id, value FROM cells WHERE project_id = ?",
-      params: [PROJECT],
+      sql:
+        "SELECT cell_id, value FROM (SELECT * FROM cells WHERE project_id = ?) cells " +
+        "WHERE project_id = ?",
+      params: [PROJECT, PROJECT],
     })
   })
 
@@ -40,7 +49,8 @@ describe("guardSql — accepts", () => {
       "SELECT * FROM project_members WHERE project_id = :project AND user_id = :user AND project_id = :project",
     )
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.params).toEqual([PROJECT, 42, PROJECT])
+    // The leading PROJECT is the scoping rewrite's own bind.
+    if (r.ok) expect(r.params).toEqual([PROJECT, PROJECT, 42, PROJECT])
   })
 
   it("binds aliases the run has seen (#c1) back to their UUIDs", () => {
@@ -53,7 +63,7 @@ describe("guardSql — accepts", () => {
       aliases,
     )
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.params).toEqual([PROJECT, cellId])
+    if (r.ok) expect(r.params).toEqual([PROJECT, PROJECT, cellId])
   })
 
   it("tolerates one trailing semicolon and :: casts", () => {
@@ -171,9 +181,14 @@ describe("guardSql — rejects", () => {
   // completely unscoped rows from a table with no RLS backstop (`users`,
   // including password_hash — see the next test).
   it("rejects a decoy CTE used to fake project scoping for an unrelated table", () => {
+    // `users` is now double-protected: BANNED_TABLES rejects it outright
+    // (2026-09-23 fix, below), which fires before the CTE-reachability check
+    // this test was originally written to exercise would even run. The next
+    // test covers the same decoy-CTE shape against a table that isn't banned
+    // outright (`agent_runs`), so the scoping-bypass coverage isn't lost.
     reject(
       "WITH _x AS (SELECT project_id FROM cells WHERE project_id = :project) SELECT id, username FROM users",
-      /project_id = :project/,
+      /table "users" is not allowed/,
     )
   })
 
@@ -190,12 +205,33 @@ describe("guardSql — rejects", () => {
       /password_hash.*not allowed/,
     )
   })
+
+  // AQU pen-test finding, 2026-09-23: `users` has no project_id column and no
+  // RLS backstop (db/postgres/migrations/0034 doesn't cover it), so the
+  // whole-query ":project appears somewhere" check did nothing to scope a
+  // join against it — this exact query used to pass guardSql and, run for
+  // real, returned every account's email on the platform, not just members
+  // of the caller's project. Verified against the pre-fix guard before this
+  // test was written.
+  it("rejects the users table outright, even correctly scoped elsewhere in the query", () => {
+    reject(
+      "SELECT c.cell_id, u.email, u.username FROM cells c CROSS JOIN users u WHERE c.project_id = :project",
+      /table "users" is not allowed/,
+    )
+  })
+
+  it("rejects users referenced via a correctly-scoped join, not just a cross join", () => {
+    reject(
+      "SELECT u.email FROM project_members pm JOIN users u ON u.id = pm.user_id WHERE pm.project_id = :project",
+      /table "users" is not allowed/,
+    )
+  })
 })
 
 describe("guardSql — reachable-CTE scoping still allows legitimate shapes", () => {
   it("allows a referenced CTE whose own body filters by an aliased project_id (assignments cookbook shape)", () => {
     const r = guard(
-      "WITH members AS (SELECT u.id, u.username FROM project_members pm JOIN users u ON u.id = pm.user_id WHERE pm.project_id = :project) SELECT * FROM members",
+      "WITH members AS (SELECT pm.user_id, pm.role_level FROM project_members pm WHERE pm.project_id = :project) SELECT * FROM members",
     )
     expect(r.ok).toBe(true)
   })
@@ -260,5 +296,346 @@ describe("runGuardedSql — execution against Postgres", () => {
     )
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.rows[0]?.uid).toBe(String(vars.userId))
+  })
+
+  // AQU pen-test finding, 2026-09-23: vars.projectId is embedded directly
+  // into `SET LOCAL app.project_id = '<id>'` (SET LOCAL can't take a bind
+  // parameter). In practice it only ever reaches here already validated by
+  // resolveProjectRole()'s parameterized lookup, but this function
+  // re-validates rather than trusts it — the same GUC-injection shape
+  // PostgresDb.withUser() already guards for app.user_id.
+  it("rejects a malformed projectId rather than interpolate it unvalidated", async () => {
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT cell_id FROM cells WHERE project_id = :project",
+      { ...vars, projectId: "not-a-uuid'; --" },
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/projectId/)
+  })
+})
+
+// ─── AQU pen-test finding, 2026-09-28 ────────────────────────────────────────
+// Before this change the tool was a blocklist over the whole database, and the
+// only scoping requirement was that `project_id = :project` appear SOMEWHERE
+// in the reachable query text. One correctly-scoped table therefore admitted
+// an arbitrary second, unscoped one. Each query in the first block below was
+// run against the pre-fix guardSql() and returned ok:true; the worst of them
+// returned every live invite token on the platform (project_invites stores
+// them in plaintext — OPS-26 — and each is a working project-access
+// credential at a stated role_level). `… OR 1 = 1` and `NOT (…)` neutralised
+// the scoping predicate outright, on every table including the readable ones.
+//
+// The old comments delegated that gap to the RLS backstop; only 21 of the
+// schema's 55 project-scoped tables have an RLS policy and none of the tables
+// below is among them, so it never covered it. Scoping is now structural: the
+// allowlist here, plus a rewrite of every reference into a project-scoped
+// derived table.
+describe("guardSql — relation allowlist (2026-09-28)", () => {
+  const reject = (sql: string, pattern: RegExp) => {
+    const r = guard(sql)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(pattern)
+  }
+
+  it.each([
+    // The reproduced exploit: every live invite token on the platform.
+    ["project_invites", "SELECT i.token, i.role_level, i.email FROM cells c CROSS JOIN project_invites i WHERE c.project_id = :project"],
+    // Deep-link token + the scrypt PIN hash guarding it.
+    ["project_access_links", "SELECT l.token, l.pin_hash FROM cells c CROSS JOIN project_access_links l WHERE c.project_id = :project"],
+    // The settings blob holds user-supplied vendor API keys, which
+    // routes/org-settings.ts redacts on read and raw SQL would not.
+    ["org_settings", "SELECT o.settings FROM cells c CROSS JOIN org_settings o WHERE c.project_id = :project"],
+    ["agent_memories", "SELECT m.content FROM cells c CROSS JOIN agent_memories m WHERE c.project_id = :project"],
+    ["api_credentials", "SELECT a.token_hash FROM cells c CROSS JOIN api_credentials a WHERE c.project_id = :project"],
+    ["knowledge_docs", "SELECT k.extracted_text FROM cells c CROSS JOIN knowledge_docs k WHERE c.project_id = :project"],
+    ["project_briefs", "SELECT b.content FROM cells c CROSS JOIN project_briefs b WHERE c.project_id = :project"],
+    ["agent_runs", "SELECT r.* FROM cells c CROSS JOIN agent_runs r WHERE c.project_id = :project"],
+    ["organizations", "SELECT o.* FROM cells c CROSS JOIN organizations o WHERE c.project_id = :project"],
+    ["password_reset_tokens", "SELECT t.* FROM cells c CROSS JOIN password_reset_tokens t WHERE c.project_id = :project"],
+  ])("rejects %s even when another table in the query is correctly scoped", (table, sql) => {
+    reject(sql, new RegExp(`table "${table}" is not readable`))
+  })
+
+  it("rejects a schema-qualified name rather than resolving it", () => {
+    reject("SELECT * FROM public.cells WHERE project_id = :project", /public\.cells" is not readable/)
+    reject(
+      "SELECT t.* FROM pg_catalog.pg_tables t CROSS JOIN cells c WHERE c.project_id = :project",
+      /pg_catalog\.pg_tables" is not readable/,
+    )
+  })
+
+  it("rejects a set-returning function in a relation position", () => {
+    reject(
+      "SELECT g FROM generate_series(1, 3) g, cells c WHERE c.project_id = :project",
+      /set-returning functions are not allowed/,
+    )
+  })
+
+  it("rejects a CTE that shadows a readable table name", () => {
+    // Otherwise the rewrite would wrap the CTE's own name and the inner
+    // reference would resolve back to the CTE.
+    reject(
+      "WITH cells AS (SELECT 1 AS x) SELECT * FROM cells WHERE project_id = :project",
+      /shadows a table of the same name/,
+    )
+  })
+
+  it("rejects FROM-operand function syntax instead of mis-parsing it as a relation", () => {
+    // `EXTRACT(epoch FROM x)` puts an expression where scanRelations() expects
+    // a table, so it is rejected by name with the ordinary-call alternative.
+    reject(
+      "SELECT extract(epoch FROM to_timestamp(server_ts / 1000)) FROM events WHERE project_id = :project",
+      /EXTRACT.*date_part/,
+    )
+  })
+
+  it.each([
+    ["plain single table", "SELECT cell_id, value FROM cells WHERE project_id = :project"],
+    [
+      "drafting cookbook — source/target self-join",
+      "SELECT c.cell_id, s.canonical_ref, s.value AS source_text FROM cells c JOIN cells s" +
+        " ON s.project_id = c.project_id AND s.cell_id = c.cell_id AND s.side = 'source'" +
+        " WHERE c.project_id = :project AND c.side = 'target' AND c.value = '' ORDER BY s.canonical_ref LIMIT 40",
+    ],
+    [
+      "checking cookbook — aggregate with FILTER",
+      "SELECT count(*) FILTER (WHERE value <> '') AS filled, count(*) FILTER (WHERE validated = 1) AS validated" +
+        " FROM cells WHERE project_id = :project AND side = 'target'",
+    ],
+    [
+      "terminology cookbook — morphology join",
+      "SELECT m.surface, m.lemma, c.canonical_ref FROM cell_word_morph m JOIN cells c" +
+        " ON c.project_id = m.project_id AND c.file_id = m.file_id AND c.cell_id = m.cell_id AND c.side = 'source'" +
+        " WHERE m.project_id = :project AND m.lemma = 'x' LIMIT 50",
+    ],
+    [
+      "terminology cookbook — jsonb over the settings blob",
+      "SELECT jsonb_array_elements(settings::jsonb -> 'terminology' -> 'concepts') AS concept" +
+        " FROM project_settings WHERE project_id = :project LIMIT 50",
+    ],
+    [
+      "validation cookbook — correlated subquery",
+      "SELECT c.cell_id, (SELECT count(*) FROM cell_validators v WHERE v.project_id = c.project_id" +
+        " AND v.cell_id = c.cell_id) AS n FROM cells c WHERE c.project_id = :project",
+    ],
+    [
+      "assignments cookbook — assignment_cells through its assignment",
+      "SELECT a.scope_label, count(ac.cell_id) AS n FROM assignments a" +
+        " JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id" +
+        " WHERE a.project_id = :project GROUP BY a.scope_label",
+    ],
+    ["comma-separated FROM list", "SELECT c.value, f.name FROM cells c, files f WHERE c.project_id = :project AND f.id = c.file_id"],
+    [
+      "LEFT JOIN with ORDER BY / LIMIT",
+      "SELECT c.cell_id FROM cells c LEFT JOIN comments m ON m.cell_id = c.cell_id AND m.project_id = c.project_id" +
+        " WHERE c.project_id = :project ORDER BY c.cell_id LIMIT 5",
+    ],
+    ["derived table in FROM", "SELECT t.n FROM (SELECT count(*) AS n FROM cells WHERE project_id = :project) t"],
+    ["catalog introspection", "SELECT column_name FROM information_schema.columns WHERE table_name = 'cells'"],
+  ])("still accepts the documented shape: %s", (_name, sql) => {
+    const r = guard(sql, { ...vars, fileId: FILE })
+    expect(r.ok).toBe(true)
+  })
+
+  it("scopes every relation reference, not just the one the caller filtered", () => {
+    const r = guard("SELECT c2.value FROM cells c1 JOIN cells c2 ON 1 = 1 WHERE c1.project_id = :project")
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // Both aliases become project-scoped derived tables, so the unfiltered
+    // `c2` can no longer reach another project's rows.
+    expect(r.sql).toBe(
+      "SELECT c2.value FROM (SELECT * FROM cells WHERE project_id = ?) c1 " +
+        "JOIN (SELECT * FROM cells WHERE project_id = ?) c2 ON 1 = 1 WHERE c1.project_id = ?",
+    )
+    expect(r.params).toEqual([PROJECT, PROJECT, PROJECT])
+  })
+
+  it.each([
+    ["OR that neutralises the predicate", "SELECT cell_id FROM cells WHERE project_id = :project OR 1 = 1"],
+    ["NOT around the predicate", "SELECT cell_id FROM cells WHERE NOT (project_id = :project)"],
+  ])("survives a predicate the caller sabotaged: %s", (_name, sql) => {
+    // These satisfy PROJECT_EQ_RE and always will — that check reads text. The
+    // rewrite is what makes them harmless: the relation itself is scoped, so
+    // the sabotaged predicate can only ever narrow the caller's own project.
+    const r = guard(sql)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.sql).toContain("(SELECT * FROM cells WHERE project_id = ?) cells")
+  })
+
+  it("scopes assignment_cells through the assignment that owns the row", () => {
+    // The one readable table with no project_id column of its own.
+    const r = guard("SELECT ac.* FROM cells c CROSS JOIN assignment_cells ac WHERE c.project_id = :project")
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.sql).toContain("JOIN assignments _aq_a ON _aq_a.assignment_id = _aq_ac.assignment_id AND _aq_a.project_id = ?")
+  })
+})
+
+// Drift guards. The allowlist is only as good as its agreement with the real
+// schema and with what the model is told it may read; both drift silently
+// otherwise (the reason the list this replaced went stale for two months).
+describe("READABLE_TABLES — drift against the schema and the prompt", () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
+  const schemaSql = readFileSync(path.join(repoRoot, "db/postgres/schema.sql"), "utf8")
+  const schemaCard = readFileSync(path.join(repoRoot, "auth-worker/src/lib/agent/schema-card.ts"), "utf8")
+
+  /** Top-level column names of one CREATE TABLE block in schema.sql. */
+  function columnsOf(table: string): string[] {
+    const start = new RegExp(`CREATE TABLE (?:IF NOT EXISTS )?${table}\\s*\\(`, "i").exec(schemaSql)
+    expect(start, `table ${table} is not in db/postgres/schema.sql`).not.toBeNull()
+    const open = start!.index + start![0].length - 1
+    let depth = 0
+    let close = -1
+    for (let i = open; i < schemaSql.length; i++) {
+      if (schemaSql[i] === "(") depth++
+      else if (schemaSql[i] === ")" && --depth === 0) {
+        close = i
+        break
+      }
+    }
+    expect(close, `unbalanced CREATE TABLE ${table}`).toBeGreaterThan(open)
+    const body = schemaSql.slice(open + 1, close)
+    return [...body.matchAll(/^\s{2,}([a-z_][a-z0-9_]*)\s/gim)]
+      .map((m) => m[1].toLowerCase())
+      .filter((name) => !["primary", "unique", "constraint", "check", "foreign"].includes(name))
+  }
+
+  it.each(Object.keys(READABLE_TABLES))("%s exists in the live schema", (table) => {
+    expect(columnsOf(table).length).toBeGreaterThan(0)
+  })
+
+  it.each(Object.keys(READABLE_TABLES).filter((t) => t !== "assignment_cells"))(
+    "%s carries project_id and its scoping template filters on it",
+    (table) => {
+      expect(columnsOf(table)).toContain("project_id")
+      expect(READABLE_TABLES[table]).toContain("WHERE project_id = :project")
+    },
+  )
+
+  it("scopes assignment_cells through assignments, since it has no project_id of its own", () => {
+    expect(columnsOf("assignment_cells")).not.toContain("project_id")
+    expect(READABLE_TABLES.assignment_cells).toContain("_aq_a.project_id = :project")
+  })
+
+  it.each(Object.keys(READABLE_TABLES))("%s is documented to the model in the schema card", (table) => {
+    // A readable table the prompt never mentions is a table the model can only
+    // find by accident; a documented table that isn't readable is a dead end.
+    expect(schemaCard).toContain(table)
+  })
+})
+
+describe("runGuardedSql — cross-project isolation (2026-09-28)", () => {
+  const OTHER = "99999999-9999-4999-8999-999999999999"
+
+  async function seedTwoProjects() {
+    for (const project of [PROJECT, OTHER]) {
+      const cellId = crypto.randomUUID()
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', ?, ?, 0)`,
+      ).bind(project, FILE, cellId, `text for ${project}`, crypto.randomUUID()).run()
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cell_backtranslations
+           (project_id, file_id, cell_id, target_event_id, bt_text, author, event_id, created_at)
+         VALUES (?, ?, ?, ?, ?, 'someone', ?, 0)`,
+      ).bind(project, FILE, cellId, crypto.randomUUID(), `bt for ${project}`, crypto.randomUUID()).run()
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO assignments
+           (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, lane_id, created_by, created_at)
+         VALUES (?, ?, 7, 'books', ?, '', 1, 0)`,
+      ).bind(crypto.randomUUID(), project, `scope for ${project}`).run()
+    }
+  }
+
+  // The shape that made this a finding: one scoped table dragging an unscoped
+  // one along. Asserted against real rows from two projects, not just against
+  // the guard's verdict.
+  it("returns no other project's back-translations from an unscoped join", async () => {
+    await seedTwoProjects()
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT b.project_id, b.bt_text FROM cells c CROSS JOIN cell_backtranslations b WHERE c.project_id = :project",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.rows.length).toBeGreaterThan(0)
+    expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
+  })
+
+  it("returns no other project's assignments from an unscoped join", async () => {
+    await seedTwoProjects()
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT a.project_id, a.scope_label FROM cells c CROSS JOIN assignments a WHERE c.project_id = :project",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.rows.length).toBeGreaterThan(0)
+    expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
+  })
+
+  it("returns no other project's cells from a self-join whose second alias is unfiltered", async () => {
+    await seedTwoProjects()
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT c2.project_id, c2.value FROM cells c1 JOIN cells c2 ON 1 = 1 WHERE c1.project_id = :project",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.rows.length).toBeGreaterThan(0)
+    expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
+  })
+
+  it("returns nothing at all when the caller sabotages its own predicate with OR", async () => {
+    await seedTwoProjects()
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT project_id, value FROM cells WHERE project_id = :project OR 1 = 1",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
+  })
+
+  it("still executes the documented assignment_cells join", async () => {
+    await seedTwoProjects()
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT a.scope_label, count(ac.cell_id) AS n FROM assignments a" +
+        " LEFT JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id" +
+        " WHERE a.project_id = :project GROUP BY a.scope_label",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.rows.map((row) => row.scope_label)).toEqual([`scope for ${PROJECT}`])
+  })
+})
+
+describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypasses", () => {
+  it("rejects E'…' escape strings that desync the literal mask", () => {
+    const r = guard(
+      "SELECT E'\\'' || (SELECT max(email) FROM users) || E'\\'' FROM cells WHERE project_id = :project",
+    )
+    expect(r.ok).toBe(false)
+  })
+  it("rejects U&'…' literals", () => {
+    expect(guard("SELECT U&'a' FROM cells WHERE project_id = :project").ok).toBe(false)
+  })
+  it("rejects query_to_xml (runs an unscoped query from a string)", () => {
+    const r = guard("SELECT query_to_xml('select * from users', true, false, '') FROM cells WHERE project_id = :project")
+    expect(r.ok).toBe(false)
+  })
+  it("still accepts plain literals ending in e", () => {
+    expect(guard("SELECT 'tree' FROM cells WHERE project_id = :project").ok).toBe(true)
   })
 })

@@ -162,3 +162,44 @@ describe("AdminBillingSection", () => {
     expect(period.textContent).toMatch(/No period set/)
   })
 })
+
+describe("AdminBillingSection — AQU-942: the resolved shell survives revalidation", () => {
+  it("shows a first-load placeholder only before anything resolves", async () => {
+    let release: (plans: AdminBillingPlans) => void = () => {}
+    mockPlans.mockImplementationOnce(
+      () => new Promise<AdminBillingPlans>((resolve) => { release = resolve }),
+    )
+    render(<AdminBillingSection jwt="jwt" />)
+
+    expect(screen.getByRole("status", { name: "Loading billing" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+
+    release(CATALOG)
+    expect(await screen.findByTestId("admin-billing")).toBeDefined()
+    expect(screen.queryByRole("status", { name: "Loading billing" })).toBeNull()
+  })
+
+  it("keeps the catalog form and org table mounted while a grant revalidates", async () => {
+    // WHY: `act` re-fetches after every grant/reset, flipping `loading` back
+    // on. Gating the section on `loading` blanked the whole tab after each
+    // action, losing the table's sort/scroll and flashing the form away.
+    render(<AdminBillingSection jwt="jwt" />)
+    await screen.findByTestId("save-field-plan")
+
+    let release: (plans: AdminBillingPlans) => void = () => {}
+    mockPlans.mockImplementationOnce(
+      () => new Promise<AdminBillingPlans>((resolve) => { release = resolve }),
+    )
+    fireEvent.click(screen.getByTestId("grant-words-1"))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+
+    expect(screen.getByTestId("admin-billing")).toBeDefined()
+    expect(screen.getByTestId("save-field-plan")).toBeDefined()
+    expect(screen.queryByRole("status", { name: "Loading billing" })).toBeNull()
+
+    release(CATALOG)
+    await waitFor(() => expect(screen.getByTestId("admin-billing")).toBeDefined())
+  })
+})

@@ -48,14 +48,17 @@ import {
   setPrimaryRendering,
   canEditTermbase,
   canEditTermCells,
+  canSuggestTerm,
   resolveTermbaseEditFloor,
 } from "@/lib/terminology/glossary-view"
+import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
-import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
-import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { exportConceptsCsv } from "@/lib/terminology/csv"
+import { exportConceptsTbx } from "@/lib/terminology/tbx"
+import { importTermbaseFile } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -72,6 +75,15 @@ interface GlossaryEditorProps {
    * project again when this surface replaces the editor center pane. */
   project?: ProjectRecord | null
   patchSettings?: UseProjectSettings["patch"]
+  /**
+   * AQU-1340 — concepts-read status for the WORKSPACE-OWNED path. On that path
+   * ProjectWorkspace owns the `useConcepts` call and folds only `concepts` onto
+   * the record it hands down, so a failed read arrives here indistinguishable
+   * from an empty termbase unless the failure is passed alongside it.
+   */
+  conceptsError?: string | null
+  conceptsLoading?: boolean
+  refreshConcepts?: () => void | Promise<void>
 }
 
 function conceptsEqual(a: Concept[], b: Concept[]): boolean {
@@ -97,6 +109,9 @@ export function GlossaryEditor({
   files: workspaceFiles,
   project: workspaceProject,
   patchSettings: workspacePatchSettings,
+  conceptsError: workspaceConceptsError,
+  conceptsLoading: workspaceConceptsLoading,
+  refreshConcepts: workspaceRefreshConcepts,
 }: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
@@ -171,6 +186,14 @@ export function GlossaryEditor({
   const serverConcepts = workspaceProject
     ? workspaceProject.terminology ?? EMPTY_SERVER_CONCEPTS
     : fetched.concepts
+  // AQU-1340: the hook deliberately fails closed (it sets `error` rather than
+  // reporting "no terms"), so the surface must read that status — dropping it
+  // turns any read failure into the empty-termbase screen.
+  const conceptsError = workspaceProject ? workspaceConceptsError ?? null : fetched.error
+  const conceptsLoading = workspaceProject
+    ? workspaceConceptsLoading ?? false
+    : fetched.isLoading
+  const retryConcepts = workspaceProject ? workspaceRefreshConcepts : fetched.refresh
   const conceptsRef = useRef<Concept[]>(serverConcepts)
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
@@ -183,6 +206,11 @@ export function GlossaryEditor({
   // AQU-822: the floor is the org's configured termbaseEditMinRole (carried on
   // the project record), not a hardcoded project_lead level.
   const canManage = canEditTermbase(project?.syncRole, project?.termbaseEditMinRole)
+  // AQU-872: adding a term is a SEPARATE, lower question — a contributor may
+  // propose one as a draft, which enforces nothing until a manager approves it
+  // (see `canSuggestTerm`). Everything else on this surface — editing,
+  // approving, archiving, importing, merging — still asks `canManage`.
+  const canSuggest = canSuggestTerm(project?.syncRole)
   // AQU-208: below the floor the termbase controls stay visible but disabled,
   // and the hover names the caller's role and the one that owns the termbase.
   const termbaseDenial = canManage
@@ -192,9 +220,40 @@ export function GlossaryEditor({
         resolveTermbaseEditFloor(project?.termbaseEditMinRole),
         project?.syncRole?.level,
       )
+  // Below CONTRIBUTOR (a viewer, a commenter) even a suggestion is refused, and
+  // the hover names the contributor bar rather than the management floor —
+  // quoting the higher one would misstate what the user actually needs.
+  const suggestDenial = canSuggest
+    ? null
+    : denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level)
   // The drill-down commits through `target.cell.commit`, so it asks the same
   // role-policy question the editor does.
   const canEditCells = canEditTermCells(project?.syncRole)
+  // AQU-1340: three states the empty list used to collapse into one.
+  //   unknown  — the read failed and we hold no termbase: the error state, and
+  //              no whole-termbase writes (an Import here appends to a list the
+  //              client never actually read, doubling every term on recovery).
+  //   pending  — first read in flight: progress, not "no terms yet".
+  //   stale    — a LATER read failed over concepts we already have: keep the
+  //              last good termbase visible and say the refresh failed.
+  const termbaseUnknown = conceptsError != null && concepts.length === 0
+  const termbasePending = conceptsError == null && conceptsLoading && concepts.length === 0
+  const termbaseStale = conceptsError != null && concepts.length > 0
+  const canWriteTermbase = canManage && !termbaseUnknown
+  // The ROLE reason wins when both apply. "Terms cannot be added until the
+  // termbase loads" implies waiting will help — which is false for someone
+  // below the floor, whose button stays disabled after the read recovers.
+  const termbaseWriteDenial =
+    termbaseDenial ??
+    (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
+  // AQU-872: Add term rides the suggestion bar, but keeps the unknown-termbase
+  // stop — a create is still a delta against the last known termbase, so a
+  // suggestion written over a failed read doubles terms on recovery exactly as
+  // an import would.
+  const canAddTerm = canSuggest && !termbaseUnknown
+  const addTermDenial =
+    suggestDenial ??
+    (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(concepts),
@@ -262,14 +321,39 @@ export function GlossaryEditor({
   )
 
   // ── Row callbacks (all reuse store.ts helpers over the live project) ────────
-  const guard = () => {
+  // AQU-1340: the mutation callbacks below are memoized on
+  // `[project, canManage, persist]`, so they hold the `guard` from an older
+  // render. The live flag is read through a ref (written in an effect, never
+  // during render) rather than from that stale closure.
+  const termbaseUnknownRef = useRef(termbaseUnknown)
+  useEffect(() => {
+    termbaseUnknownRef.current = termbaseUnknown
+  }, [termbaseUnknown])
+
+  // AQU-872: parameterized on the permission because the two authority levels
+  // deny for different reasons — the management verbs name the termbase floor,
+  // a refused suggestion names the contributor bar. The unknown-termbase stop
+  // below applies to both: it is about the delta, not about the role.
+  const guardWith = (allowed: boolean, denial: string) => {
     if (!project) return null
-    if (!canManage) {
-      setError(t("terminology.editor.errorRequiresProjectLead"))
+    if (!allowed) {
+      setError(denial)
+      return null
+    }
+    // Every write emits a DELTA against the last known termbase. When the read
+    // failed we hold no termbase, so that delta is computed against nothing:
+    // an import would append its whole file on top of terms still on the
+    // server, doubling them all once the read recovers (AQU-1337 leaves no way
+    // to merge them back).
+    if (termbaseUnknownRef.current) {
+      setError(t("terminology.editor.loadFailedDetail"))
       return null
     }
     return { ...project, terminology: conceptsRef.current }
   }
+
+  const guard = () => guardWith(canManage, t("terminology.editor.errorRequiresProjectLead"))
+  const suggestGuard = () => guardWith(canSuggest, t("terminology.editor.errorBlocked"))
 
   const onEditSource = useCallback(
     (cid: string, sourceTerm: string) => {
@@ -347,7 +431,7 @@ export function GlossaryEditor({
   )
 
   const handleAddTerm = useCallback(() => {
-    const p = guard()
+    const p = suggestGuard()
     if (!p) return
     const source = newSource.trim()
     const rendering = newRendering.trim()
@@ -356,12 +440,18 @@ export function GlossaryEditor({
       return
     }
     const renderings: TermRendering[] = [{ rendering, status: "preferred" }]
-    void persist(addConcept(p, { sourceTerm: source, renderings, status: "active" }))
+    // AQU-872: at or above the termbase floor the term goes in enforced; below
+    // it the same form files a DRAFT, which lands in the Suggested group for a
+    // manager to approve and compiles to no rules in the meantime. Adding it
+    // active would be approving it, which is exactly the authority a
+    // contributor does not have.
+    const status = canManage ? "active" : "draft"
+    void persist(addConcept(p, { sourceTerm: source, renderings, status }))
     setError(null)
     setNewSource("")
     setNewRendering("")
     setAddOpen(false)
-  }, [project, canManage, persist, newSource, newRendering])
+  }, [project, canManage, canSuggest, persist, newSource, newRendering])
 
   function handleAddOpenChange(open: boolean) {
     setAddOpen(open)
@@ -459,9 +549,14 @@ export function GlossaryEditor({
       reader.onload = () => {
         try {
           const text = String(reader.result ?? "")
-          const imported = file.name.toLowerCase().endsWith(".tbx")
-            ? importConceptsTbx(text)
-            : importConceptsCsv(text)
+          const imported = importTermbaseFile(file.name, text)
+          // AQU-684: a file that yields nothing used to persist an unchanged
+          // list and look like success — the exact way a FLEx export failed
+          // silently. Say so instead.
+          if (imported.length === 0) {
+            setError(t("terminology.editor.errorImportFailed"))
+            return
+          }
           void persist({ terminology: [...(p.terminology ?? []), ...imported] })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
@@ -512,12 +607,12 @@ export function GlossaryEditor({
       <header className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
         <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
-        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+        <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
           <Button
             variant="outline"
             size="sm"
             onClick={handleSuggest}
-            disabled={!canManage || suggestRequested}
+            disabled={!canWriteTermbase || suggestRequested}
           >
             <Sparkles data-icon="inline-start" />{" "}
             {suggestRequested
@@ -528,20 +623,20 @@ export function GlossaryEditor({
         <input
           ref={importInputRef}
           type="file"
-          accept=".csv,.tsv,.tbx"
+          accept=".csv,.tsv,.tbx,.lift,.xml"
           className="hidden"
-          disabled={!canManage}
+          disabled={!canWriteTermbase}
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) handleImport(f)
             e.target.value = ""
           }}
         />
-        <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+        <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
           <Button
             variant="outline"
             size="sm"
-            disabled={!canManage}
+            disabled={!canWriteTermbase}
             onClick={() => importInputRef.current?.click()}
           >
             <Upload data-icon="inline-start" /> {t("nav.workspaceActions.import")}
@@ -595,10 +690,10 @@ export function GlossaryEditor({
         </Button>
         {/* i18n-exempt "glossary" is a view token, not copy */}
         {view === "glossary" && (
-          <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
+          <DisabledFieldTooltip disabled={!canAddTerm} tooltip={addTermDenial}>
             <Button
               size="sm"
-              disabled={!canManage}
+              disabled={!canAddTerm}
               onClick={() => setAddOpen(true)}
               aria-label={t("terminology.editor.addTerm")}
             >
@@ -613,8 +708,14 @@ export function GlossaryEditor({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("terminology.editor.addTerm")}</DialogTitle>
+            {/* AQU-872: say which of the two things this form does before it is
+                submitted. Below the floor it files a suggestion, and a
+                translator who expected the term to start being checked would
+                otherwise read the silent draft row as the feature not working. */}
             <DialogDescription>
-              {t("terminology.editor.addTermDescription")}
+              {canManage
+                ? t("terminology.editor.addTermDescription")
+                : t("terminology.editor.addTermSuggestionDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
@@ -667,6 +768,22 @@ export function GlossaryEditor({
 
       {error && (
         <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>
+      )}
+
+      {/* AQU-1340: a refresh that failed OVER a termbase we already hold. The
+          last good terms stay on screen (the hook preserves them) and this is
+          non-blocking — writes are still safe against a known termbase. */}
+      {termbaseStale && (
+        <div
+          role="status"
+          data-testid="concepts-refresh-stale"
+          className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          <span>{t("terminology.editor.refreshFailedNotice")}</span>
+          <Button variant="ghost" size="sm" onClick={() => void retryConcepts?.()}>
+            {t("common.retry")}
+          </Button>
+        </div>
       )}
 
       {view === "violations" ? (
@@ -734,9 +851,41 @@ export function GlossaryEditor({
         ))}
 
         {active.length === 0 && suggested.length === 0 && (
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            {t("terminology.editor.noTermsYet")}
-          </p>
+          // AQU-1340: "No terms yet" is claimed ONLY when the read succeeded
+          // and came back empty. A failed or in-flight read says so instead.
+          termbaseUnknown ? (
+            <div
+              role="alert"
+              data-testid="concepts-read-error"
+              className="flex flex-col items-center gap-3 px-4 py-10 text-center"
+            >
+              <p className="text-sm font-medium">{t("terminology.editor.loadFailedTitle")}</p>
+              <p className="max-w-md text-sm text-muted-foreground">
+                {t("terminology.editor.loadFailedDetail")}
+              </p>
+              {/* The raw reason is a server/network message, not UI copy — it
+                  renders verbatim like the write-failure banner above. */}
+              {conceptsError && (
+                <p className="max-w-md text-xs text-muted-foreground">{conceptsError}</p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void retryConcepts?.()}
+                data-testid="concepts-read-retry"
+              >
+                {t("common.retry")}
+              </Button>
+            </div>
+          ) : termbasePending ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground" role="status">
+              {t("terminology.editor.loadingGlossary")}
+            </p>
+          ) : (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              {t("terminology.editor.noTermsYet")}
+            </p>
+          )
         )}
 
         {/* Archived toggle + rows */}

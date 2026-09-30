@@ -394,6 +394,10 @@ export const rules = defineNamespace({
 
     // ── RulesPage.tsx (standalone rules page) ────────────────────────────────
     "rules.loadingLabel": "Loading rules",
+    // AQU-1340: without this the list just omits every terminology rule, so it
+    // disagrees with what the editor enforces and gives no hint why.
+    "rules.terminologyUnavailableNotice":
+      "Terminology rules could not be loaded, so they are missing from this list.",
     "rules.page.heading": "Translation Rules",
     "rules.page.corpusLoadErrorPrefix": "Couldn't load the complete project corpus: {message}",
     "rules.page.readOnlySuffix": "Changes made here won't be saved.",

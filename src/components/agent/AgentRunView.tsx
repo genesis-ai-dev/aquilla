@@ -25,12 +25,14 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
-import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
+import type { AgentProposal, AquiferPublishProposal, FileCandidate } from "@/lib/agent/protocol"
+import { latestFileCandidates } from "@/lib/agent/file-candidates"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
 import { AGENT_PERSONAS, personaForToolKind } from "@/lib/agent/personas"
 import { BudgetMeter } from "./BudgetMeter"
 import { ChangesetCard } from "./ChangesetCard"
 import { CodeActivityBlock } from "./CodeActivityBlock"
+import { FileCandidateButtons } from "./FileCandidateButtons"
 import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
 import { PersonaAvatar } from "./PersonaAvatar"
 import { InlineAiError } from "@/components/InlineAiError"
@@ -48,9 +50,16 @@ const TOOL_FRIENDLY_KEY: Record<ToolKind, MessageKey> = {
   draft: "agent.run.friendly.draft",
 }
 
-function ToolChip({ item }: { item: ToolItem }) {
+function ToolChip({
+  item,
+  open,
+  onToggle,
+}: {
+  item: ToolItem
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useT()
-  const [open, setOpen] = useState(false)
   const persona = AGENT_PERSONAS[personaForToolKind(item.tool)]
   // Raw SQL is meaningless to a translator — it stays behind the expand.
   // Other kinds carry human summaries (ref ranges, topics, "N events").
@@ -62,7 +71,7 @@ function ToolChip({ item }: { item: ToolItem }) {
     <div>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         aria-expanded={open}
         className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-[11px] transition-colors hover:bg-accent/40"
       >
@@ -90,6 +99,27 @@ function ToolChip({ item }: { item: ToolItem }) {
   )
 }
 
+/**
+ * One tool step in the timeline: the chip, plus the rich card the registry
+ * renders for it (e.g. PassageCard's row table).
+ *
+ * AQU-842: the card is COLLAPSED with the chip. Tool result tables used to
+ * render expanded on every step, which buried the agent's prose under
+ * screenfuls of rows; one click on the chip now reveals an individual card.
+ * The card stays MOUNTED while hidden so its own view state (side toggle,
+ * chapter navigation, the file's fetched rows) survives a collapse — and so
+ * the activity note it already reported still matches what re-expanding shows.
+ */
+function ToolTimelineItem({ item, card }: { item: ToolItem; card: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col gap-1">
+      <ToolChip item={item} open={open} onToggle={() => setOpen((v) => !v)} />
+      {card ? <div hidden={!open}>{card}</div> : null}
+    </div>
+  )
+}
+
 export interface AgentRunViewProps {
   run: AgentRunUi
   /** Renders a staged event-proposal inline where it arrived. The parent owns
@@ -107,6 +137,12 @@ export interface AgentRunViewProps {
    *  same hook AgentDockView passes to ProposalCard. Omitted → the card
    *  relies on the project DO's event.applied broadcast alone. */
   onChangesetApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+  /** AQU-1468: when the agent asks "which file?", the candidates render as
+   *  buttons and a click calls this. Omitted → no buttons (previews/tests). */
+  onChooseFile?: (candidate: FileCandidate) => void
+  /** False once the run is no longer the newest or a run is streaming: the
+   *  buttons stay visible but disabled. */
+  fileChoiceEnabled?: boolean
 }
 
 export function AgentRunView({
@@ -116,8 +152,11 @@ export function AgentRunView({
   renderToolCard,
   onReviewMemory,
   onChangesetApplied,
+  onChooseFile,
+  fileChoiceEnabled = false,
 }: AgentRunViewProps) {
   const { locale, t } = useI18n()
+  const fileCandidates = onChooseFile ? latestFileCandidates(run) : []
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -161,15 +200,8 @@ export function AgentRunView({
               </Message>
             )
           }
-          case "tool": {
-            const card = renderToolCard?.(item)
-            return (
-              <div key={item.id} className="flex flex-col gap-1">
-                <ToolChip item={item} />
-                {card}
-              </div>
-            )
-          }
+          case "tool":
+            return <ToolTimelineItem key={item.id} item={item} card={renderToolCard?.(item)} />
           case "proposal":
             return renderProposal ? (
               <div key={item.id}>{renderProposal(item.proposal)}</div>
@@ -188,6 +220,14 @@ export function AgentRunView({
             return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
         }
       })}
+
+      {onChooseFile && fileCandidates.length > 0 && (
+        <FileCandidateButtons
+          candidates={fileCandidates}
+          enabled={fileChoiceEnabled && run.status !== "running"}
+          onChoose={onChooseFile}
+        />
+      )}
 
       {run.status === "running" && (
         <Marker role="status">

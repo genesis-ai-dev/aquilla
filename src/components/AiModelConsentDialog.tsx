@@ -15,7 +15,6 @@ import { useT } from "@/lib/i18n/I18nProvider"
 
 const SHORT_LABELS = {
   whisper: "Whisper",
-  kokoro: "Kokoro",
   mms: "MMS",
 } as const
 
@@ -48,10 +47,10 @@ export function AiModelConsentDialog() {
     const first = pending?.model.id
     storeAllFeaturesConsent()
     pending?.resolve(true)
-    const rest = (["whisper", "kokoro", "mms"] as const).filter((id) => id !== first)
+    const rest = (["whisper", "mms"] as const).filter((id) => id !== first)
     // Download the requested model first so the in-flight generate can share
-    // that worker; the others follow. Loading all three at once plus a second
-    // Kokoro worker was enough to OOM-reload the tab.
+    // that worker; the others follow. Loading all local models at once plus a
+    // second worker was enough to OOM-reload the tab.
     void (async () => {
       try {
         if (first) await prefetchAiModels({ models: [first], mmsLanguage: DEFAULT_MMS_LANGUAGE })

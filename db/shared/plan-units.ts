@@ -52,6 +52,8 @@ export function planUnitsSql(fileScope: string): string {
                  f.role        AS file_role,
                  f.kind        AS file_kind,
                  f.book_code   AS file_book_code,
+                 f.meta        AS file_meta,
+                 f.updated_at  AS file_updated_at,
                  f.cell_count  AS file_cell_count,
                  f.structural_cell_count AS file_structural_cell_count,
                  u.section_key
@@ -84,6 +86,14 @@ export interface PlanUnitRow {
   file_role: string | null
   file_kind: string | null
   file_book_code: string | null
+  /**
+   * AQU-1278: the file's meta blob, for its sidebar folder (`corpusMarker`).
+   * The board groups its in-order arrangement by the same folders the editor
+   * shows, and the folder lives nowhere but here.
+   */
+  file_meta: string | null
+  /** When the file row last changed — a folder rename moves this and nothing else. */
+  file_updated_at: number | string | null
   section_key: string
   total_count: number
   filled_count: number
@@ -95,6 +105,21 @@ export interface PlanUnitRow {
   structural_validator_histogram: Record<string, number> | string
   audio_count: number
   audio_validated_count: number
+  // AQU-1278: and the structural share of those two, so the board subtracts
+  // recorded headings exactly as it subtracts the headings themselves.
+  structural_audio_count: number
+  structural_audio_validated_count: number
+  // AQU-490: buckets of the per-cell minimum vote count across selected dub
+  // takes, so the board applies the project's required validator count on read
+  // instead of trusting a stored verdict that a threshold change invalidates.
+  audio_validator_histogram: Record<string, number> | string
+  structural_audio_validator_histogram: Record<string, number> | string
+  /**
+   * The denominator the audio counts are measured against: the CUE SHEET's
+   * cell count where one is linked, and NULL where none is — which is the
+   * signal "this unit's audio shares the text denominator", not "zero".
+   */
+  audio_total_count: number | null
   last_edit_at: number | null
   revision: number
   target_date: string | null
@@ -118,6 +143,26 @@ export interface PlanUnitRow {
  * work that does not exist. When no projection row exists at all — a file
  * imported before the projection, or mid-backfill — total falls back to
  * files.cell_count, the same last resort the progress read uses.
+ *
+ * THE CUE SHEET (AQU-1278). A dubbing project does not record against its
+ * subtitles. The importer writes a hidden `role: 'audio-cues'` sibling
+ * anchored to the subtitle file, every take hangs off a CUE cell, and the two
+ * files do not even share a cell count — 646 subtitle cells against 548 cues
+ * on The Chosen's first episode. The cue file is correctly excluded from the
+ * board (`PLAN_UNIT_FILE_PREDICATE`), so before this join the audio numbers
+ * were read off the file that by construction has none, and every dubbed
+ * episode on every real project read 0% recorded.
+ *
+ * So where a unit has a cue sheet, its audio pair comes from the SHEET's
+ * projection row and `audio_total_count` carries the sheet's own denominator.
+ * Sam's rule, 2026-09-16: measure the recording against the thing that was
+ * recorded. No attempt is made to fold takes back through `cell_links` onto
+ * the subtitle cells — the mapping is not 1:1 and nobody plans by it.
+ *
+ * Only file-grain units fold: a cue file anchors to a whole file, never to a
+ * book inside one, and in local data every anchor is a `kind: 'vtt'` source.
+ * Ids are UUIDv7, so `ORDER BY s.id DESC` is the newest-wins rule the editor
+ * already uses for the same question (`ProjectWorkspace.tsx`, `audioCueSibling`).
  */
 export function readPlanUnitsSql(extraScope = ""): string {
   // `extraScope` MUST land in a WHERE clause. Appended after the last LEFT
@@ -126,7 +171,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
   // the wrong one. The `TRUE` base keeps the composition safe when empty.
   return `WITH units AS (${planUnitsSql("f.project_id = ?")})
      SELECT u.project_id, u.file_id, u.file_name, u.file_role, u.file_kind,
-            u.file_book_code, u.section_key,
+            u.file_book_code, u.file_meta, u.file_updated_at, u.section_key,
             COALESCE(pl.total_count, pd.total_count,
                      CASE WHEN u.section_key = '' THEN u.file_cell_count END, 0) AS total_count,
             COALESCE(pl.filled_count, 0) AS filled_count,
@@ -135,15 +180,54 @@ export function readPlanUnitsSql(extraScope = ""): string {
                      CASE WHEN u.section_key = '' THEN u.file_structural_cell_count END, 0) AS structural_count,
             COALESCE(pl.structural_filled_count, 0) AS structural_filled_count,
             COALESCE(pl.structural_validator_histogram, '{}'::jsonb) AS structural_validator_histogram,
-            COALESCE(pd.audio_count, 0) AS audio_count,
-            COALESCE(pd.audio_validated_count, 0) AS audio_validated_count,
+            -- Each pair reads from the cue sheet's row the moment a sheet
+            -- EXISTS, even before its projection row does: a sheet with no row
+            -- yet has recorded nothing, and borrowing the anchor's numbers
+            -- there would put the subtitle file's (always zero) takes back on
+            -- the board wearing the cue sheet's denominator.
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_count, 0)
+                 ELSE COALESCE(pd.audio_count, 0) END AS audio_count,
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validated_count, 0)
+                 ELSE COALESCE(pd.audio_validated_count, 0) END AS audio_validated_count,
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_count, 0)
+                 ELSE COALESCE(pd.structural_audio_count, 0) END AS structural_audio_count,
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validated_count, 0)
+                 ELSE COALESCE(pd.structural_audio_validated_count, 0) END
+              AS structural_audio_validated_count,
+            -- AQU-490. These are AUDIO columns, so they take the ps/pd shape of
+            -- the four above and NOT the pl that the text histogram beside
+            -- them uses. pl is the LANE row: right for text, wrong for audio,
+            -- because a recording is shared by every target language and a
+            -- dubbing project's takes live on the cue sheet rather than on the
+            -- unit's own file. Reaching for pl by reflex is the exact bug
+            -- AQU-1278 fixed for the counts -- a dubbed episode read zero
+            -- audio on the board while its cue sheet was fully recorded.
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validator_histogram, '{}'::jsonb)
+                 ELSE COALESCE(pd.audio_validator_histogram, '{}'::jsonb) END
+              AS audio_validator_histogram,
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validator_histogram, '{}'::jsonb)
+                 ELSE COALESCE(pd.structural_audio_validator_histogram, '{}'::jsonb) END
+              AS structural_audio_validator_histogram,
+            -- NULL where there is no sheet: the reader's signal to measure
+            -- audio against the text total, exactly as it always has.
+            CASE WHEN cs.id IS NOT NULL
+                 THEN COALESCE(ps.total_count, cs.cell_count, 0) END AS audio_total_count,
             COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,
-            GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0)) AS revision,
+            GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0),
+                     COALESCE(ps.revision, 0)) AS revision,
             -- The projection stamps this on every recompute. A backfill can
             -- fill in audio counts and activity WITHOUT advancing the event
             -- sequence, so the revision alone would leave the plan ETag
             -- byte-identical and a client caching an audio-less board forever.
-            GREATEST(COALESCE(pl.updated_at, 0), COALESCE(pd.updated_at, 0)) AS progress_updated_at,
+            -- The cue sheet's stamp is in here for the same reason one step
+            -- further out: a take recorded against a cue touches no row of the
+            -- subtitle file, and without this the board that now reads its
+            -- audio from the sheet would answer 304 to every request after it.
+            GREATEST(COALESCE(pl.updated_at, 0), COALESCE(pd.updated_at, 0),
+                     COALESCE(ps.updated_at, 0),
+                     -- The cue sheet's own row, so adding, removing or
+                     -- restoring one moves the board ETag. See the cst join.
+                     COALESCE(cst.touched_at, 0)) AS progress_updated_at,
             pu.target_date, pu.done_at, pu.done_by,
             pu.updated_at AS plan_updated_at, pu.updated_by AS plan_updated_by
        FROM units u
@@ -157,6 +241,48 @@ export function readPlanUnitsSql(extraScope = ""): string {
         AND pl.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
         AND pl.section_key = u.section_key
         AND pl.target_lang = ?
+       LEFT JOIN LATERAL (
+         SELECT s.id, s.cell_count
+           FROM files s
+          WHERE u.section_key = ''
+            AND s.project_id = u.project_id
+            AND s.anchor_file_id = u.file_id
+            AND s.role = 'audio-cues'
+            AND s.deleted_at IS NULL
+          ORDER BY s.id DESC
+          LIMIT 1
+       ) cs ON TRUE
+       /*
+        * WHEN ANY CUE SIBLING WAS LAST TOUCHED — live or tombstoned.
+        *
+        * Whether a unit has a sheet is decided from the files table above, but
+        * the clocks below fold only projection rows, and a cue file is
+        * excluded from the unit set by PLAN_UNIT_FILE_PREDICATE, so its own
+        * files.updated_at reached nothing. Deleting a sheet therefore flipped every audio
+        * column on that unit — the quad falls back to the anchor's own zeroes
+        * and audio_total_count goes NULL — while leaving the plan ETag
+        * byte-identical, and the board went on serving cached numbers for a
+        * sheet that no longer existed. A restore had the same hole in
+        * reverse.
+        *
+        * Deliberately NOT filtered by deleted_at, and deliberately separate
+        * from cs above: the moment a sheet is tombstoned it drops out of cs
+        * entirely, taking its timestamp with it, which is exactly the event
+        * that needs to move the clock. MAX over every sibling keeps it.
+        */
+       LEFT JOIN LATERAL (
+         SELECT MAX(sc.updated_at) AS touched_at
+           FROM files sc
+          WHERE u.section_key = ''
+            AND sc.project_id = u.project_id
+            AND sc.anchor_file_id = u.file_id
+            AND sc.role = 'audio-cues'
+       ) cst ON TRUE
+       LEFT JOIN file_section_progress ps
+         ON ps.project_id = u.project_id AND ps.file_id = cs.id
+        AND ps.scope = 'file'
+        AND ps.section_key = ''
+        AND ps.target_lang = ''
        LEFT JOIN plan_units pu
          ON pu.project_id = u.project_id AND pu.file_id = u.file_id
         AND pu.section_key = u.section_key

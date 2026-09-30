@@ -120,6 +120,13 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     () => readCursor(settings as Record<string, unknown>),
     [settings],
   )
+  // AQU-686: the genesis import (importDcsResource) parses under the project's
+  // persisted front-matter opt-out, so every later re-parse — update delta AND
+  // repair scan — has to use the SAME option. Re-parsing without it produces
+  // book-name/header/TOC/title/intro cells this adapter deliberately never
+  // imported; they are absent from currentCells, so the delta classifies each as
+  // a CREATE and the next Door43 sync silently undoes the opt-out.
+  const excludeFrontMatter = settings.importExcludeFrontMatter ?? false
 
   const dcs = useMemo(() => client ?? new DcsClient(), [client])
 
@@ -267,6 +274,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         oldEntry,
         newEntry,
         currentCells,
+        excludeFrontMatter,
       })
 
       await runApply(delta, currentCells, {
@@ -292,7 +300,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, check, canImport, dcs, projectId, getToken, runApply, patch, t])
+  }, [cursor, check, canImport, dcs, projectId, getToken, runApply, patch, excludeFrontMatter, t])
 
   // Repair: re-read the source at the PINNED ref with today's parser and fix any
   // cells that were imported incorrectly (e.g. by a since-fixed parser bug).
@@ -312,7 +320,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     try {
       const entry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
       const currentCells = await buildCurrentCells(projectId, getToken, t)
-      const delta = await computeRepairDelta({ client: dcs, entry, currentCells })
+      const delta = await computeRepairDelta({ client: dcs, entry, currentCells, excludeFrontMatter })
       const total = delta.creates.length + delta.commits.length + delta.deletes.length
       if (total === 0) {
         // Nothing diverges from the pinned source — report and stop; no
@@ -327,7 +335,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, dcs, projectId, getToken, t])
+  }, [cursor, canImport, dcs, projectId, getToken, excludeFrontMatter, t])
 
   const handleRepairApply = useCallback(async () => {
     if (!cursor || busyRef.current) return

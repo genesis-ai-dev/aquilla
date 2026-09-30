@@ -250,7 +250,7 @@ Gotchas:
 - Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
 - Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
 - Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
-- Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, policyKeysNotApplied }\`. \`briefReachesCopilot\` is the real prompt-preview run on the first source cell of the first created file — if it is false, the brief is NOT reaching the AI.
+- Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, briefDetails, policyKeysNotApplied }\`. \`briefReachesCopilot\` is a FRESHNESS claim, not an emptiness one: with a \`brief\` block it is true only if the L1 summary was re-rendered inside this commit AND the real prompt-preview run on the first source cell of the first created file carries it. If it is false, \`briefDetails.reason\` says why and the brief is NOT reaching the AI — run RegenerateBriefSummary. \`briefDetails.truncated\` means the summary hit the 1600-char cap and dropped some committed sections; it can accompany a \`true\`.
 Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "settings": { "sourceLanguage": "ru", "targetLanguage": "sty", "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
   },
   {
@@ -549,6 +549,41 @@ Gotchas:
 - Refused while the cell still owns validators, waivers, comments, back-translations, audio takes, cell links or assignment rows: the delete projection removes ONE row and cleans up nothing else, so those would be orphaned. Clear them first — the error names what is holding it.
 - Refused on a file imported with preserved export slots (IDML/OOXML locators): removing one slice of a note block makes the export refuse to assemble it.
 - A lane that gains a translation between prepare and commit makes the plan stale rather than silently leaving an orphan.`,
+  },
+  {
+    kind: 'HideCell',
+    title: 'Hide cell',
+    oneLiner: 'Park a cell — out of translation and exports, reversibly.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### HideCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with ShowCell (stage the hides and the shows as two plans).
+Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter, at the same PROJECT_LEAD floor the editor's own **Hide cell** menu item uses.
+**This is the REVERSIBLE one.** Hiding takes the row out of the editor for everyone, in every language lane, and out of every export — but deletes NOTHING. The source text, every lane's translation, recordings, comments and validations survive and come back untouched on ShowCell. Reach for this, not DeleteCell, for a stray heading, a marker that bled through an import, or a paragraph the client does not want translated.
+Gotchas:
+- Sugar over EmitEvents: the staged plan you read back holds the equivalent \`source.cell.visibility.set\` events, not a \`HideCell\` entry. Behavior is identical either way. The raw EmitEvents door does NOT accept the kind — these named commands are the way in.
+- Refused at prepare when the cell does not exist, or is ALREADY hidden (a no-op plan is not worth a human's approval). Naming one cell twice in a plan is refused for the same reason.
+- Hiding is per CELL, not per lane: one command hides the row in every target language. There is no per-lane hide.
+- A translation a collaborator saves while the cell is hidden still applies and is there when you show it again — hiding is not a lock.
+- Cell reads carry \`hidden\` so you can tell what is already parked and skip it; a hidden cell is not work.
+Example: \`{ "kind": "HideCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
+    kind: 'ShowCell',
+    title: 'Show cell',
+    oneLiner: 'Bring a hidden cell back with everything it had.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ShowCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with HideCell.
+Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the PROJECT_LEAD floor. The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
+Gotchas:
+- Sugar over EmitEvents, same as HideCell; the staged plan holds \`source.cell.visibility.set\` events.
+- Refused at prepare when the cell does not exist or is NOT currently hidden.
+- Find what to show: list the file's cells and look for \`hidden: true\` (the flag rides the SOURCE row — a target row never carries it).
+Example: \`{ "kind": "ShowCell", "fileId": "f1", "cellId": "c7" }\``,
   },
   {
     kind: 'SplitCell',

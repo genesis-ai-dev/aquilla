@@ -9,6 +9,7 @@
 
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
+import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
@@ -72,6 +73,7 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
@@ -137,6 +139,8 @@ declare global {
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
+      /** AQU-730. Unset locally and in e2e; dev and prod set it in wrangler. */
+      LANE_READ_WALL?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
       /** Exact Worker namespace selected by the deployment profile. */
@@ -154,10 +158,14 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
-      /** OmniVoice TTS Modal endpoint (infra/modal/omnivoice.py). */
-      OMNIVOICE_URL?: string
-      /** Shared secret for the OmniVoice endpoint (matches its OMNIVOICE_TOKEN). */
-      OMNIVOICE_TOKEN?: string
+      /**
+       * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
+       * See docs/INWORLD-TTS.md.
+       */
+      INWORLD_API_KEY?: string
+      INWORLD_API_BASE?: string
+      INWORLD_TTS_MODEL?: string
+      INWORLD_DEFAULT_VOICE?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -184,7 +192,7 @@ declare global {
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
        *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
       POSTHOG_KEY?: string
-      /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+      /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
       POSTHOG_HOST?: string
       /**
        * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
@@ -327,6 +335,11 @@ const worker = {
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
+    // AQU-777: per-cell attachment bytes. Its own R2 prefix and its own
+    // allow-listed content types — see cell-attachments.ts for why this is a
+    // sibling of the audio route rather than a flag on it.
+    const attachmentResponse = await handleCellAttachmentRequest(request, env)
+    if (attachmentResponse) return attachmentResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
@@ -377,6 +390,8 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
+    if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)

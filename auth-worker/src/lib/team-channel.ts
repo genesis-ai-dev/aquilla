@@ -7,7 +7,7 @@
  * a thread hung off a main-channel dispatch message.
  *
  * Ported from the AQU-1049→1052 `team_threads` backend. Divergences from the
- * donor are recorded in db/postgres/migrations/0083_team_channel.sql; the two
+ * donor are recorded in db/postgres/migrations/0117_team_channel.sql; the two
  * that shape this module are (a) nullable `thread_id`, and (b) `(created_at,
  * id)` cursors instead of a per-thread `sequence` counter. The counter was
  * allocated under a thread row lock, which the autopilot tick — writing

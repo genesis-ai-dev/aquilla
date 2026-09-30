@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { getFileProgress } from "@/lib/progress/file-progress-resource"
+import { numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import type { PlanUnit } from "@/lib/plan/plan-status"
 
 export interface PlanSection {
@@ -26,12 +27,6 @@ export interface PlanSection {
 }
 
 const TIME_BUCKET_PREFIX = "t:"
-
-/** "GEN 1" → "1"; anything not chapter-shaped keeps its own key. */
-function sectionLabel(key: string): string {
-  const match = /^\S+\s+(\d+)$/.exec(key)
-  return match ? match[1] : key
-}
 
 /**
  * Does this section belong to the unit? A one-chapter book makes the section
@@ -84,12 +79,18 @@ export function usePlanUnitSections(opts: {
       try {
         const body = await getFileProgress(projectId, fileId, () => getToken(), lane)
         if (cancelled || generation.current !== gen) return
+        const mine = body.sections.filter((s) => sectionBelongsToUnit(s.key, sectionKey))
+        // AQU-1278: labels come from the shared classifier, over THIS unit's
+        // keys — a bare book code is "1" for a one-chapter book and keeps its
+        // code for front matter, and that answer depends on the other keys.
+        // This file used to carry a looser rule of its own that read "Scene 4"
+        // as "4", which is the wrong label and, on the grid, the wrong square.
+        const numbered = numberedBookCodes(mine.map((s) => s.key))
         setSections(
-          body.sections
-            .filter((section) => sectionBelongsToUnit(section.key, sectionKey))
+          mine
             .map((section) => ({
               key: section.key,
-              label: sectionLabel(section.key),
+              label: planSectionLabel(section.key, numbered),
               totalCount: section.totalCount,
               filledCount: section.filledCount,
               validatedCount: section.validatedCount,

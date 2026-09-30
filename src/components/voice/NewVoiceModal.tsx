@@ -1,22 +1,24 @@
 // NewVoiceModal — one modal, two ways to make a voice:
-//   • TTS voice — name it, pick the engine (OmniVoice / Gemini / Kokoro / MMS —
-//     seeded from the project's configured engine), and fill the engine's one
-//     knob (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; OmniVoice: nothing). Gemini's base timbre stays a smart default (rotated
-//     so each new voice sounds distinct).
-//   • Clone voice — name it, pick a cloud engine that can clone (OmniVoice /
-//     Gemini — Kokoro and MMS are on-device and cannot), and capture a short
+//   • TTS voice — name it, pick the engine (Inworld / Gemini / MMS —
+//     seeded from the project's configured engine), and fill that engine's
+//     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
+//     catalog voice (searchable API language + accent, then a stock speaker)
+//     or Voice Design, plus quality / delivery / speed).
+//     Gemini's base timbre stays a smart default (rotated so each new voice
+//     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
+//   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
+//     Gemini — MMS is on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
-//     to match it. A local project default is remapped to OmniVoice on this tab.
+//     to match it. A local project default is remapped to Inworld on this tab.
 //
 // Editing an existing voice reuses this same modal, locked to the voice's kind
-// (TTS: all four engines; clone: cloud clone engines only).
+// (TTS: all three engines; clone: cloud clone engines only).
 // Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AudioLines, Check, Pause, Play, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,20 +37,42 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
-import { KokoroVoiceField } from "@/components/voice/KokoroVoiceField"
 import { cn } from "@/lib/utils"
 import { isRecordedCloneClip, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
   DEFAULT_TTS_PROVIDER,
   GEMINI_TTS_VOICES,
   DEFAULT_GEMINI_VOICE,
+  DEFAULT_INWORLD_VOICE,
   TTS_PROVIDER_INFOS,
   defaultVoiceNameForProvider,
   isGeminiVoiceName,
+  isInworldVoiceName,
   normalizeVoiceForProvider,
   providerInfo,
+  effectiveTtsProvider,
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
+import {
+  DEFAULT_INWORLD_AUDIO_QUALITY,
+  DEFAULT_INWORLD_DELIVERY_MODE,
+} from "@/lib/audio/inworld-voice-settings"
+import { InworldVoiceField } from "@/components/voice/InworldVoiceField"
+import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
+import { InworldVoiceSettings } from "@/components/voice/InworldVoiceSettings"
+import {
+  InworldVoiceDesignField,
+  type InworldDesignSelection,
+} from "@/components/voice/InworldVoiceDesignField"
+import {
+  buildDesignPreviewAudioId,
+  inworldDesignPreviewBlob,
+  inworldDesignPreviewExt,
+  isInworldDesignedVoiceId,
+} from "@/lib/audio/inworld-voice-design"
+import { publishInworldVoice } from "@/lib/sync/tts"
+import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
+import { needsInworldLanguagePicker, toInworldLanguage } from "@/lib/audio/inworld-languages"
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
@@ -68,6 +92,9 @@ export interface NewVoiceModalProps {
   /** Project's configured TTS engine — seeds a new voice's engine. */
   provider?: TtsProvider
   targetLanguage?: string
+  /** Extra target-language lanes (not including the default). Archived lanes should already be omitted. */
+  targetLanes?: string[]
+  archivedLanes?: string[]
   isDefault: boolean
   /** Index used to pick a fresh palette color + base timbre for a new voice. */
   paletteIndex: number
@@ -134,15 +161,21 @@ function seedDraft(args: {
   rotatedGeminiVoice: string
 }): Voice {
   const { voice, projectProvider, targetLanguage, paletteIndex, initialMode, rotatedGeminiVoice } = args
-  const base: Voice = voice ?? {
-    id: newVoiceId(),
-    name: "",
-    color: VOICE_PALETTE[paletteIndex % VOICE_PALETTE.length],
-    provider: projectProvider,
-    voiceName: projectProvider === "gemini"
-      ? rotatedGeminiVoice
-      : defaultVoiceNameForProvider(projectProvider, { targetLanguage }),
-  }
+  const engine = effectiveTtsProvider(projectProvider)
+  const base: Voice = voice
+    ? { ...voice, provider: effectiveTtsProvider(voice.provider ?? engine) }
+    : {
+        id: newVoiceId(),
+        name: "",
+        color: VOICE_PALETTE[paletteIndex % VOICE_PALETTE.length],
+        provider: engine,
+        voiceName: engine === "gemini"
+          ? rotatedGeminiVoice
+          : defaultVoiceNameForProvider(engine, { targetLanguage }),
+        ...(engine === "inworld"
+          ? { audioQuality: DEFAULT_INWORLD_AUDIO_QUALITY, deliveryMode: DEFAULT_INWORLD_DELIVERY_MODE }
+          : {}),
+      }
   const openingClone = Boolean(voice?.referenceAudioId) || initialMode === "clone"
   if (openingClone && !providerInfo(base.provider ?? projectProvider).supportsCloning) {
     return normalizeVoiceForProvider(base, DEFAULT_TTS_PROVIDER, { targetLanguage })
@@ -151,7 +184,7 @@ function seedDraft(args: {
 }
 
 function NewVoiceModalBody({
-  onClose, voice, provider, targetLanguage, isDefault, paletteIndex, projectId, fileId,
+  onClose, voice, provider, targetLanguage, targetLanes, archivedLanes, isDefault, paletteIndex, projectId, fileId,
   session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId,
 }: NewVoiceModalProps) {
   const t = useT()
@@ -159,7 +192,12 @@ function NewVoiceModalBody({
   const lockedMode: Mode | null = voice ? (voice.referenceAudioId ? "clone" : "tts") : null
   const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
 
-  const projectProvider = provider ?? DEFAULT_TTS_PROVIDER
+  const projectProvider = effectiveTtsProvider(provider ?? DEFAULT_TTS_PROVIDER)
+  const catalogLanguages = useMemo(
+    () => projectTargetLaneLanguages({ targetLanguage, targetLanes, archivedLanes }),
+    [targetLanguage, targetLanes, archivedLanes],
+  )
+  const languagePicker = needsInworldLanguagePicker(catalogLanguages)
   // Smart default: rotate Gemini's base timbre so a fresh voice sounds distinct
   // without making the user pick one.
   const rotatedGeminiVoice =
@@ -176,11 +214,19 @@ function NewVoiceModalBody({
     }),
   )
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
+  const setInworldVoice = useCallback((voiceId: string, language?: string) => {
+    update({ voiceName: voiceId, language })
+  }, [update])
+  const inworldLocaleLanguage = draft.language
+    ?? catalogLanguages.find((lane) => toInworldLanguage(lane))
+    ?? catalogLanguages[0]
+  const setInworldLanguage = useCallback((language: string) => {
+    update({ language })
+  }, [update])
   const [deleteOpen, setDeleteOpen] = useState(false)
 
   // Engine is per-voice; legacy voices without one follow the project default.
-  const activeProvider = draft.provider ?? projectProvider
-  const activeInfo = providerInfo(activeProvider)
+  const activeProvider = effectiveTtsProvider(draft.provider ?? projectProvider)
 
   const pickProvider = useCallback((next: TtsProvider) => {
     setDraft((d) => {
@@ -188,6 +234,9 @@ function NewVoiceModalBody({
       // Switching to Gemini keeps the rotated smart-default timbre.
       if (next === "gemini" && !isGeminiVoiceName(d.voiceName)) {
         normalized.voiceName = rotatedGeminiVoice
+      }
+      if (next === "inworld" && !isInworldVoiceName(d.voiceName)) {
+        normalized.voiceName = DEFAULT_INWORLD_VOICE
       }
       return normalized
     })
@@ -200,6 +249,15 @@ function NewVoiceModalBody({
   }, [cells])
   const [liftingKey, setLiftingKey] = useState<string | null>(null)
   const [takeError, setTakeError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [inworldSource, setInworldSource] = useState<"prebuilt" | "design">(
+    () => (isInworldDesignedVoiceId(voice?.voiceName) ? "design" : "prebuilt"),
+  )
+  const [designSelection, setDesignSelection] = useState<InworldDesignSelection | null>(() =>
+    isInworldDesignedVoiceId(voice?.voiceName) && voice?.voiceName
+      ? { voiceId: voice.voiceName, unpublished: false }
+      : null,
+  )
   const applyTake = useCallback(async (take: TakeSource) => {
     if (liftingKey) return
     if (!projectId) { setTakeError(t("audio.newVoice.errorNoProjectContext")); return }
@@ -227,7 +285,7 @@ function NewVoiceModalBody({
 
   const hasReference = Boolean(draft.referenceAudioId)
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!draft.name.trim()) {
       setTakeError(t("audio.newVoice.errorNameRequired"))
       return
@@ -236,12 +294,28 @@ function NewVoiceModalBody({
       setTakeError(t("audio.newVoice.errorReferenceRequired"))
       return
     }
+    if (
+      effectiveTtsProvider(draft.provider ?? projectProvider) === "inworld"
+      && languagePicker
+      && !toInworldLanguage(draft.language)
+      && catalogLanguages.every((lane) => !toInworldLanguage(lane))
+    ) {
+      setTakeError(t("audio.newVoice.errorInworldLanguageRequired"))
+      return
+    }
+    const designing = mode === "tts"
+      && effectiveTtsProvider(draft.provider ?? projectProvider) === "inworld"
+      && inworldSource === "design"
+    if (designing && !designSelection) {
+      setTakeError(t("audio.newVoice.errorDesignPreviewRequired"))
+      return
+    }
     setTakeError(null)
     const fallback = mode === "clone" ? "Cloned voice" : "New voice"
     let next: Voice = { ...draft, name: draft.name.trim() || fallback }
     if (mode === "clone") {
       // A clone rides a cloning-capable engine; fall back to the hosted default
-      // if the draft's engine (kokoro/mms) can't re-voice a reference.
+      // if the draft's engine (mms) can't re-voice a reference.
       const base = draft.provider ?? projectProvider
       const cloneProvider = providerInfo(base).supportsCloning ? base : DEFAULT_TTS_PROVIDER
       next = normalizeVoiceForProvider(next, cloneProvider, { targetLanguage })
@@ -251,9 +325,57 @@ function NewVoiceModalBody({
       delete next.referenceAudioId
       delete next.referenceTakeKey
     }
+    if (designing && designSelection) {
+      let voiceName = designSelection.voiceId
+      let designPreviewAudioId = next.designPreviewAudioId
+      if (designSelection.unpublished) {
+        if (!projectId || !fileId || !session) {
+          setTakeError(t("audio.newVoice.errorDesignNoProject"))
+          return
+        }
+        setSaving(true)
+        try {
+          voiceName = await publishInworldVoice(
+            {
+              projectId,
+              fileId,
+              voiceId: designSelection.voiceId,
+              displayName: next.name,
+              ...(next.prompt ? { description: next.prompt } : {}),
+            },
+            audioSyncTokenFetcherForSession(session),
+          )
+          if (designSelection.previewAudio) {
+            const blob = inworldDesignPreviewBlob(designSelection.previewAudio)
+            const id = buildDesignPreviewAudioId(inworldDesignPreviewExt(designSelection.previewAudio))
+            await uploadVoiceReference({
+              projectId,
+              fileId,
+              referenceAudioId: id,
+              blob,
+              getSyncToken: audioSyncTokenFetcherForSession(session),
+            })
+            designPreviewAudioId = id
+          }
+        } catch (e) {
+          setTakeError(e instanceof Error ? e.message : String(e))
+          setSaving(false)
+          return
+        }
+        setSaving(false)
+      }
+      next = { ...next, voiceName }
+      if (designPreviewAudioId) next.designPreviewAudioId = designPreviewAudioId
+    } else if (mode === "tts" && effectiveTtsProvider(next.provider ?? projectProvider) === "inworld") {
+      delete next.prompt
+      delete next.designPreviewAudioId
+    }
     onSave(next)
     onClose()
-  }, [mode, draft, hasReference, projectProvider, targetLanguage, onSave, onClose, t])
+  }, [
+    mode, draft, hasReference, projectProvider, targetLanguage, languagePicker, catalogLanguages,
+    inworldSource, designSelection, projectId, fileId, session, onSave, onClose, t,
+  ])
 
   return (
     <>
@@ -279,9 +401,9 @@ function NewVoiceModalBody({
                   if (!providerInfo(current).supportsCloning) pickProvider(DEFAULT_TTS_PROVIDER)
                 }
               }}
-              className="gap-0"
+              className="w-full gap-0"
             >
-              <TabsList size="lg" className="w-full" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-2" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
                 </TabsTrigger>
@@ -292,7 +414,8 @@ function NewVoiceModalBody({
             </Tabs>
           )}
 
-          <FieldGroup className="space-y-4 pt-1">
+          <DialogBody>
+            <FieldGroup className="space-y-4 pt-1">
             {/* Name */}
             <Field>
               <FieldLabel htmlFor="voice-name">{t("common.name")}</FieldLabel>
@@ -307,7 +430,7 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {/* Engine — TTS offers all four; clone only the cloud engines that
+            {/* Engine — TTS offers cloud + MMS; clone only the cloud engines that
                 can re-voice a reference. Same slot on both tabs so the control
                 doesn't jump. */}
             <Field>
@@ -319,23 +442,85 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {mode === "tts" && activeProvider === "kokoro" && (
-              <KokoroVoiceField
-                value={draft.voiceName ?? ""}
-                targetLanguage={targetLanguage}
-                onChange={(v) => update({ voiceName: v || undefined })}
-              />
-            )}
             {mode === "tts" && activeProvider === "mms" && (
               <MmsLanguageField
                 value={draft.voiceName ?? ""}
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
             )}
-            {mode === "tts" && activeProvider === "omnivoice" && (
-              <p className="text-xs text-muted-foreground">
-                {t("audio.newVoice.singleVoiceHint", { engine: activeInfo.title })}
-              </p>
+            {mode === "clone" && activeProvider === "inworld" && (
+              <InworldDesignLocaleFields
+                copy="catalog"
+                language={inworldLocaleLanguage}
+                onLanguageChange={setInworldLanguage}
+                projectId={projectId}
+                fileId={fileId}
+                session={session}
+              />
+            )}
+            {mode === "tts" && activeProvider === "inworld" && (
+              <>
+                <Tabs
+                  value={inworldSource}
+                  onValueChange={(value) => setInworldSource(value as "prebuilt" | "design")}
+                  className="gap-0"
+                >
+                  <TabsList aria-label={t("audio.newVoice.inworldSourceGroupLabel")}>
+                    <TabsTrigger value="prebuilt">
+                      {t("audio.newVoice.tabPrebuilt")}
+                    </TabsTrigger>
+                    <TabsTrigger value="design">
+                      {t("audio.newVoice.tabDesign")}
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                {inworldSource === "prebuilt" ? (
+                  <>
+                    <InworldDesignLocaleFields
+                      copy="catalog"
+                      voicesOnly
+                      language={inworldLocaleLanguage}
+                      onLanguageChange={setInworldLanguage}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                    <InworldVoiceField
+                      value={draft.voiceName}
+                      language={draft.language}
+                      onChange={setInworldVoice}
+                      targetLanguages={draft.language ? [draft.language] : catalogLanguages}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                  </>
+                ) : (
+                  <InworldVoiceDesignField
+                    prompt={draft.prompt ?? ""}
+                    onPromptChange={(prompt) => update({ prompt: prompt || undefined })}
+                    selection={designSelection}
+                    onSelectionChange={setDesignSelection}
+                    existingVoiceId={isInworldDesignedVoiceId(draft.voiceName) ? draft.voiceName : undefined}
+                    existingPreviewAudioId={draft.designPreviewAudioId}
+                    language={draft.language ?? catalogLanguages.find((lane) => toInworldLanguage(lane))}
+                    onLanguageChange={setInworldLanguage}
+                    projectId={projectId}
+                    fileId={fileId}
+                    session={session}
+                    speakingRate={draft.speakingRate}
+                    deliveryMode={draft.deliveryMode}
+                    audioQuality={draft.audioQuality}
+                  />
+                )}
+              </>
+            )}
+            {activeProvider === "inworld" && (
+              <InworldVoiceSettings
+                voice={draft}
+                onChange={update}
+                previewIgnored={mode === "tts" && inworldSource === "design"}
+              />
             )}
             {activeProvider === "gemini" && (
               <Field>
@@ -364,40 +549,42 @@ function NewVoiceModalBody({
                 onApplyTake={(take) => void applyTake(take)}
               />
             )}
-          </FieldGroup>
+            </FieldGroup>
+          </DialogBody>
 
           {/* Footer */}
-          <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">
-            {onMakeDefault && !isDefault && (
-              <AppTooltip content={t("audio.newVoice.makeNarratorHint")}>
-                <Button
-                  type="button" variant="outline" onClick={onMakeDefault}
-                >
-                  <Star className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.makeNarratorButton")}
-                </Button>
-              </AppTooltip>
+          <div className="-mx-5 -mb-5 mt-2 flex flex-col gap-2 rounded-b-3xl bg-muted/40 p-5">
+            {takeError && (
+              <p className="select-text cursor-text break-words text-xs text-destructive" role="alert">{takeError}</p>
             )}
-            {isDefault && (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Star className="h-3.5 w-3.5 text-primary" /> {t("audio.narrator")}
-              </span>
-            )}
-            {onDelete && !draft.builtIn && (
-              <Button
-                type="button" variant="ghost"
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="me-1 h-3.5 w-3.5" /> {t("common.delete")}
-              </Button>
-            )}
-            <div className="ms-auto flex flex-col items-end gap-1">
-              {takeError && (
-                <p className="text-xs text-destructive" role="alert">{takeError}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {onMakeDefault && !isDefault && (
+                <AppTooltip content={t("audio.newVoice.makeNarratorHint")}>
+                  <Button
+                    type="button" variant="outline" onClick={onMakeDefault}
+                  >
+                    <Star className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.makeNarratorButton")}
+                  </Button>
+                </AppTooltip>
               )}
-              <div className="flex gap-2">
+              {isDefault && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Star className="h-3.5 w-3.5 text-primary" /> {t("audio.narrator")}
+                </span>
+              )}
+              {onDelete && !draft.builtIn && (
+                <Button
+                  type="button" variant="ghost"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 className="me-1 h-3.5 w-3.5" /> {t("common.delete")}
+                </Button>
+              )}
+              <div className="ms-auto flex gap-2">
                 <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
-                <Button type="button" onClick={handleSave}>
+                <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+                  {saving ? <Spinner className="size-3" /> : null}
                   {isNew ? t("audio.newVoice.createButton") : t("common.save")}
                 </Button>
               </div>
@@ -504,6 +691,10 @@ function CloneReferenceSource({
       audioRef.current = audio
       audio.onended = () => stopPlayback()
       await audio.play()
+      if (audioRef.current !== audio) {
+        audio.pause()
+        return
+      }
       setPlayingKey(key)
     } catch {
       stopPlayback()
@@ -518,7 +709,7 @@ function CloneReferenceSource({
       onValueChange={(value) => setSource(value as CloneSource)}
       className="gap-2"
     >
-      <TabsList className="w-full" aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
+      <TabsList aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
         <TabsTrigger value="record" className="pe-3">
           {t("audio.newVoice.referenceLabel")}
           {clipFilled && (
@@ -605,7 +796,7 @@ function CloneReferenceSource({
               })}
             </div>
             {takeError && (
-              <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+              <p className="select-text cursor-text break-words rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
                 {takeError}
               </p>
             )}

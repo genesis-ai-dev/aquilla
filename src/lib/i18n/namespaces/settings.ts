@@ -50,6 +50,17 @@ export const settings = defineNamespace({
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
 
+    // ── RepetitionPropagationSection (AQU-1391) ──
+    "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "settings.autoPropagateRepetitions.description":
+      "When on, validating a cell copies its translation into every other cell " +
+      "in the same file whose source text is identical. The filled-in cells are " +
+      "left unvalidated so someone still checks them in context. Individual " +
+      "projects can override this.",
+    "settings.autoPropagateRepetitions.saveFailed": "Save failed",
+    "settings.autoPropagateRepetitions.blocked":
+      "Only org maintainers and owners can change this default.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
@@ -61,6 +72,14 @@ export const settings = defineNamespace({
       "for themselves from the assign-work picker — they still can't assign " +
       "work to anyone else. Leads and maintainers can always assign, to " +
       "anyone, regardless of this setting.",
+    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.description":
+      "When on, a member (contributor and above) who has been restricted to " +
+      "specific target languages can assign work to other people — but only " +
+      "within those languages. Give a mentor or coordinator the languages they " +
+      "look after under Members, and they can hand out chapters there without " +
+      "any other admin rights. Members with no language restriction are " +
+      "unaffected by this setting.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -94,7 +113,7 @@ export const settings = defineNamespace({
 
     // ── LocalLlmSection (Preferences → Offline AI provider, Tauri desktop app only) ──
     // Deliberately NOT named "Local LLM" in the UI — sits right next to "Local models"
-    // (Whisper/Kokoro/MMS voice models, an unrelated on-device speech feature) in the same
+    // (Whisper/MMS voice models, an unrelated on-device speech feature) in the same
     // nav group, and the two names read as siblings when they aren't. This is a text-
     // generation endpoint used only when offline; that's a voice/transcription cache used
     // always. The description below repeats the distinction since a user landing straight on
@@ -216,7 +235,7 @@ export const settings = defineNamespace({
     "settings.monday.callback.connecting": "Connecting to Monday.com…",
 
     // ── OrgSettingsIdentity ──
-    "settings.orgIdentity.nameDescription": "Shown across the workspace.",
+    "settings.orgIdentity.nameDescription": "Shown across the organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
 

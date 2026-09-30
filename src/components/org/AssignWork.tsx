@@ -69,6 +69,11 @@ export interface AssignWorkProps {
   callerUserId?: number | null
   /** Called after a successful assign so the parent can refresh rollups. */
   onAssigned?: () => void
+  /**
+   * Target-language lane for the assignment. '' = the project's default lane
+   * (omitted on the wire, same contract as AssignModal).
+   */
+  targetLang?: string
 }
 
 const DEFAULT_ROLE_LEVEL = 500
@@ -84,6 +89,7 @@ export function AssignWork({
   assignmentMinRole = DEFAULT_ASSIGNMENT_MIN_ROLE,
   callerUserId = null,
   onAssigned,
+  targetLang = "",
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < assignmentMinRole
@@ -98,6 +104,8 @@ export function AssignWork({
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // AQU-1308: why the roster is empty, when it is empty for a reason.
+  const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
 
   // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
   // Revelation) rather than the incoming prop order, matching the sidebar and
@@ -117,12 +125,27 @@ export function AssignWork({
   // hosts use), not the org roster — an org roster both floods the picker with
   // org-baseline-only people and misses project-only invitees (AQU-474).
   // Roster-hidden / no-access resolve to an empty list, failing closed.
+  // AQU-1308: a failed roster fetch must never collapse into a silent empty
+  // "Select member…". The three non-ok outcomes are kept apart so the picker
+  // can say which one happened: `roster-hidden` is org policy (actionable —
+  // ask an owner), `no-access` / a thrown error is a load failure.
   useEffect(() => {
     if (!open) return
     let cancelled = false
+    setRosterError(null)
     fetchProjectRoster(jwt, projectId)
-      .then((r) => { if (!cancelled) setMembers(r.kind === "ok" ? r.members : []) })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
+      .then((r) => {
+        if (cancelled) return
+        setMembers(r.kind === "ok" ? r.members : [])
+        if (r.kind === "roster-hidden") setRosterError("hidden")
+        else if (r.kind === "no-access") setRosterError("load-failed")
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setMembers([])
+        setRosterError("load-failed")
+        setError(e instanceof Error ? e.message : String(e))
+      })
     return () => { cancelled = true }
   }, [open, jwt, projectId])
 
@@ -220,6 +243,7 @@ export function AssignWork({
         scope,
         scopeKind,
         scopeLabel,
+        targetLang: targetLang || undefined,
         deadline: deadline || null,
       })
       setSelectedChapters([])
@@ -304,6 +328,14 @@ export function AssignWork({
               <FieldDescription>
                 {t("org.assignWork.selfAssignNote")}
               </FieldDescription>
+            )}
+            {/* AQU-1308: name the failure right under the picker it emptied. */}
+            {rosterError && (
+              <FieldError>
+                {rosterError === "hidden"
+                  ? t("org.assignWork.rosterHiddenError")
+                  : t("org.assignWork.rosterLoadError")}
+              </FieldError>
             )}
           </Field>
           <Field>

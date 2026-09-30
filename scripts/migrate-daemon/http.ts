@@ -83,8 +83,12 @@ export class SyncClient {
     const { accepted } = (await res.json()) as { accepted: number }
     return { status: res.status, ms: Date.now() - t0, accepted }
   }
-  finalize(projectId: string): Promise<void> {
-    return this.json<unknown>("/migrate/finalize", { method: "POST", body: JSON.stringify({ projectId }) }).then(() => undefined)
+  /** AQU-557: pass the files this push actually touched so finalize recomputes
+   *  only those. An empty/omitted list keeps the whole-project recompute, which
+   *  is a superset — never a skip. */
+  finalize(projectId: string, fileIds: string[] = []): Promise<void> {
+    const body = fileIds.length > 0 ? { projectId, fileIds } : { projectId }
+    return this.json<unknown>("/migrate/finalize", { method: "POST", body: JSON.stringify(body) }).then(() => undefined)
   }
   async getSettings(projectId: string): Promise<Record<string, unknown>> {
     const r = await this.json<{ settings?: Record<string, unknown> }>(`/migrate/settings?projectId=${encodeURIComponent(projectId)}`)

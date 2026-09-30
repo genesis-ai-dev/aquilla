@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
 import { AliasMap } from "../lib/agent/compress"
 import type { EmitStageContext } from "../lib/agent/emit-stage"
-import { parseRefRange, orderPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
+import { parseRefRange, orderPairs, selectCellPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
 import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
@@ -55,8 +55,8 @@ async function seedWorld() {
   }
 }
 
-function toolCtx() {
-  return { projectId: PROJECT, focusedFileId: FILE, aliases: new AliasMap() }
+function toolCtx(lane: string = "") {
+  return { projectId: PROJECT, focusedFileId: FILE, lane, aliases: new AliasMap() }
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -124,6 +124,7 @@ describe("executeRead", () => {
     await seedWorld()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -141,6 +142,7 @@ describe("executeRead", () => {
       .run()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -154,6 +156,7 @@ describe("executeRead", () => {
       .run()
     const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(out.ok).toBe(true)
@@ -198,6 +201,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, { ref: "GEN 1" }, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -210,6 +214,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE, // Genesis is open, but the user said Mark
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -222,6 +227,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
       focusedFileId: GEN_FILE,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
@@ -233,6 +239,7 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     await seedGenesis()
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(false)
@@ -245,10 +252,302 @@ describe("resolveScope — target-file resolution (AQU-846)", () => {
     await seedWorld() // Mark alone
     const scope = await resolveScope(env.AQUILLA_PG, {}, {
       projectId: PROJECT,
+      lane: "",
       aliases: new AliasMap(),
     })
     expect(scope.ok).toBe(true)
     expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+})
+
+// AQU-1455 — "translate the first 20 cells of the project" asked which file on
+// a one-file project (the hidden audio-cues sibling counted as a second
+// document), "practise1 file" could not be named, and a non-Bible book made the
+// agent guess MRK. These pin the server half of the fix.
+describe("resolveScope — file names and non-canonical books (AQU-1455)", () => {
+  const noFocus = () => ({ projectId: PROJECT, aliases: new AliasMap(), lane: "" })
+  const XXB_FILE = "77777777-7777-4777-8777-777777777777"
+
+  async function addFile(id: string, name: string, bookCode: string | null, extra = "", binds: unknown[] = []) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id${extra ? ", " + extra.split("=")[0] : ""}) VALUES (?, ?, ?, ?, ?${extra ? ", ?" : ""})`,
+    )
+      .bind(id, PROJECT, name, bookCode, crypto.randomUUID(), ...binds)
+      .run()
+  }
+
+  async function seedProject() {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(`INSERT INTO projects (id, name, created_by) VALUES (?, 'P', 1)`).bind(PROJECT).run()
+  }
+
+  it("ignores the hidden audio-cues sibling when counting documents", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    await addFile("88888888-8888-4888-8888-888888888888", "Story (cues)", null, "role", ["audio-cues"])
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  it("treats a source file and its target sibling as one document", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    await addFile("99999999-9999-4999-8999-999999999999", "Story (target)", null, "source_file_id", [FILE])
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(true)
+  })
+
+  it("still asks when two real documents exist and nothing is focused", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(false)
+    expect(scope.ok === false && scope.error).toContain("ASK THE USER")
+    expect(scope.ok === false && scope.error).toContain('"Story Two"')
+  })
+
+  // AQU-1468: the unfocused ask carries every document as a button candidate,
+  // and still never auto-picks (AQU-846).
+  it("returns every document as a candidate when it asks, and picks none", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const scope = await resolveScope(env.AQUILLA_PG, {}, noFocus())
+    expect(scope.ok).toBe(false)
+    const candidates = scope.ok === false ? scope.candidates : undefined
+    expect([...(candidates ?? [])].sort((x, y) => x.name.localeCompare(y.name))).toEqual([
+      { id: FILE, name: "Story One" },
+      { id: XXB_FILE, name: "Story Two" },
+    ])
+  })
+
+  it("surfaces the unfocused candidates through executeRead's data", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const out = await executeRead(env.AQUILLA_PG, {}, noFocus())
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain("ASK THE USER which file to work in and stop")
+    expect(out.data?.candidates).toHaveLength(2)
+  })
+
+  // The model passes fileId ":file" out of habit with nothing open. That used
+  // to end in ":file is not bound", which carries no candidates, so the chat
+  // asked "which file?" with no buttons and a one-document project never
+  // resolved.
+  it("treats an unbound :file as no file named: one document resolves", async () => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    const scope = await resolveScope(env.AQUILLA_PG, { fileId: ":file" }, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  // Seen live: the model sent fileId "" on a one-file project and was told
+  // `no file … is named like ""`, so it asked which file anyway.
+  it.each([[""], ["  "], [null]])("treats a blank fileId (%j) as no file named", async (blank) => {
+    await seedProject()
+    await addFile(FILE, "Story", null)
+    const scope = await resolveScope(env.AQUILLA_PG, { fileId: blank, ref: blank }, noFocus())
+    expect(scope.ok && scope.fileId).toBe(FILE)
+    expect(scope.ok && scope.notice).toBeUndefined()
+  })
+
+  it("treats an unbound :file as no file named: several documents return the candidates", async () => {
+    await seedProject()
+    await addFile(FILE, "Story One", null)
+    await addFile(XXB_FILE, "Story Two", null)
+    const out = await executeRead(env.AQUILLA_PG, { fileId: ":file" }, noFocus())
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain("ASK THE USER which file to work in and stop")
+    expect(out.data?.candidates).toHaveLength(2)
+  })
+
+  describe("name lookup", () => {
+    const PRACTICE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    async function seedNamed() {
+      await seedProject()
+      await addFile(PRACTICE, "Practice1_Come_Before_God_Today", null)
+      await addFile(FILE, "Practice_Notes", null)
+      await addFile(XXB_FILE, "Genesis_Intro", null)
+    }
+
+    it("matches by prefix, ignoring case", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice1_come" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("matches by substring", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "before god" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("tolerates a typo and filler words ('practise1 file')", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practise1 file" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(PRACTICE)
+    })
+
+    it("lists candidates by exact name and id when several match", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Practice1_Come_Before_God_Today"')
+      expect(error).toContain('"Practice_Notes"')
+      expect(error).toContain(PRACTICE)
+    })
+
+    it("returns only the matching files as candidates when several match", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect(candidates).toHaveLength(2)
+      expect(candidates).toContainEqual({ id: PRACTICE, name: "Practice1_Come_Before_God_Today" })
+      expect(candidates).toContainEqual({ id: FILE, name: "Practice_Notes" })
+      const out = await executeRead(env.AQUILLA_PG, { fileId: "practice" }, noFocus())
+      expect(out.ok).toBe(false)
+      expect(out.text).toContain('matches more than one file — ASK THE USER which one, quoting these exact names, and stop.')
+      expect(out.data?.candidates).toHaveLength(2)
+    })
+
+    it("returns the project's real files as candidates when nothing matches", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "zzzzzz" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect([...(candidates ?? [])].map((c) => c.name).sort()).toEqual([
+        "Genesis_Intro",
+        "Practice1_Come_Before_God_Today",
+        "Practice_Notes",
+      ])
+      expect(candidates).toContainEqual({ id: XXB_FILE, name: "Genesis_Intro" })
+    })
+
+    it("lists every file when nothing matches", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: "zzzzzz" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Practice1_Come_Before_God_Today"')
+      expect(error).toContain('"Genesis_Intro"')
+      expect(error).toContain('"Practice_Notes"')
+    })
+
+    it("still resolves a real file id", async () => {
+      await seedNamed()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+    })
+  })
+
+  describe("non-canonical book codes", () => {
+    const XX_CELLS = [
+      // sequence order deliberately differs from insert order
+      { id: "a1", ref: "XXB:h:1", seq: 3, source: "Third" },
+      { id: "a2", ref: "XXB 1:1", seq: 1, source: "First" },
+      { id: "a3", ref: "XXB 1:2", seq: 2, source: "Second" },
+    ]
+    async function seedXxb() {
+      await seedProject()
+      await addFile(XXB_FILE, "Appendix", "XXB")
+      for (const c of XX_CELLS) {
+        await env.AQUILLA_PG.prepare(
+          `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, sequence_index, event_id, last_edit_at)
+           VALUES (?, ?, ?, 'source', ?, ?, ?, ?, 0)`,
+        )
+          .bind(PROJECT, XXB_FILE, cellId(c.id), c.source, c.ref, c.seq, crypto.randomUUID())
+          .run()
+      }
+    }
+
+    it("parses a marker ref as a whole-book scope", () => {
+      expect(parseRefRange("XXB:h:1")).toEqual({ book: "XXB" })
+      expect(parseRefRange("FRT")).toEqual({ book: "FRT" })
+    })
+
+    it("reads the whole file in sequence order for a book-only and a marker ref", async () => {
+      await seedXxb()
+      for (const ref of ["XXB", "XXB:h:1"]) {
+        const out = await executeRead(env.AQUILLA_PG, { ref, filter: "untranslated" }, noFocus())
+        expect(out.data?.cells?.map((c) => c.source)).toEqual(["First", "Second", "Third"])
+      }
+    })
+
+    it("errors, listing the files and their codes, when the project lacks the requested book", async () => {
+      await seedXxb()
+      await addFile(FILE, "Second file", "XXC")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      expect(scope.ok).toBe(false)
+      const error = scope.ok === false ? scope.error : ""
+      expect(error).toContain('"Appendix"')
+      expect(error).toContain('"Second file"')
+      expect(error).toContain("XXB")
+      expect(error).toContain("omit ref")
+      expect(error.replace("book code MRK", "")).not.toContain("MRK")
+    })
+
+    it("returns the project's files as candidates when the requested book is missing", async () => {
+      await seedXxb()
+      await addFile(FILE, "Second file", "XXC")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      const candidates = scope.ok === false ? scope.candidates : undefined
+      expect([...(candidates ?? [])].sort((x, y) => x.name.localeCompare(y.name))).toEqual([
+        { id: XXB_FILE, name: "Appendix" },
+        { id: FILE, name: "Second file" },
+      ])
+    })
+
+    it("does not fall back to the focused file when the requested book is absent", async () => {
+      await seedWorld() // Mark
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis', 'GEN', ?)`,
+      )
+        .bind(XXB_FILE, PROJECT, crypto.randomUUID())
+        .run()
+      await env.AQUILLA_PG.prepare(`DELETE FROM files WHERE id = ?`).bind(FILE).run()
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
+        projectId: PROJECT,
+        focusedFileId: XXB_FILE,
+        aliases: new AliasMap(),
+        lane: "",
+      })
+      expect(scope.ok).toBe(false)
+      expect(scope.ok === false && scope.error).toContain('"Genesis"')
+    })
+
+    it("does not auto-pick the only document when the requested book is absent", async () => {
+      await seedProject()
+      await addFile(XXB_FILE, "Genesis", "GEN")
+      const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, noFocus())
+      expect(scope.ok).toBe(false)
+      expect(scope.ok === false && scope.error).toContain('"Genesis"')
+      expect(scope.ok === false && scope.error).toContain("GEN")
+    })
+
+    it("falls back to a NAMED file with a notice when its cells never carry the ref's book", async () => {
+      await seedXxb()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE, ref: "MRK 4" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+      expect(scope.ok && scope.range).toBeUndefined()
+      expect(scope.ok && scope.notice).toContain('"Appendix"')
+      expect(scope.ok && scope.notice).toContain('"MRK 4"')
+      // read prints the notice first and reads in sequence order.
+      const out = await executeRead(env.AQUILLA_PG, { fileId: "Appendix", ref: "MRK 4", limit: 5 }, noFocus())
+      expect(out.ok).toBe(true)
+      expect(out.text.split("\n")[0]).toContain("notice:")
+      expect(out.data?.cells?.map((c) => c.source)).toEqual(["First", "Second", "Third"])
+    })
+
+    it("treats an unparseable ref as the whole file when the file is known", async () => {
+      await seedXxb()
+      const scope = await resolveScope(env.AQUILLA_PG, { fileId: XXB_FILE, ref: "the first bit!" }, noFocus())
+      expect(scope.ok && scope.fileId).toBe(XXB_FILE)
+      expect(scope.ok && scope.range).toBeUndefined()
+      expect(scope.ok && scope.notice).toContain('"the first bit!"')
+      expect(scope.ok && scope.notice).toContain('"Appendix"')
+    })
   })
 })
 
@@ -289,12 +588,13 @@ describe("executeSearch", () => {
 })
 
 describe("executeDraft", () => {
-  function draftCtx(aliases = new AliasMap()) {
+  function draftCtx(aliases = new AliasMap(), lane: string = "") {
     const stageCtx: EmitStageContext = {
       runId: "run-1",
       projectId: PROJECT,
       roleLevel: 400,
       fileId: FILE,
+      lane,
       aliases,
     }
     const progress: { label: string; done: number; total: number }[] = []
@@ -303,6 +603,7 @@ describe("executeDraft", () => {
       ctx: {
         projectId: PROJECT,
         focusedFileId: FILE,
+        lane,
         aliases,
         stageCtx,
         sourceLanguage: "English",
@@ -401,6 +702,43 @@ describe("executeDraft", () => {
     expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
   })
 
+  it("strips trailing bare markers from prompt source and from the model reply (AQU-1465)", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET value = value || ? WHERE project_id = ? AND side = 'source' AND cell_id = ?`,
+    )
+      .bind("\n\\p", PROJECT, cellId("c3"))
+      .run()
+    const requests: { messages: { role: string; content: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)))
+      const content =
+        requests.length === 1
+          ? "compact evidence"
+          : JSON.stringify([
+              { i: 1, t: "Primer verso.\n\\p" },
+              { i: 2, t: "Segundo verso\n\\q1 con texto" },
+            ])
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { ref: "MRK 4" },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.ok).toBe(true)
+    for (const req of requests) {
+      expect(req.messages.map((m) => m.content).join("\n")).not.toContain("\\p")
+    }
+    const values = out.proposal!.events.map((e) => (e.payload as { value: string }).value)
+    expect(values).toEqual(["Primer verso.", "Segundo verso\n\\q1 con texto"])
+  })
+
   it("reports scope exhaustion and remaining work honestly", async () => {
     await seedWorld()
     let calls = 0
@@ -431,5 +769,191 @@ describe("executeDraft", () => {
     // The empty reply must hand the model a next step to relay — a bare
     // "nothing here" reads as a dead end (2026-08-28 transcript).
     expect(done.text).toContain("Suggest a next step")
+  })
+
+  // AQU-1455: draft prints the same widening notice as read, as its first line.
+  it("prints the ref-widening notice first when a named file's ref matches nothing", async () => {
+    await seedWorld() // Mark: every MRK cell with a target is translated; c3/c10 are not
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '[{"i":1,"t":"borrador"}]' } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { fileId: FILE, ref: "GEN 1", limit: 1 },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.text.split("\n")[0]).toContain('notice: ref "GEN 1" matched nothing in file "Mark"')
+  })
+
+  // AQU-1468: a failed draft that asks "which file?" carries the candidates so
+  // the client can render buttons; the error text is unchanged.
+  it("passes the file candidates through when the draft scope is ambiguous", async () => {
+    await seedWorld()
+    const other = "abababab-abab-4bab-8bab-abababababab"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Mark (copy)', NULL, ?)`,
+    )
+      .bind(other, PROJECT, crypto.randomUUID())
+      .run()
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { fileId: "mar" },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain('"mar" matches more than one file — ASK THE USER which one, quoting these exact names, and stop. Matches: ')
+    expect(out.data?.candidates?.map((c) => c.name).sort()).toEqual(["Mark", "Mark (copy)"])
+    expect(out.data?.candidates).toContainEqual({ id: FILE, name: "Mark" })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("Lane plumbing (AQU-1447)", () => {
+  it("isolates work lists by lane: fresh lane B shows untranslated work, lane A untouched", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // Add target rows on lane B (empty translations)
+    for (const c of CELLS) {
+      const id = cellId(c.id)
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .run()
+    }
+
+    // Lane '' (default) should see the original translations
+    const defaultLane = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(""))
+    const defaultUntranslated = defaultLane.data?.cells?.filter((c) => c.status === "untranslated")
+    expect(defaultUntranslated).toHaveLength(2) // c3, c10 originally untranslated
+
+    // Lane B should see ALL as untranslated
+    const laneB_Read = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(laneB))
+    const laneBUntranslated = laneB_Read.data?.cells?.filter((c) => c.status === "untranslated")
+    expect(laneBUntranslated).toHaveLength(4) // all untranslated on lane B
+  })
+
+  it("pairs source with exactly one target per lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // Add empty lane B targets for first two cells
+    for (const c of CELLS.slice(0, 2)) {
+      const id = cellId(c.id)
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .run()
+    }
+
+    // Lane '' pairs should exclude lane B rows
+    const defaultPairs = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1-2" }, toolCtx(""))
+    expect(defaultPairs.data?.cells).toHaveLength(2)
+    defaultPairs.data?.cells?.forEach((c) => {
+      expect(c.cellId).toMatch(/c1|c2/)
+      expect(c.ref).toMatch(/4:1|4:2/)
+    })
+
+    // Lane B should show exactly one pair per source
+    const laneBPairs = await executeRead(env.AQUILLA_PG, { ref: "MRK 4:1-2" }, toolCtx(laneB))
+    expect(laneBPairs.data?.cells).toHaveLength(2)
+    laneBPairs.data?.cells?.forEach((c) => {
+      expect(c.target).toBe("") // empty lane B targets
+    })
+  })
+
+  it("default lane behavior unchanged (single-lane projects)", async () => {
+    await seedWorld()
+    // No additional lanes created; read from default lane
+    const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4" }, toolCtx(""))
+    expect(out.ok).toBe(true)
+    expect(out.data?.cells).toHaveLength(4)
+    expect(out.data?.cells?.[0]).toMatchObject({ ref: "MRK 4:1", status: "validated" })
+  })
+
+  it("examples filters to the active lane only", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    // A validated lane-B translation of c1 (its source matches "teach")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, validated, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Lane B taught', ?, ?, 1, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    // Default lane: sees its own validated c1 only
+    const defaultExamples = await executeExamples(env.AQUILLA_PG, { text: "teach" }, toolCtx(""))
+    expect(defaultExamples.ok).toBe(true)
+    expect(defaultExamples.text).toContain("Y comenzó otra vez a enseñar")
+    expect(defaultExamples.text).not.toContain("Lane B taught")
+
+    // Lane B: only its own validated pair, never the default lane's text
+    const laneBExamples = await executeExamples(env.AQUILLA_PG, { text: "teach" }, toolCtx(laneB))
+    expect(laneBExamples.text).toContain("Lane B taught")
+    expect(laneBExamples.text).not.toContain("Y comenzó otra vez a enseñar")
+  })
+
+  it("search filters target cells to the active lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    const hitIds = (out: Awaited<ReturnType<typeof executeSearch>>) => out.data?.hits?.map((h) => h.cellId) ?? []
+
+    // The lane-B wording is invisible from the default lane, and vice versa
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "Carril", side: "target" }, toolCtx("")))).toEqual([])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "Carril", side: "target" }, toolCtx(laneB)))).toEqual([cellId("c1")])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "cosas", side: "target" }, toolCtx(laneB)))).toEqual([])
+    expect(hitIds(await executeSearch(env.AQUILLA_PG, { q: "cosas", side: "target" }, toolCtx("")))).toEqual([cellId("c2")])
+  })
+
+  it("search side cells keeps source hits in a non-default lane", async () => {
+    await seedWorld()
+    const laneB = crypto.randomUUID()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .run()
+
+    const hits = async (q: string) =>
+      (await executeSearch(env.AQUILLA_PG, { q, side: "cells" }, toolCtx(laneB))).data?.hits?.map((h) => [h.side, h.ref]) ?? []
+
+    // Source text is shared by every lane; target text is this lane's only
+    expect(await hits("sower")).toEqual([["source", "MRK 4:3"]])
+    expect(await hits("Carril")).toEqual([["target", "MRK 4:1"]])
+    expect(await hits("cosas")).toEqual([])
+  })
+
+  it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
+    await seedWorld()
+    // @ts-expect-error targetLang is required: no caller may leave the lane out
+    const untyped = selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
+    await untyped.catch(() => undefined)
+    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "no-such-lane" })
+    expect(pairs).toHaveLength(4)
+    expect(pairs.every((p) => !p.hasTargetRow && p.target === "")).toBe(true)
   })
 })

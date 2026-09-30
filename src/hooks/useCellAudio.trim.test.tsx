@@ -178,3 +178,60 @@ describe("useCellAudio trim window", () => {
     expect(a.paused).toBe(false)
   })
 })
+
+// 2026-09-30: a row shows only which WORD is spoken, yet its hidden player
+// re-rendered it — whole subtree — on every frame a take played anywhere
+// (the card, the tab), since one playback per take made it follow them.
+describe("useCellAudio — a playhead reported by word", () => {
+  const frame = () => act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))) })
+  const byWord = (t: number) => Math.floor(t) // "words" one second long
+
+  it("reports a playing take's time only when the key changes", async () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders++; return useCellAudio(project, cellWith("a1", 3000), "f1", { timeKey: byWord }) })
+    await act(async () => { await result.current.play() })
+    const a = instances[0]
+    a.currentTime = 1.1; await frame()
+    const at = renders
+    a.currentTime = 1.3; await frame()
+    a.currentTime = 1.6; await frame()
+    expect(renders).toBe(at)                  // the same word: no re-render
+    a.currentTime = 2.05; await frame()
+    expect(result.current.currentTime).toBeCloseTo(2.05)
+    expect(renders).toBeGreaterThan(at)
+  })
+
+  it("follows another copy of the take by word too", async () => {
+    const card = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    let rowRenders = 0
+    const row = renderHook(() => { rowRenders++; return useCellAudio(project, cellWith("a1", 3000), "f1", { timeKey: byWord }) })
+    await act(async () => { await card.result.current.play() })
+    const a = instances[0]
+    a.currentTime = 0.2; await frame(); await frame()
+    const at = rowRenders
+    for (const t of [0.3, 0.5, 0.7, 0.9]) { a.currentTime = t; await frame() }
+    expect(rowRenders).toBe(at)
+    a.currentTime = 1.2; await frame(); await frame()
+    expect(row.result.current.currentTime).toBeCloseTo(1.2)
+  })
+
+  it("still reports a seek at once, even within the same word", async () => {
+    const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1", { timeKey: byWord }))
+    await act(async () => { await result.current.play() })
+    instances[0].currentTime = 1.1; await frame()
+    await seekTo(result, 1.8)
+    expect(result.current.currentTime).toBeCloseTo(1.8)
+  })
+
+  it("reports every frame for a caller that shows the playhead itself", async () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders++; return useCellAudio(project, cellWith("a1", 3000), "f1") })
+    await act(async () => { await result.current.play() })
+    const a = instances[0]
+    a.currentTime = 1.1; await frame()
+    const at = renders
+    a.currentTime = 1.3; await frame()
+    expect(renders).toBeGreaterThan(at)
+    expect(result.current.currentTime).toBeCloseTo(1.3)
+  })
+})

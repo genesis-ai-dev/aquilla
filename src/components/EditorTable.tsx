@@ -94,11 +94,11 @@ import { openActivationInputCapture, type ActivationInputCapture } from "@/lib/e
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { displayFieldLabel, displayFieldValue, useCellDisplayFields } from "@/lib/store/cell-display-fields"
-import { activeWordRange } from "@/lib/audio/timings"
+import { activeWordRange, findActiveTimingIndex } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
-import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
+import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
@@ -6216,7 +6216,14 @@ function EditorRow({
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
     cell.attachments, cell.selectedAudioId,
   ])
-  const audioController = useCellAudio(project, cellForAudio, cell.fileId)
+  // This row shows only WHICH WORD is spoken (the karaoke highlight, here and
+  // in the editor), so its players report the playhead per word, not per
+  // frame: one playback per take makes them follow the Audio view card and
+  // the Recording tab too, and a per-frame playhead re-rendered the whole row
+  // on every frame a take played anywhere (2026-09-30).
+  const audioController = useCellAudio(project, cellForAudio, cell.fileId, {
+    timeKey: (t) => findActiveTimingIndex(cellAudioTimings, t),
+  })
   // Round 5: when the rail plays the SHARED source clip (media section), it
   // must stop at the section's end — the play-queue windows this clip, but
   // this per-cell player was never told the window, so play ran on through
@@ -6242,15 +6249,15 @@ function EditorRow({
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
     cell.attachments, cell.selectedGeneratedVoiceAudioId,
   ])
-  const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
-  // AQU-1211: the Recording tab plays the takes this row plays through the
-  // row's own players, so the word highlight in the cell follows them.
-  const rowPlayers = useMemo(() => {
-    const players = new Map<string, UseCellAudioResult>()
-    if (cell.selectedAudioId) players.set(cell.selectedAudioId, audioController)
-    if (cell.selectedGeneratedVoiceAudioId) players.set(cell.selectedGeneratedVoiceAudioId, generatedVoiceController)
-    return players
-  }, [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, audioController, generatedVoiceController])
+  const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId, {
+    timeKey: (t) => findActiveTimingIndex(generatedVoiceTimings, t),
+  })
+  // The Audio view card and the Recording tab keep players of their own and
+  // are NOT handed these (AQU-1211 handed them over so the word highlight
+  // would follow the card's play button). One playback per take now keeps
+  // every copy of a take in step, these included, so the highlight still
+  // follows; and these publish a word at a time, which would make the card's
+  // playhead step from word to word.
 
   // AQU-521: karaoke-while-listening for the read-only target view. When a cell
   // is not being actively edited its target renders as plain text (not a
@@ -7183,7 +7190,6 @@ function EditorRow({
               settings={audioLens.settings}
               session={audioLens.session}
               username={audioLens.username}
-              controller={hasAudio ? audioController : hasGeneratedVoice ? generatedVoiceController : undefined}
               targetLang={activeLane || undefined}
               canEdit={editable}
               onRecord={editable && onOpenRecording ? () => onOpenRecording(cell.id) : undefined}
@@ -8313,7 +8319,6 @@ function EditorRow({
                       project={project}
                       cell={cell}
                       linkedTakes={linkedTakes}
-                      players={rowPlayers}
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}

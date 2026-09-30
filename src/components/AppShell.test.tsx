@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
@@ -357,5 +357,42 @@ describe("AppShell mobile sidebar sheet", () => {
     expect(chrome).not.toHaveClass("w-10", "flex-col")
     expect(sheet.querySelector('[data-testid="left-dock"]')).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
+  })
+
+  // Mobile Agent (2026-09-30): picking a conversation from the sheet changes
+  // only ?conversation= while you are already on /agent. The sheet must still
+  // get out of the way, or the chosen conversation opens hidden under it.
+  function DockLinks() {
+    const navigate = useNavigate()
+    return (
+      <>
+        <button type="button" onClick={() => navigate("/project/p1/agent?conversation=team-chat")}>Pick Team chat</button>
+      </>
+    )
+  }
+
+  function renderDockShell() {
+    return render(
+      <MemoryRouter initialEntries={["/project/p1/agent?conversation=questions"]}>
+        <AppShell
+          header={<div data-testid="header">header</div>}
+          statusBar={null}
+          leftDock={<DockLinks />}
+          logoSlot={<span>logo</span>}
+          main={<div data-testid="content">content</div>}
+        />
+      </MemoryRouter>,
+    )
+  }
+
+  it("closes the sheet when a pick navigates by query alone", async () => {
+    stubLgUp(false)
+    renderDockShell()
+    await userEvent.click(screen.getByRole("button", { name: "Open sidebar" }))
+    const sheet = await screen.findByRole("dialog", { name: "Navigation" })
+    await userEvent.click(within(sheet).getByRole("button", { name: "Pick Team chat" }))
+    // The modal sheet hides the page from the a11y tree while open — read the
+    // trigger regardless, and assert on its expanded state.
+    expect(screen.getByRole("button", { name: "Open sidebar", hidden: true })).toHaveAttribute("aria-expanded", "false")
   })
 })

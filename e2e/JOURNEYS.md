@@ -223,7 +223,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
-- Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring). Verified at 375px on the dev stack.
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),
   the DCS-pinned disabled reason, the IDML row that is parkable although its text

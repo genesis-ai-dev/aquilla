@@ -1104,9 +1104,10 @@ export function ProjectWorkspace() {
   } = useWorkspaceDockTabs(centerSurface === "agent", projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
-  // sheet opens onto the files list instead of a 40px icon strip.
+  // sheet opens onto the files list instead of a 40px icon strip. (The Agent
+  // tab is allowed on mobile: the team conversations list is single-column.)
   useEffect(() => {
-    if (!lgUp && (dockTab === null || dockTab === "agent")) setDockTab("files")
+    if (!lgUp && dockTab === null) setDockTab("files")
   }, [lgUp, dockTab])
   // Back to editor and file-tab navigation retain the Agent tab; only its × closes it.
   const [agentTabOpen, setAgentTabOpen] = useState(
@@ -1132,22 +1133,20 @@ export function ProjectWorkspace() {
   )
 
   useEffect(() => {
-    setAgentTabOpen(lgUp && (centerSurface === "agent" || readAgentTabOpen(projectId)))
-  }, [projectId, lgUp]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project/viewport
+    setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project
   useEffect(() => {
-    if (!lgUp) setAgentTabOpen(false)
-    else if (centerSurface === "agent") setAgentTabOpen(true)
-  }, [centerSurface, lgUp])
+    if (centerSurface === "agent") setAgentTabOpen(true)
+  }, [centerSurface])
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
   const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
   const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
-    if (!lgUp) return
     if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
-  }, [lgUp, openOverlay])
+  }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
     setAgentExpandedFromDock(false)
@@ -11962,7 +11961,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") selectDockTab("voices")
       }}
-      onAgentSelect={lgUp ? () => openAgentTab("editor") : undefined}
+      onAgentSelect={() => openAgentTab("editor")}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -12186,7 +12185,7 @@ export function ProjectWorkspace() {
                 )}
               </div>
             }
-            agentPanel={lgUp ? (
+            agentPanel={
               <AgentDockPanel
                 projectId={project.id}
                 author={currentUsername}
@@ -12198,7 +12197,7 @@ export function ProjectWorkspace() {
                 }}
                 onExpand={() => openAgentTab("sidebar")}
               />
-            ) : undefined}
+            }
             searchPanel={
               <SearchDockPanel
                 activeFileId={activeFileId}
@@ -12267,7 +12266,7 @@ export function ProjectWorkspace() {
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
             surfaceTabs={[
-              ...(lgUp && agentTabOpen && projectId
+              ...(agentTabOpen && projectId
                 ? [{
                     id: "agent",
                     label: t("nav.dock.agentTab"),
@@ -12526,7 +12525,7 @@ export function ProjectWorkspace() {
               />
             </Suspense>
           </div>
-        ) : centerSurface === "agent" && !lgUp ? null : centerSurface === "agent" ? (
+        ) : centerSurface === "agent" ? (
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
           // same shared session as the dock tab, plus the three-pane
           // Source | Agent | Target working set from the agent-workspace branch.
@@ -13097,7 +13096,7 @@ export function ProjectWorkspace() {
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
-            onAskAiFromSelection={lgUp ? handleAskAiFromSelection : undefined}
+            onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}

@@ -1,5 +1,6 @@
 import { FRONTIER_API_URL } from "./sync-token"
 import { t } from "@/lib/i18n/standalone"
+import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
   TranslationRule,
   RulePenalties,
@@ -15,6 +16,28 @@ import type { DraftContextSettings } from "@/lib/completion/draft-context"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
+
+/**
+ * AQU-1068: the stored `cellEditingFloor` vocabulary — "none" plus the rungs of
+ * the standard role ladder this floor may be set to.
+ *
+ * Exported because ProjectSettings.tsx used to repeat the union literally in
+ * two annotations, and a widening that reached only one of them would compile
+ * in a rung the control could never actually hold. `ProjectRecord` still
+ * spells it out (a type cycle for one alias is a poor trade) but cannot drift
+ * narrower: `useProject`'s `assign()` copies this field into it.
+ *
+ * Deliberately NOT sourced from `db/shared/cell-editing-floor.ts`: the client
+ * cannot import server code, which is why this file carries a copy of the
+ * mapping at all — see that module's header.
+ */
+export type CellEditingTier =
+  | "none"
+  | "commenter"
+  | "reviewer"
+  | "contributor"
+  | "project_lead"
+  | "maintainer"
 
 /**
  * The synced subset of project-wide fields. Mirrors the server's settings
@@ -36,20 +59,74 @@ export interface ProjectWideSettings {
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
   validationCount?: number
   validationCountAudio?: number
+  /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — toward its progress numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. Deliberately no stored value for it: null would be a third
+   * thing the resolver has no meaning for, so choosing the default deletes the
+   * key. Absent on the org too means they count, which is what every project
+   * did before this existed.
+   */
+  countStructuralCells?: boolean
+  /**
+   * AQU-1391: does validating a cell copy its translation into the other cells
+   * in the same file whose source text is identical?
+   *
+   * ABSENT means "use the organization's default" (which is ON unless the org
+   * opted out) — the same three-state shape as `countStructuralCells` above,
+   * and for the same reason: null would be a fourth thing the resolver has no
+   * meaning for, so choosing the default deletes the key.
+   */
+  autoPropagateRepetitions?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /** AQU-490: the audio twins. Separate keys, never fallbacks for each other. */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
-   * AQU-646: may people add new lines into the silences on the timeline?
+   * AQU-1068: who may add and remove cells in this project's files?
    *
-   * OFF unless explicitly turned on. The affordance was built speculatively —
-   * no client has asked for it — and it is underdeveloped enough to be a
-   * liability: its mic over an empty stretch used to mint a subtitle line and
-   * record against it, producing a take matching no audio cue at all. Removal
-   * of an empty added line is deliberately NOT gated on this, so switching it
-   * off can never strand a line somebody already made.
+   * Supersedes AQU-646's `allowLineCreation` boolean, which asked the same
+   * question of one surface (the timeline's silences) and could only answer
+   * yes-or-no. Cell editing is now a project-wide capability with a role
+   * FLOOR, named with the product's standard permission ladder so a project
+   * admin picks the same words here they picked on the Members panel:
+   * "maintainer" admits 600 and up, "project_lead" 500, "contributor" 400,
+   * "reviewer" 300, "commenter" 200.
+   *
+   * "none" — the default, and what an absent key means — admits NOBODY, and
+   * that includes an owner. This is a "whether", not a "who": a project that
+   * has not opted in does not restructure its files at all, so there is no
+   * clearance that skips the question. Off by default because the affordance
+   * is the liability the setting exists to contain — removing a cell takes its
+   * translations, takes, comments and validations with it (see the cascade in
+   * event-projection's `source.cell.delete` case).
+   *
+   * IT IS A PRODUCT RULE, ENFORCED AT THE AFFORDANCE, AND THAT IS DELIBERATE
+   * (Sam, 2026-09-09). This value decides which buttons exist — the row menu,
+   * the timeline's add and remove, the gap inserts, and the agent's proposal
+   * staging in auth-worker, which reads the same shared mapping. The sync
+   * perimeter does NOT check it. It was checked there until 2026-09-09, and
+   * doing so silently refused three flows that emit the same event kinds
+   * through the user's own outbox: audio-cue re-import, DCS upstream import
+   * and repair, and diarization. The setting stops accidents, not attackers,
+   * and everyone who can reach the perimeter is already a member the org
+   * admitted. Contrast `allowTrackEditing` below, which stays server-enforced.
+   *
+   * REMOVING AN IMPORTED CELL NEEDS MAINTAINER, WHATEVER THE TIER, and that
+   * half IS enforced at the perimeter (authorize.ts) because it protects the
+   * client's own file rather than merely shaping the UI. Below that rank a
+   * person only ever removes a line somebody added by hand here.
+   *
+   * The old boolean is deliberately NOT migrated: a project that had it on
+   * lands on "none" like everyone else, and a maintainer picks a tier when
+   * they want the affordance back (Sam, 2026-08-29).
    */
-  allowLineCreation?: boolean
+  cellEditingFloor?: CellEditingTier
   /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
@@ -65,14 +142,18 @@ export interface ProjectWideSettings {
    * existing capability away from every project that has one. They stay
    * maintainer-only, which is what they were.
    *
-   * NOTE THE DIVERGENCE FROM `allowLineCreation` ABOVE, which is deliberate and
-   * not an oversight: that one leaves REMOVAL ungated so switching it off
-   * cannot strand a line somebody made. Here, switching off does strand — three
-   * user-added tracks become un-deletable and un-recolourable until it goes
-   * back on. That is Sam's call (2026-08-22) and it is the coherent one for a
-   * structural switch: the tracks keep working and keep playing, they simply
-   * stop being editable, which is exactly what "turn track editing off" should
-   * mean. Do not "restore consistency" with the sibling above.
+   * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.
+   * Shape: that one names a role FLOOR as well as answering whether, while
+   * this is a bare whether riding `file.track.set`'s existing MAINTAINER
+   * floor. And enforcement: THIS ONE IS CHECKED ON THE SERVER and that one is
+   * not, because no import or re-import path emits `file.track.set`, so
+   * enforcing it at the perimeter breaks nothing. On stranding they AGREE,
+   * because both govern removal as well as insertion. Switching
+   * this off strands — three user-added tracks become un-deletable and
+   * un-recolourable until it goes back on. That is Sam's call (2026-08-22) and
+   * it is the coherent one for a structural switch: the tracks keep working and
+   * keep playing, they simply stop being editable, which is exactly what "turn
+   * track editing off" should mean.
    */
   allowTrackEditing?: boolean
   /**
@@ -158,8 +239,10 @@ export interface ProjectWideSettings {
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
   /**
-   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
-   * Opaque BCP-47-ish tags; order = display order.
+   * Complete target-language lane registry, including the project's primary
+   * lane (the same tag as `targetLanguage`). There is no implicit '' default
+   * lane — every lane is an explicit entry. Opaque BCP-47-ish tags; order =
+   * display order (primary first).
    */
   targetLanes?: string[]
   /**
@@ -170,6 +253,11 @@ export interface ProjectWideSettings {
    * tag from here. Case-insensitive to match the lane-registry dedupe rule.
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1271: project affix inventory for terminology source-term matching.
+   * Replacing this key replaces the whole object.
+   */
+  termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   /**
    * AQU-634: per-project opt-out for USFM front matter. When true, a USFM import
    * (primary upload, Paratext project, DCS/Door43 resource, and target-language
@@ -204,6 +292,18 @@ export interface ProjectWideSettings {
    * (pseudonymous ids). Not agent-writable (`POLICY_SETTINGS_KEYS`).
    */
   agentAuthorship?: "none"
+  /**
+   * AQU-934: per-file genre assignment — fileId → genre id from the vocabulary
+   * in `src/lib/rules/file-genre.ts`. Human-set (a model may only suggest); an
+   * entry OVERRIDES the genre derived from a scripture book code and is the
+   * ONLY way a non-scripture document gets one, so genre-scoped style rules
+   * reach every cell of a classified document. Files with no entry keep
+   * deriving from their book code, so this map stays small — bounded by file
+   * count (tens of entries), not by content, which is why it belongs in the
+   * settings blob rather than its own table. Replacing this key replaces the
+   * whole map: writers must send the full merged object.
+   */
+  fileGenres?: Record<string, string>
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -232,11 +332,66 @@ export function resolveTimingLocked(
   return settings?.timingLocked !== false
 }
 
+/**
+ * The role level `cellEditingFloor` admits, or `null` for "nobody".
+ *
+ * `null` is the answer for "none", for an absent key, and for any value this
+ * build does not recognise — a tier a newer client invents must not read as
+ * permission on an older one.
+ *
+ * THIS IS THE DECISION, not a mirror of one. Since 2026-09-09 the sync worker
+ * does not check the tier at all (see its authorize.ts for why), so the
+ * affordances gated on this function are what the setting means. The other
+ * reader is auth-worker's agent staging, through the shared mapping in
+ * `db/shared/cell-editing-floor.ts` — an apply button is a button too. Keep
+ * this function and that one in lock-step.
+ */
+export function resolveCellEditingFloor(
+  settings: Pick<ProjectWideSettings, "cellEditingFloor"> | null | undefined,
+): RoleLevel | null {
+  switch (settings?.cellEditingFloor) {
+    case "maintainer":
+      return ROLE.MAINTAINER
+    case "project_lead":
+      return ROLE.PROJECT_LEAD
+    case "contributor":
+      return ROLE.CONTRIBUTOR
+    case "reviewer":
+      return ROLE.REVIEWER
+    case "commenter":
+      return ROLE.COMMENTER
+    default:
+      return null
+  }
+}
+
 export interface ProjectSettingsResponse {
   version: number
   updatedAt: string
   updatedBy: { id: number; username: string } | null
   settings: ProjectWideSettings
+  /**
+   * AQU-1083: the org default this project inherits when `settings` carries no
+   * `countStructuralCells` of its own. Null when the project has no org.
+   *
+   * It rides on THIS response rather than the project record because this is
+   * the one an open editor re-reads — on a remote change frame and on window
+   * focus — so an org-level flip reaches a workspace that is already open.
+   * Optional: a server that predates this simply omits it.
+   */
+  orgCountStructuralCells?: boolean | null
+  /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
+  lanes?: ProjectLaneView[]
+}
+
+export interface ProjectLaneView {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
 }
 
 export type PatchResult =
@@ -250,6 +405,96 @@ function authHeaders(jwt: string): HeadersInit {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
   }
+}
+
+export type RenameLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  name: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<RenameLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ name }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) {
+    return { kind: "error", message: `rename failed (${res.status})` }
+  }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type CreateLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** POST /api/v2/projects/:id/lanes. Language-edit floor. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  input: { name: string; language: string },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CreateLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(input),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+/** POST /api/v2/projects/:id/lanes/:laneId/archive. */
+export async function setProjectLaneArchived(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/archive`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ archived }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `archive failed (${res.status})` }
+  return { kind: "ok" }
 }
 
 /**
@@ -316,9 +561,11 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
- * Caller must include `ifMatchVersion`; mismatched version returns
- * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
+ * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
+ * settings blob (no per-key merge) — send a complete blob. Per-key merge is
+ * only available via the `useProjectSettings` hook and the Agent API
+ * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
+ * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
  */
 export async function patchProjectSettings(

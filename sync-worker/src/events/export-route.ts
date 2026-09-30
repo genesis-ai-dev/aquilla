@@ -10,9 +10,9 @@
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
 // `?mode=raw` skips the parse/serialize overlay and returns the stored
-// original upload verbatim (X-Export-Mode: raw-original). Only USFM needs
-// the branch — binary sidecar formats and unserialized formats already
-// return their stored bytes as-is.
+// original upload verbatim (X-Export-Mode: raw-original). Only USFM and plain
+// text need the branch — binary sidecar formats and unserialized formats
+// already return their stored bytes as-is.
 //
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
@@ -31,6 +31,8 @@ import {
   serializeUsfmLossless,
   countLossyVerses,
 } from "../lib/usfm-lossless"
+import { buildUsfmExportPlan } from "./usfm-export-plan"
+import { buildPlainTextExport } from "./plaintext-export"
 
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -63,6 +65,10 @@ export async function handleExportSourceRequest(
   const lane = url.searchParams.get("lane") ?? ""
   // ?mode=raw — return the byte-exact original upload, no translation overlay.
   const rawMode = url.searchParams.get("mode") === "raw"
+  // AQU-1148: ?validated=1 — overlay ONLY translations that meet the project's
+  // validation threshold. Unvalidated drafts keep the client's original words
+  // rather than shipping as approved text. Absent/0 preserves today's contract.
+  const validatedOnly = url.searchParams.get("validated") === "1"
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -201,6 +207,24 @@ export async function handleExportSourceRequest(
     )
   }
 
+  // AQU-1472: plain text has a target serializer — the same paragraph rules as
+  // the in-app export, built from the projection. `?mode=raw` skips it and
+  // falls through to the stored upload below, which is what the project
+  // export's "source documents" folder asks for.
+  if (blob.format === "txt" && !rawMode) {
+    const body = await buildPlainTextExport(db, projectId, fileId, lane, { validatedOnly })
+    return withCors(
+      new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        },
+      }),
+      request,
+    )
+  }
+
   // Formats without a verified target serializer still retain their exact
   // source artifact. Returning it explicitly as raw-original is honest about
   // fidelity while ensuring VTT/SRT/XLIFF/TMX/CSV/TSV/document sources are
@@ -265,34 +289,12 @@ export async function handleExportSourceRequest(
     )
   }
 
-  // Pull every target cell paired with a source cell that has a canonical_ref
-  // (the verse address). The projection writes canonical_ref ONLY on the
-  // source side; the target side is paired by (project_id, file_id, cell_id)
-  // and inherits its addressability from the source twin.
-  const cells = await db
-    .prepare(
-      `SELECT s.canonical_ref AS canonical_ref, t.value AS value
-         FROM cells t
-         JOIN cells s
-           ON s.project_id = t.project_id
-          AND s.file_id    = t.file_id
-          AND s.cell_id    = t.cell_id
-          AND s.side       = 'source'
-          AND s.target_lang = ''
-        WHERE t.project_id = ?
-          AND t.file_id    = ?
-          AND t.side       = 'target'
-          AND t.target_lang = ?
-          AND s.canonical_ref IS NOT NULL
-          AND t.value <> ''`,
-    )
-    .bind(projectId, fileId, lane)
-    .all<{ canonical_ref: string; value: string }>()
-
-  const overrides = new Map<string, string>()
-  for (const row of cells.results ?? []) {
-    overrides.set(row.canonical_ref, row.value)
-  }
+  // Translations, plus what the editor did to the file's structure: content
+  // added under a verse, and verses removed outright. AQU-1068 moved all three
+  // into one shared builder because export-bundle-route.ts carried a
+  // character-for-character copy of the translations query with nothing
+  // enforcing the duplication.
+  const { overrides, edits } = await buildUsfmExportPlan(db, projectId, fileId, lane, { validatedOnly })
 
   // Safe re-imports intentionally move the immutable original to R2 and
   // atomically repoint file_source_blobs. Resolve either storage generation so
@@ -316,7 +318,7 @@ export async function handleExportSourceRequest(
   }
   const doc = parseUsfmLossless(rawSource)
   const lossyVerseCount = countLossyVerses(doc, overrides)
-  const out = serializeUsfmLossless(doc, overrides)
+  const out = serializeUsfmLossless(doc, overrides, edits)
 
   return withCors(
     new Response(out, {

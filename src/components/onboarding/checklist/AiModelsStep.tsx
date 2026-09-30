@@ -26,7 +26,7 @@ type VoiceChoice = "none" | TtsProvider
 type ModelMessageKey = Parameters<ReturnType<typeof useT>>[0]
 
 interface ModelMeta {
-  id: "whisper" | "kokoro" | "mms"
+  id: "whisper" | "mms"
   labelKey: ModelMessageKey
   sizeMb: number
   blurbKey: ModelMessageKey
@@ -37,13 +37,6 @@ const TRANSCRIBE_MODEL: ModelMeta = {
   labelKey: "onboarding.checklist.aiModels.whisper.label",
   sizeMb: 140,
   blurbKey: "onboarding.checklist.aiModels.whisper.blurb",
-}
-
-const KOKORO_MODEL: ModelMeta = {
-  id: "kokoro",
-  labelKey: "onboarding.checklist.aiModels.kokoro.label",
-  sizeMb: 80,
-  blurbKey: "onboarding.checklist.aiModels.kokoro.blurb",
 }
 
 const MMS_MODEL: ModelMeta = {
@@ -61,7 +54,6 @@ interface AiModelsStepProps {
 export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const t = useT()
   const whisper = useModelStatus("whisper")
-  const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
 
   // Selection lives locally — nothing is fetched until the user clicks the
@@ -71,7 +63,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const [voiceChoice, setVoiceChoice] = useState<VoiceChoice>(() => {
     const provider = project.ttsSettings?.provider
     if (provider === "gemini") return "gemini"
-    if (provider === "kokoro" && kokoro.kind === "ready") return "kokoro"
     if (provider === "mms" && mms.kind === "ready") return "mms"
     return "none"
   })
@@ -95,20 +86,17 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const totalSizeMb = useMemo(() => {
     let mb = 0
     if (wantWhisper && whisper.kind !== "ready") mb += TRANSCRIBE_MODEL.sizeMb
-    if (voiceChoice === "kokoro" && kokoro.kind !== "ready") mb += KOKORO_MODEL.sizeMb
     if (voiceChoice === "mms" && mms.kind !== "ready") mb += MMS_MODEL.sizeMb
     return mb
-  }, [wantWhisper, voiceChoice, whisper.kind, kokoro.kind, mms.kind])
+  }, [wantWhisper, voiceChoice, whisper.kind, mms.kind])
 
   const anyDownloading =
     whisper.kind === "downloading" ||
-    kokoro.kind === "downloading" ||
     mms.kind === "downloading"
 
   const nothingSelected = !wantWhisper && voiceChoice === "none"
   const allReady =
     (!wantWhisper || whisper.kind === "ready") &&
-    (voiceChoice !== "kokoro" || kokoro.kind === "ready") &&
     (voiceChoice !== "mms" || mms.kind === "ready") &&
     (voiceChoice !== "gemini" || isValidGeminiKey(geminiKey))
 
@@ -173,9 +161,8 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
         apiKey: voiceChoice === "gemini" ? (geminiKey.trim() || undefined) : project.ttsSettings?.apiKey,
       })
     }
-    const models: Array<"whisper" | "kokoro" | "mms"> = []
+    const models: Array<"whisper" | "mms"> = []
     if (wantWhisper && whisper.kind !== "ready") models.push("whisper")
-    if (voiceChoice === "kokoro" && kokoro.kind !== "ready") models.push("kokoro")
     if (voiceChoice === "mms" && mms.kind !== "ready") models.push("mms")
     if (models.length === 0) return
     try {
@@ -291,11 +278,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                   </div>
                 )
               )}
-              <ModelRadioRow
-                value="kokoro"
-                meta={KOKORO_MODEL}
-                status={kokoro}
-              />
               <ModelRadioRow
                 value="mms"
                 meta={MMS_MODEL}

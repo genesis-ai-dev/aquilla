@@ -56,8 +56,8 @@ async function uuidV5(seed: string): Promise<string> {
   input.set(value, namespace.byteLength)
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", input))
   const bytes = digest.slice(0, 16)
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
   return formatUuid(bytes)
 }
 

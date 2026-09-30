@@ -1,7 +1,6 @@
 // AQU-360 — the per-cell "Generate audio" hover must name the ENGINE that
 // generation will actually use (the resolved voice's provider, falling back
-// to the project's configured provider) — not a stale/hardcoded engine name
-// like "Omni voice" that was never configured.
+// to the project's configured provider) — not a stale/hardcoded engine name.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -32,22 +31,23 @@ describe("CellTtsButton hover label (AQU-360)", () => {
     renderButton({ provider: "mms", voices: [{ id: "v1", name: "Narrator", color: "#000" }], defaultVoiceId: "v1" })
     const btn = screen.getByRole("button")
     expect(btn.getAttribute("aria-label")).toContain("MMS")
-    expect(btn.getAttribute("aria-label")).not.toContain("Omni")
     expect(btn.getAttribute("aria-label")).not.toContain("Gemini")
   })
 
-  it("names Kokoro when that's the project's configured provider", () => {
+  it("names Inworld when leftover Kokoro is the project's configured provider", () => {
     renderButton({ provider: "kokoro", voices: [{ id: "v1", name: "Narrator", color: "#000" }], defaultVoiceId: "v1" })
-    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Kokoro")
+    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Inworld")
+    expect(screen.getByRole("button").getAttribute("aria-label")).not.toContain("Kokoro")
   })
 
-  it("honors a voice's own provider over the project default", () => {
+  it("honors a leftover Kokoro voice as Inworld over a Gemini project default", () => {
     renderButton({
-      provider: "omnivoice",
+      provider: "gemini",
       voices: [{ id: "v1", name: "Kid", color: "#000", provider: "kokoro", voiceName: "af_heart" }],
       defaultVoiceId: "v1",
     })
-    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Kokoro")
+    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Inworld")
+    expect(screen.getByRole("button").getAttribute("aria-label")).not.toContain("Kokoro")
   })
 })
 
@@ -67,9 +67,9 @@ describe("CellTtsButton — round 5 (AQU-646)", () => {
     expect(screen.getByRole("button").className).toContain("text-muted-foreground/40")
   })
 
-  it("the built-in Narrator follows the PROJECT engine — OmniVoice default, no pinned Gemini", () => {
+  it("the built-in Narrator follows the PROJECT engine — Inworld default, no pinned Gemini", () => {
     // Fresh project: no custom voices, no provider set → resolved engine must
-    // be the OmniVoice default (previously the Narrator preset forced Gemini
+    // be the Inworld default (previously the Narrator preset forced Gemini
     // and demanded a Gemini key on every fresh project).
     render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{}} />)
     const label = screen.getByRole("button").getAttribute("aria-label")

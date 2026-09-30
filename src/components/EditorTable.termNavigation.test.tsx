@@ -175,7 +175,7 @@ describe("EditorTable term navigation", () => {
   })
 
   it.each(["sample;", "sample,"])(
-    "opens a terminology entry when punctuation is part of the highlighted token: %s",
+    "opens a terminology entry when the term is followed by punctuation: %s",
     async (sourceText) => {
       const onOpenTerminologyConcept = vi.fn()
       render(
@@ -204,7 +204,9 @@ describe("EditorTable term navigation", () => {
         </QueryClientProvider>,
       )
 
-      fireEvent.click(await screen.findByText(sourceText))
+      // The highlight covers the term itself; trailing punctuation stays
+      // outside it, which is why this clicks "sample" rather than sourceText.
+      fireEvent.click(await screen.findByText("sample"))
       fireEvent.click(
         await screen.findByRole("button", {
           name: /Go to Terminology page.*sample/i,

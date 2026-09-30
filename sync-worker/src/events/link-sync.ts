@@ -56,6 +56,13 @@ const LANE_KINDS_SOURCE = [
   'source.cell.create',
   'source.cell.commit',
   'source.cell.delete',
+  // AQU-1453: hide/show is part of the source a downstream consumes. It was
+  // missing here, and the omission was the whole live half of the bug — the
+  // freshness probe below reads MAX(server_seq) over THIS list, so an upstream
+  // lead who only parked a cell left the downstream reading "not behind" and
+  // `loadDelta` was never even called. A downstream then kept showing (and
+  // counting, exporting and drafting) a verse the upstream had parked.
+  'source.cell.visibility.set',
   'source.cell.mirror',
   'cell.retime',
   'cast.assign',
@@ -146,6 +153,17 @@ interface FoldedCell {
   anchorCellId: string | null
   startMs: number | null
   endMs: number | null
+  /**
+   * AQU-1453: the cell's visibility as of this delta window, or `undefined`
+   * when no `source.cell.visibility.set` landed in it.
+   *
+   * `undefined` and `false` are DIFFERENT answers and the emit loop below
+   * depends on the difference: `undefined` means "this window says nothing
+   * about visibility", so the mirror omits `hidden` and the downstream's own
+   * `hidden_at` is left exactly as it is. `false` means the upstream showed the
+   * cell again, which has to travel.
+   */
+  hidden?: boolean
   /** AQU-477: only populated by the consumes='target' merge fold (§2) — the
    *  consumes='source' fold leaves these undefined/null and the emit loop's
    *  payload construction omits them (matching slice-1 behavior exactly). */
@@ -221,6 +239,13 @@ async function loadDelta(
 
   const cells = new Map<string, FoldedCell>()
   const fileIds = new Set<string>()
+  /** AQU-1453: cells this window only changed the VISIBILITY of. They have no
+   *  content in the fold, so they are resolved against the upstream's live rows
+   *  once the window is read (see below). */
+  const visibilityOnly = new Map<
+    string,
+    { fileId: string; cellId: string; eventId: string; seq: number; hidden: boolean }
+  >()
 
   for (const row of results) {
     if (!row.file_id) continue
@@ -265,6 +290,32 @@ async function loadDelta(
         startMs: prev?.startMs ?? null,
         endMs: prev?.endMs ?? null,
       })
+    } else if (row.kind === 'source.cell.visibility.set') {
+      // AQU-1453: hide/show carries no text, so it can only ADJUST a state,
+      // never create one. When the cell's content also moved in this window we
+      // ride that fold; when it did not, the cell is parked here and its
+      // content is backfilled from the upstream's live row after the loop.
+      //
+      // WITHOUT THAT BACKFILL this branch would have to invent a FoldedCell
+      // with `value: ''`, and the emit loop would mirror an empty string over
+      // the downstream's text — a hide that silently deletes the verse it was
+      // supposed to park.
+      const hidden = payload.hidden === true
+      const prev = cells.get(key)
+      if (prev) {
+        // The visibility event is the newer one, so it becomes the mirror's
+        // provenance: a fresh deterministic event id and the higher
+        // `upstream_seq` the projection's monotonic guard compares against.
+        cells.set(key, { ...prev, hidden, eventId: row.id, seq: row.server_seq })
+      } else {
+        visibilityOnly.set(key, {
+          fileId: row.file_id,
+          cellId: row.cell_id,
+          eventId: row.id,
+          seq: row.server_seq,
+          hidden,
+        })
+      }
     } else if (row.kind === 'source.cell.delete') {
       const prev = cells.get(key)
       cells.set(key, {
@@ -288,6 +339,67 @@ async function loadDelta(
     // before downstream has diverged?"). They still count toward `head` so
     // the freshness probe and cursor advance correctly; a future slice can
     // extend the fold to carry timing/cast deltas.
+  }
+
+  // AQU-1453: resolve the visibility-only cells against the upstream's LIVE
+  // source rows. Same fallback shape as `loadUpstreamTargetCurrentState` on the
+  // target path, and for the same reason: the delta window holds the change,
+  // but not always the state the change applies to.
+  //
+  // A cell whose content DID move in this window is already complete above and
+  // is skipped here — its folded text is the newer truth, and re-reading the
+  // live row would only race it.
+  const pending = [...visibilityOnly.values()].filter(
+    (v) => !cells.has(`${v.fileId}\0${v.cellId}`),
+  )
+  if (pending.length > 0) {
+    const placeholders = pending.map(() => '(?, ?)').join(', ')
+    const binds: unknown[] = [upstreamProjectId]
+    for (const v of pending) binds.push(v.fileId, v.cellId)
+    const { results: liveRows } = await db
+      .prepare(
+        `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
+                start_ms, end_ms
+           FROM cells
+          WHERE project_id = ? AND side = 'source' AND target_lang = ''
+            AND (file_id, cell_id) IN (${placeholders})`,
+      )
+      .bind(...binds)
+      .all<{
+        file_id: string
+        cell_id: string
+        value: string | null
+        value_html: string | null
+        type: string | null
+        canonical_ref: string | null
+        anchor_cell_id: string | null
+        start_ms: number | string | null
+        end_ms: number | string | null
+      }>()
+    const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
+    for (const v of pending) {
+      const key = `${v.fileId}\0${v.cellId}`
+      const live = liveByKey.get(key)
+      // No live row: the cell is gone upstream. A `source.cell.delete` is the
+      // event that says so and tombstones on its own — mirroring a phantom
+      // here would only write an empty value over the downstream's text.
+      if (!live) continue
+      cells.set(key, {
+        fileId: v.fileId,
+        cellId: v.cellId,
+        eventId: v.eventId,
+        seq: v.seq,
+        deleted: false,
+        value: live.value ?? '',
+        valueHtml: live.value_html,
+        type: live.type,
+        canonicalRef: live.canonical_ref,
+        anchorCellId: live.anchor_cell_id,
+        startMs: live.start_ms == null ? null : Number(live.start_ms),
+        endMs: live.end_ms == null ? null : Number(live.end_ms),
+        hidden: v.hidden,
+      })
+    }
   }
 
   return { cells, fileIds }
@@ -712,29 +824,45 @@ async function loadDeltaTargetConsumption(
   return { cells, fileIds: structuralDelta.fileIds }
 }
 
+interface LocalMirrorState {
+  contentHash: string | null
+  upstreamSeq: number | null
+  /** AQU-1453: whether the downstream row is currently parked. The hash-equal
+   *  skip below compares against this, so a hide/show whose text did not change
+   *  is not mistaken for upstream noise. */
+  hidden: boolean
+}
+
 /** Existing local mirror state per cell — used for the hash-equal no-op
  *  check and to know which upstream file ids are already mirrored. */
 async function loadLocalMirrorState(
   db: AquillaDb,
   downstreamProjectId: string,
   cellKeys: readonly { fileId: string; cellId: string }[],
-): Promise<Map<string, { contentHash: string | null; upstreamSeq: number | null }>> {
-  const state = new Map<string, { contentHash: string | null; upstreamSeq: number | null }>()
+): Promise<Map<string, LocalMirrorState>> {
+  const state = new Map<string, LocalMirrorState>()
   if (cellKeys.length === 0) return state
   const placeholders = cellKeys.map(() => '(?, ?)').join(', ')
   const binds: unknown[] = [downstreamProjectId]
   for (const k of cellKeys) binds.push(k.fileId, k.cellId)
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, content_hash, upstream_seq FROM cells
+      `SELECT file_id, cell_id, content_hash, upstream_seq, hidden_at FROM cells
        WHERE project_id = ? AND side = 'source' AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
-    .all<{ file_id: string; cell_id: string; content_hash: string | null; upstream_seq: number | string | null }>()
+    .all<{
+      file_id: string
+      cell_id: string
+      content_hash: string | null
+      upstream_seq: number | string | null
+      hidden_at: number | string | null
+    }>()
   for (const r of results) {
     state.set(`${r.file_id}\0${r.cell_id}`, {
       contentHash: r.content_hash,
       upstreamSeq: r.upstream_seq == null ? null : Number(r.upstream_seq),
+      hidden: r.hidden_at != null,
     })
   }
   return state
@@ -927,7 +1055,14 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     }
 
     const newHash = contentHash(cell.value)
-    if (local && local.contentHash === newHash) {
+    // AQU-1453: a hide or a show moves no text, so the hash is equal by
+    // definition — suppressing on the hash alone is exactly how the visibility
+    // change got dropped even once the event became lane-relevant. The skip now
+    // needs BOTH to be unchanged. `undefined` means this window said nothing
+    // about visibility, which is "unchanged" and leaves the old rule intact.
+    const visibilityUnchanged =
+      cell.hidden === undefined || cell.hidden === (local?.hidden ?? false)
+    if (local && local.contentHash === newHash && visibilityUnchanged) {
       // No-op suppression (§5): content unchanged (e.g. whitespace-normalized
       // re-import). upstream_event_id is allowed to lag on unchanged content
       // — §6 staleness is hash-aware, so this is harmless.
@@ -944,6 +1079,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
       anchorCellId: cell.anchorCellId,
       startMs: cell.startMs ?? undefined,
       endMs: cell.endMs ?? undefined,
+      // AQU-1453: omitted unless this window changed the cell's visibility, so
+      // a mirror that is only about text leaves the downstream's `hidden_at`
+      // untouched rather than un-parking a cell as a side effect.
+      hidden: cell.hidden,
       // AQU-477: only set by the consumes='target' merge fold — undefined
       // (omitted) for consumes='source', matching slice-1 payload shape
       // exactly (the projection's COALESCE-upsert treats undefined/missing
@@ -988,8 +1127,8 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // the same projection code the live HTTP path uses).
   const baseSeq = await allocateSeqRange(db, downstreamProjectId, eventRows.length)
   for (let i = 0; i < eventRows.length; i++) {
-    eventRows[i]!.serverSeq = baseSeq + i
-    persistedForProjection[i]!.serverSeq = baseSeq + i
+    eventRows[i].serverSeq = baseSeq + i
+    persistedForProjection[i].serverSeq = baseSeq + i
   }
 
   const allStmts: AquillaStatement[] = [buildBulkEventInsertStmt(db, eventRows)]

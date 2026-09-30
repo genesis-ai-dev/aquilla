@@ -22,6 +22,7 @@ import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
+import { handleExternalCommentsRequest } from './comments-route'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
@@ -32,6 +33,7 @@ import { listOrgsForCredential } from './orgs-list'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
+import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -105,10 +107,16 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
+    // AQU-1242: the write ceiling, published beside the autonomy mode so an MCP
+    // agent plans against it instead of discovering it as a 403 on work it has
+    // already done. Read it as the gate on whether the write tools exist for
+    // you at all; credentialMode only governs writes you are permitted.
+    credentialAccess: cred.access,
     // The numbered golden path, so a weak agent doesn't have to reconstruct
     // the workflow from per-tool descriptions.
     quickstart: [
-      '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
+      '0. Setting up a partner project? get_skill { name: "project-setup" } and follow it (one ProjectSetup command, one approval).',
+      '1. get_identity_and_scope — confirm who you are, your access (read|write), your mode (ask|act), and your org/project scope. access "read" means steps 4 and 5 will be refused: report that and stop rather than retrying.',
       '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
       '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
@@ -163,6 +171,18 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'one; omit kind for the index. EmitEvents is REST-only for now (POST ' +
         '.../changesets); every other agent-reachable kind is stageable over MCP.',
     },
+    // AQU-1294: skills — server-owned sequencing prose (L2, fetched on demand
+    // with get_skill). Same shared set the REST /skills routes and the in-app
+    // harness serve (db/shared/agent-skills.ts).
+    skills: {
+      index: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      tool: 'get_skill',
+      note:
+        'A skill sequences EXISTING commands and tools; it adds no capability and stages ' +
+        'nothing on its own. Call get_skill { name } for the full body before starting the ' +
+        'workflow it covers. project-setup: intake template → one ProjectSetup command → one ' +
+        'approval → verification receipt.',
+    },
     projectSettings: {
       readTool: 'get_project_settings',
       patchTool: 'patch_settings',
@@ -175,7 +195,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
         'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-        'contributeToGlobalTm) are NEVER writable by an agent (permission_denied). ' +
+        'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
+        'RESTRICTIVE direction ONLY (AQU-1282) — TIGHTENING oversight stages like any other ' +
+        'write, LOOSENING it returns permission_denied naming the key in details.loosening. ' +
+        'describe_command({ kind: "PatchSettings" }) has the per-key direction table. ' +
         'PatchSettings must be the sole command in its changeset, and — like every write — ' +
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',
@@ -338,6 +361,12 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       maxArtifactBytes: MAX_ARTIFACT_BYTES,
     },
     errorCodes: ERROR_CODES,
+    accessCeiling:
+      'access "read" is a read-only credential: prepare_translations, confirm_changeset and ' +
+      'artifact upload all fail with scope_denied, while every read, search and export tool ' +
+      'works normally. It is not retryable and not about your project role — only the human ' +
+      'who owns the token can lift it by minting a read-write one. access "write" is the ' +
+      'normal grant, and askModeFlow below then describes how a commit lands.',
     askModeFlow:
       'In ask mode you can prepare_translations but cannot commit directly. prepare returns ' +
       'an approvalUrl; surface it to a human who opens it in an authenticated Aquilla browser ' +
@@ -355,6 +384,10 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
     // never disagree about what a token is allowed to learn.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: same reason as the pii parity above — this tool is the MCP twin
+    // of REST GET /me, and the two must not disagree about what a token may do
+    // any more than about what it may learn.
+    access: cred.access,
     orgId: cred.orgId,
     projectId: cred.projectId,
     credentialId: cred.credentialId,
@@ -411,7 +444,10 @@ async function getProject(
   // AQU-1222: shared with the REST GET /projects/:projectId route so the two
   // adapters cannot drift — and so both carry settingsVersion, the number
   // PatchSettings.ifMatchVersion has to match.
-  const detail = await loadProjectDetail(db, projectId, resolved.level)
+  const detail = await loadProjectDetail(db, projectId, resolved.level, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(cred.userId),
+  })
   if (!detail) return fail('not_found', `project ${projectId} not found`)
   return ok(detail)
 }
@@ -459,6 +495,28 @@ function describeCommandTool(args: Record<string, unknown>): McpToolResult {
     oneLiner: entry.oneLiner,
     paramsDoc: entry.paramsDoc,
   })
+}
+
+// ── get_skill ────────────────────────────────────────────────────────────────
+
+/** AQU-1294: one skill's full body, from the same shared set REST
+ *  GET /api/v1/external/skills/:name and the in-app harness serve. Static
+ *  prose, no role gate, no projectId — like describe_command. */
+function getSkillTool(args: Record<string, unknown>): McpToolResult {
+  const name = str(args, 'name')
+  if (!name) {
+    return ok({
+      skills: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      note: 'Call get_skill({ name }) for one skill\'s full body.',
+    })
+  }
+  const skill = getSkill(name)
+  if (!skill) {
+    return fail('not_found', `unknown skill "${name}"`, {
+      details: { availableSkills: AGENT_SKILLS.map((s) => s.name) },
+    })
+  }
+  return ok({ name: skill.name, title: skill.title, oneLiner: skill.oneLiner, body: skill.body })
 }
 
 // ── delegated reads ──────────────────────────────────────────────────────────
@@ -627,6 +685,36 @@ async function readHistory(
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!cellId) return fail('validation_failed', 'cellId is required')
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
+}
+
+/** AQU-1233: comment reads live in their own route module (comments-route.ts),
+ *  so they are dispatched directly rather than through runRead's read-routes
+ *  delegate. Same bearer credential, same error mapping. */
+async function readComments(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const fileId = str(args, 'fileId')
+  const cellId = str(args, 'cellId')
+  if (cellId && !fileId) return fail('validation_failed', 'cellId requires fileId')
+  const params = new URLSearchParams()
+  if (fileId) params.set('fileId', fileId)
+  if (cellId) params.set('cellId', cellId)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const query = params.toString()
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/comments${query ? `?${query}` : ''}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalCommentsRequest(req, env)
+  if (!res) return fail('not_found', 'comments route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 /** MCP mirror of REST GET .../projects/:projectId/settings (AQU-1176) — the
@@ -1222,6 +1310,8 @@ export async function callTool(
     }
     case 'describe_command':
       return describeCommandTool(args)
+    case 'get_skill':
+      return getSkillTool(args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'find_similar_cells':
@@ -1232,6 +1322,8 @@ export async function callTool(
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'read_comments':
+      return readComments(env, token, args)
     case 'get_project_settings':
       return readProjectSettings(env, token, args)
     case 'get_prompt_preview':

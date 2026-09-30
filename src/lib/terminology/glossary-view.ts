@@ -6,6 +6,7 @@
  * These helpers derive/update that primary rendering and partition concepts by
  * lifecycle status. No side effects — callers persist via patchSettings.
  */
+import { canPerform } from "@/lib/sync/role-policy"
 import type { Concept, TermRendering } from "./types"
 
 /** The rendering shown in the row's target cell: first preferred, else first, else null. */
@@ -64,9 +65,16 @@ export function partitionConcepts(concepts: Concept[]): GlossaryPartition {
 export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500
 
 /**
- * May the user add/edit/delete/archive concepts? Local projects (no origin)
- * and not-yet-cached cloud roles are optimistically allowed; the server
- * enforces the real gate. Mirrors the rule previously local to TerminologyPage.
+ * May the user add/edit/delete/archive concepts? A role that isn't known yet
+ * (record still loading, or a local project that never resolves one) is
+ * optimistically allowed; the server enforces the real gate.
+ *
+ * AQU-208: a KNOWN role is always enforced. This used to short-circuit to
+ * "allowed" for any record without `origin`, on the premise that no origin
+ * meant a local project — but server-hydrated records never carry `origin`
+ * (see `minimalProjectRecord`), so on the live surface every role, viewers
+ * included, passed. `syncRole` is the cloud discriminator, the same one
+ * `resolveEditorCapabilities` and `canPerform` key off.
  *
  * AQU-822: `minRole` is the org's configured termbase-edit floor
  * (`ProjectRecord.termbaseEditMinRole`), letting an org drop termbase
@@ -77,12 +85,51 @@ export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500
  */
 export function canEditTermbase(
   syncRole?: { level: number } | null,
-  hasOrigin?: boolean,
   minRole?: number | null,
 ): boolean {
-  if (!hasOrigin) return true
   if (!syncRole) return true
   return syncRole.level >= resolveTermbaseEditFloor(minRole)
+}
+
+/**
+ * May the user SUGGEST a term — create one with `status: 'draft'`?
+ *
+ * AQU-872: terminology has TWO authority levels, not one (the split is spelled
+ * out in sync-worker/src/events/termbase-authority.ts, which is what actually
+ * enforces it). SUGGESTING is contributor work: a draft compiles to no rules
+ * (compile.ts skips non-active concepts), so it binds nobody and needs no
+ * manager. APPROVING one into force is management work and keeps the org's
+ * configured floor — that question is `canEditTermbase` above.
+ *
+ * The in-editor "Add to terminology" popover already asked the two questions
+ * separately; the Terminology page asked only the management one, so a
+ * translator building a glossary as they worked found Add term disabled on the
+ * very surface the glossary lives on.
+ *
+ * Keyed off the same role-policy mirror `canEditTermCells` uses — whose
+ * `term.create` floor is CONTRIBUTOR — so this affordance cannot drift from the
+ * table the outbox guard already applies, and it inherits the mirror's
+ * fail-open rule: an unknown role is optimistically allowed and the server
+ * stays authoritative.
+ */
+export function canSuggestTerm(syncRole?: { level: number } | null): boolean {
+  return canPerform("term.create", syncRole?.level ?? null)
+}
+
+/**
+ * May the user edit target cells from the C2 drill-down (AQU-208)?
+ *
+ * The drill-down's inline editor commits through `emitTargetCellCommit`, the
+ * same path `EditorTable` uses, so it must ask the same question the editor
+ * asks: `canPerform("target.cell.commit", …)`. Sharing the role-policy mirror
+ * keeps the two surfaces from drifting when a floor moves, and inherits the
+ * mirror's fail-open rule — an unknown role is optimistically allowed and the
+ * server stays authoritative — which is also what `canEditTermbase` above
+ * does. Like it, a known role is always enforced: there is no `origin`
+ * escape hatch, which is what let a viewer open the inline editor.
+ */
+export function canEditTermCells(syncRole?: { level: number } | null): boolean {
+  return canPerform("target.cell.commit", syncRole?.level ?? null)
 }
 
 /** Clamp an org-configured termbase floor to the role ladder, else the default. */

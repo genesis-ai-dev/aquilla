@@ -7,6 +7,7 @@ import {
   fetchOrgSettings,
   patchOrgSettings,
   postPromotionRequest,
+  resetCountStructuralOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -96,6 +97,14 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+
+// AQU-581: allowScopedLaneAssignment rides the SAME OWNER-only write gate as
+// allowSelfAssignment above (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) — both are
+// the org deciding who may write `assignment.create` below the assignment
+// floor — and shares its safe default of `false`.
+const DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT = false
+const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
+const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
 // AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
 // shape as the floors above, but it gates a WRITE (managing a project's
@@ -221,6 +230,44 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-581: effective lane-delegate assignment authority — true when a
+   * lane-scoped member below the assignment floor may create assignments for
+   * OTHER people inside the lanes they are scoped to. Explicit org setting,
+   * or `false` when unset. Server-enforced; see
+   * `resolveAllowScopedLaneAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowScopedLaneAssignment: boolean
+  /**
+   * AQU-1083: do chapter headings and section titles count as translatable
+   * content in this org's progress numbers? Explicit org setting, or TRUE when
+   * unset — which is what every project did before the setting existed, so
+   * nothing moves for an org that never opts out. A project may override it.
+   *
+   * Unlike the keys above this is NOT a permission policy — it decides how a
+   * number is calculated rather than who may see or do anything — so it rides
+   * the general maintainer write gate, not the owner-only one.
+   */
+  countStructuralCells: boolean
+  /**
+   * AQU-1083: how many projects in this org set their own value and therefore
+   * ignore the default above. Zero means changing the default reaches
+   * everything, which is why zero suppresses the prompt entirely.
+   */
+  countStructuralOverrides: number
+  /**
+   * AQU-1391: the org default for repetition auto-propagation. ON unless the
+   * org opts out; a project may still override it in either direction.
+   */
+  autoPropagateRepetitions: boolean
+  /** Put those projects back on the org default. Clears their own key. */
+  resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
+   * AQU-1037: effective floor for assigning work to anyone, including
+   * file/chapter/target-lane assignments and AI changeset routing.
+   */
+  assignmentMinRole: number
+  /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
    * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
@@ -330,6 +377,21 @@ export function useOrgSettings(
     return got
   }, [orgId, jwt, writeServer])
 
+  /**
+   * AQU-1083: put every project back on the org's structural-cell default.
+   *
+   * Re-fetches afterwards rather than adjusting the count locally, because the
+   * server is the only thing that knows what it actually cleared — another
+   * maintainer may have opted a project out while this dialog was open.
+   */
+  const resetOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetCountStructuralOverrides(jwt, orgId)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -410,9 +472,30 @@ export function useOrgSettings(
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
+  // `!== false` rather than `=== true`: unset must read as ON here, because
+  // counting headings is what every org does today.
+  const countStructuralCells = server?.settings?.countStructuralCells !== false
+  const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
+  // and only an explicit opt-out turns repetition propagation off org-wide.
+  const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
+  // AQU-581: effective lane-delegate assignment authority — explicit org
+  // setting, or false when unset. Rides the SAME OWNER-only write gate as
+  // allowSelfAssignment (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) and shares its
+  // safe default of `false`.
+  const allowScopedLaneAssignment = server?.settings?.allowScopedLaneAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT
+
+  const assignmentMinRole = (() => {
+    const raw = server?.settings?.assignmentMinRole
+    if (typeof raw === "number" && VALID_ROLE_LEVELS.has(raw)) return raw
+    return DEFAULT_ASSIGNMENT_MIN_ROLE
+  })()
 
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
@@ -539,6 +622,12 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    allowScopedLaneAssignment,
+    countStructuralCells,
+    countStructuralOverrides,
+    autoPropagateRepetitions,
+    resetCountStructuralOverrides: resetOverrides,
+    assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,
     canEgress,

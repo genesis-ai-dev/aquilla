@@ -41,6 +41,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import { recordSyncBytes } from "./connection-activity"
 import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
@@ -197,6 +198,8 @@ export type ProjectWsClientMessage =
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
+  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself. */
+  | { t: "ping"; ts?: number }
   | {
       t: "presence.update"
       currentFileId?: string | null
@@ -238,6 +241,40 @@ export interface WsReconcilerOptions {
   minBackoffMs?: number
   /** Max backoff between reconnects in ms. */
   maxBackoffMs?: number
+  /** How often an open socket sends a heartbeat `ping`. 0 disables. */
+  heartbeatIntervalMs?: number
+  /** A socket that receives nothing within this long of a ping is dead. */
+  heartbeatTimeoutMs?: number
+}
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────
+//
+// A half-open socket — a proxy, NAT, or sleeping laptop dropped one leg —
+// stays OPEN on this side indefinitely while the DO has forgotten it, so every
+// broadcast is silently missed and nothing ever reconnects. Found live: the
+// desktop app's project sockets went silent for ten minutes after a reload
+// while a fresh socket on the same channel received every frame.
+//
+// The DO answers `ping` with `pong`. Only once some socket in this page has
+// seen a pong do we start killing silent sockets: a sync-worker that predates
+// the pong handler ignores pings, and without this guard every quiet channel
+// would be torn down every interval until the worker is deployed.
+
+let serverPongSeen = false
+
+/** Test-only: forget that the server has answered a ping. */
+export function __resetHeartbeatForTests(): void {
+  serverPongSeen = false
+}
+
+/** Cheap pre-check before a JSON.parse: `pong` frames are tiny. */
+function isPongFrame(raw: string): boolean {
+  if (raw.length > 64 || !raw.includes('"pong"')) return false
+  try {
+    return (JSON.parse(raw) as { t?: unknown }).t === "pong"
+  } catch {
+    return false
+  }
 }
 
 export interface WsReconciler {
@@ -311,6 +348,8 @@ export function createWsReconciler(
   // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
   const minBackoff = options.minBackoffMs ?? 1_000
   const maxBackoff = options.maxBackoffMs ?? 30_000
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 25_000
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 10_000
   const Ctor =
     options.webSocketCtor ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
   if (!Ctor) {
@@ -323,6 +362,61 @@ export function createWsReconciler(
   let closed = false
   let backoffMs = minBackoff
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
+  let lastReceivedAt = 0
+
+  function stopHeartbeat(): void {
+    if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
+    if (heartbeatDeadline !== null) clearTimeout(heartbeatDeadline)
+    heartbeatTimer = null
+    heartbeatDeadline = null
+  }
+
+  /**
+   * Replace a socket that stopped answering. Doesn't wait for `onclose`: on a
+   * half-open socket the closing handshake can take minutes to give up.
+   */
+  function dropDeadSocket(ws: WebSocket): void {
+    if (socket !== ws) return
+    stopHeartbeat()
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    try {
+      ws.close(4000, "heartbeat timeout")
+    } catch {
+      /* swallow */
+    }
+    socket = null
+    safeEmit(() => handlers.onError?.(new Error("ws: heartbeat timeout")))
+    safeEmit(() => handlers.onClose?.({ code: 4000, reason: "heartbeat timeout", wasClean: false } as CloseEvent))
+    backoffMs = minBackoff
+    void connect()
+  }
+
+  function startHeartbeat(ws: WebSocket): void {
+    stopHeartbeat()
+    if (heartbeatIntervalMs <= 0) return
+    heartbeatTimer = setInterval(() => {
+      if (socket !== ws || ws.readyState !== host.Open) {
+        stopHeartbeat()
+        return
+      }
+      const sentAt = Date.now()
+      try {
+        ws.send(JSON.stringify({ t: "ping", ts: sentAt } satisfies ProjectWsClientMessage))
+      } catch {
+        /* a failing send surfaces through onerror/onclose */
+      }
+      if (!serverPongSeen || heartbeatDeadline !== null) return
+      heartbeatDeadline = setTimeout(() => {
+        heartbeatDeadline = null
+        if (lastReceivedAt < sentAt) dropDeadSocket(ws)
+      }, heartbeatTimeoutMs)
+    }, heartbeatIntervalMs)
+  }
 
   function safeEmit(fn: (() => void) | undefined): void {
     if (!fn) return
@@ -393,12 +487,21 @@ export function createWsReconciler(
 
     ws.onopen = () => {
       backoffMs = minBackoff
+      lastReceivedAt = Date.now()
+      startHeartbeat(ws)
       safeEmit(() => handlers.onOpen?.({ connId: socketConnId }))
     }
     ws.onmessage = (ev: MessageEvent) => {
+      // Any frame proves the socket is alive, not just a pong.
+      lastReceivedAt = Date.now()
       let parsed: ProjectWsServerMessage | null = null
       try {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data)
+        if (isPongFrame(raw)) {
+          serverPongSeen = true
+          return
+        }
+        recordSyncBytes("download", raw)
         parsed = parseProjectWsMessage(raw)
       } catch (err) {
         const e = err instanceof Error ? err : new Error(String(err))
@@ -417,6 +520,7 @@ export function createWsReconciler(
       safeEmit(() => handlers.onError?.(new Error("ws: socket error")))
     }
     ws.onclose = (closeEvent: CloseEvent) => {
+      if (socket === ws) stopHeartbeat()
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()
@@ -439,13 +543,16 @@ export function createWsReconciler(
     send(msg: ProjectWsClientMessage): boolean {
       if (!socket || socket.readyState !== host.Open) return false
       try {
-        socket.send(JSON.stringify(msg))
+        const payload = JSON.stringify(msg)
+        socket.send(payload)
+        recordSyncBytes("upload", payload)
         return true
       } catch {
         return false
       }
     },
     reconnect(): void {
+      stopHeartbeat()
       if (socket) {
         try {
           socket.close()
@@ -462,6 +569,7 @@ export function createWsReconciler(
     },
     close(): void {
       closed = true
+      stopHeartbeat()
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

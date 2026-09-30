@@ -110,4 +110,42 @@ describe("BlockingLoadingOverlay (AQU-737)", () => {
     expect(spinner).toHaveClass("animate-spin")
     expect(screen.getByText("Opening project…")).toBeInTheDocument()
   })
+
+  // AQU-1332: the scrim only blocks the pointer. React keeps the source screen
+  // mounted during the transition, so without this its controls stayed reachable
+  // by keyboard, screen readers, and DOM-driven agents — a page of live-looking
+  // buttons that do nothing, which an agent reads as a dead end. Every input
+  // path must see the same picture: one busy status, no reachable controls.
+  it("makes everything else in <body> inert for its lifetime, then restores it", () => {
+    const { container, unmount } = render(
+      <div>
+        <button type="button">Open project</button>
+        <BlockingLoadingOverlay label="Opening project" />
+      </div>,
+    )
+
+    const status = screen.getByRole("status", { name: "Opening project" })
+    expect(container).toHaveAttribute("inert")
+    expect(status).not.toHaveAttribute("inert")
+    // Inert subtrees are excluded from the accessibility tree and from focus
+    // (happy-dom's role queries don't model that, so assert the attribute the
+    // browser acts on).
+    expect(screen.getByRole("button", { name: "Open project" }).closest("[inert]")).toBe(container)
+
+    unmount()
+    expect(container).not.toHaveAttribute("inert")
+  })
+
+  it("leaves a sibling that was already inert alone on unmount", () => {
+    const other = document.createElement("div")
+    other.setAttribute("inert", "")
+    document.body.appendChild(other)
+    try {
+      const { unmount } = render(<BlockingLoadingOverlay label="Opening project" />)
+      unmount()
+      expect(other).toHaveAttribute("inert")
+    } finally {
+      other.remove()
+    }
+  })
 })

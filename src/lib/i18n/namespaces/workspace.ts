@@ -31,6 +31,21 @@ export const workspace = defineNamespace({
       one: "{count} change was rejected because it conflicted with a newer edit from another session.",
       other: "{count} changes were rejected because they conflicted with newer edits from another session.",
     }),
+    // Tauri offline mode (Phase 3): a locally queued write lost the AD-2 head
+    // CAS on reconnect (someone else committed to the same cell while this
+    // device was offline). See src/lib/offline/conflicts.ts.
+    "workspace.offline.conflictToast": plural({
+      one: "{count} translation couldn't sync — it was changed elsewhere while you were offline.",
+      other: "{count} translations couldn't sync — they were changed elsewhere while you were offline.",
+    }),
+    "workspace.offline.conflictDismiss": "Dismiss",
+    "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
+    // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
+    "workspace.offline.connectivityOnline": "Online",
+    "workspace.offline.connectivityOffline": "Offline",
+    "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
+    "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -52,6 +67,11 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     "workspace.staleSibling.viewInHistory": "View in history",
+    // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
+    // set, which silently switches off every term check in the editor. Say so
+    // rather than letting the editor look like a project with no terminology.
+    "workspace.terminologyUnavailableBanner":
+      "Terminology checks are unavailable — the termbase could not be loaded, so term rules are not being applied.",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
     "workspace.focusLock.editingNotice":
@@ -86,7 +106,7 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
+      "The first language is the project's primary target; each one you add below becomes its own lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",
@@ -226,6 +246,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    // AQU-1405. Painted over the page for the moment between a stale-chunk
+    // failure and the automatic reload that recovers from it.
+    "workspace.updateNotice.reloading": "Updating {app}…",
 
     // -- GenerateOverwriteDialog --
     "workspace.generateOverwrite.dontAskAgain": "Don't ask again when replacing a translation",
@@ -263,6 +286,19 @@ export const workspace = defineNamespace({
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
 
+    // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
+    "workspace.alignment.originalHeading": "Original language",
+    "workspace.alignment.originalSub": "— the Greek/Hebrew words behind this verse",
+    "workspace.alignment.originalHelpTooltip":
+      "Every word of the original-language source, with its dictionary form, Strong's number and " +
+      "morphology. Where the model can place a word, its rendering in your translation is shown " +
+      "beside it. Words matched through the dictionary form are marked — treat those as a hint.",
+    "workspace.alignment.originalNoMatch": "no confident match",
+    "workspace.alignment.originalViaLemma": "via lemma",
+    "workspace.alignment.originalViaLemmaTooltip":
+      "Matched through the dictionary form {lemma} rather than the form used in this verse, so it " +
+      "is a weaker guess than a direct match.",
+
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
 
@@ -275,6 +311,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -393,6 +431,8 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
+    "workspace.targetAudioLane.takeValidated": "This take is validated",
+    "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -445,6 +485,17 @@ export const workspace = defineNamespace({
           "with a period. States the cause, not blame.",
         placeholders: {
           count: "How many queued changes were rejected.",
+        },
+      },
+      "workspace.offline.conflictToast": {
+        description:
+          "Title of the toast shown in the Tauri desktop app when one or more " +
+          "translations queued while offline lost to a newer edit from someone " +
+          "else on reconnect (AD-2 head CAS). Paired with a 'Dismiss' action " +
+          "(workspace.offline.conflictDismiss) that clears the whole batch at " +
+          "once. Full sentence with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many translations couldn't sync.",
         },
       },
       "workspace.projectCard.deletedBy": {
@@ -646,20 +697,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },
@@ -1163,6 +1214,16 @@ export const workspace = defineNamespace({
           "that reloads the page.",
       },
 
+      "workspace.updateNotice.reloading": {
+        description:
+          "Full-screen status message shown for the moment between a stale " +
+          "code-chunk load failure (a new version was deployed while this tab " +
+          "was open) and the automatic reload that recovers from it.",
+        placeholders: {
+          app: "The product name for the current brand (e.g. 'Aquilla'), never translated.",
+        },
+      },
+
       "workspace.generateOverwrite.dontAskAgain": {
         description:
           "Checkbox label in the confirm dialog shown before an AI draft " +
@@ -1266,6 +1327,47 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.originalHeading": {
+        description:
+          "Heading of the section listing the original-language (biblical Hebrew or " +
+          "Greek) words of the verse being translated, above the statistical " +
+          "alignment links. 'Original language' means the language the scripture " +
+          "was written in, not the project's source text.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalSub": {
+        description:
+          "Muted continuation of workspace.alignment.originalHeading, on the same " +
+          "line. The leading dash joins it to the heading; do not start with a " +
+          "capital. 'Greek/Hebrew' names the two biblical languages.",
+      },
+      "workspace.alignment.originalHelpTooltip": {
+        description:
+          "Tooltip on the help icon beside that heading. 'Dictionary form' is the " +
+          "lemma — the headword an inflected form is listed under; \"Strong's " +
+          "number\" is a standard scripture-word index and stays as-is.",
+      },
+      "workspace.alignment.originalNoMatch": {
+        description:
+          "Shown in place of a target word when the model cannot say which part of " +
+          "the translation renders this original-language word. Lowercase, muted; " +
+          "it is a status, not a heading.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalViaLemma": {
+        description:
+          "Small badge on a row whose target word was found through the word's " +
+          "dictionary form (lemma) rather than the exact form in this verse — a " +
+          "weaker match. Lowercase, very short.",
+        maxLength: 14,
+      },
+      "workspace.alignment.originalViaLemmaTooltip": {
+        description:
+          "Tooltip on that badge, explaining why the match is weaker.",
+        placeholders: {
+          lemma: "The dictionary form of the original-language word — not translated.",
+        },
+      },
 
       "workspace.offlineBanner.message": {
         description:
@@ -1274,6 +1376,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +
@@ -1668,6 +1782,22 @@ export const workspace = defineNamespace({
           "button. It plays only that one clip, trimmed exactly as the " +
           "timeline draws it, without moving the playhead or starting the " +
           "rest of the timeline.",
+      },
+      "workspace.targetAudioLane.takeValidated": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip whose "
+          + "recording has reached the number of validators the project asks "
+          + "for. Read-only — the vote itself is cast in the editor, the "
+          + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
+      },
+      "workspace.targetAudioLane.takeValidatedByYou": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip that YOU "
+          + "have validated, on a project that asks for more validators than "
+          + "just you. A single tick rather than a double one, matching the "
+          + "editor's margin: your part is done, the line is not.",
+        maxLength: 30,
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

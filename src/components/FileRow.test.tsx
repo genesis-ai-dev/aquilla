@@ -50,6 +50,22 @@ function nameLabel(container: HTMLElement): HTMLElement {
 }
 
 describe("FileRow — AQU-341 truncation consistency", () => {
+  it("offers a focusable named file control and keyboard row activation", () => {
+    const onSelect = vi.fn()
+    const { container, getByRole } = renderRow({ onSelect })
+    expect(getByRole("button", { name: LONG_NAME }).tabIndex).toBe(0)
+    const row = container.querySelector('[data-showcase="sidebar.file"]')!
+    fireEvent.keyDown(row, { key: "Enter" })
+    fireEvent.keyDown(row, { key: " " })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(getByRole("button", { name: "File actions" }), { key: "Enter" })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("names the rename field after the file it edits", () => {
+    const { getByRole } = renderRow({ editing: true })
+    expect(getByRole("textbox", { name: LONG_NAME })).toHaveValue(LONG_NAME)
+  })
   it("offers section expansion for Scripture-shaped non-USFM imports", () => {
     const { getByRole } = renderRow({ file: makeFile({ type: "csv", hasScriptureContent: true }) })
     expect(getByRole("button", { name: "Expand" })).toBeInTheDocument()

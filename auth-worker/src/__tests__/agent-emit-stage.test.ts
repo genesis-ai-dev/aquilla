@@ -22,6 +22,7 @@ function ctx(overrides: Partial<EmitStageContext> = {}): EmitStageContext {
     runId: RUN_ID,
     projectId: PROJECT,
     roleLevel: 400,
+    lane: "",
     aliases: new AliasMap(),
     ...overrides,
   }
@@ -37,8 +38,20 @@ async function seedCellPair() {
     .run()
 }
 
+/** AQU-1068: the project's cell-editing tier. Most tests here are about role
+ *  floors, parents and provenance, so they opt the project in and let the new
+ *  gate stay out of the way; the dedicated describe below drives it directly. */
+async function seedCellEditingFloor(tier: string | null) {
+  await env.AQUILLA_PG.prepare(`DELETE FROM project_settings WHERE project_id = ?`).bind(PROJECT).run()
+  await env.AQUILLA_PG
+    .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+    .bind(PROJECT, JSON.stringify(tier ? { cellEditingFloor: tier } : {}))
+    .run()
+}
+
 beforeEach(async () => {
   await seedCellPair()
+  await seedCellEditingFloor("contributor")
 })
 
 describe("stageEvents — role floors (server-side re-validation)", () => {
@@ -419,5 +432,117 @@ describe("stageEvents — destination file naming (AQU-846)", () => {
     )
     expect(result.proposal).not.toBeNull()
     expect(result.proposal!.events[0].display.fileName).toBeUndefined()
+  })
+})
+
+describe("stageEvents — the project's cell-editing tier (AQU-1068)", () => {
+  // STAGING IS THE ONLY PLACE THIS IS CAUGHT, as of 2026-09-09.
+  //
+  // It used to be the polite place: the /events perimeter checked the tier too,
+  // and refusing here merely spared the user a 403 in the middle of a changeset
+  // they had already approved. The perimeter stopped checking it — enforcing it
+  // there silently refused audio-cue re-import, DCS upstream import and
+  // diarization, which all emit these kinds through the user's own outbox — so
+  // a proposal staged past these tests would now be ACCEPTED by the server.
+  //
+  // We refuse anyway, and that is the decision: the tier decides which buttons
+  // exist, and an Apply button is a button. These tests are what keep the agent
+  // from offering what the person could not do by hand.
+
+  it("refuses source.cell.create when the project has not opted in", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 700 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("not enabled for this project")
+  })
+
+  it("refuses an OWNER too — the default is nobody, not a floor", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.delete", fileId: FILE, cellId: CELL, payload: {} }],
+      ctx({ roleLevel: 700 }),
+    )
+    expect(result.proposal).toBeNull()
+  })
+
+  it("refuses a lead below the configured tier", async () => {
+    await seedCellEditingFloor("maintainer")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("role too low to add or remove cells")
+  })
+
+  it("stages once the tier admits the caller", async () => {
+    await seedCellEditingFloor("maintainer")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 600 }),
+    )
+    expect(result.proposal).not.toBeNull()
+  })
+
+  it("leaves ordinary drafting alone — a commit never asks about the tier", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x" } }],
+      ctx({ roleLevel: 400 }),
+    )
+    expect(result.proposal).not.toBeNull()
+  })
+})
+
+describe("stageEvents — lanes (AQU-1447)", () => {
+  const LANE_B = "ab12cd34"
+
+  it("stages a lane-B commit as a genesis commit tagged with the lane, ignoring lane A's head", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "Am Anfang" } }],
+      ctx({ lane: LANE_B }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.payload.targetLang).toBe(LANE_B)
+    expect(event.parentId).toBeUndefined()
+    expect(event.display.before).toBe("")
+  })
+
+  it("chains on lane B's own head once lane B has a commit", async () => {
+    const LANE_B_HEAD = "77777777-7777-4777-8777-777777777777"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Am Anfang', 'GEN 1:1', ?, 0)`,
+    )
+      .bind(PROJECT, FILE, CELL, LANE_B, LANE_B_HEAD)
+      .run()
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "Im Anfang" } }],
+      ctx({ lane: LANE_B }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.parentId).toBe(LANE_B_HEAD)
+    expect(event.payload.targetLang).toBe(LANE_B)
+  })
+
+  it("leaves the default lane unchanged: chains on its head, no targetLang, model-written targetLang stripped", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x", targetLang: LANE_B } }],
+      ctx({ lane: "" }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.parentId).toBe(TARGET_HEAD)
+    expect(event.payload).not.toHaveProperty("targetLang")
   })
 })

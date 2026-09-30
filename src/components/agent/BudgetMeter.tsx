@@ -13,6 +13,21 @@ import type { AgentBudget } from "@/lib/agent/run-state"
 
 export function BudgetMeter({ budget }: { budget: AgentBudget }) {
   const t = useT()
+  if (budget.exhausted && budget.reason === "weekly_allowance") {
+    // The workspace's weekly allowance, not this run's cap: no credit figures
+    // (customers see percentages in Billing & usage, never credits).
+    return (
+      <div
+        role="alert"
+        data-frame-type="budget.exhausted"
+        data-reason="weekly_allowance"
+        className="flex items-center gap-1.5 rounded-md border border-destructive/50 bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive"
+      >
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        <span>{t("agent.budget.weeklyExhausted")}</span>
+      </div>
+    )
+  }
   if (budget.exhausted) {
     return (
       <div

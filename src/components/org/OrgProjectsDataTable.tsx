@@ -1,8 +1,19 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { UserPlus, Users } from "lucide-react"
+import { UserPlus, Users, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import {
+  downloadProjectOffline,
+  removeOfflineProject,
+  getOfflineQueueDepth,
+  useDownloadProgress,
+  useOfflineProjectStatus,
+} from "@/lib/offline/download"
+import { toast } from "@/components/ui/toast"
+import { Spinner } from "@/components/ui/spinner"
 import {
   attentionRank,
   audioPct,
@@ -25,7 +36,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TableEmptyState } from "@/components/ui/page"
-import { MenuItem } from "@/components/ui/menu-parts"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
@@ -36,6 +47,7 @@ import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -66,6 +78,108 @@ function lensToSorting(lens: ProjectLens) {
 }
 
 /**
+ * Offline badge for the `name` column — Tauri desktop only, reusing the same
+ * `offline_projects` state and i18n keys as ProjectOverview.tsx's header
+ * badge (Phase 5). A standalone component (not inline in the `name` column's
+ * `cell` closure) so its hooks attach to their own component instance
+ * regardless of how react-table/`flexRender` invokes the outer cell function.
+ */
+function OfflineProjectBadge({ projectId }: { projectId: string }) {
+  const { store } = useOfflineStore()
+  const { t } = useI18n()
+  const status = useOfflineProjectStatus(store, projectId)
+  const progress = useDownloadProgress(projectId)
+
+  if (!isTauriRuntime()) return null
+
+  if (status?.status === "ready") {
+    return (
+      <Badge variant="secondary" className="shrink-0" data-testid="offline-ready-badge">
+        <HardDriveDownload className="size-3" aria-hidden />
+        {t("org.projectOverview.offlineReadyBadge")}
+      </Badge>
+    )
+  }
+  if (status?.status === "downloading") {
+    return (
+      <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
+        <Spinner className="size-3" />
+        {progress
+          ? t("org.projectOverview.offlineDownloadingProgress", {
+              done: progress.filesDone,
+              total: progress.filesTotal,
+            })
+          : t("org.projectOverview.offlineDownloading")}
+      </Badge>
+    )
+  }
+  return null
+}
+
+/**
+ * "Make available offline" / "Remove offline copy" row-menu items — Tauri
+ * desktop only, same handlers/error messages as ProjectOverview.tsx's
+ * overflow menu (Phase 5), just surfaced per-row here instead of on the
+ * single-project page. Errors go to a toast rather than inline text since a
+ * table row has no room for a persistent error message.
+ */
+function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: string | null }) {
+  const { store } = useOfflineStore()
+  const { t } = useI18n()
+  const status = useOfflineProjectStatus(store, projectId)
+
+  if (!isTauriRuntime()) return null
+
+  async function handleMakeAvailableOffline() {
+    if (!store || !jwt) return
+    try {
+      await downloadProjectOffline(store, projectId, jwt)
+    } catch (e) {
+      toast.add({ type: "error", title: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  function handleRemoveOfflineCopy() {
+    if (!store) return
+    const queueDepth = getOfflineQueueDepth(store, projectId)
+    if (queueDepth > 0) {
+      toast.add({ type: "error", title: t("org.projectOverview.offlineRemoveBlocked", { count: queueDepth }) })
+      return
+    }
+    const result = removeOfflineProject(store, projectId)
+    if (!result.ok && result.reason === "queue-not-empty") {
+      // Lost a race with a write that queued between the check above and the
+      // removal itself — same message, fresh count.
+      toast.add({ type: "error", title: t("org.projectOverview.offlineRemoveBlocked", { count: result.queueDepth }) })
+    }
+  }
+
+  return (
+    <>
+      <MenuSeparator />
+      {status?.status === "ready" ? (
+        <MenuItem onClick={handleRemoveOfflineCopy}>
+          <CloudOff className="size-4" />
+          {t("org.projectOverview.removeOfflineCopy")}
+        </MenuItem>
+      ) : (
+        <MenuItem
+          onClick={() => {
+            void handleMakeAvailableOffline()
+          }}
+          disabled={!jwt || status?.status === "downloading"}
+        >
+          <CloudDownload className="size-4" />
+          {status?.status === "downloading"
+            ? t("org.projectOverview.offlineDownloading")
+            : t("org.projectOverview.makeAvailableOffline")}
+        </MenuItem>
+      )}
+    </>
+  )
+}
+
+/**
  * Portfolio projects DataTable — same chrome as the admin console.
  *
  * - `page`: standalone card shell (org Projects list).
@@ -89,6 +203,7 @@ export function OrgProjectsDataTable({
   author,
   viewerUsername = null,
   allowSelfAssignment = false,
+  assignmentMinRole = ROLE.PROJECT_LEAD,
   callerUserId = null,
   onLanesChanged,
   toolbarLeading,
@@ -134,6 +249,7 @@ export function OrgProjectsDataTable({
    */
   viewerUsername?: string | null
   allowSelfAssignment?: boolean
+  assignmentMinRole?: number
   callerUserId?: number | null
   /** Called after an assign/staff lane action, so the parent can refetch the
    * portfolio (per-lane rollups changed). */
@@ -172,7 +288,17 @@ export function OrgProjectsDataTable({
 
   const tableData = useMemo(() => projects, [projects])
 
-  const canAssign = Boolean(jwt && author != null) && !embedded
+  const canAssignProject = useCallback(
+    (projectId: string) =>
+      Boolean(jwt && author != null) &&
+      !embedded &&
+      canOpenAssignUi(
+        roleByProjectId?.get(projectId)?.level ?? null,
+        allowSelfAssignment,
+        assignmentMinRole,
+      ),
+    [jwt, author, embedded, roleByProjectId, allowSelfAssignment, assignmentMinRole],
+  )
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => {
@@ -202,6 +328,7 @@ export function OrgProjectsDataTable({
                     {t("org.guestOrgHome.newBadge")}
                   </Badge>
                 )}
+                {!embedded && <OfflineProjectBadge projectId={p.id} />}
               </span>
             )
           },
@@ -528,6 +655,7 @@ export function OrgProjectsDataTable({
         })}
         rowClassName="group"
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
+        rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
         searchValue={searchValue}
@@ -569,7 +697,9 @@ export function OrgProjectsDataTable({
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
-                      canAssign ? (lane) => setAssignTarget({ projectId: p.id, lane }) : undefined
+                      canAssignProject(p.id)
+                        ? (lane) => setAssignTarget({ projectId: p.id, lane })
+                        : undefined
                     }
                     onStaffed={onLanesChanged}
                   />
@@ -580,7 +710,7 @@ export function OrgProjectsDataTable({
             ? undefined
             : (p) => (
                 <>
-                  {canAssign && (
+                  {canAssignProject(p.id) && (
                     <MenuItem
                       onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                     >
@@ -594,6 +724,7 @@ export function OrgProjectsDataTable({
                     <Users className="size-4" />
                     {t("org.teamDetail.addMemberButton")}
                   </MenuItem>
+                  <OfflineRowMenuItems projectId={p.id} jwt={jwt ?? null} />
                 </>
               )
         }
@@ -652,10 +783,11 @@ export function OrgProjectsDataTable({
             defaultLaneLabelByProjectId?.get(assignTarget.projectId),
           )}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
-          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
+          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}
           jwt={jwt}
           author={author}
           allowSelfAssignment={allowSelfAssignment}
+          assignmentMinRole={assignmentMinRole}
           callerUserId={callerUserId}
           onAssigned={() => {
             onLanesChanged?.()

@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { ApiTokensSection } from "./ApiTokensSection"
 import type { ApiCredential, MintCredentialResult } from "@/lib/sync/credentials"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -23,7 +24,9 @@ vi.mock("@/lib/sync/credentials", () => ({
   revokeCredential: vi.fn(),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn() }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(),
   projectsResultError: vi.fn((result: { reason: string }) =>
     result.reason === "unreachable"
@@ -73,6 +76,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: null,
   pii: false,
+  access: "write",
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -87,22 +91,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
   pii: false,
-}
-
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (see
-// ProjectCreateDialog.addAsLane.test.tsx for the original of this helper).
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
+  access: "write",
 }
 
 beforeEach(() => {
@@ -154,6 +143,56 @@ describe("ApiTokensSection", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1)
   })
 
+  it("shows each token's creation date and labels its reach by kind", async () => {
+    // A reader scanning this list needs to see blast radius without opening
+    // anything: whole-org tokens read differently from single-project ones,
+    // and "when did this appear" is how you spot one you didn't expect.
+    mockListCredentials.mockResolvedValue([
+      { ...ASK_CREDENTIAL, orgId: "1", projectId: null },
+      REVOKED_CREDENTIAL,
+    ])
+    render(<ApiTokensSection />)
+    expect(await screen.findByText(/Whole org: Acme Org/)).toBeInTheDocument()
+    expect(screen.getByText(/Project: Maintainer Project/)).toBeInTheDocument()
+    expect(screen.getAllByText(/^Created /)).toHaveLength(2)
+  })
+
+  it("picks up a token minted moments after browser approval, without a manual reload", async () => {
+    // Arriving from /connect-agent the credential does not exist yet — it is
+    // minted on the agent's next poll. One fetch on mount always misses it.
+    vi.useFakeTimers()
+    try {
+      window.history.replaceState(null, "", "/preferences/api-tokens?awaiting=1")
+      mockListCredentials.mockResolvedValue([])
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+
+      mockListCredentials.mockResolvedValue([ASK_CREDENTIAL])
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument())
+
+      // Having found it, the section stops polling rather than refreshing forever.
+      const calls = mockListCredentials.mock.calls.length
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials.mock.calls.length).toBe(calls)
+    } finally {
+      vi.useRealTimers()
+      window.history.replaceState(null, "", "/")
+    }
+  })
+
+  it("does not poll when the page was opened directly", async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("renders an empty state when the caller has no tokens", async () => {
     mockListCredentials.mockResolvedValue([])
     render(<ApiTokensSection />)
@@ -188,6 +227,7 @@ describe("ApiTokensSection", () => {
         lastUsedAt: null,
         revokedAt: null,
         pii: false,
+        access: "write",
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -223,6 +263,10 @@ describe("ApiTokensSection", () => {
     // Show-once dialog: the plaintext token renders, with the "never again" notice.
     expect(await screen.findByText("aqk_freshplaintext")).toBeInTheDocument()
     expect(screen.getByText(/you will not see it again/i)).toBeInTheDocument()
+    // Pasting a live credential into a chat or a log is how these leak. The
+    // warning has to name that, at the one moment the plaintext is on screen.
+    expect(screen.getByText(/Don't paste it into a chat/i)).toBeInTheDocument()
+    expect(screen.getByText(/act-mode access/i)).toBeInTheDocument()
 
     // Closing it makes it disappear for good — it isn't reachable again without
     // a fresh mint (the client never stores the plaintext).
@@ -256,7 +300,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false, access: "write",
       },
     })
     await screen.findByText("aqk_once")
@@ -301,7 +345,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null, pii: false,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
         },
       })
 
@@ -349,6 +393,136 @@ describe("ApiTokensSection", () => {
       // ASK_CREDENTIAL is ask-mode and unscoped: the safety instruction is present.
       expect(prompt).toMatch(/ask-mode/)
       expect(prompt).toContain("Unscoped (personal)")
+    })
+
+    // AQU-1242: a read-only token's prompt must not read like an ask-mode one.
+    // "Stage writes and wait for my approval" sends the agent down a path that
+    // ends in a 403 it will probably retry; the ceiling has to be stated instead.
+    it("read-only token: the prompt states the ceiling instead of the approval dance", async () => {
+      mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, access: "read" }])
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      await screen.findByText(/aqk_abc123/)
+
+      fireEvent.click(screen.getByRole("button", { name: "Agent setup" }))
+      await screen.findByText("Instructions for your agent")
+      fireEvent.click(screen.getByRole("button", { name: /Copy instructions/i }))
+
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+      const prompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+      expect(prompt).toContain("read-only")
+      expect(prompt).toContain("scope_denied")
+      expect(prompt).not.toMatch(/ask-mode/)
+      expect(prompt).not.toMatch(/you can stage writes/)
+    })
+  })
+
+  // AQU-1242 — the token's write ceiling.
+  describe("access ceiling", () => {
+    it("mints a read-only token, and act mode is not offered for one", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_readonlyplaintext",
+        credential: {
+          id: "cred-ro", name: "Reporting agent", mode: "ask", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_ro",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reporting agent" } })
+
+      // A maintainer project would normally unlock act mode...
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      expect(screen.getByRole("radio", { name: /Act/i })).not.toHaveAttribute("aria-disabled", "true")
+
+      // ...but a read-only token has nothing to apply, so act is withdrawn and
+      // the reason is stated rather than left as a mysteriously dead control.
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+      expect(screen.getByRole("radio", { name: /Act/i })).toHaveAttribute("aria-disabled", "true")
+      expect(screen.getByText(/Mode only applies to a token that can write/i)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("picking act mode and then read-only never mints the contradiction the server rejects", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_x",
+        credential: {
+          id: "cred-y", name: "Flip flop", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_x", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Flip flop" } })
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      fireEvent.click(screen.getByRole("radio", { name: /Act/i }))
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      // read + act is a 400 server-side; the dialog must not be able to send it.
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("defaults to read-write, so a user who ignores the new field mints what they always did", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_default",
+        credential: {
+          id: "cred-d", name: "Same as before", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_def", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Same as before" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "write" }),
+      )
+    })
+
+    it("the list marks a read-only token as read-only instead of showing its unused mode", async () => {
+      mockListCredentials.mockResolvedValue([
+        { ...ASK_CREDENTIAL, id: "cred-ro", tokenPrefix: "aqk_ro1234", access: "read" },
+        { ...ASK_CREDENTIAL, id: "cred-rw", tokenPrefix: "aqk_rw1234", access: "write" },
+      ])
+      render(<ApiTokensSection />)
+      await screen.findByText(/aqk_ro1234/)
+
+      const readOnlyRow = screen.getByText(/aqk_ro1234/).closest("li")!
+      const writeRow = screen.getByText(/aqk_rw1234/).closest("li")!
+      expect(readOnlyRow).toHaveTextContent("read-only")
+      // "ask" would suggest writes are merely gated on approval, not impossible.
+      expect(readOnlyRow).not.toHaveTextContent(/\bask\b/)
+      expect(writeRow).toHaveTextContent("ask")
+      expect(writeRow).not.toHaveTextContent("read-only")
     })
   })
 })

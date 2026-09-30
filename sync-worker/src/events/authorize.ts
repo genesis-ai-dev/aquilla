@@ -6,13 +6,19 @@
 import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
-import { resolveAllowSelfAssignment } from './assignment-authority'
+import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
-import { resolveAllowLineCreation } from './line-creation-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
+import { loadTargetLanes } from './lane-read-wall'
+import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { visibleLaneTags } from '../../../src/lib/lanes/read-wall'
+import { laneTagForArchiveCheck } from '../../../src/lib/lanes/archived-lane'
+import { loadLaneGrants } from '../../../db/shared/lane-visibility'
+import { refusalForArchivedLane } from './archived-lane'
+import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -69,6 +75,31 @@ function scopeLaneOf(kind: string, payload: unknown): string {
  * Composition is AND: if any 'lane' scopes exist the event's lane must be among
  * them, AND if any 'file' scopes exist the event's fileId must be among them.
  */
+function enforceFileScopes(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
+  raw: RawEvent<EventKind>,
+): { ok: false; status: 403; reason: string } | null {
+  if (!SCOPE_GATED_KINDS.has(raw.kind)) return null
+  const fileScopes = (scopes ?? []).filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length === 0) return null
+  if (!raw.fileId || !fileScopes.includes(raw.fileId)) {
+    return { ok: false, status: 403, reason: `file '${raw.fileId ?? ''}' not in scope for ${raw.kind}` }
+  }
+  return null
+}
+
+/**
+ * AQU-1415: the lane a self-assign or reassign addresses. `null` when the
+ * event does not name a lane (a reassign that only moves the assignee).
+ * An omitted `targetLang` on create is the empty-string default lane.
+ */
+function assignmentLaneTag(kind: string, payload: unknown): string | null {
+  if (kind !== 'assignment.create' && kind !== 'assignment.reassign') return null
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  if (kind === 'assignment.reassign' && lang === undefined) return null
+  return typeof lang === 'string' ? lang : ''
+}
+
 function enforceScopes(
   scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }>,
   raw: RawEvent<EventKind>,
@@ -83,14 +114,7 @@ function enforceScopes(
     }
   }
 
-  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
-  if (fileScopes.length > 0) {
-    if (!raw.fileId || !fileScopes.includes(raw.fileId)) {
-      return { ok: false, status: 403, reason: `file '${raw.fileId ?? ''}' not in scope for ${raw.kind}` }
-    }
-  }
-
-  return null
+  return enforceFileScopes(scopes, raw)
 }
 
 /**
@@ -102,6 +126,57 @@ function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boo
   if (raw.kind !== 'assignment.create') return false
   const payload = raw.payload as { assigneeUserId?: unknown } | undefined
   return typeof payload?.assigneeUserId === 'number' && payload.assigneeUserId === callerUserId
+}
+
+/**
+ * AQU-581: true when `raw` is an `assignment.create` that falls entirely
+ * inside the caller's OWN lane/file scopes — the shape the lane-delegate
+ * carve-out below permits a mentor/coordinator to emit for other people.
+ *
+ * The caller must actually be scoped: an UNSCOPED member is refused here even
+ * with the org setting on, because "who may assign in the Spanish lane" is
+ * expressed by granting that person the `es` lane scope. Without that guard,
+ * flipping the setting would hand blanket assignment rights to every
+ * contributor in the org — the opposite of what the setting is for.
+ *
+ * Composition matches `enforceScopes`: lane scopes must contain the
+ * assignment's lane (`payload.targetLang`, '' for the default lane — an
+ * absent targetLang is the DEFAULT lane, never a wildcard), and if the caller
+ * also carries file scopes, EVERY file the assignment covers must be among
+ * them.
+ */
+function isInScopeLaneAssignCreate(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
+  raw: RawEvent<EventKind>,
+): boolean {
+  if (raw.kind !== 'assignment.create') return false
+  if (!Array.isArray(scopes) || scopes.length === 0) return false
+
+  const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
+  if (laneScopes.length === 0) return false
+
+  const payload = raw.payload as { targetLang?: unknown; scope?: unknown } | undefined
+  const lane = typeof payload?.targetLang === 'string' ? payload.targetLang : ''
+  if (!laneScopes.includes(lane)) return false
+
+  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length > 0) {
+    const entries = Array.isArray(payload?.scope) ? payload.scope : []
+    if (entries.length === 0) return false
+    const everyFileInScope = entries.every((entry) => {
+      const fileId = (entry as { fileId?: unknown } | null)?.fileId
+      return typeof fileId === 'string' && fileScopes.includes(fileId)
+    })
+    if (!everyFileInScope) return false
+  }
+
+  return true
+}
+
+function isAssignmentKind(kind: EventKind): boolean {
+  return kind === 'assignment.create' ||
+    kind === 'assignment.reassign' ||
+    kind === 'assignment.unassign'
 }
 
 // Private symbol — NOT exported. Code outside this file cannot reproduce
@@ -134,6 +209,32 @@ export function isAuthorizedEvent<K extends EventKind = EventKind>(
   return x instanceof AuthorizedEvent && (x as { [AUTHORIZED]?: true })[AUTHORIZED] === true
 }
 
+const externalGrantsByCache = new WeakMap<RequestCache, Map<string, Promise<Array<{ lane: string; level: number }>>>>()
+
+/**
+ * Lane grants for an external commit token, which does not carry `laneGrants`.
+ * Memoized on the request cache so a batch pays for the lookup once.
+ */
+async function laneGrantsForExternalToken(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  cache: RequestCache,
+): Promise<Array<{ lane: string; level: number }>> {
+  let byCaller = externalGrantsByCache.get(cache)
+  if (!byCaller) {
+    byCaller = new Map()
+    externalGrantsByCache.set(cache, byCaller)
+  }
+  const key = `${projectId}\0${userId}`
+  let pending = byCaller.get(key)
+  if (!pending) {
+    pending = loadLaneGrants(db, projectId, userId)
+    byCaller.set(key, pending)
+  }
+  return pending
+}
+
 /**
  * The ONLY function that mints AuthorizedEvent instances. Every event handler
  * accepts AuthorizedEvent and TypeScript prevents bypass (the symbol-branded
@@ -159,8 +260,9 @@ export async function authorize<K extends EventKind>(
   secret: string | undefined,
   /**
    * AQU-496: optional DB handle for the settings-gated carve-outs below
-   * (self-assign, timing lock, line creation, track editing). Reads go
-   * through `cache` when one is supplied, so a batch pays one lookup per
+   * (self-assign, timing lock, line creation, track editing) and, for
+   * assignment events, the org-configured assignment floor (AQU-1037). Reads
+   * go through `cache` when one is supplied, so a batch pays one lookup per
    * settings row rather than one per event. Omitting `db` simply disables the
    * carve-outs (falls back to the static floors) rather than erroring — every
    * existing caller/test that doesn't pass it keeps working.
@@ -174,6 +276,13 @@ export async function authorize<K extends EventKind>(
    * pre-memo behaviour every existing caller/test relies on.
    */
   cache?: RequestCache,
+  /**
+   * AQU-1415: `LANE_READ_WALL`. Unset keeps the additive `scopes` claim.
+   * "1" or "true" denies a below-Maintainer target write that has no
+   * `laneGrants` row for the lane the event addresses. Same switch as the
+   * read wall, so the grant backfill can land before either wall turns on.
+   */
+  laneReadWall?: string,
 ): Promise<AuthorizeResult<K>> {
   // 1. Secret must be configured — misconfigured deployment, not a client error.
   if (!secret) {
@@ -262,8 +371,81 @@ export async function authorize<K extends EventKind>(
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
 
+  // AQU-1462: an archived lane refuses writes that name it. Every role,
+  // including Maintainer and platform, and whether or not the write wall is
+  // on. The default lane is not archivable. Kinds that are not stored per
+  // lane (audio, waivers, back-translations, lane retimes) are frozen only
+  // when the event carries that lane's tag.
+  //
+  // Someone who is not allowed to know the lane exists does not hear its
+  // name or that it is archived. The read wall decides that: wall off,
+  // platform, and Maintainer+ may know every lane; below that, only a grant
+  // at Viewer or above reveals the lane. An external commit token omits
+  // laneGrants (the SPA token carries them), so those grants are read here
+  // and are not handed to the write wall below.
+  const archiveTag = laneTagForArchiveCheck(raw.kind, raw.payload)
+  const wallOn = laneReadWallEnabled(laneReadWall)
+  if (db != null && settings && archiveTag) {
+    let laneGrants = tokenClaims.laneGrants
+    if (
+      wallOn &&
+      tokenClaims.src === 'external' &&
+      tokenClaims.role < ROLE.MAINTAINER &&
+      laneGrants == null
+    ) {
+      laneGrants = await laneGrantsForExternalToken(db, raw.projectId, tokenClaims.userId, settings)
+    }
+    const visible = visibleLaneTags({
+      enabled: wallOn,
+      role: tokenClaims.role,
+      src: tokenClaims.src,
+      laneGrants,
+    })
+    const archived = await refusalForArchivedLane(db, raw.projectId, archiveTag, settings, visible)
+    if (archived) return { ok: false, status: 403, reason: archived }
+  }
+
+  // AQU-1037: assignment events replace their historical static
+  // PROJECT_LEAD floor with the project's org-configured floor. The resolver
+  // defaults to PROJECT_LEAD for org-less/unconfigured projects.
+  const assignmentAuthority =
+    db != null && isAssignmentKind(raw.kind)
+      ? await resolveAssignmentAuthority(db, raw.projectId, settings)
+      : null
+  const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+
+  // AQU-1415: when the write wall is on, a grant can elevate the caller
+  // inside one lane, and the absence of a grant denies the write even when
+  // the project role would have been enough. Maintainer+ and platform skip
+  // this; the static role floor below still applies to them.
+  let roleForGate = tokenClaims.role
+  if (
+    wallOn &&
+    SCOPE_GATED_KINDS.has(raw.kind) &&
+    tokenClaims.src !== 'platform' &&
+    tokenClaims.role < ROLE.MAINTAINER
+  ) {
+    if (db == null) {
+      return { ok: false, status: 403, reason: 'lane write wall requires a database' }
+    }
+    const lanes = await loadTargetLanes(db, raw.projectId)
+    const decision = decideLaneWrite({
+      enabled: true,
+      role: tokenClaims.role,
+      src: tokenClaims.src,
+      laneGrants: tokenClaims.laneGrants,
+      laneTag: scopeLaneOf(raw.kind, raw.payload),
+      lanes,
+      requiredRole,
+    })
+    if (decision.action === 'deny') {
+      return { ok: false, status: 403, reason: decision.reason }
+    }
+    if (decision.action === 'allow') roleForGate = decision.effectiveRole
+  }
+
   // Role gate: check that the token's role is sufficient for this event kind.
-  if (tokenClaims.role < requiredRoleFor(raw.kind)) {
+  if (roleForGate < requiredRole) {
     // AQU-496: assignment.create self-assign carve-out. A below-lead member
     // (CONTRIBUTOR=400+) may still pass here if (a) a DB handle was supplied,
     // (b) the payload assigns the scope to THEMSELVES (never another user —
@@ -274,8 +456,60 @@ export async function authorize<K extends EventKind>(
       db != null &&
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
       isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
-      (await resolveAllowSelfAssignment(db, raw.projectId, settings))
-    if (!selfAssignOk) {
+      assignmentAuthority?.allowSelfAssignment === true
+
+    // AQU-581: the lane-delegate carve-out. Unlike AQU-496's, this one admits
+    // assigning ANOTHER person — that is the whole point (a mentor hands out
+    // chapters) — but only within the lanes the org scoped this member to,
+    // and only while the org has opted into `allowScopedLaneAssignment`. It is
+    // evaluated SECOND so a self-assign under the older setting short-circuits
+    // first, and so an org running only AQU-496 behaves exactly as it did
+    // before.
+    //
+    // The ASSIGNEE is checked too (AQU-581 review): they must be able to do
+    // the work — CONTRIBUTOR+ and, if scoped, scoped to this lane and files.
+    // A lead is trusted to pick; a delegate's choice is what the grant is for.
+    //
+    // A delegate may also `assignment.unassign` work they handed out
+    // themselves, in a lane they still hold — otherwise their mistakes could
+    // only be undone by a lead. Reassign keeps the floor: nothing emits it.
+    const delegateCandidate =
+      !selfAssignOk &&
+      db != null &&
+      tokenClaims.role >= ROLE.CONTRIBUTOR &&
+      assignmentAuthority?.allowScopedLaneAssignment === true &&
+      Array.isArray(tokenClaims.scopes) &&
+      tokenClaims.scopes.some((s) => s.kind === 'lane')
+    let laneDelegateOk = false
+    if (delegateCandidate && isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>)) {
+      const payload = raw.payload as RawEvent<'assignment.create'>['payload']
+      const lane = typeof payload.targetLang === 'string' ? payload.targetLang : ''
+      const eligible = await isEligibleLaneAssignee(
+        db,
+        raw.projectId,
+        payload.assigneeUserId,
+        lane,
+        payload.scope.map((entry) => entry.fileId),
+      )
+      // The assign dialog recognises "cannot take work in" and shows its own
+      // translated message; anything else showing this sees plain words.
+      if (!eligible) {
+        const language = lane === '' ? 'the main language' : lane
+        return {
+          ok: false,
+          status: 403,
+          reason: `this person cannot take work in ${language}: they need to be a Contributor or above and be allowed to work in ${language}`,
+        }
+      }
+      laneDelegateOk = true
+    } else if (delegateCandidate && raw.kind === 'assignment.unassign') {
+      const payload = raw.payload as RawEvent<'assignment.unassign'>['payload']
+      laneDelegateOk =
+        typeof payload?.assignmentId === 'string' &&
+        (await isOwnLaneAssignment(db, raw.projectId, payload.assignmentId, tokenClaims.userId, tokenClaims.scopes ?? []))
+    }
+
+    if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
   }
@@ -310,40 +544,57 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // Sam, 2026-08-21: `source.cell.create` / `source.cell.delete` /
-  // `source.cell.reorder` dropped from their old static PROJECT_LEAD floor to
-  // CONTRIBUTOR so the "let people add new lines" project setting can mean
-  // what it says — reorder included because every add and remove BATCHES one
-  // in to keep the anchor chain matching the clock, and a floor that refused
-  // the companion killed the whole batch. The PROJECT_LEAD floor is
-  // re-imposed HERE for whoever is below it: all three pass only while the
-  // project has opted in ("that setting is enabling lines being added or
-  // removed" — the package travels together), and a delete additionally only
-  // for a line a person added by hand — an imported subtitle line stays
-  // lead-only to remove whatever the setting says. Leads and above never
-  // reach these checks; an absent `db` skips them, matching the carve-outs
-  // above.
+  // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule
+  // about cell structure that this perimeter still enforces.
+  //
+  // THE PROJECT'S `cellEditingFloor` TIER IS DELIBERATELY NOT CHECKED HERE, and
+  // its absence is a decision rather than an oversight (Sam, 2026-09-09). The
+  // tier is a PRODUCT rule, enforced where the buttons are drawn — the row's
+  // menu, the timeline's add and remove, the gap inserts, and the agent's
+  // proposal staging in auth-worker all read it from the same shared module. It
+  // exists to stop a project restructuring its files by ACCIDENT, not to stop
+  // somebody determined, and everyone who reaches this code is already a member
+  // the org admitted.
+  //
+  // Enforcing it here refused three legitimate flows, silently, on any project
+  // that had not opted in — all three of which emit these same kinds through
+  // the user's OWN outbox: audio-cue re-import (`handleReconcileAudioCues`),
+  // DCS upstream import and repair, and diarization. Each REPLACES imported
+  // content wholesale, each is maintainer-gated at its own button, and none is
+  // the by-hand restructuring the tier was written to govern.
+  //
+  // What actually protects the client's work is the rule below. An IMPORTED
+  // cell is content from their own file, so taking one back needs MAINTAINER
+  // whatever the tier says; below that rank a person only ever removes a line
+  // somebody added by hand here. `isUserInsertedCell` fails closed, so a cell
+  // row that cannot be read keeps the requirement rather than waiving it.
+  //
+  // Contrast the timing lock (timing-authority.ts) and `allowTrackEditing`
+  // just below, which stay server-enforced and should. Those answer "may this
+  // project's imported TIMINGS move at all" — a question whose wrong answer
+  // corrupts data the client handed us. This one answers "should we draw the
+  // button", and a wrong answer there is a button somebody did not want.
+  //
+  // The external surface keeps its exemption: that is the behaviour it had
+  // before AQU-1068, `emitEventsFloor` holds external callers at PROJECT_LEAD
+  // for these kinds, and an external PlanImport populates a whole new file
+  // through this perimeter. An absent `db` skips the check, matching the
+  // carve-outs above.
   if (
     db != null &&
-    tokenClaims.role < ROLE.PROJECT_LEAD &&
-    (raw.kind === 'source.cell.create' ||
-      raw.kind === 'source.cell.delete' ||
-      raw.kind === 'source.cell.reorder')
+    tokenClaims.src !== 'external' &&
+    raw.kind === 'source.cell.delete' &&
+    tokenClaims.role < ROLE.MAINTAINER
   ) {
-    if (!(await resolveAllowLineCreation(db, raw.projectId, settings))) {
-      return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
-    }
-    if (raw.kind === 'source.cell.delete') {
-      const userInserted =
-        raw.fileId != null &&
-        raw.cellId != null &&
-        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
-      if (!userInserted) {
-        return {
-          ok: false,
-          status: 403,
-          reason: 'only a line someone added by hand can be removed at this clearance',
-        }
+    const userInserted =
+      raw.fileId != null &&
+      raw.cellId != null &&
+      (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+    if (!userInserted) {
+      return {
+        ok: false,
+        status: 403,
+        reason: 'removing an imported cell requires maintainer',
       }
     }
   }
@@ -351,15 +602,16 @@ export async function authorize<K extends EventKind>(
   // AQU-646 stage 2: RESTRUCTURING a timeline needs the project to have opted
   // in, on top of the maintainer floor `file.track.set` already carries.
   //
-  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. Both blocks
-  // above carry one because both are conditional floor RAISES on kinds whose
-  // static floor was lowered. This kind's floor was never lowered — it is
-  // MAINTAINER in role-policy.ts and has been since it shipped — so there is
-  // nothing to raise and no clearance that should skip the question. The
-  // setting answers *whether* a project restructures its timelines, not *who*
-  // may do it, which is why an OWNER is refused here too. Two gates means two
-  // gates. Adding a role term to make this resemble its neighbours would open
-  // exactly the back door the second gate exists to close.
+  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. The
+  // self-assign and timing-lock blocks above carry one because both are
+  // conditional floor RAISES on kinds whose static floor was lowered. This
+  // kind's floor was never lowered — it is MAINTAINER in role-policy.ts and
+  // has been since it shipped — so there is nothing to raise and no clearance
+  // that should skip the question. The setting answers *whether* a project
+  // restructures its timelines, not *who* may do it, which is why an OWNER is
+  // refused here too. Two gates means two gates. Adding a role term to make
+  // this resemble its neighbours would open exactly the back door the second
+  // gate exists to close.
   //
   // A rename or a reorder is NOT restructuring, and both already ship — see
   // isGatedTrackPatch for the three clauses that separate them, and why
@@ -370,10 +622,40 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // AQU-553: after the role floor passes, apply ADDITIVE lane/file scopes. An
-  // absent `scopes` claim is unscoped (skip). Present scopes gate chain-mutating
-  // target.* writes + validate/unvalidate; every other kind falls through.
-  if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
+  // AQU-553 / AQU-1415. Wall off: additive lane/file scopes. An absent
+  // `scopes` claim is unscoped (skip). Wall on: lane access comes from
+  // `laneGrants` (checked above for scope-gated kinds). File scopes stay
+  // on the old claim. Assignment into a lane also needs a grant.
+  if (wallOn) {
+    const fileRejection = enforceFileScopes(
+      tokenClaims.scopes,
+      raw as RawEvent<EventKind>,
+    )
+    if (fileRejection) return fileRejection
+    const assignmentTag = assignmentLaneTag(raw.kind, raw.payload)
+    if (
+      assignmentTag != null &&
+      tokenClaims.src !== 'platform' &&
+      tokenClaims.role < ROLE.MAINTAINER
+    ) {
+      if (db == null) {
+        return { ok: false, status: 403, reason: 'lane write wall requires a database' }
+      }
+      const lanes = await loadTargetLanes(db, raw.projectId)
+      const decision = decideLaneWrite({
+        enabled: true,
+        role: tokenClaims.role,
+        src: tokenClaims.src,
+        laneGrants: tokenClaims.laneGrants,
+        laneTag: assignmentTag,
+        lanes,
+        requiredRole: ROLE.VIEWER,
+      })
+      if (decision.action === 'deny') {
+        return { ok: false, status: 403, reason: decision.reason }
+      }
+    }
+  } else if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
     const scopeRejection = enforceScopes(
       tokenClaims.scopes,
       raw as RawEvent<EventKind>,

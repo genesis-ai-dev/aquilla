@@ -17,6 +17,8 @@
 // to avoid a cross-package import that violates the SPA↔worker boundary.
 // KEEP IN SYNC with src/lib/comments/comment-helpers.ts extractMentions.
 
+import { ROLE } from './events/role-policy'
+
 /**
  * Extract @username mentions from a comment body.
  * Mirrors src/lib/comments/comment-helpers.ts extractMentions — keep in sync.
@@ -194,6 +196,56 @@ export async function resolveUserEmails(
 }
 
 /**
+ * Filter a list of @mentioned usernames down to those with a live grant on
+ * `projectId`.
+ *
+ * [Pen test 2026-09-24] API security & data exposure: `extractMentions` pulls
+ * any `@username`-shaped token out of a comment body with no validation, and
+ * `resolveUserEmails` looks usernames up globally with no project scope —
+ * unlike `getThreadParticipants`, which is already scoped to actual
+ * commenters on the thread. Without this filter, any project contributor
+ * (including an agent posting via the external Agent API's comment.create)
+ * could @mention an arbitrary registered username and cause a real email
+ * (comment excerpt, project name, deep link) to be sent to an account with
+ * no role on the project — a cross-tenant content leak plus a
+ * username-enumeration/spam primitive. Mirrors the grant-path union in
+ * events/membership.ts checkProjectMembershipDetailed, keyed by username
+ * instead of user id.
+ */
+export async function filterUsernamesWithProjectAccess(
+  db: AquillaDb,
+  projectId: string,
+  usernames: string[],
+): Promise<string[]> {
+  if (usernames.length === 0) return []
+
+  const placeholders = usernames.map(() => '?').join(', ')
+  const rows = await db
+    .prepare(
+      `SELECT u.username FROM users u
+       WHERE u.username IN (${placeholders})
+         AND (
+           EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ? AND pm.user_id = u.id)
+           OR EXISTS (SELECT 1 FROM projects p WHERE p.id = ? AND p.created_by = u.id)
+           OR EXISTS (
+             SELECT 1 FROM org_members om
+               JOIN projects p ON p.org_id = om.org_id
+              WHERE p.id = ? AND om.user_id = u.id AND om.role_level >= ${ROLE.MAINTAINER}
+           )
+           OR EXISTS (
+             SELECT 1 FROM group_members gm
+               JOIN group_project_grants gpg ON gpg.group_id = gm.group_id
+              WHERE gpg.project_id = ? AND gm.user_id = u.id
+           )
+         )`,
+    )
+    .bind(...usernames, projectId, projectId, projectId, projectId)
+    .all<{ username: string }>()
+
+  return rows.results.map((r) => r.username)
+}
+
+/**
  * Look up thread-participant usernames for a comment thread.
  *
  * For a reply (parentCommentId !== null): returns all distinct author_ids of
@@ -263,8 +315,11 @@ export async function sendCommentNotifications(
       env, db, baseUrl, projectId, author, body, parentCommentId,
     } = opts
 
-    const mentionedUsernames = extractMentions(body)
-    const threadParticipants = await getThreadParticipants(db, projectId, parentCommentId)
+    const rawMentionedUsernames = extractMentions(body)
+    const [mentionedUsernames, threadParticipants] = await Promise.all([
+      filterUsernamesWithProjectAccess(db, projectId, rawMentionedUsernames),
+      getThreadParticipants(db, projectId, parentCommentId),
+    ])
     const recipientUsernames = deriveRecipientUsernames({
       author,
       mentionedUsernames,

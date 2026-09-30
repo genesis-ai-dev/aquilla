@@ -1,0 +1,100 @@
+import { PGlite } from '@electric-sql/pglite'
+import { readFileSync } from 'node:fs'
+import { URL } from 'node:url'
+import { expect, it } from 'vitest'
+
+it('adds workspace billing to existing organizations without classifying or repricing them', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec(`CREATE TABLE organizations (id bigint PRIMARY KEY,
+      owner_user_id bigint NOT NULL, name text);
+      INSERT INTO organizations VALUES (1, 7, 'Existing partner');`)
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0092_workspace_billing.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(migration)
+    expect((await db.query('SELECT name, billing_scope FROM organizations')).rows)
+      .toEqual([{ name: 'Existing partner', billing_scope: null }])
+    expect((await db.query('SELECT * FROM workspace_plan_entitlements')).rows).toEqual([])
+    await db.exec("INSERT INTO organizations VALUES (2, 7, 'Personal', 'personal')")
+    await expect(db.exec("INSERT INTO organizations VALUES (3, 7, 'Duplicate', 'personal')"))
+      .rejects.toThrow()
+  } finally { await db.close() }
+})
+
+it('preserves checkout attempts on migration replay and rejects a second attempt or live mode', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE organizations (id bigint PRIMARY KEY); INSERT INTO organizations VALUES (1)')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0093_workspace_checkout_attempts.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(`INSERT INTO workspace_checkout_attempts
+      (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json, request_params, expires_at)
+      VALUES ('first', 1, 'acct_test', 'same', '{}', '[]', '{}', '{}', 123)`)
+    await db.exec(migration)
+    expect((await db.query('SELECT id, sandbox FROM workspace_checkout_attempts')).rows)
+      .toEqual([{ id: 'first', sandbox: true }])
+    await expect(db.exec(`INSERT INTO workspace_checkout_attempts
+      SELECT 'second', org_id, account_id, fingerprint, catalog_json, prices_json,
+      quote_json, request_params, expires_at, created_at, session_id, sandbox
+      FROM workspace_checkout_attempts`)).rejects.toThrow()
+    await expect(db.exec('UPDATE workspace_checkout_attempts SET sandbox = FALSE')).rejects.toThrow()
+  } finally { await db.close() }
+})
+
+it('upgrades checkout history to one unresolved attempt without losing rows', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE organizations (id bigint PRIMARY KEY); INSERT INTO organizations VALUES (1)')
+    await db.exec(readFileSync(new URL('../../../db/postgres/migrations/0093_workspace_checkout_attempts.sql', import.meta.url), 'utf8'))
+    await db.exec(`INSERT INTO workspace_checkout_attempts
+      (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json, request_params, expires_at)
+      VALUES ('original', 1, 'acct_test', 'same', '{}', '[]', '{}', '{}', 123)`)
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0094_workspace_checkout_recovery.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(migration)
+    await expect(db.exec("UPDATE workspace_checkout_attempts SET resolved_at = now()")).rejects.toThrow()
+    await expect(db.exec("UPDATE workspace_checkout_attempts SET resolution = 'expired'")).rejects.toThrow()
+    const second = `INSERT INTO workspace_checkout_attempts
+      (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json, request_params, expires_at)
+      VALUES ('next', 1, 'acct_test', 'same', '{}', '[]', '{}', '{}', 456)`
+    await expect(db.exec(second)).rejects.toThrow()
+    await db.exec("UPDATE workspace_checkout_attempts SET resolved_at = now(), resolution = 'expired'")
+    await db.exec(second)
+    await db.exec(migration)
+    expect((await db.query('SELECT id, resolution FROM workspace_checkout_attempts ORDER BY expires_at')).rows)
+      .toEqual([{ id: 'original', resolution: 'expired' }, { id: 'next', resolution: null }])
+  } finally { await db.close() }
+})
+
+it('adds lifecycle facts without inventing paid periods and preserves them on replay', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE workspace_plan_entitlements (org_id bigint PRIMARY KEY); INSERT INTO workspace_plan_entitlements VALUES (1)')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0095_workspace_subscription_state.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    expect((await db.query('SELECT * FROM workspace_subscription_state')).rows).toEqual([])
+    await db.exec(`INSERT INTO workspace_subscription_state
+      (org_id, payment_failed, paid_through, cancel_at_period_end)
+      VALUES (1, true, '2026-10-01T00:00:00Z', false)`)
+    await db.exec(migration)
+    expect((await db.query('SELECT org_id, revision, payment_failed FROM workspace_subscription_state')).rows)
+      .toEqual([{ org_id: 1, revision: 1, payment_failed: true }])
+    await expect(db.exec('UPDATE workspace_subscription_state SET revision = 0')).rejects.toThrow()
+  } finally { await db.close() }
+})
+
+it('preserves immutable plan-change review facts across migration replay', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE workspace_plan_entitlements (org_id bigint PRIMARY KEY); INSERT INTO workspace_plan_entitlements VALUES (1)')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0096_workspace_plan_change_reviews.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(`INSERT INTO workspace_plan_change_reviews
+      (id, org_id, account_id, direction, source_json, quote_json, request_params, invoice_json, review_json, expires_at)
+      VALUES ('review', 1, 'acct_test', 'upgrade', '{"revision":1}', '{}', '{"proration_date":123}', '{}', '{"amountDueNow":365}', now())`)
+    await db.exec(migration)
+    expect((await db.query('SELECT source_json, request_params, review_json FROM workspace_plan_change_reviews')).rows)
+      .toEqual([{ source_json: { revision: 1 }, request_params: { proration_date: 123 }, review_json: { amountDueNow: 365 } }])
+    await expect(db.exec("UPDATE workspace_plan_change_reviews SET direction = 'immediate_downgrade'")).rejects.toThrow()
+  } finally { await db.close() }
+})

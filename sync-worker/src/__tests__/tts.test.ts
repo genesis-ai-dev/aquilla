@@ -1,23 +1,48 @@
-// Tests for POST /api/v1/voice/tts — intent-encoding per Rule 9.
+// Tests for POST /api/v1/voice/tts — Inworld TTS 2 Flash (AQU-1189).
 //
 // WHY these tests matter:
-//   - The route holds the Modal secret; a bad token must never reach GPU.
-//   - The X-Audio-Duration-Seconds header is the metering unit — misreading it
-//     means the budget counter is wrong (either too lenient or too strict).
+//   - The route holds the Inworld API key; a bad token must never reach Inworld.
+//   - WAV duration is the metering unit — misreading it means the budget
+//     counter is wrong (either too lenient or too strict).
 //   - The WAV must land in R2 under the file's audio path so the returned
 //     audioId is a valid R2 key the client can attach or pass to /voice/convert.
-//   - A Modal failure must NOT record any seconds; recording on failure would
-//     wrongly drain the user's budget for audio they never received.
+//   - An Inworld failure must NOT record any seconds; recording on failure
+//     would wrongly drain the user's budget for audio they never received.
 
 import { describe, it, expect, afterEach } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import { handleTtsRequest } from "../tts"
+import { bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import type { SyncTokenClaims } from "../auth"
 
 const SECRET = "tts-tests-secret"
-const OMNIVOICE_URL = "https://acct--omnivoice-web.modal.run"
-const OMNIVOICE_TOKEN = "omnivoice-shared-secret"
+const INWORLD_API_KEY = "dGVzdDprZXk=" // base64("test:key")
+const INWORLD_API_BASE = "https://api.inworld.ai"
+
+function makeWav(durationSeconds: number, sampleRate = 24000): Uint8Array {
+  const samples = Math.max(1, Math.round(durationSeconds * sampleRate))
+  const dataSize = samples * 2
+  const buf = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buf)
+  const write = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
+  }
+  write(0, "RIFF")
+  view.setUint32(4, 36 + dataSize, true)
+  write(8, "WAVE")
+  write(12, "fmt ")
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  write(36, "data")
+  view.setUint32(40, dataSize, true)
+  return new Uint8Array(buf)
+}
 
 // ── Stub R2 bucket (mirrors voice-convert.test.ts) ───────────────────────────
 
@@ -33,7 +58,11 @@ function makeStubBucket() {
     async get(key: string) {
       const obj = store.get(key)
       if (!obj) return null
-      return { arrayBuffer: async () => obj.body, httpMetadata: obj.httpMetadata }
+      return {
+        arrayBuffer: async () => obj.body,
+        text: async () => new TextDecoder().decode(obj.body),
+        httpMetadata: obj.httpMetadata,
+      }
     },
     async put(
       key: string,
@@ -118,8 +147,6 @@ function makeStubDb(projectOrgId: number | null = 5) {
               rateLimitEvents.push({ kind, identifier })
             }
             if (sql.includes("INSERT INTO tts_usage_daily")) {
-              // Bind params: (user_id, org_id, date_utc, audio_seconds)
-              // request_count is a literal 1 in the SQL — NOT a bind param.
               const [userId, orgId, dateUtc, audioSeconds] = boundArgs as [
                 number,
                 number,
@@ -172,8 +199,10 @@ type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeStubBucket>
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
-  OMNIVOICE_URL?: string
-  OMNIVOICE_TOKEN?: string
+  INWORLD_API_KEY?: string
+  INWORLD_API_BASE?: string
+  INWORLD_TTS_MODEL?: string
+  INWORLD_DEFAULT_VOICE?: string
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   TTS_BUDGET_ENFORCE?: string
   AQUILLA_PG?: AquillaDb
@@ -186,14 +215,12 @@ function makeEnv(
   return {
     SNAPSHOTS: makeStubBucket(),
     SYNC_SECRET_KEY: SECRET,
-    OMNIVOICE_URL: OMNIVOICE_URL,
-    OMNIVOICE_TOKEN: OMNIVOICE_TOKEN,
+    INWORLD_API_KEY,
+    INWORLD_API_BASE,
     AQUILLA_PG: dbStub,
     ...overrides,
   }
 }
-
-// ── Token helpers ────────────────────────────────────────────────────────────
 
 async function makeToken(
   partial: Partial<SyncTokenClaims> = {},
@@ -213,43 +240,65 @@ async function makeToken(
   return sign(claims as unknown as Record<string, unknown>, secret, "HS256")
 }
 
-// ── Modal fetch stub ─────────────────────────────────────────────────────────
-
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-interface ModalCallRecord {
+interface InworldCallRecord {
   url: string
   headers: Record<string, string>
-  body: FormData
+  body: unknown
 }
 
-function stubModal(
-  wavBytes: Uint8Array,
-  durationSeconds: number,
-  status = 200,
-): ModalCallRecord[] {
-  const calls: ModalCallRecord[] = []
+function stubInworld(opts: {
+  wav: Uint8Array
+  status?: number
+  cloneVoiceId?: string
+  cloneStatus?: number
+  designPreviews?: Array<{ voiceId: string; previewText?: string; previewAudio?: string }>
+  designStatus?: number
+  publishVoiceId?: string
+  publishStatus?: number
+}): InworldCallRecord[] {
+  const calls: InworldCallRecord[] = []
   globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const bodyText = typeof init.body === "string" ? init.body : ""
     calls.push({
       url: url as string,
       headers: (init.headers ?? {}) as Record<string, string>,
-      body: init.body as FormData,
+      body: bodyText ? JSON.parse(bodyText) : init.body,
     })
-    if (status !== 200) {
-      return new Response("modal error", { status })
+    const path = String(url)
+    if (path.includes("voices:clone")) {
+      if (opts.cloneStatus && opts.cloneStatus !== 200) {
+        return new Response("clone error", { status: opts.cloneStatus })
+      }
+      return Response.json({ voice: { voiceId: opts.cloneVoiceId ?? "cloned-1" } })
     }
-    return new Response(wavBytes.buffer.slice(wavBytes.byteOffset, wavBytes.byteOffset + wavBytes.byteLength) as ArrayBuffer, {
-      status: 200,
-      headers: { "X-Audio-Duration-Seconds": String(durationSeconds) },
-    })
+    if (path.includes("voices:design")) {
+      if (opts.designStatus && opts.designStatus !== 200) {
+        return new Response("design error", { status: opts.designStatus })
+      }
+      return Response.json({
+        previewVoices: opts.designPreviews ?? [
+          { voiceId: "ws__design-voice-1", previewText: "Hello", previewAudio: "UklGRQ==" },
+        ],
+      })
+    }
+    if (path.includes(":publish")) {
+      if (opts.publishStatus && opts.publishStatus !== 200) {
+        return new Response("publish error", { status: opts.publishStatus })
+      }
+      return Response.json({ voice: { voiceId: opts.publishVoiceId ?? "ws__design-voice-1" } })
+    }
+    if (opts.status && opts.status !== 200) {
+      return new Response("inworld error", { status: opts.status })
+    }
+    return Response.json({ audioContent: bytesToBase64(opts.wav.buffer as ArrayBuffer) })
   }) as unknown as typeof fetch
   return calls
 }
-
-// ── Request builder ──────────────────────────────────────────────────────────
 
 function ttsReq(
   body: Record<string, unknown>,
@@ -269,8 +318,6 @@ function call(env: StubEnv, req: Request) {
   return handleTtsRequest(req, env as unknown as Parameters<typeof handleTtsRequest>[1])
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
-
 describe("POST /api/v1/voice/tts", () => {
   it("returns null for unrelated paths", async () => {
     const { db } = makeStubDb()
@@ -278,15 +325,14 @@ describe("POST /api/v1/voice/tts", () => {
     expect(res).toBeNull()
   })
 
-  it("503 when OmniVoice endpoint is not configured", async () => {
+  it("503 when Inworld API key is not configured", async () => {
     const { db } = makeStubDb()
-    const env = makeEnv(db, { OMNIVOICE_URL: undefined, OMNIVOICE_TOKEN: undefined })
+    const env = makeEnv(db, { INWORLD_API_KEY: undefined })
     const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "hello" }, await makeToken())))!
     expect(res.status).toBe(503)
   })
 
   it("401 without a valid sync-token", async () => {
-    // WHY: the Modal secret must never be exposed to an unauthenticated caller
     const { db } = makeStubDb()
     const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hello" })))!
     expect(res.status).toBe(401)
@@ -309,16 +355,11 @@ describe("POST /api/v1/voice/tts", () => {
   it("400 when required fields are missing", async () => {
     const { db } = makeStubDb()
     const token = await makeToken()
-    // text is missing
     const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1" }, token)))!
     expect(res.status).toBe(400)
   })
 
   it("400 when fileId contains a path separator", async () => {
-    // WHY: fileId is interpolated straight into the R2 key (audioObjectKey);
-    // a `/` here would let a caller aim the write outside this file's key
-    // namespace. The mint endpoint (auth-worker sync-token.ts) blocks this
-    // too, but this route must not rely on that alone.
     const { db } = makeStubDb()
     const fileId = "../other-file"
     const token = await makeToken({ fileId })
@@ -334,17 +375,14 @@ describe("POST /api/v1/voice/tts", () => {
     expect(res.status).toBe(400)
   })
 
-  it("calls Modal with X-Auth-Token and sends text; writes WAV to R2; returns audioId + durationSeconds", async () => {
-    // WHY: this is the core happy-path contract — the returned audioId must be
-    // a valid R2 key (for cell attachment) and durationSeconds must reflect the
-    // actual audio length (for budget metering)
+  it("calls Inworld with Basic auth and model inworld-tts-2; writes WAV to R2", async () => {
     const { db } = makeStubDb()
     const env = makeEnv(db)
-    const wav = new Uint8Array([82, 73, 70, 70]) // "RIFF"
-    const calls = stubModal(wav, 7.5)
+    const wav = makeWav(1)
+    const calls = stubInworld({ wav })
     const token = await makeToken()
 
-    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "Hello world" }, token)))!
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "Hello world", voiceId: "Sarah" }, token)))!
     expect(res.status).toBe(200)
 
     const body = (await res.json()) as {
@@ -354,30 +392,78 @@ describe("POST /api/v1/voice/tts", () => {
       url: string
     }
     expect(body.audioId).toMatch(/^audio-tts-/)
-    expect(body.durationSeconds).toBe(7.5)
+    expect(body.durationSeconds).toBeCloseTo(1, 5)
     expect(body.url).toBe(`frontier-audio://${body.objectName}`)
 
-    // Modal was called correctly.
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`${OMNIVOICE_URL}/synthesize`)
-    expect(calls[0].headers["X-Auth-Token"]).toBe(OMNIVOICE_TOKEN)
+    expect(calls[0].url).toBe(`${INWORLD_API_BASE}/tts/v1/voice`)
+    expect(calls[0].headers.Authorization).toBe(`Basic ${INWORLD_API_KEY}`)
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      text: "Hello world",
+      voiceId: "Sarah",
+      modelId: "inworld-tts-2",
+      deliveryMode: "STABLE",
+    }))
+    expect((calls[0].body as { audioConfig: { speakingRate?: number } }).audioConfig.speakingRate).toBeUndefined()
 
-    // WAV landed in R2 under the file-scoped audio path.
     const stored = await env.SNAPSHOTS._bytes(audioObjectKey(env, "p1", "f1", body.objectName))
-    expect(stored && Array.from(stored)).toEqual([82, 73, 70, 70])
+    expect(stored && stored.byteLength).toBe(wav.byteLength)
+  })
+
+  it("sends Highest quality as inworld-tts-2 with deliveryMode and speakingRate", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db)
+    const wav = makeWav(1)
+    const calls = stubInworld({ wav })
+    const token = await makeToken()
+
+    const res = (await call(env, ttsReq({
+      projectId: "p1",
+      fileId: "f1",
+      text: "Hello world",
+      voiceId: "Sarah",
+      audioQuality: "highest",
+      deliveryMode: "CREATIVE",
+      speakingRate: 0.95,
+    }, token)))!
+    expect(res.status).toBe(200)
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      modelId: "inworld-tts-2",
+      deliveryMode: "CREATIVE",
+      audioConfig: expect.objectContaining({
+        audioEncoding: "LINEAR16",
+        speakingRate: 0.95,
+      }),
+    }))
+  })
+
+  it("does not send deliveryMode on Flash even if the client includes it", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1) })
+    const token = await makeToken()
+    const res = (await call(makeEnv(db), ttsReq({
+      projectId: "p1",
+      fileId: "f1",
+      text: "hi",
+      audioQuality: "standard",
+      deliveryMode: "CREATIVE",
+    }, token)))!
+    expect(res.status).toBe(200)
+    expect((calls[0].body as { modelId: string }).modelId).toBe("inworld-tts-2-flash")
+    expect((calls[0].body as { deliveryMode?: string }).deliveryMode).toBeUndefined()
   })
 
   // [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
   // seconds cap is log-only unless TTS_BUDGET_ENFORCE is set (never true in any
   // deployed environment), so this per-user sliding-window throttle is the
-  // only thing actually blocking a flood against the GPU-backed Modal endpoint.
+  // only thing actually blocking a flood against the hosted Inworld endpoint.
   describe("rate limiting", () => {
-    it("429s a user that has flooded the window, without calling Modal", async () => {
+    it("429s a user that has flooded the window, without calling Inworld", async () => {
       const { db, rateLimitEvents } = makeStubDb()
       for (let i = 0; i < 200; i++) {
         rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:1" })
       }
-      const calls = stubModal(new Uint8Array([1]), 5)
+      const calls = stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 
       const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
@@ -393,7 +479,7 @@ describe("POST /api/v1/voice/tts", () => {
       for (let i = 0; i < 200; i++) {
         rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:999" })
       }
-      stubModal(new Uint8Array([1]), 5)
+      stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 
       const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
@@ -402,69 +488,37 @@ describe("POST /api/v1/voice/tts", () => {
     })
   })
 
-  it("parses X-Audio-Duration-Seconds header correctly", async () => {
-    // WHY: this header is the sole source of the metering unit; a missing or
-    // misread header would silently corrupt the user's budget counter
-    const { db } = makeStubDb()
-    stubModal(new Uint8Array([1, 2]), 123.456)
-    const token = await makeToken()
-    const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "test" }, token)))!
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { durationSeconds: number }
-    expect(body.durationSeconds).toBeCloseTo(123.456)
-  })
-
   it("records durationSeconds to the budget counter after success", async () => {
-    // WHY: if seconds aren't recorded, the budget guard never accumulates and
-    // a user could generate unlimited audio
     const { db, usageRows } = makeStubDb()
-    stubModal(new Uint8Array([1]), 30)
+    stubInworld({ wav: makeWav(2) })
     const token = await makeToken()
     const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "go" }, token)))!
     expect(res.status).toBe(200)
     const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
-    expect(userRow?.audio_seconds).toBeCloseTo(30)
+    expect(userRow?.audio_seconds).toBeCloseTo(2)
   })
 
   it("records seconds to the global sentinel row (user_id=0, org_id=0)", async () => {
-    // WHY: the sentinel gives an O(1) platform total; missing it means ops
-    // can't see platform-wide TTS spend
     const { db, usageRows } = makeStubDb()
-    stubModal(new Uint8Array([1]), 15)
+    stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
     await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token))
     const sentinel = usageRows.find((r) => r.user_id === 0 && r.org_id === 0)
-    expect(sentinel?.audio_seconds).toBeCloseTo(15)
+    expect(sentinel?.audio_seconds).toBeCloseTo(1)
   })
 
-  it("records 0 seconds when X-Audio-Duration-Seconds header is absent", async () => {
-    // WHY: an absent header (Modal bug or old version) must degrade to 0, not NaN
+  it("does NOT record any seconds on an Inworld failure (502)", async () => {
     const { db, usageRows } = makeStubDb()
-    globalThis.fetch = (async () =>
-      new Response(new Uint8Array([1]).buffer, { status: 200 })) as unknown as typeof fetch
-    const token = await makeToken()
-    await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "x" }, token))
-    const userRow = usageRows.find((r) => r.user_id === 1)
-    expect(userRow?.audio_seconds ?? 0).toBe(0)
-  })
-
-  it("does NOT record any seconds on a Modal failure (502)", async () => {
-    // WHY: recording seconds for failed syntheses would drain the user's budget
-    // for audio they never received — a subtle correctness bug
-    const { db, usageRows } = makeStubDb()
-    stubModal(new Uint8Array([1]), 30, 500)
+    stubInworld({ wav: makeWav(1), status: 500 })
     const token = await makeToken()
     const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "fail" }, token)))!
     expect(res.status).toBe(502)
-    // No usage rows should have been written.
     expect(usageRows).toHaveLength(0)
   })
 
   it("attributes recorded seconds to the project's org_id", async () => {
-    // WHY: org_id attribution is what powers the org Overview dashboard;
-    // wrong org_id means the wrong org sees the usage
-    const { db, usageRows } = makeStubDb(42) // org 42
-    stubModal(new Uint8Array([1]), 20)
+    const { db, usageRows } = makeStubDb(42)
+    stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
     await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "org test" }, token))
     const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
@@ -474,7 +528,7 @@ describe("POST /api/v1/voice/tts", () => {
   it("honors R2_KEY_PREFIX for the output audio write", async () => {
     const { db } = makeStubDb()
     const env = makeEnv(db, { SNAPSHOTS: makeStubBucket(), R2_KEY_PREFIX: "pr-99" })
-    stubModal(new Uint8Array([7, 8]), 5)
+    stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
     const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "prefix" }, token)))!
     expect(res.status).toBe(200)
@@ -482,15 +536,12 @@ describe("POST /api/v1/voice/tts", () => {
     expect(env.SNAPSHOTS._allKeys()).toContain(`pr-99/projects/p1/files/f1/audio/${body.objectName}`)
   })
 
-  it("resolves a referenceAudioId from R2 and sends it to Modal as voice_ref", async () => {
-    // WHY: voice-cloned TTS requires the reference clip to reach Modal;
-    // a missing reference means the output won't sound like the target voice
+  it("clones from referenceAudioId then synthesizes with the cloned voiceId", async () => {
     const { db } = makeStubDb()
     const env = makeEnv(db)
     const refBytes = new Uint8Array([9, 9, 9])
-    const refKey = `projects/p1/voices/ref1.wav`
-    env.SNAPSHOTS._seed(refKey, refBytes, "audio/wav")
-    const calls = stubModal(new Uint8Array([1]), 5)
+    env.SNAPSHOTS._seed("projects/p1/voices/ref1.wav", refBytes, "audio/wav")
+    const calls = stubInworld({ wav: makeWav(1), cloneVoiceId: "ws__ref_clone" })
     const token = await makeToken()
 
     const res = (await call(
@@ -498,20 +549,354 @@ describe("POST /api/v1/voice/tts", () => {
       ttsReq({ projectId: "p1", fileId: "f1", text: "cloned", referenceAudioId: "ref1.wav" }, token),
     ))!
     expect(res.status).toBe(200)
+    expect(calls.map((c) => c.url)).toEqual([
+      `${INWORLD_API_BASE}/voices/v1/voices:clone`,
+      `${INWORLD_API_BASE}/tts/v1/voice`,
+    ])
+    expect((calls[1].body as { voiceId: string }).voiceId).toBe("ws__ref_clone")
+    expect(env.SNAPSHOTS._allKeys()).toContain("projects/p1/voices/ref1.wav.inworld.json")
+  })
 
-    // Modal must have received a voice_ref field.
-    const sentForm = calls[0].body as FormData
-    expect(sentForm.get("voice_ref")).toBeTruthy()
+  it("reuses a cached Inworld clone id and does not clone again", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db)
+    env.SNAPSHOTS._seed(
+      "projects/p1/voices/ref1.wav.inworld.json",
+      new TextEncoder().encode(JSON.stringify({ voiceId: "cached-voice" })),
+      "application/json",
+    )
+    const calls = stubInworld({ wav: makeWav(1) })
+    const token = await makeToken()
+    const res = (await call(
+      env,
+      ttsReq({ projectId: "p1", fileId: "f1", text: "cached", referenceAudioId: "ref1.wav" }, token),
+    ))!
+    expect(res.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(`${INWORLD_API_BASE}/tts/v1/voice`)
+    expect((calls[0].body as { voiceId: string }).voiceId).toBe("cached-voice")
   })
 
   it("404 when referenceAudioId is given but the clip is absent from R2", async () => {
     const { db } = makeStubDb()
-    stubModal(new Uint8Array([1]), 5)
+    stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
     const res = (await call(
       makeEnv(db),
       ttsReq({ projectId: "p1", fileId: "f1", text: "missing ref", referenceAudioId: "gone.wav" }, token),
     ))!
     expect(res.status).toBe(404)
+  })
+})
+
+describe("GET /api/v1/voice/tts/voices", () => {
+  it("503 when Inworld API key is not configured", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db, { INWORLD_API_KEY: undefined })
+    const token = await makeToken()
+    const res = (await call(
+      env,
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(503)
+  })
+
+  it("401 without a valid sync-token", async () => {
+    const { db } = makeStubDb()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en"),
+    ))!
+    expect(res.status).toBe(401)
+  })
+
+  it("lists SYSTEM voices for each requested language", async () => {
+    const { db } = makeStubDb()
+    const calls: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url))
+      return Response.json({
+        voices: [
+          { voiceId: "Dennis", displayName: "Dennis", langCode: "EN_US" },
+          { voiceId: "Diego", displayName: "Diego", langCode: "ES_ES" },
+        ],
+      })
+    }) as unknown as typeof fetch
+
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en&language=es", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(200)
+    const json = await res.json() as { voices: Array<{ voiceId: string; language: string }> }
+    expect(json.voices.map((v) => v.voiceId)).toEqual(["Dennis", "Diego"])
+    expect(json.voices.map((v) => v.language)).toEqual(["en-US", "es-ES"])
+    const listed = new URL(calls[0]!)
+    expect(listed.pathname).toBe("/voices/v1/voices")
+    expect(listed.searchParams.get("filter")).toContain('lang_code = "en"')
+    expect(listed.searchParams.get("filter")).toContain('lang_code = "es"')
+    expect(listed.searchParams.get("filter")).toContain('source = "SYSTEM"')
+  })
+
+  it("lists every SYSTEM voice when all=1", async () => {
+    const { db } = makeStubDb()
+    const calls: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url))
+      return Response.json({
+        voices: [
+          { voiceId: "Dennis", displayName: "Dennis", langCode: "EN_US" },
+          { voiceId: "Diego", displayName: "Diego", langCode: "ES_ES" },
+        ],
+      })
+    }) as unknown as typeof fetch
+
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&all=1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(200)
+    const listed = new URL(calls[0]!)
+    expect(listed.searchParams.get("filter")).toBe('source = "SYSTEM"')
+    expect(listed.searchParams.get("filter")).not.toContain("lang_code")
+  })
+})
+
+describe("GET /api/v1/voice/tts/supported-languages", () => {
+  it("503 when Inworld API key is not configured", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db, { INWORLD_API_KEY: undefined })
+    const token = await makeToken()
+    const res = (await call(
+      env,
+      new Request("https://w/api/v1/voice/tts/supported-languages?projectId=p1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(503)
+  })
+
+  it("401 without a valid sync-token", async () => {
+    const { db } = makeStubDb()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/supported-languages?projectId=p1"),
+    ))!
+    expect(res.status).toBe(401)
+  })
+
+  it("proxies Inworld supportedLanguages and drops undetermined rows", async () => {
+    const { db } = makeStubDb()
+    const calls: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url))
+      return Response.json({
+        supportedLanguages: [
+          {
+            code: "kbt",
+            familyCode: "kbt",
+            familyDisplayName: "Abadi",
+            accentDisplayName: "",
+            displayName: "Abadi",
+            creationEnabled: true,
+            hasVoices: true,
+          },
+          {
+            code: "en-US",
+            familyCode: "en",
+            familyDisplayName: "English",
+            accentDisplayName: "American",
+            displayName: "English",
+            creationEnabled: true,
+            hasVoices: true,
+          },
+          {
+            code: "und",
+            familyCode: "und",
+            familyDisplayName: "Undetermined",
+            accentDisplayName: "",
+            displayName: "Undetermined",
+            creationEnabled: true,
+            hasVoices: true,
+          },
+        ],
+      })
+    }) as unknown as typeof fetch
+
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/supported-languages?projectId=p1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(200)
+    const json = await res.json() as {
+      languages: Array<{ code: string; familyDisplayName: string; accentDisplayName: string }>
+    }
+    expect(json.languages.map((row) => row.code)).toEqual(["kbt", "en-US"])
+    expect(json.languages[0]).toMatchObject({
+      familyDisplayName: "Abadi",
+      accentDisplayName: "",
+    })
+    expect(json.languages[1]).toMatchObject({
+      familyDisplayName: "English",
+      accentDisplayName: "American",
+    })
+    expect(new URL(calls[0]!).pathname).toBe("/voices/v1/supportedLanguages")
+  })
+})
+
+function jsonPost(path: string, body: Record<string, unknown>, token?: string): Request {
+  return new Request(`https://w${path}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+}
+
+describe("POST /api/v1/voice/tts/design", () => {
+  it("401 without a valid sync-token", async () => {
+    const { db } = makeStubDb()
+    stubInworld({ wav: makeWav(1) })
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", {
+        projectId: "p1",
+        designPrompt: "A warm middle-aged male narrator with a steady pace and a clear tone.",
+      }),
+    ))!
+    expect(res.status).toBe(401)
+  })
+
+  it("400 when the design prompt is too short", async () => {
+    const { db } = makeStubDb()
+    stubInworld({ wav: makeWav(1) })
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", { projectId: "p1", designPrompt: "too short" }, token),
+    ))!
+    expect(res.status).toBe(400)
+  })
+
+  it("posts languageCode and three samples to Inworld Voice Design", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({
+      wav: makeWav(1),
+      designPreviews: [
+        { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+        { voiceId: "ws__design-voice-b", previewText: "Hello", previewAudio: "UklGRQ==" },
+        { voiceId: "ws__design-voice-c", previewText: "Hello", previewAudio: "UklGRQ==" },
+      ],
+    })
+    const token = await makeToken()
+    const prompt = "A middle-aged male voice with a clear British accent speaking at a steady pace."
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", {
+        projectId: "p1",
+        designPrompt: prompt,
+        language: "en-GB",
+      }, token),
+    ))!
+    expect(res.status).toBe(200)
+    const json = await res.json() as { previewVoices: Array<{ voiceId: string }> }
+    expect(json.previewVoices.map((v) => v.voiceId)).toEqual([
+      "ws__design-voice-a",
+      "ws__design-voice-b",
+      "ws__design-voice-c",
+    ])
+    expect(calls[0]!.url).toBe(`${INWORLD_API_BASE}/voices/v1/voices:design`)
+    expect(calls[0]!.body).toEqual({
+      designPrompt: prompt,
+      previewText: INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+      voiceDesignConfig: { numberOfSamples: 3 },
+      languageCode: "en-GB",
+    })
+  })
+
+  it("forwards DESIGN_PROMPT_MODE_VERBATIM for a structured profile", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({
+      wav: makeWav(1),
+      designPreviews: [
+        { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      ],
+    })
+    const token = await makeToken()
+    const prompt = [
+      "dialect: British English",
+      "gender: male",
+      "age: middle-aged",
+      "emotion:",
+      "tone: warm, neutral",
+      "pitch:",
+      "volume:",
+      "speed: steady",
+      "clarity:",
+      "fluency:",
+      "personality:",
+      "texture:",
+      "environment:",
+    ].join("\n")
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", {
+        projectId: "p1",
+        designPrompt: prompt,
+        designPromptMode: "DESIGN_PROMPT_MODE_VERBATIM",
+        language: "en-GB",
+      }, token),
+    ))!
+    expect(res.status).toBe(200)
+    expect(calls[0]!.body).toEqual({
+      designPrompt: prompt,
+      previewText: INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+      voiceDesignConfig: { numberOfSamples: 3 },
+      languageCode: "en-GB",
+      designPromptMode: "DESIGN_PROMPT_MODE_VERBATIM",
+    })
+  })
+})
+
+describe("POST /api/v1/voice/tts/publish", () => {
+  it("401 without a valid sync-token", async () => {
+    const { db } = makeStubDb()
+    stubInworld({ wav: makeWav(1) })
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/publish", { projectId: "p1", voiceId: "ws__design-voice-a" }),
+    ))!
+    expect(res.status).toBe(401)
+  })
+
+  it("publishes the chosen preview id with a display name", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1), publishVoiceId: "ws__design-voice-a" })
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/publish", {
+        projectId: "p1",
+        voiceId: "ws__design-voice-a",
+        displayName: "British narrator",
+      }, token),
+    ))!
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ voiceId: "ws__design-voice-a" })
+    expect(calls[0]!.url).toBe(`${INWORLD_API_BASE}/voices/v1/voices/ws__design-voice-a:publish`)
+    expect(calls[0]!.body).toEqual({ displayName: "British narrator" })
   })
 })

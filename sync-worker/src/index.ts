@@ -9,6 +9,7 @@
 
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
+import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
@@ -24,12 +25,14 @@ import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleRemovedCellsReadRequest } from "./events/removed-cells-read-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
+import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -70,15 +73,19 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
+import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
+import { handleExternalSkillsRequest } from "./external/skills-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -132,6 +139,8 @@ declare global {
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
+      /** AQU-730. Unset locally and in e2e; dev and prod set it in wrangler. */
+      LANE_READ_WALL?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
       /** Exact Worker namespace selected by the deployment profile. */
@@ -149,10 +158,14 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
-      /** OmniVoice TTS Modal endpoint (infra/modal/omnivoice.py). */
-      OMNIVOICE_URL?: string
-      /** Shared secret for the OmniVoice endpoint (matches its OMNIVOICE_TOKEN). */
-      OMNIVOICE_TOKEN?: string
+      /**
+       * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
+       * See docs/INWORLD-TTS.md.
+       */
+      INWORLD_API_KEY?: string
+      INWORLD_API_BASE?: string
+      INWORLD_TTS_MODEL?: string
+      INWORLD_DEFAULT_VOICE?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -179,7 +192,7 @@ declare global {
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
        *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
       POSTHOG_KEY?: string
-      /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+      /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
       POSTHOG_HOST?: string
       /**
        * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
@@ -322,6 +335,11 @@ const worker = {
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
+    // AQU-777: per-cell attachment bytes. Its own R2 prefix and its own
+    // allow-listed content types — see cell-attachments.ts for why this is a
+    // sibling of the audio route rather than a flag on it.
+    const attachmentResponse = await handleCellAttachmentRequest(request, env)
+    if (attachmentResponse) return attachmentResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
@@ -354,8 +372,12 @@ const worker = {
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
+    const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
+    if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
+    if (removedCellsResponse) return withCors(removedCellsResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
     if (memberActivityResponse) return withCors(memberActivityResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
@@ -368,12 +390,19 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
+    if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1233: agent-facing comment reads. Its own module (rather than another
+    // arm of read-routes) because it re-uses that file's auth/scope gate —
+    // registering it here keeps the dependency one-directional.
+    const externalCommentsResponse = await handleExternalCommentsRequest(request, env)
+    if (externalCommentsResponse) return withCors(externalCommentsResponse, request)
     // AQU-1229: Living Memory reads. Mounted after the general external reads —
     // both regexes are $-anchored so neither can shadow the other, but the
     // memory paths extend .../files/:fileId/cells, so keeping the narrower
@@ -474,6 +503,13 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1294: partner intake template + agent skills. Static text / pure
+    // transforms, unauthenticated like the command docs below.
+    const externalSetupTemplateResponse = await handleExternalSetupTemplateRequest(request)
+    if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
+    const externalSkillsResponse = handleExternalSkillsRequest(request)
+    if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
 
     // Static command documentation (the REST half of describe_command).
     // Unauthenticated like the discovery root, and mounted with it so both sit

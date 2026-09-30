@@ -6,8 +6,12 @@ import {
   describePatchFailure,
   broadcastProjectSettingsUpdated,
   type PatchOutcome,
+  isCountStructuralOnlyPatch,
 } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
+import posthog from "@/lib/posthog"
+
+vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
@@ -30,6 +34,15 @@ vi.mock("@/lib/store/project-index", () => ({
 
 beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
+  // AQU-1277: the read-path tests don't mock the write, but the hook pushes
+  // local settings when the server row looks absent — that PATCH went to
+  // production identity for real. Tests that exercise the write path install
+  // their own spy over this default.
+  vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+    kind: "error",
+    status: 0,
+    message: "patchProjectSettings not mocked by this test",
+  })
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -935,5 +948,81 @@ describe("useProjectSettings — same-tab propagation after a write (AQU-979)", 
     // Give any errant refresh a chance to fire before asserting it did not.
     await new Promise((r) => setTimeout(r, 0))
     expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-1083 — the client's own role floor has to agree with the server's, or a
+// project lead gets a control that silently does nothing.
+describe("isCountStructuralOnlyPatch (AQU-1083)", () => {
+  it("recognises a patch that only sets the override", () => {
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: false })).toBe(true)
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: true })).toBe(true)
+  })
+
+  it("recognises clearing the override, which is how 'inherit' is stored", () => {
+    // The key present and undefined: JSON drops it, so the stored blob loses
+    // the override entirely. That is a lead-level write, not a maintainer one.
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: undefined })).toBe(true)
+  })
+
+  it("refuses a patch that carries anything else", () => {
+    // Same fail-safe as the terminology carve-out: bundling another key must
+    // fall back to the maintainer floor rather than ride this one through.
+    expect(isCountStructuralOnlyPatch({ countStructuralCells: false, sourceLanguage: "fr" })).toBe(false)
+    expect(isCountStructuralOnlyPatch({})).toBe(false)
+  })
+})
+
+describe("useProjectSettings — hydration event once per open (AQU-1470)", () => {
+  // The open is tracked at module scope, so each test uses its own project id.
+  const settingsRow = (): restClient.ProjectSettingsResponse => ({
+    version: 1,
+    updatedAt: "x",
+    updatedBy: null,
+    settings: {},
+  })
+  const captureSpy = vi.mocked(posthog.capture)
+  const hydratedCaptures = () =>
+    captureSpy.mock.calls.filter(([name]) => name === "project settings hydrated")
+  beforeEach(() => captureSpy.mockClear())
+
+  it("captures once when two consumers mount for the same project", async () => {
+    const fetchSpy = mockSettingsFetch(settingsRow())
+    const { result } = renderHook(() => [
+      useProjectSettings("aqu1470-a", 700),
+      useProjectSettings("aqu1470-a", 700),
+    ])
+    await waitFor(() => expect(result.current.every((s) => s.hasFetched)).toBe(true))
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(hydratedCaptures()).toHaveLength(1)
+    expect(hydratedCaptures()[0][1]).toMatchObject({
+      project_id: "aqu1470-a",
+      has_server_row: true,
+    })
+  })
+
+  it("does not capture again on refresh or a settings-updated broadcast", async () => {
+    const fetchSpy = mockSettingsFetch(settingsRow())
+    const { result } = renderHook(() => useProjectSettings("aqu1470-b", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    act(() => broadcastProjectSettingsUpdated({ projectId: "aqu1470-b" }))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3))
+    expect(hydratedCaptures()).toHaveLength(1)
+  })
+
+  it("captures again when the consumer switches to a different project", async () => {
+    mockSettingsFetch(settingsRow())
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useProjectSettings(id, 700),
+      { initialProps: { id: "aqu1470-c" } },
+    )
+    await waitFor(() => expect(hydratedCaptures()).toHaveLength(1))
+    rerender({ id: "aqu1470-d" })
+    await waitFor(() => expect(hydratedCaptures()).toHaveLength(2))
+    expect(hydratedCaptures()[1][1]).toMatchObject({ project_id: "aqu1470-d" })
+    expect(result.current.hasFetched).toBe(true)
   })
 })

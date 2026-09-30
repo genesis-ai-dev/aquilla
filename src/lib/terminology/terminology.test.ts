@@ -96,6 +96,38 @@ describe("compileConceptsToRules", () => {
     expect(targetPatterns.some((p) => p.includes("specter"))).toBe(true)
   })
 
+  // AQU-764: the flag-vs-auto-replace question the team could not answer from
+  // anywhere. The answer is documented in docs/UI-GLOSSARY.md "Terminology
+  // enforcement — flag, never auto-replace"; these guard it.
+  it("flags rather than rewrites: no compiled terminology rule carries an autofix", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "aliento", status: "admitted" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    expect(rules.length).toBeGreaterThan(0)
+    for (const rule of rules) {
+      expect(rule.autofix).toBeUndefined()
+    }
+  })
+
+  it("grades a missing approved rendering minor and a forbidden rendering major", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    const approvedRule = rules.find((r) => r.check.type === "source-requires-target")
+    const forbiddenRule = rules.find((r) => r.check.type === "target-forbids")
+    expect(approvedRule?.severity).toBe("minor")
+    expect(forbiddenRule?.severity).toBe("major")
+  })
+
   it("violation detected: preferred rendering missing from target (source contains term)", () => {
     // Verify the compiled rules produce the expected check shape so the rule-engine
     // will flag the violation (rule-engine itself has its own tests).
@@ -216,6 +248,27 @@ describe("compileConceptsToRules", () => {
   it("all produced rules are enabled", () => {
     const rules = compileConceptsToRules([makeConcept()])
     expect(rules.every((r) => r.enabled)).toBe(true)
+  })
+
+  // WHY: enforcement must see the same forms the term page and chips see. If
+  // compile bypassed the concept matcher, a term would count as "enforced" on
+  // the glossary page while the rule engine silently skipped prefixed cells.
+  it("source pattern honours foldMarks, affixes, forms and exclusions", () => {
+    const concept: Concept = {
+      id: "c-erets",
+      sourceTerm: "הָאָ֗רֶץ",
+      renderings: [{ rendering: "earth", status: "preferred" }],
+      status: "active",
+      createdAt: new Date().toISOString(),
+      match: { excludedForms: ["בארץ"] },
+    }
+    const [rule] = compileConceptsToRules([concept], { prefixes: ["ו", "ה", "ב"], suffixes: [] })
+    const re = new RegExp((rule.check as { sourcePattern: string }).sourcePattern, "giu")
+    expect(re.test("וְהָאָ֗רֶץ")).toBe(true)
+    re.lastIndex = 0
+    expect(re.test("הָאָֽרֶץ׃")).toBe(true)
+    re.lastIndex = 0
+    expect(re.test("בָּאָ֓רֶץ")).toBe(false)
   })
 })
 

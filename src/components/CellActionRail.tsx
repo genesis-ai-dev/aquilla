@@ -158,52 +158,52 @@ export function CellActionRail({
         }}
       >
         {mountActions ? primary : null}
-
-        {/* AQU-200: one `⋯` in place of the five-to-seven buttons that used to
-            sit here. The popup mounts the SAME action nodes, so every
-            conditional gate (record-only-when-supported, play-only-with-audio,
-            …) still decides whether its button exists at all — the overflow
-            only decides where it is drawn. */}
-        {mountActions && children != null && (
-          <Popover open={overflowOpen} onOpenChange={(open) => onOverflowOpenChange?.(open)}>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  data-tooltip={overflowLabel}
-                  data-slot="cell-action-rail-overflow"
-                  aria-label={overflowLabel}
-                  onClick={(e) => e.stopPropagation()}
-                  className="relative text-muted-foreground/70 hover:text-foreground"
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                  {overflowAttentionDot && (
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "pointer-events-none absolute end-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
-                        DOT_CLASS[overflowAttentionDot],
-                      )}
-                    />
-                  )}
-                </Button>
-              }
-            />
-            {/* Override the popover default (fixed-width vertical stack): this
-                is the rail's own button cluster, just relocated. */}
-            <PopoverContent
-              align="end"
-              side="bottom"
-              className="w-auto flex-row items-center gap-0 p-1"
-            >
-              {children}
-            </PopoverContent>
-          </Popover>
-        )}
       </div>
-
+      {/* Keep the menu discoverable without hover, including on touch and
+          through the accessibility tree. Its contents still mount on open. */}
+      {/* AQU-200: one `⋯` in place of the five-to-seven buttons that used to
+          sit here. The popup mounts the SAME action nodes, so every
+          conditional gate (record-only-when-supported, play-only-with-audio,
+          …) still decides whether its button exists at all — the overflow
+          only decides where it is drawn. */}
+      {children != null && (
+        <Popover open={overflowOpen} onOpenChange={(open) => onOverflowOpenChange?.(open)}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-tooltip={overflowLabel}
+                data-slot="cell-action-rail-overflow"
+                aria-label={overflowLabel}
+                onClick={(e) => e.stopPropagation()}
+                className="relative text-muted-foreground/70 hover:text-foreground"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+                {overflowAttentionDot && (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute end-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
+                      DOT_CLASS[overflowAttentionDot],
+                    )}
+                  />
+                )}
+              </Button>
+            }
+          />
+          {/* Override the popover default (fixed-width vertical stack): this
+              is the rail's own button cluster, just relocated. */}
+          <PopoverContent
+            align="end"
+            side="bottom"
+            className="w-auto flex-row items-center gap-0 p-1"
+          >
+            {children}
+          </PopoverContent>
+        </Popover>
+      )}
       {showDetailsToggle && (
         <div
           className={cn(

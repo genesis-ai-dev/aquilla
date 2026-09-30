@@ -2,12 +2,12 @@
 // `cloudflare/src/routes/orgs.ts`. Personal-org lazy-create, members CRUD,
 // member-project listing, and pending-invite listing.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
-import { isPlatformAdminEmail } from "../middleware/platform-admin"
-import { ROLE, type Env } from "../types"
+import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform-admin"
+import { ROLE, type AuthUser, type Env } from "../types"
 import {
   addGroupMember,
   attachGroupProject,
@@ -52,6 +52,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 
@@ -739,6 +740,41 @@ type OrgGrantOutcome =
   | { ok: true; userId: number; username: string; role: number }
   | { ok: false; username: string; code: string; message: string }
 
+// [Pen test] Authorization & access control (2026-09-22): getEffectiveOrgRole
+// folds the ADMIN_EMAILS allowlist in as an unconditional owner (700) on
+// EVERY org, including ones the caller has never joined — correct for reads
+// (support/oversight, see platform-admin-access.test.ts) but this org's
+// member-management routes WRITE governance: POST added/upgraded an arbitrary
+// target to real, persistent OWNER membership in any org on the platform, and
+// DELETE could strip any org's real owners, with only a plain session cookie
+// and no step-up check. A hijacked admin-email session (no MFA required here)
+// could silently plant a durable backdoor owner in any org, invisible once
+// the compromised session itself is revoked. The external Agent-API surface
+// already excludes platform-admin from org-membership commands for exactly
+// this reason (org-members-engine.ts: "confers no cross-tenant governance
+// authority") — this closes the same gap on the browser-session path by
+// requiring the same step-up elevation `/api/v2/admin/*` already demands,
+// but ONLY on the platform-admin branch. A genuine owner (role_level >= 700
+// in org_members) is unaffected — no elevation, no extra request.
+async function requireGenuineOwnerOrElevatedAdmin(
+  c: Context<AuthHonoEnv>,
+  orgId: number,
+): Promise<Response | null> {
+  const user = c.get("user")
+  const membership = await getOrgMemberRole(c.env, orgId, user.id)
+  if ((membership ?? 0) >= 700) return null
+  if (!isPlatformAdminEmail(c.env, user.email)) {
+    return c.json({ error: "only org owners can manage membership" }, 403)
+  }
+  if (!(await hasActiveElevation(c))) {
+    return c.json(
+      { error: "elevation required to manage membership on an org you do not belong to" },
+      403,
+    )
+  }
+  return null
+}
+
 /**
  * Evaluate + apply a single org-member grant. Checks are per target so a batch
  * never rolls the valid grants back on one bad entry. Owner-only is enforced by
@@ -751,6 +787,7 @@ async function grantOrgMemberOne(
   orgId: number,
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<OrgGrantOutcome> {
   const { username, role } = entry
   const target = await lookupUserByUsername(env, username)
@@ -761,6 +798,7 @@ async function grantOrgMemberOne(
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "org", orgId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -771,6 +809,13 @@ async function grantOrgMemberOne(
   )
     .bind(orgId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "org.member.add" : "org.member.role",
+    where: { scope: "org", orgId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -784,10 +829,8 @@ orgs.post(
     const orgId = parseInt(c.req.param("orgId"), 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-    const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-    if (callerRole == null || callerRole < 700) {
-      return c.json({ error: "only org owners can add members" }, 403)
-    }
+    const denied = await requireGenuineOwnerOrElevatedAdmin(c, orgId)
+    if (denied) return denied
 
     const body = c.req.valid("json")
 
@@ -803,7 +846,7 @@ orgs.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry)
+        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry, user)
         results.push(
           outcome.ok
             ? { username: entry.username, ok: true }
@@ -813,7 +856,7 @@ orgs.post(
       return c.json({ results })
     }
 
-    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body)
+    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, ORG_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1024,6 +1067,19 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
     : invite.role_level
 
   try {
+    // [Pen test 2026-09-29] Claim the single-use invite (CAS) BEFORE granting
+    // membership so concurrent redeemers can't both be admitted.
+    if (!invite.used_at) {
+      const claim = await c.env.AQUILLA_PG.prepare(
+        `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
+         WHERE token = ? AND used_at IS NULL`,
+      )
+        .bind(user.id, token)
+        .run()
+      if (claim.meta.changes === 0) {
+        return c.json({ error: "Invite already used" }, 410)
+      }
+    }
     await c.env.AQUILLA_PG.prepare(
       `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
@@ -1033,13 +1089,6 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
          granted_at = CURRENT_TIMESTAMP`,
     )
       .bind(invite.org_id, user.id, finalRole, invite.created_by)
-      .run()
-    // Atomic stamp: only the first concurrent redeemer wins.
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
-       WHERE token = ? AND used_at IS NULL`,
-    )
-      .bind(user.id, token)
       .run()
   } catch (err) {
     console.error("[org-invites] accept failed:", err)
@@ -1062,20 +1111,26 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "invalid id" }, 400)
   }
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < 700) {
-    return c.json({ error: "only org owners can remove members" }, 403)
-  }
+  const denied = await requireGenuineOwnerOrElevatedAdmin(c, orgId)
+  if (denied) return denied
   if (targetUserId === user.id) {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
+  const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
   ])
+  await auditMembershipChange(c.env, user, {
+    action: "org.member.remove",
+    where: { scope: "org", orgId },
+    target: { id: targetUserId },
+    roleBefore,
+    roleAfter: null,
+  })
 
   return c.json({ removed: true })
 })

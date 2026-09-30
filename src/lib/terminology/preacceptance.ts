@@ -20,8 +20,8 @@
  * never warn.
  */
 
-import type { Concept } from "./types"
-import { matchesTerm } from "./match"
+import type { Concept, TermMatchingSettings } from "./types"
+import { matchesConcept, matchesTerm } from "./match"
 
 export interface PreAcceptanceWarning {
   conceptId: string
@@ -35,6 +35,7 @@ export function detectPreAcceptanceWarnings(
   completionText: string,
   sourceText: string,
   concepts: Concept[],
+  termMatching?: TermMatchingSettings,
 ): PreAcceptanceWarning[] {
   const warnings: PreAcceptanceWarning[] = []
 
@@ -44,8 +45,10 @@ export function detectPreAcceptanceWarnings(
     if (!concept.sourceTerm.trim()) continue
 
     // Only concepts whose source term actually appears in this source are
-    // relevant. Irrelevant concepts never warn. Wildcard-aware match.
-    if (!matchesTerm(sourceText, concept.sourceTerm)) continue
+    // relevant. Irrelevant concepts never warn. AQU-1271: the source side uses
+    // the shared concept matcher, so a warning fires on exactly the surface
+    // forms the rule engine and the editor chips recognise.
+    if (!matchesConcept(sourceText, concept, termMatching)) continue
 
     // (a) Any forbidden rendering present in the completion → louder warning.
     let forbiddenFired = false

@@ -14,6 +14,7 @@ export interface DaemonConfig {
   chunkMax: number
   fetchConcurrency: number
   materializeConcurrency: number
+  audioCopyConcurrency: number
   inboxPollMs: number
   reconcileMs: number
   orgMapsRefreshMs: number
@@ -44,10 +45,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     chunkStart: 500,
     chunkMin: 50,
     chunkMax: 2500,
-    fetchConcurrency: num(env.FETCH_CONCURRENCY, 4),
-    materializeConcurrency: num(env.MATERIALIZE_CONCURRENCY, 2),
-    inboxPollMs: 30_000,
-    reconcileMs: 15 * 60_000,
+    fetchConcurrency: num(env.FETCH_CONCURRENCY, 1),
+    materializeConcurrency: num(env.MATERIALIZE_CONCURRENCY, 1),
+    audioCopyConcurrency: num(env.AUDIO_COPY_CONCURRENCY, 4),
+    inboxPollMs: num(env.MIGRATE_INBOX_POLL_MS, 5_000),
+    reconcileMs: num(env.MIGRATE_RECONCILE_MS, 15 * 60_000),
     orgMapsRefreshMs: 60 * 60_000,
     discordWebhookUrl: env.DISCORD_WEBHOOK_URL,
     r2,

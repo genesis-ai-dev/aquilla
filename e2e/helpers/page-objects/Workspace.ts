@@ -7,6 +7,10 @@ import { type Page, type Locator, expect } from "@playwright/test"
 // 60-second per-test ceiling so a genuinely stuck editor still fails promptly.
 const EDITOR_READY_TIMEOUT_MS = 30_000
 
+// A target cell's editable surface — see `editCell` for the two shapes.
+const EDITABLE_TARGET_SELECTOR =
+  'textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]'
+
 interface FilePayload {
   name: string
   mimeType: string
@@ -402,9 +406,7 @@ export class Workspace {
   }
 
   private editableTarget(index: number): Locator {
-    return this.targetColumn(index)
-      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
-      .first()
+    return this.targetColumn(index).locator(EDITABLE_TARGET_SELECTOR).first()
   }
 
   private targetColumn(index: number): Locator {
@@ -415,26 +417,37 @@ export class Workspace {
     return this.targetColumn(index).locator("[data-target-read-view]").first()
   }
 
+  /** The one surface that takes an activating click right now: the mounted
+   * editor, or the read view while it accepts activation. The column renders
+   * exactly one of the two. A read view is `aria-readonly` while an AI draft
+   * is still saving (or another user holds the focus lock); a click there is
+   * a no-op by design, so it is not a match and callers wait it out. */
+  private activatableTarget(index: number): Locator {
+    return this.targetColumn(index)
+      .locator(`[data-target-read-view]:not([aria-readonly="true"]), ${EDITABLE_TARGET_SELECTOR}`)
+      .filter({ visible: true })
+      .first()
+  }
+
   async activateTargetCell(index: number): Promise<Locator> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
 
-    const target = this.editableTarget(index)
-    let activatedFromReadView = false
-    if (!(await target.isVisible())) {
-      const readView = this.targetReadView(index)
-      await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-      await readView.click()
-      activatedFromReadView = true
-    }
+    // Exactly ONE click, on whichever surface is activatable when the click
+    // lands. Do not sample "editor or read view?" first and then act on the
+    // answer: the app swaps the two on its own — the sparkle flow mounts and
+    // focuses the editor when its draft's save settles — so the sampled read
+    // view can be gone by the time it is clicked. The locator re-resolves on
+    // every retry of this single action instead.
+    //
+    // One click also keeps first activation honest: a read-view click is the
+    // user's one activation, and clicking the newly mounted editor again
+    // would normalize IDML's caret through handleClick and hide
+    // focus-placement regressions that only occur on first activation.
+    await this.activatableTarget(index).click({ timeout: EDITOR_READY_TIMEOUT_MS })
 
+    const target = this.editableTarget(index)
     await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-    // A read-view click is the user's one activation. Clicking the newly
-    // mounted editor again normalizes IDML's caret through handleClick and can
-    // hide focus-placement regressions that only occur on first activation.
-    if (!activatedFromReadView) {
-      await target.click()
-    }
     await expect(target).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
     return target
   }
@@ -853,9 +866,21 @@ export class Workspace {
 
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
+    await this.replaceCellMeasuringCommit(index, text)
+  }
+
+  /** `replaceCell`, returning the wall-clock milliseconds from the committing
+   * blur to the server's authoritative `/events` acknowledgement.
+   *
+   * Activation and typing are deliberately outside the measurement: the number
+   * the production timing probe (AQU-1024) asserts on is the write round-trip,
+   * not how long Playwright took to focus a cell. */
+  async replaceCellMeasuringCommit(index: number, text: string): Promise<number> {
     const target = await this.activateTargetCell(index)
     await target.fill(text)
+    const startedAt = Date.now()
     await this.commitTargetCellEdit(index, text)
+    return Date.now() - startedAt
   }
 
   async readCell(index: number): Promise<string> {
@@ -1054,23 +1079,10 @@ export class Workspace {
     await this.page.locator("aside").click()
   }
 
-  private actionRail(index: number): Locator {
-    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
-  }
-
-  /** Open the per-cell "Edit history" drawer from the row's action rail. The
-   * rail springs out on row hover (data-revealed) — same reveal handshake as
-   * clickSparkleOnFirstCell. */
+  /** Open the per-cell "Edit history" drawer through the action overflow. */
   async openHistoryDrawer(index: number): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
-    const button = row.getByRole("button", { name: "Edit history" }).first()
-    await expect(button).toBeVisible()
-    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
-    // races the click; the button is already asserted visible.
-    await button.click({ force: true })
+    const button = await this.openRowAction(this.cellRow(index), "Edit history")
+    await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }
 

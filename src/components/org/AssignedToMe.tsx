@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { Building2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { Badge } from "@/components/ui/badge"
+import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
@@ -12,8 +12,10 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { laneChipLabel } from "./project-lanes"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { getPortfolio } from "@/lib/frontier/portfolio"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -22,9 +24,10 @@ function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  return a.targetLang
-    ? `${base}?lane=${encodeURIComponent(a.targetLang)}`
-    : base
+  const lane = a.laneId || a.targetLang
+  return lane
+    ? `${base}?lane=${encodeURIComponent(lane)}`
+    : `${base}?lane=`
 }
 
 function progressPct(a: MyOrgAssignment): number {
@@ -48,12 +51,17 @@ export function AssignedToMe() {
   const navigate = useNavigate()
 
   const [rows, setRows] = useState<MyOrgAssignment[]>([])
+  const [defaultLaneLabelByProjectId, setDefaultLaneLabelByProjectId] = useState<Map<string, string>>(
+    () => new Map(),
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const laneFallbackLabel = t("org.projectOverview.laneDefaultFallback")
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) {
       setRows([])
+      setDefaultLaneLabelByProjectId(new Map())
       setLoading(false)
       return
     }
@@ -62,10 +70,20 @@ export function AssignedToMe() {
     setError(null)
     void (async () => {
       try {
-        const all = await getMyAssignmentsForOrg(jwt, activeOrgId)
+        // AQU-729: lane labels are display-only. A portfolio miss must not
+        // hide the assignments themselves — that is the bug this list is
+        // here to avoid.
+        const [all, portfolio] = await Promise.all([
+          getMyAssignmentsForOrg(jwt, activeOrgId),
+          getPortfolio(jwt, activeOrgId).catch(() => []),
+        ])
         if (cancelled) return
+        const labels = new Map(
+          portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""]),
+        )
         // Pair rows + loading so org-assigned-table never mounts empty while
         // the fetch result is already in hand (avoids a race with content asserts).
+        setDefaultLaneLabelByProjectId(labels)
         setRows(all)
         setLoading(false)
       } catch (e) {
@@ -91,10 +109,12 @@ export function AssignedToMe() {
           return (
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate">{a.scopeLabel}</span>
-              {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
-              {a.targetLang ? (
-                <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
-              ) : null}
+              <AssignmentLaneBadge
+                targetLang={a.targetLang}
+                laneName={a.laneName}
+                defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
+                fallbackLabel={laneFallbackLabel}
+              />
             </div>
           )
         },
@@ -162,7 +182,7 @@ export function AssignedToMe() {
         ),
       },
     ],
-    [t],
+    [t, defaultLaneLabelByProjectId, laneFallbackLabel],
   )
 
   return (
@@ -198,17 +218,24 @@ export function AssignedToMe() {
               onRowClick={(a) => {
                 navigate(assignmentHref(a))
               }}
+              rowLink={{ columnId: "assignment", to: assignmentHref }}
               initialSorting={[{ id: "deadline", desc: false }]}
               searchPlaceholder="Search assignments…"
               globalFilterFn={(row, _columnId, filterValue) => {
                 const q = String(filterValue).trim().toLowerCase()
                 if (!q) return true
                 const a = row.original
+                const laneLabel = laneChipLabel(
+                  a.targetLang ?? "",
+                  defaultLaneLabelByProjectId.get(a.projectId) ?? "",
+                  laneFallbackLabel,
+                  a.laneName,
+                )
                 return (
                   a.scopeLabel.toLowerCase().includes(q) ||
                   a.projectName.toLowerCase().includes(q) ||
                   (a.fileName ? a.fileName.toLowerCase().includes(q) : false) ||
-                  (a.targetLang ? a.targetLang.toLowerCase().includes(q) : false)
+                  laneLabel.toLowerCase().includes(q)
                 )
               }}
               emptyState={(table) => {

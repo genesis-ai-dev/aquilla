@@ -1,8 +1,8 @@
 // Background prefetch for the heavy in-browser AI models. Drives both the
 // onboarding "Download AI features" step and the floating progress chip.
 //
-// Internals: sends a "warmup" message to the lazy-loaded Whisper, Kokoro,
-// and MMS workers; they call their pipeline init (downloading model weights to the
+// Internals: sends a "warmup" message to the lazy-loaded Whisper and MMS
+// workers; they call their pipeline init (downloading model weights to the
 // browser's Cache API) and post progress back. Subsequent transcribe / synth
 // calls find the pipeline already warm and run instantly.
 
@@ -14,12 +14,6 @@ import type {
   WarmupRequest as WhisperWarmupRequest,
 } from "./whisper-worker"
 import type {
-  ProgressMessage as KokoroProgress,
-  ErrorMessage as KokoroError,
-  WarmedMessage as KokoroWarmed,
-  WarmupRequest as KokoroWarmupRequest,
-} from "./kokoro-worker"
-import type {
   ProgressMessage as MmsProgress,
   ErrorMessage as MmsError,
   WarmedMessage as MmsWarmed,
@@ -28,7 +22,7 @@ import type {
 import { MMS_SHERPA_CACHE_KEY, USE_SHERPA_MMS_MODELS } from "./mms-languages"
 import { DEFAULT_MMS_LANGUAGE, inferMmsLanguageCode } from "./tts-providers"
 
-export type ModelId = "whisper" | "kokoro" | "mms"
+export type ModelId = "whisper" | "mms"
 
 export type ModelPrefetchStatus =
   | { kind: "idle" }
@@ -122,7 +116,6 @@ export function noteModelDownloadSettled(model: ModelId, ok: boolean): void {
 const TRANSFORMERS_CACHE_KEY = "transformers-cache"
 const MODEL_REPOS: Record<ModelId, string> = {
   whisper: "Xenova/whisper-base",
-  kokoro: "onnx-community/Kokoro-82M-v1.0-ONNX",
   mms: "mms-tts-",
 }
 
@@ -181,7 +174,6 @@ export async function clearPrefetchStatus(model?: ModelId): Promise<void> {
 }
 
 let whisperWorkerPromise: Promise<Worker> | null = null
-let kokoroWorkerPromise: Promise<Worker> | null = null
 let mmsWorkerPromise: Promise<Worker> | null = null
 let prefetchSeq = 0
 let readyMmsLanguage: string | null = null
@@ -197,17 +189,6 @@ async function getWhisperWorker(): Promise<Worker> {
   })()
   whisperWorkerPromise = p
   p.catch(() => { if (whisperWorkerPromise === p) whisperWorkerPromise = null })
-  return p
-}
-/** Shared with the synth path in tts.ts so warmup and generate hit one worker. */
-export async function getKokoroWorker(): Promise<Worker> {
-  if (kokoroWorkerPromise) return kokoroWorkerPromise
-  const p = (async () => {
-    const mod = await import("./kokoro-worker?worker")
-    return new (mod.default as new () => Worker)()
-  })()
-  kokoroWorkerPromise = p
-  p.catch(() => { if (kokoroWorkerPromise === p) kokoroWorkerPromise = null })
   return p
 }
 /** Shared with the synth path in tts.ts so warmup and generate hit one worker. */
@@ -256,42 +237,6 @@ async function warmWhisper(): Promise<void> {
     // creates a fresh one rather than reusing a broken pipeline.
     try { worker.terminate() } catch { /* nothing to clean up */ }
     if (whisperWorkerPromise) whisperWorkerPromise = null
-    throw e
-  }
-}
-
-async function warmKokoro(): Promise<void> {
-  if (getModelStatus("kokoro").kind === "ready") return
-  setStatus("kokoro", { kind: "downloading", loaded: 0, total: 0, file: "" })
-  let worker: Worker
-  try {
-    worker = await getKokoroWorker()
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
-    setStatus("kokoro", { kind: "error", message: friendlyDownloadError(message) })
-    throw e
-  }
-  const requestId = `warm-k-${++prefetchSeq}`
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const onMessage = (event: MessageEvent<KokoroProgress | KokoroWarmed | KokoroError>) => {
-        const m = event.data
-        if (m.requestId !== requestId) return
-        if (m.type === "progress") {
-          setStatus("kokoro", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
-          return
-        }
-        worker.removeEventListener("message", onMessage)
-        if (m.type === "warmed") { markReady("kokoro"); resolve() }
-        else { setStatus("kokoro", { kind: "error", message: friendlyDownloadError(m.message) }); reject(new Error(m.message)) }
-      }
-      worker.addEventListener("message", onMessage)
-      const req: KokoroWarmupRequest = { type: "warmup", requestId }
-      worker.postMessage(req)
-    })
-  } catch (e) {
-    try { worker.terminate() } catch { /* nothing to clean up */ }
-    if (kokoroWorkerPromise) kokoroWorkerPromise = null
     throw e
   }
 }
@@ -376,10 +321,9 @@ export interface PrefetchOptions {
  * that model regardless.
  */
 export async function prefetchAiModels(opts: PrefetchOptions = {}): Promise<void> {
-  const models = opts.models ?? ["whisper", "kokoro"]
+  const models = opts.models ?? ["whisper"]
   const promises: Promise<void>[] = []
   if (models.includes("whisper")) promises.push(warmWhisper())
-  if (models.includes("kokoro")) promises.push(warmKokoro())
   if (models.includes("mms")) promises.push(warmMms(opts.mmsLanguage))
   await Promise.all(promises)
 }

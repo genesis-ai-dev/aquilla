@@ -44,11 +44,14 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
+import { fixedSlices, packSelectionIntoCalls, type GroupingCell } from "@/lib/completion/draft-grouping"
+import { isMeaningUnitDraftingEnabled } from "@/lib/completion/seams-flag"
+import type { PrecedingContextEntry } from "@/lib/completion/prompt-build"
 import {
   resetBatchCompletionState,
   clearBatchCompletionProgress,
@@ -65,7 +68,7 @@ import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
-import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
+import { mergeInRunDraftContext, gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/lib/completion/translate-as-read"
 import {
@@ -82,6 +85,19 @@ import {
 // review unit; larger files still run, but are split into independently
 // reviewable chunks.
 const MAX_CELLS_PER_CALL = 10
+
+/** AQU-1386: the view of a cell the seam/unit machinery needs. `text` is the
+ *  EFFECTIVE source, so a media section contributes its transcript rather than
+ *  its filename — the same rule the rest of the drafting path follows. */
+function toGroupingCell(cell: CellData): GroupingCell {
+  return {
+    id: cell.id,
+    fileId: cell.fileId,
+    sourceEventId: cell.sourceEventId ?? null,
+    text: effectiveSourceText(cell),
+    ref: cell.cellLabel ?? null,
+  }
+}
 
 // AQU-620: a "regenerate" request re-drafts a cell that already has a
 // prediction. The project's configured temperature is tuned low for a stable
@@ -191,6 +207,23 @@ export interface CompleteSingleOptions {
   commitGuard?: () => boolean
 }
 
+/**
+ * Union of the style instructions in force across a group of cells, in first-seen
+ * order. A batch/paragraph call shares ONE system prompt, so it must carry the
+ * union of what applies to its members rather than any single cell's set.
+ */
+function unionStyleInstructions(
+  cells: CellData[],
+  resolve: ((cell: CellData) => string[]) | undefined,
+): string[] | undefined {
+  if (!resolve) return undefined
+  const seen = new Set<string>()
+  for (const cell of cells) {
+    for (const instruction of resolve(cell)) seen.add(instruction)
+  }
+  return seen.size > 0 ? [...seen] : undefined
+}
+
 export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
@@ -213,6 +246,9 @@ export function useCompletion(
   lane = "",
   /** AQU-1145: persist one mapped model-response chunk as one local batch. */
   commitCompletedCells?: CommitCompletedCells,
+  /** Style-rule instructions in force for one cell, resolved from the
+   *  applicability graph (AQU-934). Omitted → no style block is injected. */
+  styleInstructionsFor?: (cell: CellData) => string[],
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -266,7 +302,12 @@ export function useCompletion(
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
     let found: ScoredPair[] = []
     try {
-      found = await search(sourceText, topK, cell.id)
+      // AQU-153: branching search ranks SOURCE cells, so an untranslated cell
+      // is a valid hit but not an example. Drop the unpaired hits here, at the
+      // retrieval boundary, so the evidence panel's count and the prompt pool
+      // both mean "real source→target pairs" rather than trusting whatever
+      // filter the retriever was asked for.
+      found = retainTranslationPairs(await search(sourceText, topK, cell.id))
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -378,6 +419,7 @@ export function useCompletion(
         sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
         examples: [],
         rules,
+        ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
@@ -502,7 +544,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, briefSummary, draftProvenance, prepareSingleEvidence, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -526,10 +568,28 @@ export function useCompletion(
     const cells = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
     if (cells.length === 0) return
 
-    const chunks: CellData[][] = []
-    for (let i = 0; i < cells.length; i += MAX_CELLS_PER_CALL) {
-      chunks.push(cells.slice(i, i + MAX_CELLS_PER_CALL))
-    }
+    // AQU-1386: pack whole drafting units into calls instead of slicing every
+    // MAX_CELLS_PER_CALL cells, so a sentence straddling the boundary goes out
+    // in ONE call. Seams come from the file, never from the selection — see
+    // src/lib/completion/draft-grouping.ts.
+    //
+    // Off by default until the shadow eval clears (seams-flag.ts). The flag-off
+    // path calls the same fixed-slice helper the old inline loop was, so
+    // "grouping disabled" is literally today's behaviour, not a re-derivation.
+    const groupingEnabled = isMeaningUnitDraftingEnabled()
+    const corpusCells = getAllCells()
+    const selectedById = new Map(cells.map((c) => [c.id, c]))
+    const chunks: CellData[][] = groupingEnabled
+      ? packSelectionIntoCalls(
+          cells.map(toGroupingCell),
+          corpusCells.map(toGroupingCell),
+          MAX_CELLS_PER_CALL,
+        )
+        .map((ids) => ids
+          .map((id) => selectedById.get(id))
+          .filter((c): c is CellData => c !== undefined))
+        .filter((chunk) => chunk.length > 0)
+      : fixedSlices(cells, MAX_CELLS_PER_CALL)
 
     posthog.capture("ai batch translation started", {
       provider,
@@ -539,6 +599,7 @@ export function useCompletion(
       cell_count: cells.length,
       chunk_count: chunks.length,
       max_cells_per_call: MAX_CELLS_PER_CALL,
+      meaning_units: groupingEnabled,
     })
 
     // AQU-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
@@ -546,9 +607,12 @@ export function useCompletion(
     // finally-clear pass this ID so a stale run cannot affect us.
     const runId = resetBatchCompletionState(cells.length)
     memMark(`completeBatch.start(${cells.length}c)`)
-    const corpusCells = getAllCells()
 
     const fallbackQueue: CellData[] = []
+    // AQU-1386 §3: this run's own drafts, carried into the NEXT call's
+    // discourse window. Run-scoped by construction — it is a local, so it
+    // cannot outlive the run or reach another one.
+    const inRunDrafts: PrecedingContextEntry[] = []
 
     try {
       for (const chunk of chunks) {
@@ -581,11 +645,16 @@ export function useCompletion(
           break
         }
 
-        const flatExamples: ScoredPair[] = passages.flatMap((p) =>
-          p.cells.filter((c) => c.hit).map((c) => ({
-            cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
-            score: 1, matchedTokens: [], coverageWeight: 1,
-          }))
+        // AQU-153: same pair requirement as the single path — a passage hit
+        // whose target is still empty is not an example, so it must not swell
+        // the per-cell example count the editor shows.
+        const flatExamples: ScoredPair[] = retainTranslationPairs(
+          passages.flatMap((p) =>
+            p.cells.filter((c) => c.hit).map((c) => ({
+              cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
+              score: 1, matchedTokens: [], coverageWeight: 1,
+            }))
+          )
         )
         const llmAuthor = modelName
         for (const c of chunk) {
@@ -611,9 +680,25 @@ export function useCompletion(
           }
         }
 
-        const precedingContext = gatherPrecedingContext(
+        // AQU-1386 §3: the approved discourse window, then whatever THIS run
+        // has already drafted immediately before this chunk. Without the
+        // second part, every chunk after the first starts its discourse cold —
+        // `corpusCells` was read once before the loop, and gatherPrecedingContext
+        // only admits validated targets, so call N+1 could never see call N.
+        //
+        // In-run only. `inRunDrafts` is a local that dies with the run: nothing
+        // is persisted, and the rule that unapproved text never becomes a
+        // retrieval EXAMPLE is untouched — these rows are labelled as
+        // unreviewed drafts in the prompt and excluded from the example pool
+        // below, exactly like the approved window is.
+        const approvedContext = gatherPrecedingContext(
           corpusCells,
           chunk[0].id,
+          draftContext.precedingTargetCells,
+        )
+        const precedingContext: PrecedingContextEntry[] = mergeInRunDraftContext(
+          approvedContext,
+          inRunDrafts,
           draftContext.precedingTargetCells,
         )
         // The global examples are one bounded pool across passage retrieval
@@ -637,6 +722,9 @@ export function useCompletion(
           })),
           examples: [],
           rules,
+          ...(styleInstructionsFor && {
+            styleInstructions: unionStyleInstructions(chunk, styleInstructionsFor),
+          }),
           validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
@@ -769,6 +857,24 @@ export function useCompletion(
           }
         }
 
+        // Carry this chunk's fresh drafts into the next call's discourse
+        // window (AQU-1386 §3), marked unreviewed so the prompt weighs them
+        // below approved translations.
+        for (const draft of preparedDrafts) {
+          inRunDrafts.push({
+            source: effectiveSourceText(draft.cell),
+            target: draft.text,
+            draft: true,
+          })
+        }
+        // Only the tail is ever read, so keep only the tail: a 1000-cell run
+        // would otherwise hold the whole file's source and target text here
+        // for the run's duration.
+        const draftWindow = Math.max(0, draftContext.precedingTargetCells)
+        if (inRunDrafts.length > draftWindow) {
+          inRunDrafts.splice(0, inRunDrafts.length - draftWindow)
+        }
+
         // AQU-1145: a model response is already a bounded, coherent package.
         // Hand that package to the workspace once so it can apply one store
         // mutation, one outbox transaction, and one refresh. The scalar path
@@ -877,7 +983,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -973,6 +1079,9 @@ export function useCompletion(
         examples: [],
         validatedPairs: approvedExamples,
         rules,
+        ...(styleInstructionsFor && {
+          styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
+        }),
         briefSummary,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
@@ -1108,7 +1217,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(lk(c.id), msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

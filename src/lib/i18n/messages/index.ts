@@ -14,9 +14,11 @@
 import { en, type Catalog } from "./en"
 import { th } from "./th"
 import { my } from "./my"
-import { mfa } from "./mfa"
+import { ms } from "./ms"
+import { id } from "./id"
 import { ar } from "./ar"
 import { zh_Hans } from "./zh-Hans"
 import { zh_Hant } from "./zh-Hant"
+import { ru } from "./ru"
 
-export const CATALOGS: Record<string, Catalog> = { en, th, my, mfa, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant }
+export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, id, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant, ru }

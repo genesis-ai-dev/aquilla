@@ -2296,11 +2296,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
       <div className="flex justify-end">
         {mode === "source" ? (
-          <Button onClick={handleImport} disabled={!selected || importing}>
+          <Button onClick={handleImport} loading={importing} disabled={!selected}>
             {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
           </Button>
         ) : (
-          <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>
+          <Button onClick={handlePrepareTarget} loading={importing} disabled={!selected || !sourceCells?.length}>
             {importing ? t("importExport.ebible.preparing") : t("importExport.ebible.nextReviewMatches")}
           </Button>
         )}

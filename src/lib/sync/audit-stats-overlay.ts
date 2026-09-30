@@ -41,11 +41,11 @@ export interface OverlayInput {
 export function applyOutboxOverlay(
   input: OverlayInput,
 ): Map<string, CellAuditStats> {
-  const out = new Map<string, CellAuditStats>()
-  // Shallow-clone every base entry so callers' map stays untouched.
-  for (const [k, v] of input.base) {
-    out.set(k, { ...v, activeValidators: [...v.activeValidators], waivers: [...v.waivers] })
-  }
+  // Untouched entries are immutable shared snapshots. Copy only a cell that
+  // receives an event, before mutating it, including its nested arrays. This
+  // also lets downstream audit diffs skip untouched cells by identity.
+  const out = new Map(input.base)
+  const owned = new Set<string>()
 
   for (const rec of input.pending) {
     const ev = rec.event
@@ -56,6 +56,11 @@ export function applyOutboxOverlay(
     // ever caught up — keeps the map consistent for callers that just lookup by
     // cellId.
     let stats = out.get(cellId)
+    if (stats && !owned.has(cellId)) {
+      stats = { ...stats, activeValidators: [...stats.activeValidators], waivers: [...stats.waivers] }
+      out.set(cellId, stats)
+    }
+    owned.add(cellId)
     if (!stats) {
       stats = {
         cellId,

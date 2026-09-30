@@ -32,9 +32,10 @@ Contributor (400) · Project Lead (500) · Maintainer (600) · Owner (700).
 > This is the section Wendi cares most about: translators should see only their own work;
 > Anna/managers should see everything.
 
-- [ ] 🚧 **A Contributor sees only the projects they're on** (via a team or direct
-      assignment) — **not** every project in the org. *Status: a fix is in progress; until it
-      lands, contributors can currently see all org projects. Re-test once notified.*
+- [ ] ✅ **A Contributor sees only the projects they're on** (via a team or direct
+      assignment) — **not** every project in the org. Org-level add defaults to
+      Contributor and does not open projects; only Maintainer/Owner have org-wide
+      visibility (AQU-435 / AQU-1107).
 - [ ] ✅ A Maintainer/Owner (Anna) sees **all** projects in the org for oversight.
 - [ ] ✅ Teams (formerly the GitLab subgroups like `the-chosen / Arabic-Moroccan`) exist, each
       with members + the projects they grant access to.

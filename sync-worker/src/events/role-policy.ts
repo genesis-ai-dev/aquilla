@@ -37,19 +37,41 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
   //
-  // Sam, 2026-08-21: create/delete/reorder dropped to CONTRIBUTOR so the
-  // `allowLineCreation` project setting can admit contributors — reorder
-  // included because it is the chain bookkeeping riding every add and remove
-  // batch. This is the LOWEST reachable floor; authorize.ts conditionally
-  // re-imposes PROJECT_LEAD — all three refused below lead unless the
-  // project opted in, deletes additionally only for a cell a person added by
-  // hand (line-creation-authority.ts).
-  'source.cell.create': ROLE.CONTRIBUTOR,
+  // AQU-1068: create/delete/reorder sit at COMMENTER — reorder included
+  // because it is the chain bookkeeping riding every add and remove batch.
+  //
+  // SINCE 2026-09-09 THIS IS THE ONLY SERVER FLOOR ON THESE THREE KINDS, and
+  // that is deliberate. The project's `cellEditingFloor` tier used to be
+  // checked in authorize.ts on top of it; it is now a PRODUCT rule enforced
+  // where the buttons are drawn, because enforcing it here silently refused
+  // audio-cue re-import, DCS upstream import and diarization — three flows
+  // that emit these kinds through the user's own outbox. See the long note in
+  // authorize.ts. What survives at the perimeter is the rule that protects the
+  // client's file: a delete needs MAINTAINER unless the cell is one a person
+  // added by hand here.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // when the tier list grew Commenter and Reviewer rungs; at CONTRIBUTOR those
+  // two rungs were unreachable by construction, which is a setting that lies.
+  //
+  // The external API surface does not consult this table for these three kinds
+  // at all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
+  // PROJECT_LEAD for create/delete/reorder, and since the tier check went away
+  // that hard-coded floor is now the ONLY thing holding integrations above
+  // this line. There is a test pinning it for exactly that reason.
+  'source.cell.create': ROLE.COMMENTER,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.CONTRIBUTOR,
-  'source.cell.reorder': ROLE.CONTRIBUTOR,
+  'source.cell.delete': ROLE.COMMENTER,
+  'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
+  // AQU-1422: hiding a cell takes it out of translation and (AQU-1423) out of
+  // every export for EVERYONE, in every lane. That is a decision about what the
+  // file contains, so it sits with source.cell.commit at PROJECT_LEAD and NOT
+  // with the create/delete/reorder trio at COMMENTER — those are floored low
+  // because re-import, DCS repair and diarization all emit them through a
+  // user's own outbox, and nothing emits this but a person choosing it.
+  'source.cell.visibility.set': ROLE.PROJECT_LEAD,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,
@@ -74,6 +96,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
+
+  // AQU-777: per-cell file attachments. Same floor as the other per-cell blob
+  // write (cell.audio.attach) — attaching a reference image is editing the
+  // cell's working context, not commenting on it. Mirrored client-side in
+  // src/lib/sync/role-policy.ts.
+  'cell.attachment.add': ROLE.CONTRIBUTOR,
+  'cell.attachment.remove': ROLE.CONTRIBUTOR,
 
   // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.
   // The stage-4 reasoning — "pairing a subtitle line with the audio cue that

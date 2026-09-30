@@ -10,7 +10,10 @@ import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
-import { ROLE, PROJECT_ROLE_OPTIONS } from "@/lib/frontier/roles"
+import { ROLE } from "@/lib/frontier/roles"
+import {
+  MEMBER_GRANT_MIN_ROLE, grantableProjectRoles,
+} from "@/lib/frontier/member-grants"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -29,6 +32,7 @@ export function AddProjectMemberDialog({
   members,
   addMany,
   onAdded,
+  callerLevel,
 }: {
   projectId: string
   open: boolean
@@ -36,6 +40,14 @@ export function AddProjectMemberDialog({
   members: ProjectMember[]
   addMany: UseProjectMembers["addMany"]
   onAdded?: () => void
+  /**
+   * AQU-853: the caller's own effective role on this project, from the roster
+   * MembersSection already renders. Null while unknown. The role picker below
+   * is capped by it — the server refuses `role > callerRole.level` with
+   * `role_above_caller`, so offering Maintainer to a project_lead just
+   * produces a 403 the user cannot act on.
+   */
+  callerLevel: number | null
 }) {
   const t = useT()
   const { session } = useFrontierSession()
@@ -93,7 +105,10 @@ export function AddProjectMemberDialog({
     [visibleOrgMembers, directGrantUserIds],
   )
 
-  const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= ROLE.MAINTAINER)
+  const grantableRoles = useMemo(
+    () => grantableProjectRoles(callerLevel),
+    [callerLevel],
+  )
 
   const handleAddMany = useCallback(async (usernames: string[], role: number) => {
     const results = await addMany(usernames.map((username) => ({ username, role })))
@@ -166,7 +181,10 @@ export function AddProjectMemberDialog({
             {addForbidden && (
               <PermissionDeniedAlert
                 action="org.membersPage.addMembersAction"
-                requiredRoleLevel={ROLE.MAINTAINER}
+                // AQU-853: the server's floor for granting membership is
+                // project_lead (500), not maintainer — naming the wrong role
+                // sends the user to ask for more access than they need.
+                requiredRoleLevel={MEMBER_GRANT_MIN_ROLE}
               />
             )}
           </TabsContent>

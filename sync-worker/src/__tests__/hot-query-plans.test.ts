@@ -93,7 +93,7 @@ describe('hot query plan shapes (PGlite)', () => {
     expect(i).toBe(stmt.args.length)
     const plan = await explain(t, sql)
     expect(plan).toContain('Index Only Scan using cells_pkey')
-    expect(plan).toMatch(/Group Key: (cells_1\.)?cell_id/)
+    expect(plan).toMatch(/Group Key: (\w+\.)?cell_id/)
     expect(plan).not.toContain('Sort')
   })
 

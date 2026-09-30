@@ -33,6 +33,7 @@ export interface CastGutterVoiceProps {
   editable: boolean
   voices: Voice[]
   onPick(voiceId: string, opts?: { applyToSpeaker?: boolean }): void
+  showLanguageBadge?: boolean
   /** Take the character off this line without replacing it (Matt's QA,
    *  2026-08-21). Offered only while the line carries one — an unassign row
    *  on an already-empty line is noise. Honours the same apply-to-speaker
@@ -41,7 +42,7 @@ export interface CastGutterVoiceProps {
   onClear?(opts?: { applyToSpeaker?: boolean }): void
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, showLanguageBadge = false }: CastGutterVoiceProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
@@ -109,6 +110,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
         <VoicePickerContent
           voices={voices}
           activeId={explicit ? voice.id : undefined}
+          showLanguageBadge={showLanguageBadge}
           onPick={(voiceId) => {
             onPick(voiceId, { applyToSpeaker })
             setOpen(false)

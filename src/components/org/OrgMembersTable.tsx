@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -36,6 +36,7 @@ import type { OrgMember } from "@/lib/frontier/orgs"
 import {
   ALL_ROLE_LEVELS,
   humanRoleName,
+  ORG_ROLE_CHANGE_OPTIONS,
   ORG_ROLE_OPTIONS,
   ROLE,
   roleDisplayText,
@@ -50,6 +51,17 @@ type AddDialogTab = "members" | "invite"
 // Shown on the disabled row-menu Remove item when the caller is not an org owner.
 const REMOVE_REQUIRES_OWNER_TOOLTIP =
   "Only org owners can remove members from the organization. Ask an owner to remove someone."
+
+// AQU-952: promoting someone to Owner is the workspace-handover path — a
+// partner that Frontier pre-loaded a workspace for can be given full admin
+// without rebuilding the workspace. It is additive (the promoting owner keeps
+// their own ownership, so the loaded workspace is never orphaned) and this
+// dialog cannot undo it: the row menu hides Change role and Remove for members
+// who are already owners.
+const PROMOTE_TO_OWNER_WARNING =
+  "Owners get full control of this workspace, including billing, members and deletion. " +
+  "You keep your own ownership, so the workspace is never left unowned. " +
+  "This cannot be undone here — an owner's role and membership are locked in this table once granted."
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
@@ -262,7 +274,7 @@ export function OrgMembersTable({
               </DialogDescription>
             </DialogHeader>
             <RoleSelect
-              options={ORG_ROLE_OPTIONS}
+              options={ORG_ROLE_CHANGE_OPTIONS}
               value={roleChangeLevel ? Number(roleChangeLevel) : null}
               onValueChange={(level) => setRoleChangeLevel(String(level))}
               className="w-full!"
@@ -272,6 +284,12 @@ export function OrgMembersTable({
                   : "New role"
               }
             />
+            {Number(roleChangeLevel) === ROLE.OWNER && (
+              <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
+                <AlertTriangle className="mt-px size-4 shrink-0 text-amber-600" />
+                <span>{PROMOTE_TO_OWNER_WARNING}</span>
+              </p>
+            )}
             {roleError && (
               <p role="alert" className="text-xs text-destructive">{roleError}</p>
             )}
@@ -297,8 +315,9 @@ export function OrgMembersTable({
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>{t("org.membersPage.orgTable.addMemberTitle")}</DialogTitle>
-              <DialogDescription>
-                {t("org.membersPage.orgTable.addMemberDescription")}
+              <DialogDescription className="space-y-2">
+                <span className="block">{t("org.membersPage.orgTable.addMemberDescription")}</span>
+                <span className="block">{t("org.membersPage.orgTable.projectAccessNote")}</span>
               </DialogDescription>
             </DialogHeader>
             <Tabs
@@ -313,7 +332,7 @@ export function OrgMembersTable({
               <TabsContent value="members">
                 <MemberMultiAddRow
                   roleOptions={ORG_ROLE_OPTIONS}
-                  defaultRole={ROLE.MAINTAINER}
+                  defaultRole={ROLE.CONTRIBUTOR}
                   scopedUserSearch={false}
                   excludedUserIds={members.map((m) => m.userId)}
                   onAdd={async (usernames, role) => {

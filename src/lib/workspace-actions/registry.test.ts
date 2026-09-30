@@ -158,6 +158,53 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
   })
 })
 
+// AQU-481: the source-import action was the one primary entry with no role gate
+// (`isAvailable: () => true`), so a VIEWER got the full Import type-picker with
+// every importer clickable. Source import emits `file.create`, whose server
+// floor is PROJECT_LEAD (500) — the server always refused, making this an
+// affordance-honesty bug rather than a security hole. These guard the floor.
+describe("AQU-481: source import gated at the file.create floor", () => {
+  const importNew = workspaceActions.find((a) => a.id === "import-new")!
+
+  function ctxWithRole(roleLevel: number | null, overrides: Partial<WorkspaceActionContext> = {}) {
+    const projectWithRole: ProjectRecord = roleLevel === null
+      ? project
+      : { ...project, syncRole: { level: roleLevel, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } }
+    return ctx({ project: projectWithRole, ...overrides })
+  }
+
+  it("refuses the import action for a VIEWER (100) — the reported repro", () => {
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER))).toBe(false)
+    // …and with a file open, which is the "More actions" half of the repro.
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER, { activeFileId: "f1" }))).toBe(false)
+  })
+
+  it("refuses every role below PROJECT_LEAD (500)", () => {
+    for (const level of [ROLE.VIEWER, ROLE.COMMENTER, ROLE.REVIEWER, ROLE.CONTRIBUTOR]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(false)
+    }
+  })
+
+  it("allows PROJECT_LEAD (500) and above", () => {
+    for (const level of [ROLE.PROJECT_LEAD, ROLE.MAINTAINER, ROLE.OWNER]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(true)
+    }
+  })
+
+  it("fails open for a local project with no resolved syncRole", () => {
+    // No server floor to enforce against — a local/unsynced project must keep
+    // importing, same convention as canPerform and the AQU-365 actions above.
+    expect(importNew.isAvailable(ctxWithRole(null))).toBe(true)
+  })
+
+  it("no longer offers import as the default action to a viewer with no file open", () => {
+    // getDefaultAction only ever picks from getVisibleActions, so the gate above
+    // is what keeps a viewer's primary CTA off a dialog the server refuses.
+    const visible = getVisibleActions(workspaceActions, ctxWithRole(ROLE.VIEWER))
+    expect(visible.map((a) => a.id)).not.toContain("import-new")
+  })
+})
+
 describe("AQU-503: target import is discoverable by wording", () => {
   const importIntoFile = workspaceActions.find((a) => a.id === "import-into-file")!
 
@@ -274,5 +321,50 @@ describe("the audio actions are gated on their counts", () => {
     const c = ctx({ activeFileId: "f1", audioCounts: { untranscribed: 7, unsynthesized: 4 } })
     expect(find("transcribe-all").requiresConfirmation!.description(c, t)).toContain("7")
     expect(find("synth-all").requiresConfirmation!.description(c, t)).toContain("4")
+  })
+})
+
+// ── AQU-490: bulk recording validation ─────────────────────────────────────
+//
+// Sam's ruling: a SEPARATE action beside the text one, in both places a bulk
+// text validate lives. Never combined — a reviewer signing off translations
+// has not listened to the recordings, and one button doing both would collect
+// sign-off nobody meant to give.
+describe("batch-validate-audio", () => {
+  const action = () => workspaceActions.find((a) => a.id === "batch-validate-audio")!
+  const withRole = (roleLevel: number, overrides: Partial<WorkspaceActionContext> = {}) => ctx({
+    project: { ...project, syncRole: { level: roleLevel, name: "t", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } },
+    activeFileId: "f1",
+    ...overrides,
+  })
+
+  it("exists as its own action, distinct from the text one", () => {
+    expect(action()).toBeDefined()
+    expect(workspaceActions.find((a) => a.id === "batch-validate")).toBeDefined()
+  })
+
+  // A text-only project must not grow a menu item it can do nothing with.
+  it("hides itself when the file has no take this user could validate", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 0 } }))).toBe(false)
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 3, unsynthesized: 2 } }))).toBe(false)
+  })
+
+  it("appears once there is something to sign off", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 } }))).toBe(true)
+  })
+
+  // Reviewer floor, same as the text action — and the same as the server's.
+  it("stays hidden below the reviewer floor", () => {
+    const counts = { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 }
+    expect(action().isAvailable(withRole(ROLE.COMMENTER, { audioCounts: counts }))).toBe(false)
+    expect(action().isAvailable(withRole(ROLE.REVIEWER, { audioCounts: counts }))).toBe(true)
+  })
+
+  it("runs its own handler, never the text one", () => {
+    const runBatchValidate = vi.fn()
+    const runBatchValidateAudio = vi.fn()
+    action().run(withRole(600), { runBatchValidate, runBatchValidateAudio } as never)
+    expect(runBatchValidateAudio).toHaveBeenCalledTimes(1)
+    expect(runBatchValidate).not.toHaveBeenCalled()
   })
 })

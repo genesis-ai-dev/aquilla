@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { TerminologyTermDetail } from "./TerminologyTermDetail"
 import type { Concept } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
@@ -61,6 +62,56 @@ describe("TerminologyTermDetail", () => {
     renderDetail({ cells: [cell()], onJumpToCell })
     fireEvent.click(screen.getByRole("button", { name: /go to rom 3:24/i }))
     expect(onJumpToCell).toHaveBeenCalledWith({ cellId: "cell-1", fileId: "file-1" })
+  })
+})
+
+// AQU-206 AC3: the verdict is derived on read from the row's current target,
+// so correcting an infringing rendering flips the row without a refetch of the
+// concept itself.
+describe("TerminologyTermDetail verdicts", () => {
+  const FORBIDDEN: Concept = {
+    ...CONCEPT,
+    renderings: [
+      { rendering: "favor", status: "preferred" },
+      { rendering: "gracia barata", status: "forbidden" },
+    ],
+  }
+
+  /** The verdict chip on the occurrence row carrying the source snippet. */
+  const rowVerdict = () => {
+    const row = screen.getByText("by grace alone").closest("li")
+    if (!row) throw new Error("occurrence row not found")
+    return within(row).getByText(/^(enforced|infringed|n\/a)$/i).textContent
+  }
+
+  it("marks an occurrence infringed while it carries a forbidden rendering", () => {
+    renderDetail({
+      concept: FORBIDDEN,
+      cells: [cell({ translated: "por gracia barata" })],
+    })
+    expect(rowVerdict()).toBe("infringed")
+  })
+
+  it("re-derives the verdict when the target is corrected", () => {
+    const { rerender } = renderDetail({
+      concept: FORBIDDEN,
+      cells: [cell({ translated: "por gracia barata" })],
+    })
+    expect(rowVerdict()).toBe("infringed")
+
+    rerender(
+      <TerminologyTermDetail
+        concept={FORBIDDEN}
+        cells={[cell({ translated: "por favor solo" })]}
+        canEdit
+        projectId="p1"
+        username="tester"
+        onClose={vi.fn()}
+        onCellCommitted={vi.fn()}
+        onOptimisticEdit={vi.fn()}
+      />,
+    )
+    expect(rowVerdict()).toBe("enforced")
   })
 })
 
@@ -147,5 +198,60 @@ describe("TerminologyTermDetail — editable renderings", () => {
     // The renderings themselves are still shown (in the chip row, and again
     // in the EquivalentsPanel's managed list — hence getAllByText).
     expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
+  })
+})
+
+// ── AQU-1271: source forms and matching options ─────────────────────────────
+//
+// A term's source side is not one string: "הָאָרֶץ" shows up prefixed, pointed
+// differently, or not at all. The term page is where a translator sees which
+// surface forms their term actually hit and prunes the wrong ones — so both
+// edits below must travel the same `term.update` path the renderings do.
+describe("TerminologyTermDetail — forms and matching", () => {
+  function makeConcept(over: Partial<Concept> = {}): Concept {
+    return { ...CONCEPT, ...over }
+  }
+
+  // WHY: excluding a form from the term page must persist through term.update
+  // with the FULL match object (the projection replaces it wholesale), and the
+  // occurrence count must drop immediately.
+  it("Forms section lists surface forms and excluding one emits the full match object", async () => {
+    const user = userEvent.setup()
+    const onMatchChange = vi.fn()
+    const concept = makeConcept({ sourceTerm: "הָאָ֗רֶץ", match: { foldMarks: true } })
+    const cells = [
+      cell({ id: "a", original: "וְהָאָ֗רֶץ הָיְתָה" }),
+      cell({ id: "b", original: "אֵת הָאָֽרֶץ׃" }),
+    ]
+    renderDetail({
+      concept,
+      cells,
+      termMatching: { prefixes: ["ו"], suffixes: [] },
+      canManageTermbase: true,
+      onMatchChange,
+    })
+    expect(screen.getByText("2")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Exclude וְהָאָ֗רֶץ/ }))
+    expect(onMatchChange).toHaveBeenCalledWith(concept.id, {
+      foldMarks: true,
+      excludedForms: ["וְהָאָ֗רֶץ"],
+    })
+  })
+
+  // WHY: manual variants are the escape hatch; adding one must go through the
+  // same term.update path.
+  it("Add form appends to match.forms", async () => {
+    const user = userEvent.setup()
+    const onMatchChange = vi.fn()
+    const concept = makeConcept({ sourceTerm: "אֶרֶץ" })
+    renderDetail({ concept, cells: [], canManageTermbase: true, onMatchChange })
+    await user.type(screen.getByPlaceholderText(/Another spelling/), "אָרֶץ{enter}")
+    expect(onMatchChange).toHaveBeenCalledWith(concept.id, { forms: ["אָרֶץ"] })
+  })
+
+  // WHY: read-only users must not be offered a write the server would refuse.
+  it("hides the form editors without termbase permission", () => {
+    renderDetail({ canManageTermbase: false, onMatchChange: vi.fn() })
+    expect(screen.queryByPlaceholderText(/Another spelling/)).not.toBeInTheDocument()
   })
 })

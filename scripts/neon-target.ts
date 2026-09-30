@@ -4,9 +4,12 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
+import { childArgs, type NeonTargetCommand } from "./neon-target-args"
 
-type Target = "production" | "dev"
-type Command = "status" | "apply" | "baseline" | "backfill-progress" | "backfill-activity"
+type RemoteTarget = "production" | "dev"
+type Target = RemoteTarget | "local"
+// One union, owned by neon-target-args.ts, so the two files cannot drift apart.
+type Command = NeonTargetCommand
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
@@ -17,15 +20,18 @@ const TARGET_ALIASES: Record<string, Target> = {
   production: "production",
   dev: "dev",
   development: "dev",
+  local: "local",
 }
-const TARGET_BRANCH_DEFAULTS: Record<Target, string> = {
+const TARGET_BRANCH_DEFAULTS: Record<RemoteTarget, string> = {
   production: "production",
   dev: "dev",
 }
-const TARGET_ENV_NAMES: Record<Target, string[]> = {
+const TARGET_ENV_NAMES: Record<RemoteTarget, string[]> = {
   production: ["PRODUCTION", "PROD"],
   dev: ["DEV", "DEVELOPMENT"],
 }
+// Same default and overrides as scripts/dev-stack.ts.
+const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
 
 const DEFAULTS: Partial<Record<PgKey, string>> = {
   DB: "neondb",
@@ -34,7 +40,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress|backfill-activity>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|verify-lanes>")
   process.exit(1)
 }
 
@@ -46,7 +52,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "verify-lanes") return value
   usage()
 }
 
@@ -59,13 +65,13 @@ function loadDotEnv(): void {
   }
 }
 
-function candidates(target: Target, key: PgKey): string[] {
+function candidates(target: RemoteTarget, key: PgKey): string[] {
   if (target === "production") return [`NEON_PG_${key}`]
   const upper = target.toUpperCase()
   return [`NEON_${upper}_PG_${key}`, `NEON_PG_${upper}_${key}`]
 }
 
-function envCandidates(target: Target, suffix: string): string[] {
+function envCandidates(target: RemoteTarget, suffix: string): string[] {
   return TARGET_ENV_NAMES[target].map((name) => `NEON_${name}_${suffix}`)
 }
 
@@ -77,7 +83,7 @@ function firstEnv(names: string[]): string | null {
   return null
 }
 
-function resolveValue(target: Target, key: PgKey): string {
+function resolveValue(target: RemoteTarget, key: PgKey): string {
   const value = firstEnv(candidates(target, key))
   if (value) return value
   const fallback = DEFAULTS[key]
@@ -85,7 +91,7 @@ function resolveValue(target: Target, key: PgKey): string {
   throw new Error(`${candidates(target, key).join(" or ")} is required for Neon ${target}`)
 }
 
-function staticPgEnv(target: Target): NodeJS.ProcessEnv | null {
+function staticPgEnv(target: RemoteTarget): NodeJS.ProcessEnv | null {
   const host = firstEnv(candidates(target, "HOST"))
   const password = firstEnv(candidates(target, "PASSWORD"))
   if (!host && !password) return null
@@ -175,7 +181,7 @@ async function runCapture(command: string, args: string[]): Promise<string> {
   })
 }
 
-async function branchPgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
+async function branchPgEnv(target: RemoteTarget): Promise<NodeJS.ProcessEnv> {
   const projectId = requiredEnv("NEON_PROJECT_ID", DEFAULT_PROJECT_ID)
   const branch = firstEnv(envCandidates(target, "BRANCH")) ?? TARGET_BRANCH_DEFAULTS[target]
   const database = firstEnv(envCandidates(target, "DATABASE")) ?? DEFAULTS.DB!
@@ -197,6 +203,15 @@ async function branchPgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
 }
 
 async function resolvePgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
+  if (target === "local") {
+    const url =
+      process.env.WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE?.trim() ||
+      process.env.LOCAL_PG_URL?.trim() ||
+      DEFAULT_LOCAL_PG_URL
+    // AQUILLA_LOCAL_PG_URL switches scripts/pg.ts to a no-SSL client;
+    // AQUILLA_DATABASE_URL is what the backfill scripts read.
+    return { ...process.env, AQUILLA_LOCAL_PG_URL: url, AQUILLA_DATABASE_URL: url }
+  }
   if (process.env.GITHUB_ACTIONS === "true" && process.env.NEON_API_KEY?.trim()) {
     return branchPgEnv(target)
   }
@@ -223,13 +238,12 @@ async function main() {
   const command = parseCommand(process.argv[3])
   const env = await resolvePgEnv(target)
 
-  console.log(`neon-target ${target} ${command} -> ${env.NEON_PG_HOST}`)
-  const script = command === "backfill-progress"
-    ? "scripts/neon-backfill-progress.ts"
-    : command === "backfill-activity"
-      ? "scripts/neon-backfill-activity.ts"
-      : "scripts/neon-migrate.ts"
-  const args = command.startsWith("backfill-") ? [script] : [script, command]
+  // Everything after the command reaches a backfill or verify script as its
+  // own flags (`--missing-books`, `--apply`, `--require-complete`). See
+  // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
+  const passthrough = process.argv.slice(4)
+  const args = childArgs(command, passthrough)
+  console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))
 }
 

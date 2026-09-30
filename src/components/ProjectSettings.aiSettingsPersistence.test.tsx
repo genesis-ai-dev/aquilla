@@ -17,6 +17,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { pickSelectOption as selectOption } from "@/test-utils/select"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
@@ -143,16 +144,11 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   }),
 }))
 
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Under happy-dom, hover-highlighting the option and pressing Enter
-// commits the selection (see AssignModal.test.tsx for the same pattern).
+// The shared helper drives the pointer sequence Base UI requires to commit a
+// choice (see src/test-utils/select.tsx); here we additionally hold it to
+// rendering the chosen label on the trigger.
 async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  const trigger = await selectOption(triggerName, optionName)
   await waitFor(() => {
     expect(trigger.textContent).toMatch(optionName)
   })

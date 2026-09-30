@@ -27,7 +27,7 @@ import type {
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
 
 interface Props {
   cellId: string
@@ -151,7 +151,7 @@ export function CellTtsButton({
   const baseVoice = resolveCastVoice(projectTtsSettings, voiceCellId ?? cellId, cellTtsSettings?.voiceId)
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
-  const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
+  const modelStatus = useModelStatus("mms")
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -301,13 +301,13 @@ export function CellTtsButton({
                 description: t("audio.tts.siblingFailedDetail"),
               })
             }
-          } else if (provider === "omnivoice") {
-            // OmniVoice has no client-side synth — there's nothing to preview
+          } else if (isServerTtsProvider(provider)) {
+            // Inworld has no client-side synth — there's nothing to preview
             // until the cell has durably-generated audio. Guide the user
             // instead of surfacing the internal server-only guard error.
             setTtsStatus(statusKey, {
               kind: "error",
-              message: "Generate audio on this line first to hear OmniVoice.",
+              message: "Generate audio on this line first to hear Inworld TTS.",
             })
             return
           } else {
@@ -373,7 +373,7 @@ export function CellTtsButton({
   // instead of vanishing — a disappearing control read as a bug in QA.
   const noText = !trimmed
 
-  const isLocalModel = provider === "mms" || provider === "kokoro"
+  const isLocalModel = provider === "mms"
   const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
   const isLoadingModel = status.kind === "loading" || downloadingModel
   const isSynthesizing = status.kind === "synthesizing"

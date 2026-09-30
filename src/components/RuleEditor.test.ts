@@ -4,7 +4,7 @@
  * No React render required — pure logic tests.
  */
 import { describe, it, expect } from "vitest"
-import { escapeRegex, validateRegex } from "./RuleEditor"
+import { escapeRegex, validateRegex, sidesForMode } from "./RuleEditor"
 
 describe("escapeRegex", () => {
   it("escapes special regex characters", () => {
@@ -44,6 +44,38 @@ describe("validateRegex", () => {
   it("returns error for unbalanced group", () => {
     const err = validateRegex("(abc")
     expect(err).not.toBeNull()
+  })
+
+  // AQU-195 regression: an autofix is stored as pattern + flags, so a bad flag
+  // string has to be caught here too — it throws from `new RegExp` just like a
+  // bad pattern does, but only when the flags are passed in.
+  it("returns null for a valid pattern with valid flags", () => {
+    expect(validateRegex("\\d+", "gi")).toBeNull()
+    expect(validateRegex("\\d+", "")).toBeNull()
+  })
+
+  it("returns an error for valid patterns with invalid flags", () => {
+    expect(validateRegex("\\d+", "gg")).not.toBeNull()
+    expect(validateRegex("\\d+", "gx")).not.toBeNull()
+  })
+
+  it("still reports nothing for an empty pattern regardless of flags", () => {
+    expect(validateRegex("", "gg")).toBeNull()
+  })
+})
+
+// AQU-195 regression: the RuleCheck union has no source-side prohibition, so
+// only `match` genuinely spans both sides. Offering "source" for the other two
+// modes produced a rule that could never be built (`buildCheck` → null) and a
+// Save that failed with a misleading "Pattern is required".
+describe("sidesForMode", () => {
+  it("allows both sides only for the match mode", () => {
+    expect(sidesForMode("match")).toEqual(["source", "target"])
+  })
+
+  it("restricts forbidden and required to the target", () => {
+    expect(sidesForMode("forbidden")).toEqual(["target"])
+    expect(sidesForMode("required")).toEqual(["target"])
   })
 })
 

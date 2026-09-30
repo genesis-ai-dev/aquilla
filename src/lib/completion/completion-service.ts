@@ -3,7 +3,9 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
+import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
 // instead of re-deriving them server-side. This module keeps everything that
@@ -13,10 +15,14 @@ import {
   buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
+  buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
+  retainTranslationPairs,
   selectApprovedExamples,
   type ChatMessage,
+  type PrecedingContextEntry,
   type ValidatedPair,
 } from "./prompt-build"
 
@@ -24,11 +30,14 @@ export {
   buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
+  buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
+  retainTranslationPairs,
   selectApprovedExamples,
 }
-export type { ChatMessage, PromptRule, ValidatedPair } from "./prompt-build"
+export type { ChatMessage, PrecedingContextEntry, PromptRule, ValidatedPair } from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -265,6 +274,9 @@ export function buildBatchPrompt(options: {
   examples: PassageExample[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the batch (AQU-934) — the union
+   *  of what applies to its cells, since the batch shares one system prompt. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -273,8 +285,9 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
-  /** Approved bilingual pairs immediately preceding the first live cell. */
-  precedingContext?: { source: string; target: string }[]
+  /** Bilingual pairs immediately preceding the first live cell. Approved
+   *  targets, plus (AQU-1386) this run's own earlier drafts marked `draft`. */
+  precedingContext?: PrecedingContextEntry[]
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -286,6 +299,8 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -296,7 +311,7 @@ export function buildBatchPrompt(options: {
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   let user = ""
   // Validated pairs from the project's living memory come first — they are
@@ -327,10 +342,10 @@ export function buildBatchPrompt(options: {
   // single-cell and paragraph recipes.
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
-  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
+  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${stripTrailingBareMarkers(c.source)}</v${i + 1}>`).join("\n")
   user += `Source:\n${liveSource}\n\nTranslation:\n`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -379,6 +394,8 @@ export function buildParagraphPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** Active project rules injected into the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the paragraph group (AQU-934). */
+  styleInstructions?: string[]
   /** Project brief L1 summary. */
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
@@ -410,6 +427,8 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {
@@ -438,16 +457,16 @@ export function buildParagraphPrompt(options: {
     )
     if (pairs.length) {
       if (targetOnly) {
-        user += pairs.map((p) => `Target: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Target: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       } else {
-        user += pairs.map((p) => `Source: ${p.source}\nTranslation: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Source: ${stripTrailingBareMarkers(p.source)}\nTranslation: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       }
     }
   }
 
   // Retrieved passage examples.
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   for (const ex of options.examples) {
     const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
@@ -466,12 +485,12 @@ export function buildParagraphPrompt(options: {
   if (options.precedingContext?.length) {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
-        user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\nTranslation: ${stripTrailingBareMarkers(ctx.target)}\n\n`
       } else if (ctx.source.trim()) {
         // D4 source-fallback: no committed target yet — surface the preceding
         // source as discourse context WITHOUT a Source/Translation pair the model
         // could mimic by echoing a blank "translation".
-        user += `Preceding (source, not yet translated): ${ctx.source}\n\n`
+        user += `Preceding (source, not yet translated): ${stripTrailingBareMarkers(ctx.source)}\n\n`
       }
     }
   }
@@ -483,7 +502,7 @@ export function buildParagraphPrompt(options: {
       // Encode as a context block so the model sees what comes next without
       // being asked to translate it (it will translate the live paragraph).
       user += `Following context (source only — do not translate this block):\n`
-      user += followingSrc.map((f) => f.source).join("\n") + "\n\n"
+      user += followingSrc.map((f) => stripTrailingBareMarkers(f.source)).join("\n") + "\n\n"
     }
   }
 
@@ -497,8 +516,8 @@ export function buildParagraphPrompt(options: {
   // excludes it, so it's discarded as `extra` (D11) — unchanged.
   const liveSource = options.cells
     .map((c) => (c.lockedTarget !== undefined
-      ? `${c.source} [already translated — do not output: ${c.lockedTarget}]`
-      : `<c id="${c.cellId}">${c.source}</c>`))
+      ? `${stripTrailingBareMarkers(c.source)} [already translated — do not output: ${c.lockedTarget}]`
+      : `<c id="${c.cellId}">${stripTrailingBareMarkers(c.source)}</c>`))
     .join("\n")
   user += `Source paragraph:\n${liveSource}\n\nTranslation paragraph:\n`
 
@@ -561,6 +580,16 @@ export interface CompleteOptions {
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
+  // Offline in the Tauri desktop app: route straight to the local LLM proxy
+  // regardless of the configured provider — there is no reachable Frontier or
+  // custom endpoint to fall back to. No streaming, no AB assignment, no
+  // per-project spend attribution; none of that applies to a local model.
+  if (await shouldUseLocalLlm()) {
+    const text = await completeWithLocalLlm(options.messages, { signal: options.signal })
+    options.onChunk?.(text)
+    return stripTrailingBareMarkers(text)
+  }
+
   const effectiveSettings = resolveEffectiveCompletionSettings(
     options.settings,
     getUserProviderOverride(),
@@ -643,7 +672,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
     }
 
     const data = await res.json()
-    return data.choices[0]?.message?.content?.trim() || ""
+    return stripTrailingBareMarkers(data.choices[0]?.message?.content?.trim() || "")
   } catch (error) {
     if (request.didTimeout()) {
       throw new Error(t("rules.completion.requestTimedOut"))
@@ -750,10 +779,10 @@ async function consumeStream(
     while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIdx).replace(/\r$/, "")
       buffer = buffer.slice(newlineIdx + 1)
-      if (processLine(line) === "done") return full.trim()
+      if (processLine(line) === "done") return stripTrailingBareMarkers(full.trim())
     }
   }
-  return full.trim()
+  return stripTrailingBareMarkers(full.trim())
 }
 
 async function buildRequestTarget(

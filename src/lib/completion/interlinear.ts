@@ -37,6 +37,8 @@
  * ```
  */
 
+import { tokenize } from "./tokenize"
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Pair count below this threshold → Dice cold-start; at or above → EM. */
@@ -140,12 +142,16 @@ export interface AlignmentModel {
 
 // ── Tokenization ──────────────────────────────────────────────────────────────
 
-const TOKEN_RE = /[\p{L}\p{N}]+/gu
-
-/** Split a string into lowercase Unicode tokens. */
-function tokenize(s: string): string[] {
-  return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
-}
+/**
+ * The tokenizer `alignCell` uses, re-exported so the panel can synthesize a row
+ * for a decided (srcToken, tgtToken) pair on the same token boundaries that
+ * produced the link in the first place (AQU-207).
+ *
+ * The rule — combining marks belong inside a word — and why it matters live in
+ * `./tokenize`, which `bt-glosser.ts` shares so the gloss cannot tokenize
+ * differently from the alignment it is read against (AQU-462, AQU-1190).
+ */
+export { tokenize }
 
 // ── Dice cold-start ───────────────────────────────────────────────────────────
 

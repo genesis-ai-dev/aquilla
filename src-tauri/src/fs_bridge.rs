@@ -103,3 +103,29 @@ fn map_io(e: &std::io::Error) -> String {
     };
     format!("{code}: {e}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn map_io_translates_known_kinds_to_posix_codes() {
+        assert!(map_io(&Error::new(ErrorKind::NotFound, "x")).starts_with("ENOENT: "));
+        assert!(map_io(&Error::new(ErrorKind::PermissionDenied, "x")).starts_with("EACCES: "));
+        assert!(map_io(&Error::new(ErrorKind::AlreadyExists, "x")).starts_with("EEXIST: "));
+        assert!(map_io(&Error::new(ErrorKind::InvalidInput, "x")).starts_with("EINVAL: "));
+        assert!(map_io(&Error::new(ErrorKind::InvalidData, "x")).starts_with("EINVAL: "));
+    }
+
+    #[test]
+    fn map_io_falls_back_to_eio_for_unmapped_kinds() {
+        assert!(map_io(&Error::new(ErrorKind::Other, "boom")).starts_with("EIO: "));
+    }
+
+    #[test]
+    fn map_io_includes_the_underlying_message() {
+        let msg = map_io(&Error::new(ErrorKind::NotFound, "no such file"));
+        assert!(msg.contains("no such file"), "expected message in {msg:?}");
+    }
+}

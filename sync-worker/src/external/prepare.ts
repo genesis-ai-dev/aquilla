@@ -8,6 +8,7 @@
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
+  commandsContainAssignmentEvents,
   validateCommands,
   isStructureCommandKind,
   laneCellKey,
@@ -23,6 +24,7 @@ import {
   type PatchSettingsCommand,
   type PlanImportCommand,
   type ProjectLifecycleCommand,
+  type RegenerateBriefSummaryCommand,
   type RenameFileCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
@@ -40,7 +42,17 @@ import {
 } from './commands-membership'
 import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
 import { renameFileToEmitEvents } from './commands-rename-file'
+import {
+  isVisibilityCommand,
+  requestedHidden,
+  visibilityToEmitEvents,
+  VISIBILITY_MAX_COMMANDS,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 import { prepareSetBrief } from './commands-set-brief'
+import { prepareProjectSetup } from './prepare-project-setup'
+import type { ProjectSetupCommand } from './commands-project-setup'
+import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
@@ -49,18 +61,37 @@ import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
-import { assertCredentialScope } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import type { ProjectLaneRecord } from '../../../db/shared/lanes'
+import {
+  archivedLaneReason,
+  archivedTagsFromSettings,
+  type ArchiveLaneRow,
+} from '../../../src/lib/lanes/archived-lane'
+import { echoableLaneLabels, visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
+import { resolveAssignmentAuthority } from '../events/assignment-authority'
 
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
 export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
+
+function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
+  return lanes
+    .filter((lane) => lane.role === 'target')
+    .map((lane) => ({
+      id: lane.id,
+      name: lane.name,
+      legacyTag: lane.legacyTag,
+      archivedAt: lane.archivedAt,
+    }))
+}
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -137,6 +168,18 @@ export async function prepareChangesetCore(
   projectId: string,
   raw: Record<string, unknown>,
 ): Promise<Response> {
+  // AQU-1242: a read-only credential cannot stage anything. Checked FIRST —
+  // ahead of command validation and every scope/role gate — because a plan this
+  // token could never commit is pure waste, and the refusal should name the
+  // reason rather than arriving later as a puzzling commit failure. Applies to
+  // every prepare path (PAT, MCP, parse-and-stage); the session principal is
+  // always 'write', so the in-app surface is untouched.
+  try {
+    assertCredentialMayWrite(cred, 'stage a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   // Validate the batch BEFORE the project-existence scope check: a
   // receipt-only CreateProject (W2-A) files its changeset under a
   // not-yet-existing project id and so takes its own path that must skip
@@ -277,6 +320,32 @@ export async function prepareChangesetCore(
     return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
   }
 
+  // RegenerateBriefSummary (AQU-1282): sole command, same settings-blob
+  // version pin as SetBrief; the render itself happens at commit.
+  const regenBrief = validated.commands.find(
+    (c): c is RegenerateBriefSummaryCommand => c.kind === 'RegenerateBriefSummary',
+  )
+  if (regenBrief) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'RegenerateBriefSummary must be the only command in a changeset')
+    }
+    return prepareRegenerateBriefSummary(db, cred, projectId, id, autonomyMode, regenBrief, env)
+  }
+
+  // AQU-1294 ProjectSetup: the composite setup plan. Sole command and FORCED
+  // ask-mode; its module owns the effective floor (the max of the blocks it
+  // carries), every named-field rejection, and the step ledger — so like the
+  // settings commands it skips the generic role gate below.
+  const projectSetup = validated.commands.find(
+    (c): c is ProjectSetupCommand => c.kind === 'ProjectSetup',
+  )
+  if (projectSetup) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ProjectSetup must be the only command in a changeset')
+    }
+    return prepareProjectSetup(db, cred, projectId, id, projectSetup, env)
+  }
+
   // AQU-1228 Living Memory writes: sole command; receipt-only like
   // PatchSettings, with its own floors (propose vs. review tier) and the
   // human-edited guard, so it also skips the generic role gate below.
@@ -298,15 +367,20 @@ export async function prepareChangesetCore(
   // added/modified counts). Require the role FLOOR of the command kind being
   // staged — the same floor its commit hits at the /events perimeter, so a plan
   // the caller could never commit is denied here rather than leaked.
-  const requiredRole = Math.max(...validated.commands.map(requiredRoleForCommand))
+  const assignmentMinRole = commandsContainAssignmentEvents(validated.commands)
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : undefined
+  const requiredRole = Math.max(
+    ...validated.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+  )
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
 
   // EmitEvents (AQU-926 §2): sole command (one command already batches many
-  // events). The static max-floor gate just ran; its engine adds the dynamic
-  // maintainer bumps + live existence/pin resolution.
+  // events). The max-floor gate just ran, including the dynamic org assignment
+  // floor; its engine adds maintainer bumps + live existence/pin resolution.
   const emitEvents = validated.commands.find(
     (c): c is EmitEventsCommand => c.kind === 'EmitEvents',
   )
@@ -387,6 +461,95 @@ export async function prepareChangesetCore(
     )
   }
 
+  // HideCell / ShowCell (AQU-1426): sugar over EmitEvents, like RenameFile.
+  // Desugared AFTER its own live-state preconditions, because the EmitEvents
+  // engine collects cell references only for the kinds it knows — it would stage
+  // a hide of a cell that does not exist without a word. The role gate above
+  // already enforced the PROJECT_LEAD floor (requiredRoleForCommand returns
+  // `source.cell.visibility.set`'s own perimeter floor verbatim), so a plan the
+  // caller could never commit is refused rather than staged.
+  const visibility: VisibilityCommand[] = validated.commands.filter(isVisibilityCommand)
+  if (visibility.length > 0) {
+    if (visibility.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    if (visibility.length > VISIBILITY_MAX_COMMANDS) {
+      return errorResponse(
+        'validation_failed',
+        `too many HideCell/ShowCell commands in one changeset (max ${VISIBILITY_MAX_COMMANDS})`,
+      )
+    }
+    // One DIRECTION per changeset. Not a technical limit — the approval page
+    // groups its effect lines by event kind, and hide and show are one kind, so
+    // a mixed plan would render as a single sentence that is a lie in one
+    // direction. "Park these" and "bring these back" are also two different
+    // decisions to ask a human to consent to.
+    const wantHidden = requestedHidden(visibility[0])
+    const mixed = visibility.find((c) => requestedHidden(c) !== wantHidden)
+    if (mixed) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot share one changeset — stage the hides and the shows as two plans',
+      )
+    }
+    // A cell named twice in one plan is a caller mistake, not a batch: the
+    // second command is a no-op the approver cannot see, and the "already in
+    // that state" check below would not catch it (both are checked against the
+    // same live row).
+    const seen = new Set<string>()
+    for (const c of visibility) {
+      const key = laneCellKey(c.fileId, c.cellId)
+      if (seen.has(key)) {
+        return errorResponse(
+          'validation_failed',
+          `${c.kind} names cell ${c.cellId} in file ${c.fileId} twice — one entry per cell`,
+        )
+      }
+      seen.add(key)
+    }
+    const visibilityStates = await resolveCellStates(
+      db,
+      projectId,
+      visibility.map((c) => ({ fileId: c.fileId, cellId: c.cellId })),
+    )
+    for (const c of visibility) {
+      const state = visibilityStates.get(laneCellKey(c.fileId, c.cellId))
+      if (!state?.sourceExists) {
+        return errorResponse(
+          'validation_failed',
+          `cell ${c.cellId} does not exist in file ${c.fileId}`,
+        )
+      }
+      // Refusing the no-op is the point: an agent that believes it hid a cell it
+      // had already hidden has lost track of the file, and staging a plan whose
+      // whole effect is nothing wastes a human's approval. Commit does NOT
+      // re-check this — the compiled event SETS a flag rather than toggling one,
+      // so a human hiding the same cell in between leaves commit landing exactly
+      // the state that was approved (idempotent), not a stale plan.
+      if (state.sourceHidden === requestedHidden(c)) {
+        return errorResponse(
+          'validation_failed',
+          requestedHidden(c)
+            ? `cell ${c.cellId} in file ${c.fileId} is already hidden`
+            : `cell ${c.cellId} in file ${c.fileId} is not hidden`,
+        )
+      }
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      visibilityToEmitEvents(visibility),
+      env,
+      resolvedRole.level,
+    )
+  }
+
   // Cell-structure commands (AQU-1234): sole command per changeset. A
   // structural edit is one indivisible rewrite of a file's anchor chain — two
   // of them in one plan could name each other's cells and would have to be
@@ -418,7 +581,16 @@ export async function prepareChangesetCore(
         'PlanImport must be the only command in a changeset',
       )
     }
-    return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+    return preparePlanImport(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      planImports[0],
+      env,
+      resolvedRole.level,
+    )
   }
 
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
@@ -454,13 +626,43 @@ export async function prepareChangesetCore(
         ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
         : [],
     )
+    const archivedRows = archiveRows(projectSettings.lanes ?? [])
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      resolvedRole.level,
+    )
     for (const [index, c] of setCommands.entries()) {
       if (c.laneId && !registeredLanes.has(c.laneId)) {
+        const echoable = await echoableLaneLabels(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          resolvedRole.level,
+        )
+        const listedLanes = echoable === null
+          ? [...registeredLanes]
+          : [...registeredLanes].filter((lane) => echoable.has(lane))
         return errorResponse(
           'validation_failed',
           `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
-          { registeredLanes: [...registeredLanes] },
+          { registeredLanes: listedLanes },
         )
+      }
+      if (c.laneId) {
+        const archived = archivedLaneReason({
+          tag: c.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
+        if (archived) {
+          return errorResponse('validation_failed', `commands[${index}] ${archived}`)
+        }
       }
     }
   }
@@ -572,6 +774,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+    ...(cmd.laneId !== undefined ? { laneId: cmd.laneId } : {}),
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -612,6 +815,7 @@ async function preparePlanImport(
   autonomyMode: 'ask' | 'act',
   cmd: PlanImportCommand,
   env: ExternalEnv,
+  callerRoleLevel: number,
 ): Promise<Response> {
   if (cmd.cells.length === 0) {
     return errorResponse('validation_failed', 'PlanImport.cells must be non-empty')
@@ -693,6 +897,20 @@ async function preparePlanImport(
       ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
       : [],
   )
+  const archivedRows = archiveRows(projectSettings.lanes ?? [])
+  const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+  const namesALane = cmd.cells.some((cell) => (cell.variants ?? []).some((variant) => variant.laneId))
+  const visibleLaneIds = namesALane
+    ? (
+        await visibleTagsForMember(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          callerRoleLevel,
+        )
+      ).visible
+    : null
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       if (variant.laneId && !registeredLanes.has(variant.laneId)) {
@@ -700,6 +918,20 @@ async function preparePlanImport(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
         )
+      }
+      if (variant.laneId) {
+        const archived = archivedLaneReason({
+          tag: variant.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
+        if (archived) {
+          return errorResponse(
+            'validation_failed',
+            `PlanImport.cells[${cellIndex}].variants[${variantIndex}] ${archived}`,
+          )
+        }
       }
       const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
       if (variant.languageTag && variant.languageTag !== effectiveLanguage) {

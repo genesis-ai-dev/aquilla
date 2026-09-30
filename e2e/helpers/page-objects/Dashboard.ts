@@ -55,10 +55,8 @@ export class Dashboard {
     // while /i tolerates label casing ("Project title" vs "Project Title").
     await dialog.getByLabel(/^Project title$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
-    // Self-contained projects support extra target-language lanes and label
-    // the primary field "Target language(s)"; linked-target projects retain
-    // the singular label. Accept both accessible names.
-    await dialog.getByLabel(/^Target language(?:\(s\))?$/i).fill(target)
+    // Create-dialog target field is always "Target Language(s)".
+    await dialog.getByLabel(/^Target Language\(s\)$/i).fill(target)
     const createResponse = this.page.waitForResponse((response) => {
       const request = response.request()
       if (request.method() !== "POST" || !response.ok()) return false

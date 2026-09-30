@@ -7,6 +7,15 @@ import { TeamDetail } from "./TeamDetail"
 import { UserError } from "@/lib/errors/user-error"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
 const listOrgMembers = vi.fn()
@@ -30,7 +39,9 @@ vi.mock("@/lib/frontier/teams", () => ({
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
   projectsResultError: vi.fn(() => new Error("project load failed")),
 }))

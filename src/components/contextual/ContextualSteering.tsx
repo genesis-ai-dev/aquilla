@@ -7,6 +7,12 @@
 // is deliberately no per-chip dismiss: queued directions have no client-visible
 // identity in v1.
 //
+// AQU-1299: a short imperative ("stop", "pause", "@Coordinator halt") is NOT a
+// direction — it controls the run, routing to the same server commands the
+// Pause/Stop buttons use. The classifier below is the same module the server
+// runs, so the optimistic feedback here can never disagree with what the server
+// actually did; the response is still what we report.
+//
 // All strings are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useState } from "react"
@@ -22,6 +28,7 @@ import {
 import { ContextualAuthError, sendContextualSteering } from "@/lib/contextual/transport"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { classifyRunCommandIntent } from "../../../shared/run-command-intent"
 
 /** UI cap — well under the server's hard limit on a steering entry. */
 export const MAX_DIRECTION_LENGTH = 2000
@@ -41,16 +48,22 @@ export function ContextualSteering({ projectId, fileId, runId, targetLang = "", 
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<"auth" | "failed" | null>(null)
+  const [commandResult, setCommandResult] = useState<
+    { command: "pause" | "stop"; applied: boolean } | null
+  >(null)
 
   const trimmed = text.trim()
   const canSend = trimmed.length > 0 && !sending
+  // Drives the send label only — the server's answer is what we report.
+  const pendingIntent = classifyRunCommandIntent(trimmed)
 
   const handleSend = async () => {
     if (!canSend) return
     setSending(true)
     setSendError(null)
+    setCommandResult(null)
     try {
-      await sendContextualSteering(runId, trimmed)
+      const result = await sendContextualSteering(runId, trimmed)
       const current = getContextualRunState()
       if (
         current.projectId !== projectId ||
@@ -62,10 +75,16 @@ export function ContextualSteering({ projectId, fileId, runId, targetLang = "", 
         // reattach the abandoned file into the current editor mirror.
         return
       }
-      // The server accepted the direction — it is queued now; show the chip
-      // immediately and let the snapshot refresh reconcile.
-      noteContextualDirectionQueued(trimmed)
       setText("")
+      if (result.intent !== "direction") {
+        // A run command, not steering: never show a queued-direction chip for
+        // it. The refresh below is what surfaces the new run status.
+        setCommandResult({ command: result.intent, applied: result.applied })
+      } else {
+        // The server accepted the direction — it is queued now; show the chip
+        // immediately and let the snapshot refresh reconcile.
+        noteContextualDirectionQueued(trimmed)
+      }
       void attachContextualRun(projectId, fileId, targetLang)
     } catch (error) {
       setSendError(error instanceof ContextualAuthError ? "auth" : "failed")
@@ -107,6 +126,9 @@ export function ContextualSteering({ projectId, fileId, runId, targetLang = "", 
         <p className="text-xs text-muted-foreground">
           {t("autopilot.steering.appliesNext")}
         </p>
+        <p className="text-xs text-muted-foreground">
+          {t("autopilot.steering.commandHint")}
+        </p>
         {directions.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {directions.map((direction, i) => (
@@ -130,6 +152,7 @@ export function ContextualSteering({ projectId, fileId, runId, targetLang = "", 
           onChange={(e) => {
             setText(e.target.value)
             if (sendError) setSendError(null)
+            if (commandResult) setCommandResult(null)
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -146,13 +169,32 @@ export function ContextualSteering({ projectId, fileId, runId, targetLang = "", 
               : t("autopilot.steering.sendFailed")}
           </p>
         )}
+        {commandResult && (
+          <p
+            role="status"
+            data-testid="contextual-steering-command-result"
+            className="text-xs text-muted-foreground"
+          >
+            {!commandResult.applied
+              ? t("autopilot.steering.commandNothingRunning")
+              : commandResult.command === "stop"
+                ? t("autopilot.feedback.stopped")
+                : t("autopilot.feedback.pauseRequested")}
+          </p>
+        )}
         <div className="flex justify-end">
           <Button
             type="button"
             disabled={!canSend}
             onClick={() => void handleSend()}
           >
-            {sending ? t("autopilot.steering.sending") : t("autopilot.steering.send")}
+            {sending
+              ? t("autopilot.steering.sending")
+              : pendingIntent === "stop"
+                ? t("autopilot.steering.sendStop")
+                : pendingIntent === "pause"
+                  ? t("autopilot.steering.sendPause")
+                  : t("autopilot.steering.send")}
           </Button>
         </div>
       </PopoverContent>

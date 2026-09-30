@@ -27,6 +27,10 @@ export interface PlanUnit {
   fileName: string
   fileRole: string | null
   fileKind: string | null
+  /** AQU-1278: the file's sidebar folder, or null. Optional: an older worker sends neither. */
+  corpusMarker?: string | null
+  /** The file's own book code, for a one-book file. */
+  fileBookCode?: string | null
   /** '' for a file-grain unit; a Bible book code for a sub-file one. */
   sectionKey: string
   totalCount: number
@@ -34,6 +38,13 @@ export interface PlanUnit {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /**
+   * AQU-1278: what the two audio counts are out of, when that is not
+   * `totalCount` — a dubbing project's takes hang off a hidden cue sheet with
+   * a cell count of its own. Null (and absent, from a worker that predates
+   * this) means audio shares the text denominator.
+   */
+  audioTotalCount?: number | null
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null

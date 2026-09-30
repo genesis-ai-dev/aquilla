@@ -80,6 +80,48 @@ describe("emitConceptDelta", () => {
     expect(emitTermApprove).not.toHaveBeenCalled()
   })
 
+  // AQU-1271: a form exclusion made on the term page is a `match` edit and
+  // nothing else. Before this branch existed the delta dropped it silently, so
+  // the chip toggled in the UI and came back included after a reload.
+  it("a match-options edit becomes a term.update carrying the whole match object", async () => {
+    await emitConceptDelta({
+      ...base,
+      prev: [concept({})],
+      next: [concept({ match: { excludedForms: ["וְהָאָ֗רֶץ"] } })],
+    })
+    expect(emitTermUpdate).toHaveBeenCalledWith({
+      projectId: "p1",
+      conceptId: "c1",
+      author: "ryder",
+      match: { excludedForms: ["וְהָאָ֗רֶץ"] },
+    })
+  })
+
+  it("clearing every match option sends {} so the projector actually clears it", async () => {
+    await emitConceptDelta({
+      ...base,
+      prev: [concept({ match: { foldMarks: true } })],
+      next: [concept({ match: undefined })],
+    })
+    expect(emitTermUpdate).toHaveBeenCalledWith({
+      projectId: "p1",
+      conceptId: "c1",
+      author: "ryder",
+      match: {},
+    })
+  })
+
+  // `match` is JSONB: the projection can hand back the same options in a
+  // different key order (and forms in a different order). Re-emitting on that
+  // would put a spurious term.update on the wire for every unrelated edit.
+  it("re-ordered match keys and form lists are not a change", async () => {
+    const prev = concept({ match: { foldMarks: true, forms: ["a", "b"], excludedForms: ["x"] } })
+    const next = concept({ match: { excludedForms: ["x"], forms: ["b", "a"], foldMarks: true } })
+    const ids = await emitConceptDelta({ ...base, prev: [prev], next: [next] })
+    expect(ids).toEqual([])
+    expect(emitTermUpdate).not.toHaveBeenCalled()
+  })
+
   it("status changes are lifecycle verbs: approve for → active, reject(deprecate) for → deprecated", async () => {
     await emitConceptDelta({ ...base, prev: [concept({ status: "draft" })], next: [concept({ status: "active" })] })
     expect(emitTermApprove).toHaveBeenCalledWith({ projectId: "p1", conceptId: "c1", author: "ryder" })

@@ -76,6 +76,8 @@ describe('command catalog — invariants', () => {
       ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
       UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
+      RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
@@ -86,6 +88,8 @@ describe('command catalog — invariants', () => {
       InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
       DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
       SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
+      HideCell: { kind: 'HideCell', fileId: 'f', cellId: 'c' },
+      ShowCell: { kind: 'ShowCell', fileId: 'f', cellId: 'c' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -150,6 +154,19 @@ describe('command catalog — invariants', () => {
     expect(entry.paramsDoc).toContain(String(BRIEF_NOTES_MAX_CHARS))
   })
 
+  it('describe_command("RegenerateBriefSummary") names the floor, the pin, and the failure codes (AQU-1282)', () => {
+    const entry = describeCommand('RegenerateBriefSummary')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    expect(entry.agentReachable).toBe(true)
+    for (const needle of ['ifMatchVersion', 'l1Summary', 'nothing to summarize', 'rate_limited', 'briefSummaryChars']) {
+      expect(entry.paramsDoc).toContain(needle)
+    }
+    // SetBrief's doc no longer claims the L1 is merely "carried over".
+    const setBriefDoc = describeCommand('SetBrief')!.paramsDoc
+    expect(setBriefDoc).toContain('RegenerateBriefSummary')
+    expect(setBriefDoc).not.toContain('carried over, not cleared')
+  })
+
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {
     // describe_command is how an agent learns the shape before it stages. An
     // accepted field missing from the doc is how the silent-drop bug got its
@@ -168,7 +185,7 @@ describe('get_capabilities — commands index (§6)', () => {
   it('publishes kind/title/tier/minRoleLevel for every agent-reachable command', async () => {
     const cred = {
       credentialId: 'cred-1', userId: '1', username: 'alice',
-      mode: 'act' as const, orgId: null, projectId: null,
+      mode: 'act' as const, access: 'write' as const, orgId: null, projectId: null,
     }
     const result = await callTool('get_capabilities', {}, { AQUILLA_PG: undefined }, cred, 'tok')
     expect(result).not.toBe(Symbol.for('unknown-tool'))

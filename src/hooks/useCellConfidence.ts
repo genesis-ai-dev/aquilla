@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { CellSummary } from "./useActiveCellStore"
 import { fetchCellConfidence } from "@/lib/sync/cell-confidence-read"
 
@@ -78,29 +78,37 @@ export function useCellConfidence(args: {
   const [topNeighbor, setTopNeighbor] = useState<Map<string, string | null>>(new Map())
   const [lastTookMs, setLastTookMs] = useState<number | null>(null)
 
-  // AQU-646: `status` alone no longer implies "has text" — a line carrying only
-  // a recording now reads as unvalidated rather than empty. Confidence is a
-  // TEXT model, so it needs the text test explicitly or every dubbed-but-
-  // unwritten line would be sent to the scorer with nothing to score.
-  const toQuery = cells
-    .filter((c) => c.status !== "validated" && c.status !== "empty" && Boolean(c.translated?.trim()))
-    .map((c) => c.id)
-    .slice(0, MAX_QUERY_CELLS)
-
-  // Refetch key: file + which cells are validated (ground-truth anchors that
-  // ripple out and shift neighbors' health) + which cells still need a score.
-  const validatedSig = cells
-    .filter((c) => c.status === "validated")
-    .map((c) => c.id)
-    .join(",")
-  const querySet = new Set(toQuery)
-  const contentMap = new Map<string, string>()
-  for (const cell of cells) {
-    if (querySet.has(cell.id)) {
-      contentMap.set(cell.id, `${textFingerprint(cell.original)}:${textFingerprint(cell.translated)}`)
+  // CellStore publishes immutable summary snapshots. Focus, token, and server
+  // response renders can reuse this preparation; edits publish a new snapshot.
+  const { toQuery, validatedSig, contentMap, contentSig } = useMemo(() => {
+    if (!enabled) return {
+      toQuery: [] as string[], validatedSig: "", contentMap: new Map<string, string>(), contentSig: "",
     }
-  }
-  const contentSig = Array.from(contentMap, ([id, fp]) => `${id}:${fp}`).join(",")
+    // AQU-646: `status` alone no longer implies "has text" — a line carrying only
+    // a recording now reads as unvalidated rather than empty. Confidence is a
+    // TEXT model, so it needs the text test explicitly or every dubbed-but-
+    // unwritten line would be sent to the scorer with nothing to score.
+    const toQuery = cells
+      .filter((c) => c.status !== "validated" && c.status !== "empty" && Boolean(c.translated?.trim()))
+      .map((c) => c.id)
+      .slice(0, MAX_QUERY_CELLS)
+
+    // Refetch key: file + which cells are validated (ground-truth anchors that
+    // ripple out and shift neighbors' health) + which cells still need a score.
+    const validatedSig = cells
+      .filter((c) => c.status === "validated")
+      .map((c) => c.id)
+      .join(",")
+    const querySet = new Set(toQuery)
+    const contentMap = new Map<string, string>()
+    for (const cell of cells) {
+      if (querySet.has(cell.id)) {
+        contentMap.set(cell.id, `${textFingerprint(cell.original)}:${textFingerprint(cell.translated)}`)
+      }
+    }
+    const contentSig = Array.from(contentMap, ([id, fp]) => `${id}:${fp}`).join(",")
+    return { toQuery, validatedSig, contentMap, contentSig }
+  }, [cells, enabled])
   const scopeKey = `${projectId}|${fileId}|${perHopDecay ?? ""}`
   const sig = `${scopeKey}|${validatedSig}|${contentSig}`
 

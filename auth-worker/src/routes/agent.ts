@@ -20,6 +20,7 @@ import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../l
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { makeAgentTelemetry } from "../lib/agent/telemetry"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -30,7 +31,7 @@ import { compactConvo, loadSession, saveSession, type StoredMessage } from "../l
 import { executeRead, type ReadArgs } from "../lib/agent/tools/read"
 import { executeExamples, type ExamplesArgs } from "../lib/agent/tools/examples"
 import { executeSearch, type SearchArgs } from "../lib/agent/tools/search"
-import { executeDraft, type DraftArgs } from "../lib/agent/tools/draft"
+import { executeDraft, type DraftArgs, type DraftContext } from "../lib/agent/tools/draft"
 import type { ToolResultData } from "../lib/agent/tools/types"
 import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
@@ -48,6 +49,7 @@ import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled } from "../lib/billing/agent-usage"
 import {
   runCode,
   loadArtifact,
@@ -162,8 +164,8 @@ type AgentFrame =
 // mocks + old transcripts in stored sessions still call it).
 
 const SCOPE_PROPS = {
-  fileId: { type: "string", description: "File id, #f-alias, or :file (the focused file)." },
-  ref: { type: "string", description: 'Scripture scope: "MRK", "MRK 4", or "MRK 4:1-20". Resolves the file by book code when fileId is omitted.' },
+  fileId: { type: "string", description: "File id, #f-alias, :file (the focused file), or the file's name as the user said it (case and small typos tolerated; several matches return the candidates)." },
+  ref: { type: "string", description: 'Book scope: "<BOOK>", "<BOOK> 4", or "<BOOK> 4:1-20", where <BOOK> is a code the project actually contains (read it from a file, never invent one). Resolves the file by book code when fileId is omitted. Omit ref to work through the file in order.' },
 } as const
 
 const AQUIFER_PROPS = {
@@ -479,7 +481,7 @@ const runRequestSchema = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .min(1)
     .max(10),
-  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional() }).optional(),
+  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional(), lane: z.string().max(64).optional() }).optional(),
   translatorProfile: translatorProfileSchema,
   /** AQU-AGENT Wave-2: files the user attached in the composer, already
    *  uploaded as project artifacts (POST /projects/:id/agent-artifacts). The
@@ -564,16 +566,25 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   } catch {
     /* best-effort — degrade to org 0 (no-org) so we still record */
   }
-  const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
-  if (!creditCheck.ok) {
-    return c.json(
-      { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
-      429,
-    )
-  }
-  const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
-  if (!agentWordCheck.ok) {
-    return c.json(wordCapBody(agentWordCheck.reason), 429)
+  // AQU-837 weekly allowance. Enforced usage never funds an unowned project
+  // from org 0, and once it meters a run the legacy guards are retired for it.
+  let usage: AgentUsageMeter | undefined
+  if (agentUsageEnabled(c.env)) {
+    if (!agentUsageAllowed(c.env, c.req.url)) return c.json({ error: "usage_rehearsal_unavailable" }, 503)
+    if (orgId <= 0) return c.json({ error: "forbidden", message: "This project has no billing workspace" }, 403)
+    usage = new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId: body.projectId })
+  } else {
+    const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
+    if (!creditCheck.ok) {
+      return c.json(
+        { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
+        429,
+      )
+    }
+    const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!agentWordCheck.ok) {
+      return c.json(wordCapBody(agentWordCheck.reason), 429)
+    }
   }
 
   // Session-native conversation (v2): load the stored convo — including tool
@@ -613,13 +624,24 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     sessionId: body.sessionId ?? null,
   })
 
+  // Telemetry flush outlives the response: hand it to the Worker so the SSE
+  // stream closes without waiting on PostHog. The test harness has no real
+  // ExecutionContext and the getter throws, so fall back to a bare promise.
+  const waitUntil = (p: Promise<unknown>) => {
+    try {
+      c.executionCtx.waitUntil(p)
+    } catch {
+      void p
+    }
+  }
+
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -694,9 +716,31 @@ interface LoopArgs {
   draftModel: string
   signal: AbortSignal
   send: (frame: AgentFrame) => void
+  /** Weekly-allowance meter; undefined when metering is off. */
+  usage?: AgentUsageMeter
+  /** Keeps the telemetry flush alive past the response. */
+  waitUntil?: (p: Promise<unknown>) => void
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send }: LoopArgs): Promise<void> {
+function parseToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(raw || "{}")
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Telemetry lane: a `targetLang`/`lane` string in the call args wins over the
+ *  project's target language. */
+function pickLane(rawArgs: string, projectTarget: string | undefined): string | undefined {
+  const args = parseToolArgs(rawArgs)
+  if (typeof args.targetLang === "string") return args.targetLang
+  if (typeof args.lane === "string") return args.lane
+  return projectTarget
+}
+
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -710,6 +754,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     roleLevel,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
+    lane: body.context?.lane ?? "",
     aliases,
   }
 
@@ -821,6 +866,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // draft tool's internal model call, and each tool invocation, so the ACU
   // breakdown shows where an agent run's compute actually goes.
   const meter = makeCostMeter(env, env.AQUILLA_PG)
+  // PostHog events (AQU-1467): counts only, one batch POST at the end of the run.
+  const telemetry = makeAgentTelemetry(env, { runId, projectId: body.projectId, userId: user.id, orgId, model })
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
@@ -904,26 +951,53 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // untrusted-content tool (contracts §2).
       untrusted.usedThisTurn = false
 
+      // AQU-837: reserve this turn's bound against the weekly allowance before
+      // the provider sees it. Exhaustion stops the run here; staged work stays.
+      let stepRequestId: string | undefined
+      if (usage) {
+        const admission = await usage.admitStep({ model, promptChars: JSON.stringify({ messages: convo, tools }).length })
+        if (!admission.ok) {
+          if (admission.reason === "exhausted") {
+            status = "capped"
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "weekly_allowance" })
+          } else {
+            status = "error"
+            send({ type: "error", message: admission.reason === "unpriced" ? "model_price_unavailable" : "usage_accounting_unavailable" })
+          }
+          break
+        }
+        stepRequestId = admission.requestId
+      }
       const turnStartedAt = Date.now()
-      const upstream = await fetch(resolveOpenRouterUrl(env), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: convo,
-          tools,
-          stream: true,
-          ...openRouterExtras(env.OPENROUTER_BASE_URL),
-          ...streamUsageOptions(env.OPENROUTER_BASE_URL),
-        }),
-        signal,
-      })
+      const promptChars = JSON.stringify(convo).length
+      let upstream: Response
+      try {
+        upstream = await fetch(resolveOpenRouterUrl(env), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: convo,
+            tools,
+            stream: true,
+            ...openRouterExtras(env.OPENROUTER_BASE_URL),
+            ...streamUsageOptions(env.OPENROUTER_BASE_URL),
+            ...(usage ? { max_tokens: usage.maxOutputTokens } : {}),
+          }),
+          signal,
+        })
+      } catch (error) {
+        // Uncertain charge: the reservation stays held for reconciliation.
+        if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
+        throw error
+      }
 
       if (!upstream.ok) {
         const text = await upstream.text()
+        if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
         meter.add({
           surface: "agent",
           runId,
@@ -933,6 +1007,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           model,
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
+        })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
         })
         send({ type: "error", message: `openrouter_error ${upstream.status}: ${text.slice(0, 500)}` })
         status = "error"
@@ -945,6 +1027,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       let message: UpstreamMessage
       try {
         const turn = await readModelTurn(upstream, (text) => send({ type: "assistant_delta", text }))
+        if (usage && stepRequestId) await usage.settleStep(stepRequestId, { id: turn.id, usage: turn.usage })
         message = turn.message
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
@@ -962,6 +1045,18 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - turnStartedAt,
           ok: turn.usage !== undefined,
         })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          promptTokens: turn.usage?.prompt_tokens ?? 0,
+          completionTokens: turn.usage?.completion_tokens ?? 0,
+          costUsd: turn.usage?.cost ?? 0,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: turn.usage !== undefined,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
+          outputChars: typeof message.content === "string" ? message.content.length : 0,
+        })
       } catch (err) {
         meter.add({
           surface: "agent",
@@ -972,6 +1067,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           model,
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
+        })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
         })
         send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
@@ -1018,18 +1121,30 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         }
         steps++
         const toolStartedAt = Date.now()
+        // Capture this call's last code_result (ok + data) for telemetry
+        // without touching each tool runner; then forward unchanged.
+        let resultOk: boolean | undefined
+        let resultData: ToolResultData | undefined
+        const callSend = (frame: AgentFrame) => {
+          if (frame.type === "code_result") {
+            resultOk = frame.ok
+            resultData = frame.data
+          }
+          send(frame)
+        }
         const result = await executeToolCall(call, {
           env,
           aliases,
           sqlVars,
           stageCtx,
-          send,
+          send: callSend,
           step: steps,
           signal,
           draft: {
             model: draftModel,
             apiKey: env.OPENROUTER_API_KEY ?? "",
             url: resolveOpenRouterUrl(env),
+            ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,
             targetLanguage: languages.targetLanguage,
             briefSummary,
@@ -1054,9 +1169,30 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
               costCents: (u.cost ?? 0) * 100,
               ok: true,
             })
+            telemetry.generation({
+              span: `tool-model:${call.function.name}`,
+              model: draftModel,
+              promptTokens: u.prompt_tokens ?? 0,
+              completionTokens: u.completion_tokens ?? 0,
+              costUsd: u.cost ?? 0,
+              ok: true,
+            })
           },
           canContinuePaidWork: () =>
             costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
+          admitPaidCall: usage
+            ? async (input) => {
+                const admission = await usage.admitStep(input)
+                if (!admission.ok) {
+                  if (admission.reason === "exhausted") {
+                    send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "weekly_allowance" })
+                    return { ok: false, message: "error: weekly AI allowance exhausted — this pass was not started" }
+                  }
+                  return { ok: false, message: `error: ${admission.reason === "unpriced" ? "model price unavailable" : "usage accounting unavailable"} — this pass was not started` }
+                }
+                return { ok: true, settle: (body) => usage.settleStep(admission.requestId, body), hold: (body) => usage.holdStep(admission.requestId, body) }
+              }
+            : undefined,
           // Acceptance-rate denominator (0051): staged commits per run. The
           // numerator lands in the event log when the user Applies.
           countStaged: (n) => {
@@ -1077,6 +1213,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           label: call.function.name,
           latencyMs: Date.now() - toolStartedAt,
           ok: toolOk,
+        })
+        telemetry.toolRun({
+          tool: call.function.name,
+          args: parseToolArgs(call.function.arguments),
+          lane: pickLane(call.function.arguments, languages.targetLanguage),
+          ok: resultOk ?? toolOk,
+          data: resultData,
+          resultText: result,
+          latencyMs: Date.now() - toolStartedAt,
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
@@ -1108,6 +1253,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Drain the cost ledger. After `done` so it never delays the client's frame.
   await meter.flush()
 
+  // Not awaited when the Worker gives us waitUntil: the flush is bounded by a
+  // 3 s timeout and must not hold the stream open. Without it, await.
+  const flushed = telemetry.flush(status)
+  if (waitUntil) waitUntil(flushed)
+  else await flushed
+
   try {
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })
   } catch (err) {
@@ -1137,6 +1288,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
   // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
+  if (usage) return
   await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
   await recordWords(
     env.AQUILLA_PG,
@@ -1160,6 +1312,7 @@ interface ToolCallEnv {
     model: string
     apiKey: string
     url: string
+    maxTokens?: number
     sourceLanguage?: string
     targetLanguage?: string
     briefSummary?: string
@@ -1168,6 +1321,7 @@ interface ToolCallEnv {
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
   /** True while another paid sub-call fits under the run's cost/token caps. */
   canContinuePaidWork: () => boolean
+  admitPaidCall?: DraftContext["admitPaidCall"]
   /** Folds staged target.cell.commit events into the run's staged_count. */
   countStaged: (n: number) => void
   /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
@@ -1248,6 +1402,7 @@ async function runReadTool(args: ReadArgs, t: ToolCallEnv): Promise<string> {
   const outcome = await executeRead(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1265,6 +1420,7 @@ async function runExamplesTool(args: ExamplesArgs, t: ToolCallEnv): Promise<stri
   t.send({ type: "code_start", step: t.step, kind: "examples", summary: seed })
   const outcome = await executeExamples(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1283,6 +1439,7 @@ async function runSearchTool(args: SearchArgs, t: ToolCallEnv): Promise<string> 
   const outcome = await executeSearch(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1313,6 +1470,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
     {
       projectId: t.stageCtx.projectId,
       focusedFileId: t.stageCtx.fileId,
+      lane: t.stageCtx.lane,
       aliases: t.aliases,
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,
@@ -1322,8 +1480,9 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
       addUsage: t.addUsage,
       canContinuePaidWork: t.canContinuePaidWork,
+      admitPaidCall: t.admitPaidCall,
     },
-    { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url },
+    { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url, maxTokens: t.draft.maxTokens },
   )
   if (outcome.proposal) {
     t.send({ type: "proposal", proposal: outcome.proposal })

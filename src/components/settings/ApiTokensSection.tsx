@@ -11,13 +11,12 @@ import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // remains the authority and re-checks everything.
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
-import { Copy } from "lucide-react"
+import { Copy, ShieldAlert } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { fmtShortCalendarDate } from "@/lib/format-date"
-import { DateTooltip } from "@/components/ui/date-tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
-import { Badge } from "@/components/ui/badge"
+import { CredentialRow } from "./CredentialRow"
+import { scopeLabel } from "./credential-scope"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -57,12 +56,18 @@ import {
   mintCredential,
   revokeCredential,
   type ApiCredential,
+  type CredentialAccess,
   type CredentialMode,
   type MintCredentialResult,
 } from "@/lib/sync/credentials"
 
 /** MessageKey, without importing from the generated catalog — see LeftDock.tsx. */
 type TokenMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
+/** ~15s of polling at 2.5s, which comfortably covers the agent's 5s poll
+ * interval plus a slow mint, without becoming a background refresher. */
+const AWAIT_GRANT_ATTEMPTS = 6
+const AWAIT_GRANT_INTERVAL_MS = 2500
 
 const EXPIRY_PRESETS = [
   { id: "30d", labelKey: "common.thirtyDays", days: 30 },
@@ -75,26 +80,6 @@ function expiryToIso(preset: ExpiryPresetId): string | undefined {
   const days = EXPIRY_PRESETS.find((p) => p.id === preset)?.days
   if (!days) return undefined
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-}
-
-/** Resolve a credential's org/project scope into a friendly label. Falls back
- * to the raw id when the org/project isn't in the caller's current lists
- * (e.g. access was later revoked). */
-function scopeLabel(
-  t: ReturnType<typeof useT>,
-  cred: ApiCredential,
-  orgs: OrgSummary[],
-  projects: CloudProjectSummary[],
-): string {
-  if (cred.projectId) {
-    const p = projects.find((p) => p.id === cred.projectId)
-    return p ? p.name : t("onboarding.apiTokens.scope.projectFallback", { id: cred.projectId })
-  }
-  if (cred.orgId) {
-    const o = orgs.find((o) => String(o.id) === cred.orgId)
-    return o ? (o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })) : t("onboarding.apiTokens.scope.orgFallback", { id: cred.orgId })
-  }
-  return t("onboarding.apiTokens.scope.unscoped")
 }
 
 /** Fetches the caller's orgs + accessible projects for scope filtering and
@@ -174,6 +159,32 @@ export function ApiTokensSection() {
   const [connectionCopyError, setConnectionCopyError] = useState(false)
   const connectionInstructions = buildConnectionInstructions(AUTH_BASE, syncWorkerHttpOrigin())
   const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
+  // Arriving from /connect-agent, the credential does not exist yet: it is
+  // minted on the agent's NEXT poll of the token endpoint, up to `interval`
+  // seconds after approval. A single fetch on mount is therefore reliably too
+  // early. Refetch a few times, then stop — this is a startup race, not a
+  // surface that needs live updates.
+  // Read once from the URL rather than through the router: this is a one-shot
+  // arrival signal, and the section is rendered in tests without a Router.
+  const [attemptsLeft, setAttemptsLeft] = useState(() =>
+    new URLSearchParams(window.location.search).get("awaiting") === "1" ? AWAIT_GRANT_ATTEMPTS : 0,
+  )
+  const knownCount = credentials?.length ?? null
+  useEffect(() => {
+    if (attemptsLeft <= 0) return
+    const timer = setTimeout(() => {
+      setAttemptsLeft((n) => n - 1)
+      setRefreshKey((k) => k + 1)
+    }, AWAIT_GRANT_INTERVAL_MS)
+    return () => clearTimeout(timer)
+  }, [attemptsLeft, knownCount])
+  // The new token is the newest row; stop polling as soon as one shows up.
+  const firstCount = useRef<number | null>(null)
+  useEffect(() => {
+    if (knownCount == null) return
+    if (firstCount.current == null) firstCount.current = knownCount
+    else if (knownCount > firstCount.current) setAttemptsLeft(0)
+  }, [knownCount])
 
   useEffect(() => {
     if (!jwt) {
@@ -286,6 +297,7 @@ export function ApiTokensSection() {
       {instructionsFor && (
         <AgentInstructionsDialog
           mode={instructionsFor.mode}
+          access={instructionsFor.access}
           scopeLabel={scopeLabel(t, instructionsFor, orgs, projects)}
           onClose={() => setInstructionsFor(null)}
         />
@@ -299,78 +311,6 @@ export function ApiTokensSection() {
         />
       )}
     </div>
-  )
-}
-
-function CredentialRow({
-  credential,
-  orgs,
-  projects,
-  onRevoke,
-  onShowInstructions,
-}: {
-  credential: ApiCredential
-  orgs: OrgSummary[]
-  projects: CloudProjectSummary[]
-  onRevoke: () => void
-  onShowInstructions: () => void
-}) {
-  const t = useT()
-  const { locale } = useI18n()
-  const revoked = Boolean(credential.revokedAt)
-  const expired =
-    !revoked && Boolean(credential.expiresAt) && new Date(credential.expiresAt!).getTime() < Date.now()
-
-  return (
-    <li className="flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5">
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <code className="text-xs font-mono">{credential.tokenPrefix}…</code>
-          <Badge variant={credential.mode === "act" ? "default" : "secondary"}>
-            {credential.mode}
-          </Badge>
-          {revoked && <Badge variant="destructive">{t("onboarding.apiTokens.revokedBadge")}</Badge>}
-          {expired && <Badge variant="outline">{t("onboarding.apiTokens.expiredBadge")}</Badge>}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {credential.name} · {scopeLabel(t, credential, orgs, projects)}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? (
-            <DateTooltip value={credential.expiresAt} label={t("common.date.expires")}>
-              {t("common.expiresOn", {
-                date: fmtShortCalendarDate(credential.expiresAt, undefined, locale),
-              })}
-            </DateTooltip>
-          ) : t("common.noExpiry")}
-          {credential.lastUsedAt ? (
-            <>
-              {" · "}
-              <DateTooltip value={credential.lastUsedAt} label={t("common.date.lastUsed")}>
-                {t("onboarding.apiTokens.lastUsedOn", {
-                  date: fmtShortCalendarDate(credential.lastUsedAt, undefined, locale),
-                })}
-              </DateTooltip>
-            </>
-          ) : null}
-        </p>
-      </div>
-      {!revoked && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={onShowInstructions}>
-            {t("onboarding.apiTokens.agentSetupButton")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={onRevoke}
-          >
-            {t("common.revoke")}
-          </Button>
-        </div>
-      )}
-    </li>
   )
 }
 
@@ -463,6 +403,7 @@ function ShowOnceTokenDialog({
         syncOrigin: syncWorkerHttpOrigin(),
         token: result.token,
         mode: result.credential.mode,
+        access: result.credential.access,
         scopeLabel,
       }),
     )
@@ -494,6 +435,15 @@ function ShowOnceTokenDialog({
               {copied ? t("nav.version.copiedLabel") : t("common.copy")}
             </Button>
           </div>
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs" role="alert">
+            <p className="flex gap-1.5">
+              <ShieldAlert className="mt-px size-3.5 shrink-0 text-destructive" aria-hidden />
+              <span>{t("onboarding.apiTokens.exposureWarning", { mode: result.credential.mode })}</span>
+            </p>
+            <p className="mt-1.5 ps-5 text-muted-foreground">
+              {t("onboarding.apiTokens.exposureConnectHint")}
+            </p>
+          </div>
           <p className="text-xs text-muted-foreground">
             {t("onboarding.apiTokens.agentHandoffHint", { mode: result.credential.mode })}
           </p>
@@ -516,19 +466,21 @@ function ShowOnceTokenDialog({
 function AgentInstructionsDialog({
   token,
   mode,
+  access,
   scopeLabel,
   onClose,
 }: {
   token?: string
   mode: CredentialMode
+  access: CredentialAccess
   scopeLabel: string
   onClose: () => void
 }) {
   const t = useT()
   const [copied, setCopied] = useState(false)
   const text = useMemo(
-    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, scopeLabel }),
-    [token, mode, scopeLabel],
+    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, access, scopeLabel }),
+    [token, mode, access, scopeLabel],
   )
 
   function copy() {
@@ -588,6 +540,15 @@ function MintTokenDialog({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [mode, setMode] = useState<CredentialMode>("ask")
+  // AQU-1242: defaults to read-write, matching the server default and what every
+  // token minted before this field existed does. Tempting as a safe-by-default
+  // read-only is, flipping it would silently change what a returning user gets
+  // from this dialog: someone who mints "Import agent" the way they always have
+  // and skips past a new radio would walk away with a token their agent 403s on,
+  // and discover it as a broken import rather than as a choice they made.
+  // Narrowing a token is therefore explicit, and the option is placed first and
+  // spelled out so it is not easy to miss.
+  const [access, setAccess] = useState<CredentialAccess>("write")
   const [orgId, setOrgId] = useState("")
   const [projectId, setProjectId] = useState("")
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
@@ -615,7 +576,9 @@ function MintTokenDialog({
   const selectedProject = projectOptions.find((p) => p.id === projectId) ?? null
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
-  const canAct = selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
+  const readOnly = access === "read"
+  const canAct =
+    !readOnly && selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
   // AQU-1180: exposing translator names to an agent is a decision about other
   // people's safety, so it takes an OWNER of the scope — mirrors the server's
   // permission_denied rule rather than letting the user discover it on submit.
@@ -628,6 +591,7 @@ function MintTokenDialog({
     if (open) return
     setName("")
     setMode("ask")
+    setAccess("write")
     setOrgId("")
     setProjectId("")
     setExpiry("90d")
@@ -668,6 +632,7 @@ function MintTokenDialog({
       const result = await mintCredential(jwt, {
         name: name.trim(),
         mode,
+        access,
         orgId: orgId || undefined,
         projectId: projectId || undefined,
         expiresAt: expiryToIso(expiry),
@@ -704,15 +669,39 @@ function MintTokenDialog({
               />
             </Field>
 
+            {/* AQU-1242: asked BEFORE mode, because it decides whether mode is a
+                question at all — a read-only token never reaches an approval. */}
+            <Field>
+              <FieldLabel>{t("onboarding.apiTokens.accessLabel")}</FieldLabel>
+              <RadioGroup
+                value={access}
+                onValueChange={(value) => setAccess(value as CredentialAccess)}
+                className="gap-2"
+              >
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="read" className="mt-0.5" data-testid="token-access-read" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessReadLabel")}</strong> — {t("onboarding.apiTokens.accessReadDescription")}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="write" className="mt-0.5" data-testid="token-access-write" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessWriteLabel")}</strong> — {t("onboarding.apiTokens.accessWriteDescription")}
+                  </span>
+                </label>
+              </RadioGroup>
+            </Field>
+
             <Field>
               <FieldLabel>{t("common.modeLabel")}</FieldLabel>
               <RadioGroup
                 value={mode}
                 onValueChange={(value) => setMode(value as CredentialMode)}
-                className="gap-2"
+                className={`gap-2 ${readOnly ? "opacity-50" : ""}`}
               >
                 <label className="flex items-start gap-2.5 text-sm">
-                  <RadioGroupItem value="ask" className="mt-0.5" />
+                  <RadioGroupItem value="ask" className="mt-0.5" disabled={readOnly} />
                   <span>
                     <strong>{t("onboarding.apiTokens.modeAskLabel")}</strong> — {t("onboarding.apiTokens.modeAskDescription")}
                   </span>
@@ -726,6 +715,9 @@ function MintTokenDialog({
                   </span>
                 </label>
               </RadioGroup>
+              {readOnly && (
+                <FieldDescription>{t("onboarding.apiTokens.modeNotApplicable")}</FieldDescription>
+              )}
             </Field>
 
             <Field>

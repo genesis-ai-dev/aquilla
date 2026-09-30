@@ -78,7 +78,11 @@ bucket_name = "aquilla-snapshots"
 [[send_email]]
 name = "EMAIL"
 
-# Secrets (provisioned via `wrangler secret put`, never committed):
+# Secrets (provisioned via `wrangler secret put`, never committed). They attach to a
+# Worker NAME and do not copy between environments — aquilla-identity and
+# aquilla-dev-identity must each be provisioned separately. The per-environment table,
+# the exact commands, and the fail-closed deploy check live in
+# docs/DEPLOYMENT-ENVIRONMENTS.md § "Worker secrets (per environment)" (AQU-762):
 #   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
@@ -129,7 +133,17 @@ crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): was 43200 (30 days). Lowered per
+# docs/OPSEC.md V8 — with server-side jti revocation now in place
+# (utils/token-revocation.ts), the 30-day fixed lifetime was a leftover from
+# before revocation existed, not a deliberate current tradeoff. 20160 (14
+# days) still comfortably covers the offline/diode-zone gap this domain
+# actually sees (see access-links.ts's 90-day link TTL for that flow, which
+# is unaffected) while roughly halving the worst-case exposure of a token
+# that leaks somewhere refresh can't reach it (server logs, browser history,
+# a shared machine) — an active client is unaffected, since useSessionRefresh
+# rolls the credential forward well before this lapses.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -197,7 +211,7 @@ routes = [
 ]
 
 [env.production.build]
-command = "bash ../scripts/verify-deploy-branch.sh main"
+command = "bash ../scripts/verify-deploy-branch.sh release"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.production.placement]
@@ -230,7 +244,9 @@ name = "EMAIL"
 
 [env.production.vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
+# dropped from 43200 (30 days) — same reasoning applies to production.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -247,21 +263,33 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles in production. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
-# PostHog *project* token (public — same one shipped in the SPA bundle).
-# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
-POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+# PostHog ingest region + *project* token (public — same one shipped in the SPA
+# bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+# AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
+# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
+# EMPTY until the EU project exists — the retired US project token must not be
+# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
+# shipping stays off (local logging is unaffected) until the EU token is filled
+# in here. See the Linear issue's "Account-side dependency".
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = ""
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
 MONDAY_APP_ID = "11760401"
 MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
 MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
-# Stripe Field Plan: set STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON here after
+# Stripe launch: use STRIPE_PRICE_FIELD_MONTHLY / STRIPE_PRICE_FIELD_ANNUAL.
+# Keep BILLING_CHECKOUT_ENABLED unset/false until an explicit launch.
+# Legacy Field Plan: STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON retained after
 # live (or test) prices are provisioned. Checkout 503s until they exist.
 # Secrets: `wrangler secret put STRIPE_SECRET_KEY` + STRIPE_WEBHOOK_SECRET.
 
@@ -313,7 +341,9 @@ binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see top-level [vars] for why
+# this dropped from 43200 (30 days).
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -327,9 +357,22 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 # deploys to omit it.
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://dev.aquilla.app"
+# Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
+# requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
+# two vars cannot enable anything on production even if copied there.
+# Secrets to install with `wrangler secret put <NAME> --env development`:
+# STRIPE_SECRET_KEY (sk_test_…), STRIPE_WEBHOOK_SECRET (whsec_… from the
+# sandbox endpoint pointed at https://api.dev.aquilla.app/identity/billing/webhook),
+# STRIPE_PRICE_CATALOG (config/pricing/stripe-sandbox-native.json contents),
+# STRIPE_PORTAL_PERSONAL_CONFIGURATION and STRIPE_PORTAL_TEAM_CONFIGURATION (bpc_…).
+BILLING_WORKSPACE_CHECKOUT_REHEARSAL = "true"
+BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "development"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles on dev. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -362,6 +405,9 @@ bucket_name = "aquilla-snapshots-dev"
 
 [env.e2e.vars]
 ALGORITHM = "HS256"
+# Left at 30 days deliberately — not internet-reachable, so the shorter
+# prod/dev TTL's exposure argument doesn't apply here, and a longer lifetime
+# avoids mid-run token expiry flakiness.
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"

@@ -5,6 +5,8 @@ import {
   LINK_ROLE_ALLOWED,
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
+  ORG_WIDE_ACCESS_FLOOR,
+  orgRoleGrantsProjectAccess,
   roleName,
   roleLevelFromName,
   roleNameKey,
@@ -13,6 +15,8 @@ import {
   roleDescription,
   roleHelpText,
   PROJECT_ROLE_OPTIONS,
+  ORG_ROLE_CHANGE_OPTIONS,
+  ORG_ROLE_CHANGE_PICKER,
   ORG_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
   ALL_ROLE_OPTIONS,
@@ -68,10 +72,19 @@ describe("ROLE constants", () => {
   })
 
   it("keeps the AD-6 viewer help text", () => {
-    expect(roleDescription(100)).toMatch(/read all org projects/i)
+    expect(roleDescription(100)).toMatch(/read-only access/i)
     expect(roleHelpText(100)).toBe(
-      "Viewer (100) — can read all org projects. No edit or management actions.",
+      "Viewer (100) — read-only access. No edit or management actions.",
     )
+  })
+
+  it("org-wide project access starts at Maintainer (AQU-435 / AQU-1107)", () => {
+    expect(ORG_WIDE_ACCESS_FLOOR).toBe(ROLE.MAINTAINER)
+    expect(orgRoleGrantsProjectAccess(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(orgRoleGrantsProjectAccess(ROLE.PROJECT_LEAD)).toBe(false)
+    expect(orgRoleGrantsProjectAccess(ROLE.MAINTAINER)).toBe(true)
+    expect(orgRoleGrantsProjectAccess(ROLE.OWNER)).toBe(true)
+    expect(orgRoleGrantsProjectAccess(null)).toBe(false)
   })
 })
 
@@ -98,6 +111,14 @@ describe("picker subsets", () => {
     expect(ORG_ROLE_PICKER).not.toContain(ROLE.REVIEWER)
     expect(ORG_ROLE_PICKER).not.toContain(ROLE.OWNER)
   })
+
+  // AQU-952: workspace handover. The change-role rung must reach Owner, while
+  // the picker that drives add-member and email invites must not (the invite
+  // endpoint caps at 600 so an org can't be handed over by a leaked link).
+  it("ORG_ROLE_CHANGE_PICKER is ORG_ROLE_PICKER plus owner", () => {
+    expect(ORG_ROLE_CHANGE_PICKER).toEqual([...ORG_ROLE_PICKER, ROLE.OWNER])
+    expect(ORG_ROLE_CHANGE_PICKER).toContain(ROLE.OWNER)
+  })
 })
 
 describe("ROLE_OPTIONS shapes", () => {
@@ -106,6 +127,10 @@ describe("ROLE_OPTIONS shapes", () => {
   })
   it("org options match the picker order", () => {
     expect(ORG_ROLE_OPTIONS.map((o) => o.level)).toEqual([...ORG_ROLE_PICKER])
+  })
+  it("org change-role options match their picker and end at owner", () => {
+    expect(ORG_ROLE_CHANGE_OPTIONS.map((o) => o.level)).toEqual([...ORG_ROLE_CHANGE_PICKER])
+    expect(ORG_ROLE_CHANGE_OPTIONS.at(-1)?.level).toBe(ROLE.OWNER)
   })
   it("link options match the link-allowed list", () => {
     expect(LINK_ROLE_OPTIONS.map((o) => o.level)).toEqual([...LINK_ROLE_ALLOWED])
@@ -118,6 +143,7 @@ describe("ROLE_OPTIONS shapes", () => {
       ...ALL_ROLE_OPTIONS,
       ...PROJECT_ROLE_OPTIONS,
       ...ORG_ROLE_OPTIONS,
+      ...ORG_ROLE_CHANGE_OPTIONS,
       ...LINK_ROLE_OPTIONS,
     ]) {
       expect(opt.name).not.toBe("")

@@ -36,10 +36,6 @@ import {
   isCellFieldKind,
   validateCellFieldCommand,
   type CellFieldCommand,
-  type SetSourceCommand,
-  type SetTimingCommand,
-  type SetTrackOverrideCommand,
-  type SetTranscriptionCommand,
 } from './commands-cell-fields'
 import {
   MEMBERSHIP_FLOOR,
@@ -58,10 +54,20 @@ import {
   type ProjectLifecycleCommand,
 } from './commands-project-lifecycle'
 import {
+  PROJECT_SETUP_REQUIRED_ROLE,
+  validateProjectSetupCommand,
+  type ProjectSetupCommand,
+} from './commands-project-setup'
+import {
   SET_BRIEF_REQUIRED_ROLE,
   validateSetBriefCommand,
   type SetBriefCommand,
 } from './commands-set-brief'
+import {
+  REGENERATE_BRIEF_REQUIRED_ROLE,
+  validateRegenerateBriefSummaryCommand,
+  type RegenerateBriefSummaryCommand,
+} from './commands-regenerate-brief'
 import {
   isOrgMemberCommand,
   validateOrgMemberCommand,
@@ -80,6 +86,12 @@ import {
   validateStructureCommand,
   type StructureCommand,
 } from './commands-structure'
+import {
+  isVisibilityCommandKind,
+  validateVisibilityCommand,
+  visibilityCommandFloor,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 
 /** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
  *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
@@ -115,6 +127,7 @@ export type {
   UnarchiveProjectCommand,
 } from './commands-project-lifecycle'
 export type { SetBriefCommand } from './commands-set-brief'
+export type { RegenerateBriefSummaryCommand } from './commands-regenerate-brief'
 export type {
   AddOrgMemberCommand,
   OrgMemberCommand,
@@ -137,6 +150,12 @@ export type {
   StructureCommand,
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
+export type {
+  HideCellCommand,
+  ShowCellCommand,
+  VisibilityCommand,
+} from './commands-hide-cell'
+export { isVisibilityCommand, isVisibilityCommandKind } from './commands-hide-cell'
 export { cellKey, laneCellKey } from './cell-keys'
 export { isCellFieldCommand } from './commands-cell-fields'
 
@@ -276,8 +295,11 @@ export type Command =
   | RenameFileCommand
   | ProjectLifecycleCommand
   | SetBriefCommand
+  | RegenerateBriefSummaryCommand
+  | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
+  | VisibilityCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -792,6 +814,16 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'RegenerateBriefSummary') {
+      const cmd = validateRegenerateBriefSummaryCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'ProjectSetup') {
+      const cmd = validateProjectSetupCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isOrgMemberCommand(c as { kind: string })) {
       const cmd = validateOrgMemberCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -805,6 +837,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
     }
     if (isStructureCommandKind(c.kind)) {
       const cmd = validateStructureCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    // AQU-1426 HideCell / ShowCell — one validator for the pair.
+    if (isVisibilityCommandKind(c.kind)) {
+      const cmd = validateVisibilityCommand(c, index, issues)
       if (cmd) commands.push(cmd)
       return
     }
@@ -842,12 +880,17 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
  * from role-policy.ts (the single source of truth). SetTranslation compiles to
  * target.cell.commit (CONTRIBUTOR); PlanImport compiles to file.create +
  * source.cell.create, and the max keeps it at file.create's PROJECT_LEAD even
- * now that source.cell.create's static floor is CONTRIBUTOR (the app-side
- * `allowLineCreation` carve-out — see line-creation-authority.ts — which this
- * surface deliberately does not extend). Staging a plan you could never commit
- * leaks the server-computed effect summary, so prepare enforces this too.
+ * now that source.cell.create's static floor is COMMENTER. The project's
+ * `cellEditingFloor` tier plays no part here: it is a product rule enforced at
+ * the app's buttons, never at this perimeter, and this surface was exempt from
+ * it even while it was checked server-side (see authorize.ts). Staging a plan
+ * you could never commit leaks the server-computed effect summary, so prepare
+ * enforces this too.
  */
-export function requiredRoleForCommand(c: Command): number {
+export function requiredRoleForCommand(
+  c: Command,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
+): number {
   if (c.kind === 'PlanImport') {
     return Math.max(REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
@@ -879,11 +922,22 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'SetBrief') {
     return SET_BRIEF_REQUIRED_ROLE
   }
+  // RegenerateBriefSummary (AQU-1282) rewrites the L1 half of the same key.
+  if (c.kind === 'RegenerateBriefSummary') {
+    return REGENERATE_BRIEF_REQUIRED_ROLE
+  }
+  // AQU-1294 ProjectSetup: a composite plan taking its own prepare/commit path,
+  // where the floor is re-resolved live as the MAX of the blocks it carries
+  // (incl. the org termbase/language floors). MAINTAINER is the honest static
+  // value for index filtering — it is every constituent command's own floor.
+  if (c.kind === 'ProjectSetup') {
+    return PROJECT_SETUP_REQUIRED_ROLE
+  }
   // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
   // floors its compiled events hit at the /events perimeter (dynamic bumps,
   // e.g. foreign unvalidate → maintainer, are enforced in its prepare path).
   if (c.kind === 'EmitEvents') {
-    return emitEventsFloor(c)
+    return emitEventsFloor(c, assignmentMinRole)
   }
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
@@ -944,5 +998,26 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'InsertCell' || c.kind === 'DeleteCell' || c.kind === 'SplitCell') {
     return structureCommandFloor()
   }
+  // AQU-1426 HideCell / ShowCell: whatever floor `source.cell.visibility.set`
+  // carries at the /events perimeter (PROJECT_LEAD). Asked of role-policy, not
+  // restated, so this surface cannot drift below the perimeter that would refuse
+  // the compiled event anyway — see commands-hide-cell.ts.
+  if (isVisibilityCommandKind(c.kind)) {
+    return visibilityCommandFloor()
+  }
   return REQUIRED_ROLE['target.cell.commit']
+}
+
+/** Whether a plan's dynamic authority depends on the org assignment floor. */
+export function commandsContainAssignmentEvents(commands: readonly Command[]): boolean {
+  return commands.some(
+    (command) =>
+      command.kind === 'EmitEvents' &&
+      command.events.some(
+        (event) =>
+          event.kind === 'assignment.create' ||
+          event.kind === 'assignment.reassign' ||
+          event.kind === 'assignment.unassign',
+      ),
+  )
 }

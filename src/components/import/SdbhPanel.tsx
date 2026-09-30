@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
+import { importSdbh, SdbhImportCancelledError, type SdbhImportProgress } from "@/lib/import-sdbh"
+import { SDBH_MAX_REFERENCES, type SdbhNotImportedField } from "@/lib/parsers/sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -26,11 +27,22 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<SdbhImportProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notImported, setNotImported] = useState<SdbhNotImportedField[] | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const decisionRef = useRef<((proceed: boolean) => void) | null>(null)
 
   useEffect(() => {
-    return () => abortRef.current?.abort()
+    return () => {
+      abortRef.current?.abort()
+      decisionRef.current?.(false)
+    }
   }, [])
+
+  function decide(proceed: boolean) {
+    decisionRef.current?.(proceed)
+    decisionRef.current = null
+    setNotImported(null)
+  }
 
   async function handleImport() {
     if (!masterFile || importing) return
@@ -54,13 +66,22 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
             localized: { name: localizedFile.name, bytes: await localizedFile.arrayBuffer() },
           } : {}),
         },
+        {
+          confirmNotImported: (fields) =>
+            new Promise<boolean>((resolve) => {
+              decisionRef.current = resolve
+              setNotImported(fields)
+            }),
+        },
       )
       await onImported(summary.refs, {
         sourceLanguage: "hbo",
         ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
       }, summary.skipped)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
+      if (!(err instanceof SdbhImportCancelledError)) {
+        setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
+      }
     } finally {
       setImporting(false)
       setProgress(null)
@@ -113,7 +134,37 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
           />
         </Button>
       </div>
-      {progress && (
+      {notImported && (
+        <div role="alertdialog" aria-labelledby="sdbh-not-imported-title" className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+          <p id="sdbh-not-imported-title" className="font-medium">{t("importExport.sdbh.notImported.title")}</p>
+          <p>
+            {t("importExport.sdbh.notImported.body", {
+              count: notImported.length,
+              max: formatNumber(SDBH_MAX_REFERENCES, locale),
+            })}
+          </p>
+          <ul className="list-disc pl-4">
+            {notImported.slice(0, 5).map((f) => (
+              <li key={f.conId}>
+                {t("importExport.sdbh.notImported.item", { lemma: f.lemma, count: formatNumber(f.count, locale) })}
+              </li>
+            ))}
+            {notImported.length > 5 && (
+              <li>{t("importExport.sdbh.notImported.more", { count: notImported.length - 5 })}</li>
+            )}
+          </ul>
+          <p className="text-muted-foreground">{t("importExport.sdbh.notImported.exportNote")}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => decide(false)}>
+              {t("importExport.sdbh.notImported.cancel")}
+            </Button>
+            <Button size="sm" onClick={() => decide(true)}>
+              {t("importExport.sdbh.notImported.proceed")}
+            </Button>
+          </div>
+        </div>
+      )}
+      {progress && !notImported && (
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" ? (
             <p>{t("importExport.sdbh.parsingLexicon")}</p>

@@ -25,6 +25,7 @@ import {
 } from './commit-gates'
 import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
+import { renderBriefSummary } from './brief-summary-bridge'
 import type {
   ChangesetSummary,
   ExternalEnv,
@@ -37,6 +38,7 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/shared/projects'
 import {
+  applyBriefL1Summary,
   applyBriefPatch,
   BRIEF_FIELD_IDS,
   BRIEF_SETTINGS_KEY,
@@ -45,6 +47,7 @@ import {
   isBriefPatchSatisfied,
   readBriefFromSettings,
   type BriefPatch,
+  type TranslationBriefRecord,
 } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
 
@@ -270,6 +273,7 @@ export async function prepareSetBrief(
  */
 export async function commitSetBrief(
   db: AquillaDb,
+  env: ExternalEnv,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   cmd: SetBriefCommand,
@@ -326,7 +330,10 @@ export async function commitSetBrief(
       result.current.updatedBy != null &&
       String(result.current.updatedBy) === String(cred.userId)
     if (!wasStaged && bumpedByThisUser) {
-      return finishSetBriefReceipt(db, cred, cs, projectId, result.current.version, confirmationId, channel)
+      return finishSetBriefReceipt(db, cred, cs, projectId, result.current.version, confirmationId, channel, {
+        rendered: false,
+        reason: 'crash-retry — the sections were already committed; use RegenerateBriefSummary',
+      })
     }
     // A bump by someone else is only stale if the patch still has work to do.
     // When every named section already holds the proposed text, the human beat
@@ -351,7 +358,49 @@ export async function commitSetBrief(
     return errorResponse('job_failed', result.message)
   }
 
-  return finishSetBriefReceipt(db, cred, cs, projectId, result.settings.version, confirmationId, channel)
+  // AQU-1282: the sections are committed; now try to make them reach the
+  // copilot. Best-effort — a failed render is reported in the receipt, never
+  // a failed commit, and RegenerateBriefSummary re-runs it on demand.
+  const { version, briefSummary } = await autoRenderL1(db, env, cred, projectId, nextBrief, result.settings.version)
+  return finishSetBriefReceipt(db, cred, cs, projectId, version, confirmationId, channel, briefSummary)
+}
+
+/**
+ * Render the L1 for the just-written brief and store it against the version
+ * the sections write returned. Returns the version a caller should pin next
+ * (the L1 write bumps it again on success) plus the receipt fact.
+ */
+async function autoRenderL1(
+  db: AquillaDb,
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  brief: TranslationBriefRecord,
+  version: number,
+): Promise<{ version: number; briefSummary: NonNullable<ReceiptOnlyReceipt['briefSummary']> }> {
+  const rendered = await renderBriefSummary(env, {
+    projectId,
+    userId: cred.userId,
+    l2Markdown: brief.l2Markdown,
+  })
+  if (!rendered.ok) {
+    return { version, briefSummary: { rendered: false, reason: `${rendered.code}: ${rendered.message}` } }
+  }
+  const withL1 = applyBriefL1Summary(brief, rendered.summary, rendered.model, new Date().toISOString())
+  const write = await patchProjectSettingsShared(db, {
+    projectId,
+    ops: [{ key: BRIEF_SETTINGS_KEY, value: withL1 }],
+    ifMatchVersion: version,
+    updatedBy: cred.userId,
+  })
+  if (write.status !== 'ok') {
+    const reason = write.status === 'conflict' ? 'settings changed while the summary was rendering' : write.message
+    return { version, briefSummary: { rendered: false, reason } }
+  }
+  return {
+    version: write.settings.version,
+    briefSummary: { rendered: true, chars: rendered.summary.length, model: rendered.model },
+  }
 }
 
 async function finishSetBriefReceipt(
@@ -362,6 +411,7 @@ async function finishSetBriefReceipt(
   version: number,
   confirmationId: string | null,
   channel: ProvenanceChannel,
+  briefSummary: NonNullable<ReceiptOnlyReceipt['briefSummary']>,
 ): Promise<Response> {
   const receipt: ReceiptOnlyReceipt = {
     credentialId: cred.credentialId,
@@ -371,6 +421,7 @@ async function finishSetBriefReceipt(
     appliedAt: new Date().toISOString(),
     projectId,
     version,
+    briefSummary,
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
   return Response.json({ receipt })

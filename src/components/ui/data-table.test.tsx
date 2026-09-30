@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "./data-table"
 import { allocateColumnWidths } from "./data-table-virtual"
@@ -413,5 +414,40 @@ describe("DataTable", () => {
     expect(within(footerRow).getByRole("button", { name: "Show 2 more" })).toBeInTheDocument()
     expect(within(footerRow).getAllByRole("cell")).toHaveLength(1)
     expect(within(footerRow).getByRole("cell")).toHaveAttribute("colspan", String(columns.length))
+  })
+
+  // AQU-1330: a row whose only affordance is a <tr onClick> is invisible to
+  // keyboard users, screen readers, and DOM-driven agents. `rowLink` gives the
+  // row a real link to the same place, without changing what mouse users see.
+  it("rowLink exposes a real link in the named column that keyboard/AT users can reach", () => {
+    const onRowClick = vi.fn()
+    render(
+      <MemoryRouter>
+        <DataTable
+          columns={columns}
+          data={rows}
+          getRowId={(r) => String(r.id)}
+          onRowClick={onRowClick}
+          rowLink={{ columnId: "name", to: (r) => `/projects/${r.id}` }}
+        />
+      </MemoryRouter>,
+    )
+
+    const link = screen.getByRole("link", { name: "Alpha" })
+    expect(link).toHaveAttribute("href", "/projects/2")
+    // The cell's accessible name is unchanged — the link wraps, not duplicates.
+    expect(screen.getByRole("cell", { name: "Alpha" })).toContainElement(link)
+    // Only the named column gets a link; other cells stay plain.
+    expect(screen.queryByRole("link", { name: "10" })).toBeNull()
+
+    // A plain activation navigates exactly once, via the row handler (the
+    // link's own navigation is suppressed so the destination isn't pushed twice).
+    fireEvent.click(link)
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+    expect(onRowClick).toHaveBeenCalledWith(rows[1])
+    // A modifier click is left to the browser (open in new tab) and must not
+    // also trigger the in-app row navigation.
+    fireEvent.click(link, { metaKey: true })
+    expect(onRowClick).toHaveBeenCalledTimes(1)
   })
 })

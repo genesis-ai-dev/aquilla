@@ -76,6 +76,7 @@ export const comments = defineNamespace({
     // CommentsDrawer (per-cell comments panel in the editor)
     "comments.drawer.closeLabel": "Close comments",
     "comments.drawer.noComments": "No comments yet.",
+    "comments.drawer.loadError": "Couldn't load comments. Existing threads may be missing.",
     "comments.drawer.newThreadHeading": "New thread",
     "comments.drawer.newThreadPlaceholder": "Start a new comment thread...",
     "comments.drawer.post": "Post",
@@ -364,6 +365,14 @@ export const comments = defineNamespace({
           "Plain inline text shown in the per-cell drawer's thread list when the cell " +
           "has no comments yet. Distinct from comments.empty.title, which is a large " +
           "heading on the full-page thread list.",
+        screenshot: "cell-editor",
+      },
+      "comments.drawer.loadError": {
+        description:
+          "Inline error shown at the top of the per-cell drawer's thread list when the " +
+          "comments feed failed to load. Replaces the 'No comments yet.' empty state so " +
+          "a dropped request is never mistaken for deleted comments; warns that the " +
+          "threads shown may be incomplete and sits above a Retry button.",
         screenshot: "cell-editor",
       },
       "comments.drawer.newThreadHeading": {

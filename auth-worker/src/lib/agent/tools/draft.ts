@@ -9,12 +9,13 @@
 // path as a hand emit. One tool call is one human-review package; the verdict
 // tells the orchestrator how much work remains.
 
+import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
-import type { ToolOutcome } from "./types"
+import type { FileCandidate, ToolOutcome } from "./types"
 
 export interface DraftArgs {
   fileId?: unknown
@@ -29,6 +30,8 @@ export interface DraftModelConfig {
   apiKey: string
   /** Full chat-completions URL (mock-aware, resolved by the route). */
   url: string
+  /** Output cap forwarded to the provider (set when the run is metered). */
+  maxTokens?: number
 }
 
 /** Everything the drafting pipeline itself needs. Deliberately free of any
@@ -39,6 +42,8 @@ export interface DraftModelConfig {
 export interface DraftGenerationContext {
   projectId: string
   focusedFileId?: string
+  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  lane: string
   aliases: AliasMap
   sourceLanguage?: string
   targetLanguage?: string
@@ -49,6 +54,10 @@ export interface DraftGenerationContext {
   /** Re-check the enclosing agent run's cost/token cap between the two paid
    *  phases. Direct unit callers may omit it (no enclosing run budget). */
   canContinuePaidWork?: () => boolean
+  /** Weekly-allowance admission for each paid pass (AQU-837). Reserves before
+   *  the call; the returned settle records the provider body afterwards. */
+  admitPaidCall?: (input: { model: string; promptChars: number }) => Promise<
+    { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> } | { ok: false; message: string }>
   /** Ceiling on cells drafted in one call. Defaults to the in-agent review
    *  package size (MAX_LIMIT); the external DraftCells command passes the
    *  project's configured completion batch size instead. */
@@ -72,7 +81,7 @@ export interface DraftEmit {
 }
 
 export type DraftGeneration =
-  | { ok: false; error: string }
+  | { ok: false; error: string; candidates?: FileCandidate[] }
   | {
       ok: true
       fileId: string
@@ -85,6 +94,8 @@ export type DraftGeneration =
       drafted: CellPair[]
       /** True when nothing in scope needed drafting (not an error). */
       empty: boolean
+      /** AQU-1455: set when a failed ref widened the scope to the whole file. */
+      notice?: string
     }
 
 // Keep agent proposals in the same human-review package used by the editor.
@@ -134,13 +145,14 @@ Rules:
 }
 
 interface UpstreamJson {
+  id?: string
   choices?: { message?: { content?: string | null } }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
   error?: { message?: string }
 }
 
 type DraftModelResult =
-  | { ok: true; content: string; usage?: UpstreamJson["usage"] }
+  | { ok: true; content: string; usage?: UpstreamJson["usage"]; id?: string }
   | { ok: false; error: string }
 
 async function callDraftModel(
@@ -160,6 +172,7 @@ async function callDraftModel(
       stream: false,
       usage: { include: true },
       reasoning: { effort: "none" },
+      ...(modelCfg.maxTokens ? { max_tokens: modelCfg.maxTokens } : {}),
     }),
     signal,
   })
@@ -173,7 +186,28 @@ async function callDraftModel(
     ok: true,
     content: data.choices?.[0]?.message?.content ?? "",
     ...(data.usage ? { usage: data.usage } : {}),
+    ...(typeof data.id === "string" ? { id: data.id } : {}),
   }
+}
+/** Metered pass: reserve, call, then settle or hold. Unmetered runs call directly. */
+async function callPaidPass(
+  ctx: DraftGenerationContext,
+  modelCfg: DraftModelConfig,
+  messages: { role: "system" | "user"; content: string }[],
+): Promise<DraftModelResult> {
+  if (!ctx.admitPaidCall) return callDraftModel(modelCfg, messages, ctx.signal)
+  const admission = await ctx.admitPaidCall({ model: modelCfg.model, promptChars: messages.reduce((n, m) => n + m.content.length, 0) })
+  if (!admission.ok) return { ok: false, error: admission.message }
+  let result: DraftModelResult
+  try {
+    result = await callDraftModel(modelCfg, messages, ctx.signal)
+  } catch (error) {
+    await admission.hold(undefined)
+    throw error
+  }
+  // A provider error is an uncertain charge: the reservation stays held.
+  await (result.ok ? admission.settle({ id: result.id, usage: result.usage }) : admission.hold(undefined))
+  return result
 }
 
 /** Tolerant parse of the drafting model's JSON array. */
@@ -215,13 +249,14 @@ export async function generateDrafts(
   const scope = await resolveScope(db, args, {
     projectId: ctx.projectId,
     focusedFileId: ctx.focusedFileId,
+    lane: ctx.lane,
     aliases: ctx.aliases,
   })
-  if (!scope.ok) return { ok: false, error: scope.error }
+  if (!scope.ok) return { ok: false, error: scope.error, ...(scope.candidates ? { candidates: scope.candidates } : {}) }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]
@@ -239,7 +274,7 @@ export async function generateDrafts(
   work = work.slice(0, limit)
 
   if (work.length === 0) {
-    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true }
+    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.
@@ -251,7 +286,7 @@ export async function generateDrafts(
   const precedingBlock =
     preceding.length > 0
       ? `\nImmediately preceding, validated context (continue its discourse flow):\n${preceding
-          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
+          .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(p.source))} → ${JSON.stringify(stripTrailingBareMarkers(p.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -259,13 +294,13 @@ export async function generateDrafts(
   const examplesOutcome = await executeExamples(
     db,
     { text: work.map((p) => p.source).join(" "), n: EXAMPLES_N },
-    { projectId: ctx.projectId, aliases: ctx.aliases },
+    { projectId: ctx.projectId, lane: ctx.lane, aliases: ctx.aliases },
   )
   const examplePairs = examplesOutcome.data?.examples ?? []
   const examplesBlock =
     examplePairs.length > 0
       ? `\nTranslation pairs from this project (imitate them):\n${examplePairs
-          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
+          .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(e.source))} → ${JSON.stringify(stripTrailingBareMarkers(e.target))}`)
           .join("\n")}\n`
       : ""
 
@@ -274,20 +309,20 @@ export async function generateDrafts(
       ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
       : ""
   const numbered = work
-    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${p.source}`)
+    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)
     .join("\n")
 
   // Preserve the benchmarked causal structure: research finishes before the
   // model sees the request to translate. This is deliberately two calls, not
   // one prompt asking the model to "think first" and draft in the same pass.
   ctx.sendProgress(`Researching ${work.length} cells`, 0, work.length)
-  const researched = await callDraftModel(
+  const researched = await callPaidPass(
+    ctx,
     modelCfg,
     [
       { role: "system", content: researchSystemPrompt(ctx, examplesBlock, precedingBlock) },
       { role: "user", content: `Research these ${work.length} source segments:${instructions}\n${numbered}` },
     ],
-    ctx.signal,
   )
   if (!researched.ok) return { ok: false, error: `drafting research ${researched.error}` }
   if (researched.usage) ctx.addUsage(researched.usage)
@@ -304,7 +339,8 @@ export async function generateDrafts(
   ctx.sendProgress(`Researching ${work.length} cells`, work.length, work.length)
 
   ctx.sendProgress(`Drafting ${work.length} cells`, 0, work.length)
-  const generated = await callDraftModel(
+  const generated = await callPaidPass(
+    ctx,
     modelCfg,
     [
       { role: "system", content: draftSystemPrompt(ctx, examplesBlock, precedingBlock) },
@@ -315,7 +351,6 @@ export async function generateDrafts(
           `Translate these ${work.length} segments:${instructions}\n${numbered}`,
       },
     ],
-    ctx.signal,
   )
   if (!generated.ok) return { ok: false, error: `drafting generation ${generated.error}` }
   if (generated.usage) ctx.addUsage(generated.usage)
@@ -330,14 +365,14 @@ export async function generateDrafts(
   const emits: DraftEmit[] = []
   const missed: string[] = []
   work.forEach((p, i) => {
-    const t = drafts.get(i + 1)
-    if (t && t.trim()) {
+    const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    if (t) {
       emits.push({
         kind: "target.cell.commit",
         fileId: scope.fileId,
         cellId: p.cellId,
         payload: {
-          value: t.trim(),
+          value: t,
           ai_draft: {
             model: modelCfg.model,
             provider: "platform",
@@ -367,6 +402,7 @@ export async function generateDrafts(
     remaining,
     drafted: work.filter((_, i) => drafts.has(i + 1)),
     empty: false,
+    notice: scope.notice,
   }
 }
 
@@ -377,14 +413,22 @@ export async function executeDraft(
   modelCfg: DraftModelConfig,
 ): Promise<DraftOutcome> {
   const gen = await generateDrafts(db, args, ctx, modelCfg)
-  if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
-  if (gen.empty) return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+  if (!gen.ok) {
+    return {
+      ok: false,
+      text: `error: ${gen.error}`,
+      ...(gen.candidates ? { data: { candidates: gen.candidates } } : {}),
+    }
+  }
+  if (gen.empty) {
+    return { ok: true, text: `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope.` }
+  }
 
   // Stage through the SAME path as a hand emit: role floors, staleness
   // pre-check, provenance injection, and rule lint all apply.
   const { proposal, modelVerdictBlock } = await stageEvents(db, gen.emits, ctx.stageCtx)
 
-  const lines = [modelVerdictBlock]
+  const lines = gen.notice ? [gen.notice, modelVerdictBlock] : [modelVerdictBlock]
   if (gen.missed.length > 0) lines.push(`No draft returned for: ${gen.missed.join(", ")} — re-run draft with their cellIds.`)
   if (gen.remaining > 0) lines.push(`${gen.remaining} more untranslated cells remain in scope — call draft again to continue.`)
 

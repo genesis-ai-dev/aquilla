@@ -98,6 +98,14 @@ vi.mock("@/components/ProjectSettings/RulesSection", () => ({
   ),
 }))
 
+// Same for the style-rule library section — it owns its own useStyleRules
+// fetch; its behaviour is covered by living-memory/QualityStyleRules.test.tsx.
+vi.mock("@/components/living-memory/QualityStyleRules", () => ({
+  QualityStyleRules: ({ projectId }: { projectId: string }) => (
+    <div data-testid="quality-style-rules" data-project-id={projectId} />
+  ),
+}))
+
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -183,6 +191,21 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
+  // AQU-912: Mariette (Biblica GP, 2026-08-12) and Josseline (ETT, 2026-08-13)
+  // each read the translation brief and the AI instructions as the same thing,
+  // one day apart, and ETT writes no briefs at all. This index is where the two
+  // sit side by side, so it is where the distinction has to be legible without
+  // support: the brief row says it is OPTIONAL and describes the translation's
+  // purpose; the instructions row says it governs how the AI drafts.
+  it("distinguishes the optional brief from the AI instructions", () => {
+    renderPage()
+
+    expect(
+      screen.getByText(/optional — who this translation is for and what it must achieve/i),
+    ).toBeTruthy()
+    expect(screen.getByText(/how the AI should behave when drafting/i)).toBeTruthy()
+  })
+
   it("does not load the complete cell corpus before Examples is opened", () => {
     renderPage()
 
@@ -362,6 +385,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument()
     expect(screen.getByTestId("rules-settings-section")).toBeInTheDocument()
+    expect(screen.getByTestId("quality-style-rules")).toBeInTheDocument()
   })
 })
 

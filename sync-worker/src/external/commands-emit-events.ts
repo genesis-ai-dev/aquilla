@@ -90,7 +90,16 @@ export const EMIT_EVENTS_MAX_EVENTS = 200
  * kind that forgets its phrasing degrades to today's output rather than an
  * empty line.
  */
-export function emitKindEffectLabel(kind: string, count: number): string {
+export function emitKindEffectLabel(
+  kind: string,
+  count: number,
+  /** AQU-1426: one representative payload from the group. Only consulted by
+   *  kinds whose sentence depends on the payload — `source.cell.visibility.set`
+   *  carries BOTH hide and show, and "N cells changed visibility" is not a thing
+   *  a translation manager can consent to. Prepare refuses a plan that mixes the
+   *  two directions, so one sample speaks for the whole group. */
+  sample?: Record<string, unknown>,
+): string {
   const n = count
   const s = (one: string, many: string) => (n === 1 ? `${one}` : `${n} ${many}`)
   switch (kind) {
@@ -104,6 +113,10 @@ export function emitKindEffectLabel(kind: string, count: number): string {
     case 'cell.unvalidate': return `Remove validation from ${s('a translation', 'translations')}`
     case 'cell.backtranslation.set': return `Save a back-translation for ${s('a line', 'lines')}`
     case 'target.cell.repin': return `Clear the "source changed" flag on ${s('a line', 'lines')}`
+    case 'source.cell.visibility.set':
+      return sample?.hidden === false
+        ? `Bring ${s('a hidden line', 'hidden lines')} back into the file`
+        : `Hide ${s('a line', 'lines')} from translators and from every export`
     case 'file.rename': return `Rename ${s('a file', 'files')}`
     case 'file.delete': return `Move ${s('a file', 'files')} to the trash`
     case 'file.restore': return `Restore ${s('a file', 'files')} from the trash`
@@ -136,23 +149,40 @@ export interface EmitEventsCommand {
   events: EmitEventInput[]
 }
 
-/** Changeset floor = max REQUIRED_ROLE over the batch's event kinds
- *  (role-policy is the single source of truth; dynamic bumps — foreign
- *  unvalidate → MAINTAINER, foreign comment mutation → FOREIGN_COMMENT_ROLE
- *  — are prepare-time checks). */
-export function emitEventsFloor(cmd: EmitEventsCommand): number {
+/** Changeset floor = max authority over the batch's event kinds. Static kinds
+ *  use REQUIRED_ROLE; assignment kinds use the caller-supplied org floor.
+ *  Other dynamic bumps — foreign unvalidate → MAINTAINER, foreign comment
+ *  mutation → FOREIGN_COMMENT_ROLE — are prepare-time checks. */
+export function emitEventsFloor(
+  cmd: EmitEventsCommand,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
+): number {
   let floor = 0
   for (const e of cmd.events) {
-    // Sam, 2026-08-21: source.cell.create/delete/reorder dropped to
-    // CONTRIBUTOR in the static table so the app's `allowLineCreation`
-    // setting can admit contributors — with authorize.ts enforcing the
-    // conditional part per event. THIS surface never runs those per-event
-    // checks, so it keeps the old PROJECT_LEAD floor: an integration adding,
-    // deleting or re-anchoring source rows is a re-import-shaped act, not
-    // the timeline affordance.
+    // AQU-1068: source.cell.create/delete/reorder sit at COMMENTER in the
+    // static table, and PROJECT_LEAD is put back here because an integration
+    // adding, deleting or re-anchoring source rows is a re-import-shaped act.
+    //
+    // THIS LINE IS LOAD-BEARING, not a fail-fast convenience. It used to be one
+    // of two floors: the project's `cellEditingFloor` was also checked per
+    // event in authorize.ts. Since 2026-09-09 that tier is a product rule
+    // enforced at the button and NOT at the perimeter, and the external surface
+    // never consulted it anyway (it is exempt by `src === 'external'`). So this
+    // hard-coded PROJECT_LEAD is now the ONLY thing holding an integration
+    // above COMMENTER for these three kinds. A test pins it. Do not soften it
+    // to REQUIRED_ROLE without replacing it with something else.
+    //
+    // What still applies at commit is the maintainer requirement on removing an
+    // IMPORTED cell — except that the external exemption skips that too, which
+    // is a documented gap rather than an accident: it is the behaviour this
+    // surface had before AQU-1068. See authorize.ts.
     const kindFloor =
       e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
         ? ROLE.PROJECT_LEAD
+        : e.kind === 'assignment.create' ||
+            e.kind === 'assignment.reassign' ||
+            e.kind === 'assignment.unassign'
+          ? assignmentMinRole
         : (REQUIRED_ROLE[e.kind as keyof typeof REQUIRED_ROLE] ?? 0)
     floor = Math.max(floor, kindFloor)
   }
@@ -200,6 +230,10 @@ const LANE_KINDS = new Set([
  *  caller-supplied value would either be silently ignored or fork the plan
  *  from what commit re-checks — reject with a teaching message instead. */
 const SERVER_RESOLVED_FIELDS: Record<string, string[]> = {
+  // AQU-1233: viaAgent is stamped at compile — a caller supplying it (either to
+  // forge the marker on a human's behalf or to suppress it on its own comment)
+  // gets a validation error rather than a silent drop.
+  'comment.create': ['viaAgent'],
   'cell.validate': ['editEventId'],
   'cell.unvalidate': ['editEventId'],
   'cell.backtranslation.set': ['targetEventId'],

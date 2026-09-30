@@ -158,7 +158,15 @@ export function OrgSidebar() {
           </OrgNavLink>
         )}
         {isAdmin && activeOrgId != null && (
-          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
+          <OrgNavLink
+            to={orgPath(activeOrgId, "/settings")}
+            className={link}
+            data-tour="nav-settings"
+            // AQU-1338: a project view also carries a link labelled
+            // "Settings". Two links with one name and different destinations
+            // is ambiguous link purpose; name this one for where it goes.
+            aria-label={t("editor.navTitle.organizationSettings")}
+          >
             <NavIcon icon={NAV_PAGE_ICONS.settings} />
             {t("nav.settings")}
           </OrgNavLink>

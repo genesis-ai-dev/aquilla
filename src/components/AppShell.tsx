@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useContext, useEffect, useState, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { PanelLeft } from "lucide-react"
@@ -9,6 +9,7 @@ import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
+import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
 import { NavHistoryControls } from "./NavHistoryControls"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -24,21 +25,9 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { useIsLgUp } from "@/hooks/useIsLgUp"
 
-/** Tailwind `lg` — below this, org chrome and the editor dock move into a sheet. */
-const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
-
-export function useIsLgUp(): boolean {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
-      mq.addEventListener("change", onStoreChange)
-      return () => mq.removeEventListener("change", onStoreChange)
-    },
-    () => window.matchMedia(LG_MIN_WIDTH_QUERY).matches,
-    () => true,
-  )
-}
+export { useIsLgUp } from "@/hooks/useIsLgUp"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -210,6 +199,26 @@ export function AppShell({
     setNavOpen(false)
   }, [pathname])
 
+  /**
+   * Mark the document while this frame is on screen, so the base stylesheet
+   * can refuse a viewport scroll ONLY here.
+   *
+   * Scoped rather than global, and a page that is not in this frame is why:
+   * /privacy-policy renders a 3,400px document straight into the body. A
+   * blanket `overflow: hidden` on html made two thirds of it unreachable —
+   * no wheel, no scrollbar, no End key — including the page's own analytics
+   * opt-out and every contact address on it. Login, the invite and verify
+   * routes, the approval page and the 404 are all in the same position, and
+   * three of them carry a comment saying they scroll the document by design.
+   *
+   * Inside the frame the opposite holds: every pane scrolls on its own, so a
+   * document scroll can only slide the whole application off the top.
+   */
+  useEffect(() => {
+    document.documentElement.dataset.appFrame = "true"
+    return () => { delete document.documentElement.dataset.appFrame }
+  }, [])
+
   useEffect(() => {
     if (lgUp) setNavOpen(false)
   }, [lgUp])
@@ -334,8 +343,11 @@ export function AppShell({
         data-slot="app-shell-sidebar-footer"
         className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
       >
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
           <VersionTag />
+          {/* Same overflow reasoning as BetaBadge above: no room for a text
+              chip in the 40px collapsed icon rail. */}
+          {!chromeCollapsed && <ConnectivityStatusChip />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <HelpMenu compact showTour={!useDockResize} />

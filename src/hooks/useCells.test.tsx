@@ -46,17 +46,13 @@ const streamMeta: {
 } = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
-const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
+const pagesMock: { queue: CellRow[][] } = {
   queue: [],
-  pendingResolvers: [],
 }
 
-// The editor loads in two passes per fetch — target side first (tiny), then
-// source — so translations aren't hidden behind the full source stream on
-// large files. Tests still provide ONE combined dataset; cache it on the
-// target pass and reuse on the source pass so a `mockResolvedValueOnce` is
-// consumed once per load (call counts unchanged) and each pass gets its side.
-let sideCache: CellRow[] | null = null
+// Hold later complete pages behind an explicit gate.
+let pageGate: Promise<void> | null = null
+let releasePages: (() => void) | null = null
 
 type OnPage = (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>
 
@@ -81,15 +77,9 @@ vi.mock("@/lib/sync/cells-read", () => ({
       })
     }
     if (pagesMock.queue.length > 0) {
-      // Streaming/pagination fixtures are source pages; the target pass yields
-      // nothing so the source pass drains the queue.
-      if (side === "target") {
-        fireMeta(0)
-        await onPage([], true)
-        return
-      }
       const pages = pagesMock.queue.splice(0)
       for (let i = 0; i < pages.length; i++) {
+        if (i > 0 && pageGate) await pageGate
         fireMeta(i)
         const cont = await onPage(pages[i], i === pages.length - 1)
         if (cont === false) return
@@ -97,13 +87,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
       return
     }
     fireMeta(0)
-    let rows: CellRow[]
-    if (side === "source" && sideCache !== null) {
-      rows = sideCache
-    } else {
-      rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
-      sideCache = rows
-    }
+    const rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
     const filtered = side ? rows.filter((r) => r.side === side) : rows
     await onPage(filtered, true)
   },
@@ -185,6 +169,49 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   }
 })
 
+// Tauri offline read-branch seams. Every existing (online) test above relies
+// on `offlineTestState.isTauri` defaulting to false, which makes
+// `resolveOfflineStore` (useCells.ts) return null unconditionally — so the
+// HTTP mocks above are exercised exactly as before. Only the dedicated
+// "Tauri offline branch" describe block below flips it.
+const offlineTestState: {
+  isTauri: boolean
+  ready: boolean
+  rows: CellRow[]
+} = { isTauri: false, ready: false, rows: [] }
+// `subscribeToOfflineFileCells` callers registered via the mock below — a
+// test "fires" one by calling it directly, standing in for the real
+// LiveStore reactivity this seam replaces.
+let offlineSubscribers: Array<() => void> = []
+
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => offlineTestState.isTauri,
+}))
+
+vi.mock("@/context/OfflineStoreContext", () => ({
+  // The mocked offline-reads functions below never actually dereference this
+  // value — any truthy placeholder proves "the store finished booting".
+  useOfflineStore: () => ({ store: offlineTestState.isTauri ? ({} as object) : null, loading: false, error: null }),
+}))
+
+vi.mock("@/lib/offline/offline-reads", () => ({
+  isProjectOfflineReady: () => offlineTestState.ready,
+  resolveOfflineStore: (store: unknown, _projectId: string) =>
+    store && offlineTestState.isTauri && offlineTestState.ready ? store : null,
+  readOfflineFileCells: (
+    _store: unknown,
+    _projectId: string,
+    _fileId: string,
+    opts?: { side?: "source" | "target" },
+  ) => (opts?.side ? offlineTestState.rows.filter((r) => r.side === opts.side) : offlineTestState.rows),
+  subscribeToOfflineFileCells: (_store: unknown, _projectId: string, _fileId: string, onChange: () => void) => {
+    offlineSubscribers.push(onChange)
+    return () => {
+      offlineSubscribers = offlineSubscribers.filter((fn) => fn !== onChange)
+    }
+  },
+}))
+
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
@@ -213,8 +240,8 @@ beforeEach(() => {
   fetchByIdsMock.mockResolvedValue([])
   fetchDeltaMock.mockReset()
   pagesMock.queue = []
-  pagesMock.pendingResolvers = []
-  sideCache = null
+  pageGate = null
+  releasePages = null
   cacheEntry.value = null
   cacheWrites.length = 0
   delete streamMeta.maxServerSeq
@@ -222,6 +249,10 @@ beforeEach(() => {
   delete streamMeta.projectEpoch
   vtt.calls = 0
   peekOutboxBatchCallCount = 0
+  offlineTestState.isTauri = false
+  offlineTestState.ready = false
+  offlineTestState.rows = []
+  offlineSubscribers = []
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -285,11 +316,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
   })
 
-  it("loads the target side first so translations aren't hidden behind the source stream", async () => {
-    // Regression: on a 30k-cell file with a few translations, the combined
-    // read returns all source rows before any target row, so translations
-    // only appeared after the entire file streamed in — committed edits
-    // looked lost on reload. The hook now fetches the target side first.
+  it("loads both sides together (AQU-1328)", async () => {
     fetchAllMock.mockResolvedValue([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "tgt" }),
@@ -298,10 +325,9 @@ describe("useCells (Phase 2a, D1-backed)", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
     await waitFor(() => expect(result.current.cells).toHaveLength(1))
-    expect(result.current.cells[0].translated).toBe("tgt")
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("tgt"))
     expect(result.current.cells[0].original).toBe("src")
-    // The very first read pass targets the (small) target side.
-    expect(fetchAllMock.mock.calls[0][3]).toBe("target")
+    expect(fetchAllMock.mock.calls[0][3]).toBeUndefined()
   })
 
   it("revalidate() triggers a refetch and reflects new data", async () => {
@@ -432,6 +458,30 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(result.current.cells).toHaveLength(4))
     expect(result.current.cells.map((c) => c.id)).toEqual(["p1a", "p1b", "p2a", "p3a"])
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it("paints complete rows while later rows are still loading (AQU-1328)", async () => {
+    pageGate = new Promise<void>((resolve) => { releasePages = resolve })
+    pagesMock.queue = [
+      [makeRow({ cellId: "s1", side: "source", value: "Source 1" }),
+       makeRow({ cellId: "s1", side: "target", value: "Translated 1" }),
+       makeRow({ cellId: "empty", side: "source", value: "Untranslated" })],
+      [makeRow({ cellId: "s2", side: "source", value: "Source 2" }),
+       makeRow({ cellId: "s2", side: "target", value: "Translated 2" })],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells.map((c) => [c.id, c.translated])).toEqual([
+      ["s1", "Translated 1"], ["empty", ""],
+    ])
+    expect(result.current.isLoading).toBe(true)
+    await act(async () => { releasePages?.() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells.map((c) => [c.id, c.translated])).toEqual([
+      ["s1", "Translated 1"], ["empty", ""], ["s2", "Translated 2"],
+    ])
   })
 
   it("does not rebuild the whole cell list on every page of a hard stream (no O(N^2) first open)", async () => {
@@ -1436,7 +1486,6 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     fetchAllMock.mockReset()
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
-    sideCache = null
   })
 
   it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
@@ -1614,7 +1663,6 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     fetchAllMock.mockReset()
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
-    sideCache = null
     peekOutboxBatchCallCount = 0
   })
 
@@ -1664,5 +1712,137 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     // The entire burst of 20 notifications must have triggered exactly ONE
     // peekOutboxBatch call (not 20).
     expect(peekOutboxBatchCallCount).toBe(1)
+  })
+})
+
+describe("useCells (Tauri offline read branch)", () => {
+  it("reads from LiveStore instead of HTTP when offline-ready, mapping degraded CellRow fields via buildCellData's defaults", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "Source 1", canonicalRef: "GEN 1:1", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "Target 1", validated: true, sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0]).toMatchObject({
+      id: "c1",
+      original: "Source 1",
+      translated: "Target 1",
+      status: "validated",
+    })
+    // The offline branch never touches the HTTP read path.
+    expect(fetchAllMock).not.toHaveBeenCalled()
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+    expect(fetchByIdsMock).not.toHaveBeenCalled()
+  })
+
+  it("falls through to the unchanged HTTP path when Tauri but the project isn't offline-ready", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = false // e.g. still "downloading", or never requested for offline use
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "tgt" }),
+    ])
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-not-ready", fileId: "file-offline", getToken, enabled: true }),
+    )
+
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("tgt")
+    expect(fetchAllMock).toHaveBeenCalled()
+  })
+
+  it("re-reads and updates cells when subscribeToOfflineFileCells fires, without any HTTP call", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "v1", sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("v1")
+    expect(offlineSubscribers.length).toBeGreaterThan(0)
+
+    // Simulate the Phase 3 sync adapter materializing a remote commit into
+    // LiveStore, then firing the subscription this hook registered.
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "v2 (remote)", sequenceIndex: 0 }),
+    ]
+    act(() => {
+      for (const fn of offlineSubscribers) fn()
+    })
+
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("v2 (remote)"))
+    expect(fetchAllMock).not.toHaveBeenCalled()
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+  })
+
+  it("revalidateCell reads the one cellId from LiveStore synchronously, without fetchCellsByIds", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "old", sequenceIndex: 0 }),
+      makeRow({ cellId: "c2", side: "source", value: "src2", sequenceIndex: 1 }),
+      makeRow({ cellId: "c2", side: "target", value: "untouched", sequenceIndex: 1 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+
+    // A targeted change lands in LiveStore for c1 only.
+    offlineTestState.rows = offlineTestState.rows.map((r) =>
+      r.cellId === "c1" && r.side === "target" ? { ...r, value: "new" } : r,
+    )
+    act(() => { result.current.revalidateCell("c1") })
+
+    await waitFor(() => expect(result.current.cells.find((c) => c.id === "c1")?.translated).toBe("new"))
+    // c2 is untouched and keeps its position/value — revalidateCell must not
+    // have re-read (and thus reordered) the whole file.
+    expect(result.current.cells.map((c) => c.id)).toEqual(["c1", "c2"])
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("untouched")
+    expect(fetchByIdsMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps an in-flight optimistic edit visible when the offline branch re-reads a stale (pre-flush) snapshot", async () => {
+    // Mirrors the online FRO-247 "disappearing prediction" guard: an
+    // optimistic edit lands locally before the write-side's outbox event has
+    // materialized into LiveStore, so a subscribe-triggered re-read must not
+    // clobber it with the stale value still sitting in the table.
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "old", sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "predicted" }) })
+    expect(result.current.cells[0].translated).toBe("predicted")
+
+    // The sync adapter fires the subscription for an unrelated reason while
+    // LiveStore's own row still shows the pre-edit value (not yet flushed).
+    act(() => {
+      for (const fn of offlineSubscribers) fn()
+    })
+
+    expect(result.current.cells[0].translated).toBe("predicted")
   })
 })

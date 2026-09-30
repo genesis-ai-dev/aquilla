@@ -96,7 +96,7 @@ export interface CreatedProject {
  * AND a server-side row, so subsequent member-add and sync calls succeed. */
 export async function createProjectServerSide(
   jwt: string,
-  args: { id: string; name: string },
+  args: { id: string; name: string; orgId?: number },
 ): Promise<CreatedProject> {
   // The caller supplies a stable project id and the worker insert uses
   // ON CONFLICT(id) DO NOTHING, so replaying this byte-identical fixture POST
@@ -108,6 +108,21 @@ export async function createProjectServerSide(
     operation: "createProjectServerSide",
   })
   return (await r.json()) as CreatedProject
+}
+
+/** GET /api/v2/projects/:projectId/settings — the stored shared-settings blob,
+ * for specs asserting that a UI save actually reached auth-worker. */
+export async function readProjectSettings(
+  jwt: string,
+  projectId: string,
+): Promise<Record<string, unknown>> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!r.ok) throw new Error(`read settings failed: HTTP ${r.status} — ${await r.text()}`)
+  const stored = (await r.json()) as { settings?: Record<string, unknown> }
+  return stored.settings ?? {}
 }
 
 /** PUT /api/v2/projects/:projectId/settings — merge keys into a project's

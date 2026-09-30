@@ -67,6 +67,22 @@ describe("WorkloadRollup", () => {
     expect(heading.closest("section")).toHaveTextContent("Visibility control")
   })
 
+  it("hides Remove when the caller is below the project's assignment floor", async () => {
+    mockGetWorkload.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
+    ])
+    render(
+      <WorkloadRollup
+        jwt="jwt"
+        orgId={1}
+        canUnassignProject={(projectId) => projectId !== "pa"}
+      />,
+    )
+
+    await screen.findByText("Team workload")
+    expect(screen.queryByRole("button", { name: /Remove assignment/ })).not.toBeInTheDocument()
+  })
+
   it("removes a completed (100%) assignment on click — it disappears (AQU-494 bug 1)", async () => {
     // "Completed" here means 100% progress, not a completed_at flag — nothing
     // in this system ever sets completed_at (see assignments.ts service docs);

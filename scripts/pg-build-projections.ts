@@ -47,17 +47,22 @@ const COMMENT_COLS = [
   "comment_id", "project_id", "scope_kind", "file_id", "cell_id", "parent_comment_id",
   "body", "resolved", "author_id", "author_label", "created_at", "updated_at", "deleted_at",
 ]
-// `comments.comment_id` and `files.id` are GLOBAL primary keys (not project-
-// scoped like cells/cell_validators), so an id reused across projects collides
-// even after the per-project DELETE. Mirror the canonical conflict handling:
-// comment.create is ON CONFLICT(comment_id) DO NOTHING (first writer wins);
-// file.create is ON CONFLICT(id) DO NOTHING here (a cross-project file-id clash
-// must not let one project clobber another's file row).
+// `files.id` is still a GLOBAL primary key (not project-scoped like
+// cells/cell_validators), so an id reused across projects collides even after
+// the per-project DELETE: file.create is ON CONFLICT(id) DO NOTHING here (a
+// cross-project file-id clash must not let one project clobber another's file
+// row).
+//
+// AQU-1296: `comments` is now keyed on (project_id, comment_id) — migration
+// 0093. Mirror the canonical conflict handling in event-projection.ts, which
+// conflicts on the same project-scoped pair. Conflicting on `comment_id` alone
+// was the bug: two projects importing the same source emit identical comment
+// ids, and the first one to load silently swallowed the second's every row.
 const TABLES: Array<{ name: keyof ReturnType<typeof foldProjection>; cols: string[]; conflict?: string }> = [
   { name: "files", cols: FILE_COLS, conflict: "ON CONFLICT (id) DO NOTHING" },
   { name: "cells", cols: CELLS_COLS },
   { name: "cell_validators", cols: VALIDATOR_COLS },
-  { name: "comments", cols: COMMENT_COLS, conflict: "ON CONFLICT (comment_id) DO NOTHING" },
+  { name: "comments", cols: COMMENT_COLS, conflict: "ON CONFLICT (project_id, comment_id) DO NOTHING" },
 ]
 
 const PARAM_CAP = 60000 // < PG's 65535 bind-param ceiling

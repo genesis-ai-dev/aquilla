@@ -9,6 +9,7 @@ import {
   SAMPLE_EBL,
   makeEblIdml,
   styled,
+  tocEntriesWithPageRuns,
   type EblIdmlStories,
 } from "@/lib/biblica/ebl/__fixtures__/ebl-idml"
 import { selectEblNotes } from "@/lib/biblica/ebl/notes"
@@ -237,5 +238,28 @@ describe("EBL parser adapter", () => {
     })
 
     expect(strings).toEqual([])
+  })
+
+  it("omits contents page numbers from the imported original", async () => {
+    const entries = SAMPLE_EBL.contentsTitles.map((title, index) => ({
+      title,
+      page: SAMPLE_EBL.contentsPages[index]!,
+    }))
+    const { result: { strings } } = await extractFrom({
+      body: [
+        styled("h", "02_TOC:ms1", SAMPLE_EBL.contentsHead),
+        tocEntriesWithPageRuns("toc", "02_TOC:tc1", entries),
+        styled("nested", "02_TOC:tc3", SAMPLE_EBL.contentsNestedEntry),
+      ],
+      badge: [],
+      summary: [],
+    })
+    const originals = strings.map((cell) => cell.original)
+
+    for (const title of SAMPLE_EBL.contentsTitles) expect(originals).toContain(title)
+    expect(originals).toContain(SAMPLE_EBL.contentsNestedTitle)
+    for (const page of SAMPLE_EBL.contentsPages) expect(originals).not.toContain(page)
+    expect(originals).not.toContain(SAMPLE_EBL.contentsNestedEntry)
+    expect(originals.some((text) => text.includes(SAMPLE_EBL.contentsNestedPage))).toBe(false)
   })
 })

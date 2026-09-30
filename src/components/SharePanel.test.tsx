@@ -95,7 +95,9 @@ vi.mock("@/lib/sync/project-settings", () => ({
 }))
 
 const mockResolveCloudProjectResult = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   resolveCloudProjectResult: (...args: unknown[]) => mockResolveCloudProjectResult(...args),
   projectsResultError: () => new Error("project load failed"),
 }))

@@ -15,8 +15,10 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * Where chips render (ground truth): terminology-chip-plugin is wired into
  * the TARGET editor only (TranslatedEditor via the terminologyConcepts prop,
  * EditorTable.tsx) and scans the target doc for ACTIVE concept sourceTerm
- * matches. The source column's term affordance (SourceWithTermLookup) is
- * exact-word only — wildcards never decorate the source side.
+ * matches. This spec covers that target path. The source column has its own
+ * affordances on the same shared matcher — `SourceWithTermLookup` for plain
+ * text and `decorateTermsInHtml` for a formatted cell (AQU-1135) — so
+ * wildcards decorate the source side too; both are covered in RTL.
  *
  * This spec:
  *   1. Imports sample.md.

@@ -243,6 +243,7 @@ export function OrgProjectsPage() {
                 jwt={jwt}
                 author={session?.username}
                 allowSelfAssignment={orgSettings.allowSelfAssignment}
+                assignmentMinRole={orgSettings.assignmentMinRole}
                 viewerUsername={username}
                 onLanesChanged={() => {
                   portfolio.bumpRefresh()

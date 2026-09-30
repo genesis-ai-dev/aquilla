@@ -184,12 +184,33 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     )
   })
 
+  // AQU-581 review: the automatic validate that follows your own edit went to
+  // the MAIN language — editing Spanish validated the German row, and a member
+  // limited to Spanish had it refused ("…the main language at the time").
+  it("validates your own edit in the lane you edited, not the main language", async () => {
+    emitCellValidate.mockClear()
+    emitTargetCellCommit.mockClear()
+    reviewContextualDraft.mockClear()
+    hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", "fr"), [
+      { draftId: "draft-fr", cellId: "cell-1", text: "Bonjour le monde" },
+    ])
+    renderTable("fr", [], "")
+    fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
+    expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
+    emitTargetCellCommit.mockClear()
+  })
+
   it("AQU-633: disables the per-cell validate action outside the member's lane scope", async () => {
     emitCellValidate.mockClear()
     renderTable("fr", [{ kind: "lane", value: "es" }])
 
-    const button = await screen.findByRole("button", { name: /Click to validate/ })
-    expect(button).toBeDisabled()
+    const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
+    expect(button.getAttribute("aria-label")).not.toMatch(/click/i)
+    // aria-disabled rather than disabled, so its hover can still say why
+    // (2026-09-23). The click must still do nothing.
+    expect(button).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })

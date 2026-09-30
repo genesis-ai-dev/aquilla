@@ -57,6 +57,8 @@ export const agent = defineNamespace({
     "agent.run.stepRunning": "Step running",
     "agent.run.stepSucceeded": "Step succeeded",
     "agent.run.stepFailed": "Step failed",
+    "agent.run.chooseFile": "Choose a file:",
+    "agent.run.useFileMessage": "Use \"{name}\"",
     "agent.run.capped": "Run hit its step/token cap — results may be partial.",
     "agent.run.tokenUsage": "{promptTokens} prompt + {completionTokens} completion tokens",
 
@@ -87,6 +89,7 @@ export const agent = defineNamespace({
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.weeklyExhausted": "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. Usage resets weekly; see Billing & usage.",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the
     //    full-page /approve/:changesetId gate in ApproveChangeset) ──────
@@ -309,7 +312,8 @@ export const agent = defineNamespace({
     "agent.brief.prefillFromText": "Pre-fill from text",
     "agent.brief.summaryOutOfDate": "Summary out of date",
     "agent.brief.capturePurpose":
-      "Capture this project's purpose, audience, and standards so the AI drafts to your brief.",
+      "Capture this project's purpose, audience, and standards so the AI drafts to " +
+      "your brief — or skip it and start translating without one.",
     "agent.brief.createBrief": "Create brief",
     "agent.brief.noSummaryYet": "No summary generated yet.",
     "agent.brief.editBrief": "Edit brief",
@@ -445,6 +449,21 @@ export const agent = defineNamespace({
       "agent.run.stepFailed": {
         description:
           "Accessible name for the X icon beside a tool-call chip that errored.",
+      },
+      "agent.run.chooseFile": {
+        description:
+          "Short label above a row of buttons, one per project file, shown when the " +
+          "agent asks which file to work in. Ends with a colon because the buttons " +
+          "follow it.",
+      },
+      "agent.run.useFileMessage": {
+        description:
+          "The message sent to the agent when the user clicks one of the file buttons. " +
+          "It appears as the user's chat bubble and is what the agent reads. Keep the " +
+          "straight double quotes around the file name.",
+        placeholders: {
+          name: "The exact file name the user clicked; never translate or alter it.",
+        },
       },
       "agent.run.tokenUsage": {
         description:

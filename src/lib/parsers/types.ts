@@ -240,7 +240,12 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
   },
 }
 
-export type TtsProvider = "omnivoice" | "gemini" | "kokoro" | "mms"
+/**
+ * `"omnivoice"` and `"kokoro"` are persisted legacy ids. Opening a project
+ * rewrites them to `"inworld"` (language tags included); runtime still remaps
+ * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
+ */
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -253,12 +258,37 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "omnivoice" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "inworld" when absent. Leftover `"kokoro"` is rewritten to inworld. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
-  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name. */
+  /** Gemini prebuilt voice id (e.g. "Kore"). For Inworld, the catalog `voiceId`
+   *  (Dennis, Alex), an Instant Clone id, or a published Voice Design id
+   *  (`workspace__design-voice-…`). Leftover Kokoro speaker ids (`af_heart`)
+   *  are rewritten to the Inworld stock default on load. */
   voiceName?: string
+  /**
+   * BCP-47 language this Inworld stock voice was picked for (AQU-1189). Used
+   * to badge the name when a project has more than one target-language lane,
+   * and as the synthesize/catalog language when the project lane is a
+   * display name Inworld cannot map.
+   */
+  language?: string
+  /**
+   * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
+   * `audioConfig.speakingRate`.
+   */
+  speakingRate?: number
+  /**
+   * Inworld delivery: STABLE | BALANCED | CREATIVE. Only sent when audio
+   * quality is Highest (`inworld-tts-2`); Flash ignores it.
+   */
+  deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
+  /**
+   * Inworld audio quality. Highest = `inworld-tts-2` (default, unlocks Delivery
+   * and steering); Standard = `inworld-tts-2-flash`.
+   */
+  audioQuality?: "standard" | "highest"
   /** Spoken accent or oral reading tradition. */
   accent?: string
   /** Closest high-resource language whose pronunciation should be used as a fallback. */
@@ -278,6 +308,13 @@ export interface Voice {
    */
   referenceAudioId?: string
   /**
+   * R2 object name (incl. ext) of the Voice Design sample the user picked.
+   * The editor plays this clip so it matches the preview, instead of
+   * synthesizing the script again. Voices saved before this field existed
+   * fall back to a fresh TTS request.
+   */
+  designPreviewAudioId?: string
+  /**
    * When the clone reference was lifted from a line take, `${cellId}:${slot}`
    * of that take. The Reference audio tab is filled only when `referenceAudioId`
    * is set *without* this key (a recorded or uploaded clip).
@@ -286,7 +323,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "omnivoice" (hosted, no key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. */
+  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "mms" runs locally. Legacy `"omnivoice"` / `"kokoro"` are rewritten to inworld on load and remapped at runtime. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string
@@ -403,6 +440,9 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  // AQU-1083's org default is NOT here. It lives on the project settings
+  // response (`ProjectSettingsResponse.orgCountStructuralCells`), because that
+  // is the one an open editor re-reads when someone else changes it.
   /**
    * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
    * allowed to change this project's source/target language and its extra
@@ -440,6 +480,22 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
+   * still use `legacyTag` ('' is the default target lane). Absent until the
+   * settings read returns them.
+   */
+  lanes?: {
+    id: string
+    role: "source" | "target"
+    name: string
+    langCode: string | null
+    legacyTag: string | null
+    position: number
+    archivedAt: string | null
+  }[]
+  /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
+  termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]
@@ -462,16 +518,25 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
-  /** AQU-646: may people add lines into the timeline's silences? Off unless
-   *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
-   *  Deleting an empty added line is not gated on it. */
-  allowLineCreation?: boolean
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
    *  on top of the maintainer floor, so with it off the write is refused even
    *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
-   *  sibling above on stranding. */
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
@@ -512,6 +577,17 @@ export interface ProjectRecord {
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
   validationCountAudio?: number
   /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — as translatable content in its progress and
+   * completion numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. There is deliberately no stored value for it: a null would be
+   * a third thing the resolver has no meaning for. Absent on the org too means
+   * they count, which is what every project did before this existed.
+   */
+  countStructuralCells?: boolean
+  /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"
    * Server enforcement: sync-worker cell.validate branch must check the
@@ -541,6 +617,17 @@ export interface ProjectRecord {
    *   allowSelfValidation is false.
    */
   allowSelfValidation?: boolean
+  /**
+   * AQU-490: the audio twins of the three above. SEPARATE keys, by Sam's
+   * ruling — a project can want two ears on a recording and one on a
+   * translation, or trust a different set of people with each. Neither set is
+   * ever read as a fallback for the other; absent means unrestricted on both
+   * sides. All three ARE enforced server-side (sync-worker route.ts), unlike
+   * the text trio's long-standing SWARM-TODOs.
+   */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).
@@ -617,6 +704,8 @@ export interface ProjectRecord {
   /** Authored living-memory entries (instructions + standards). Persisted and
    *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /** AQU-934: per-file genre assignment (fileId → genre id). Synced settings. */
+  fileGenres?: Record<string, string>
   /** The project's skopos/Paratext translation brief. Persisted and synced via
    *  ProjectWideSettings the same way as `livingMemoryEntries`. */
   translationBrief?: import("@/lib/brief/types").TranslationBrief

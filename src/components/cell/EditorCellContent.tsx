@@ -12,9 +12,37 @@ import {
 } from "@/lib/richtext/idml-style-display"
 import {
   segmentUsfmForDisplay,
+  type UsfmInlineMark,
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
+import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
+import type { Concept } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+/**
+ * Renders a USFM display segment with the inline styling its character
+ * markers carried (AQU-578). `segmentUsfmForDisplay` unwraps `\bd`/`\it`/
+ * `\bdit`/`\em`/`\add`/`\sc`/`\nd`/`\sup` and reports them as `marks`; without
+ * this wrapper the source column showed bold and italic source text as plain.
+ *
+ * Nesting order is fixed (strong → em → small-caps → sup) so the same marks
+ * always produce the same DOM regardless of the order the markers opened in.
+ */
+export function UsfmMarkedText({
+  marks,
+  children,
+}: {
+  marks: readonly UsfmInlineMark[]
+  children: ReactNode
+}) {
+  if (marks.length === 0) return <>{children}</>
+  let node: ReactNode = children
+  if (marks.includes("superscript")) node = <sup>{node}</sup>
+  if (marks.includes("small-caps")) node = <span style={{ fontVariantCaps: "small-caps" }}>{node}</span>
+  if (marks.includes("italic")) node = <em>{node}</em>
+  if (marks.includes("bold")) node = <strong>{node}</strong>
+  return <>{node}</>
+}
 
 export function UsfmNoteChip({
   note,
@@ -63,16 +91,32 @@ export function SanitizedRichHtml({
   html,
   idmlStyleCatalog,
   idmlParagraphStyleId,
+  concepts,
 }: {
   html: string
   idmlStyleCatalog?: IdmlStyleCatalog
   idmlParagraphStyleId?: string
+  /**
+   * AQU-1135: managed terminology for this project. When supplied, every
+   * active-concept match is wrapped in the shared `.term-chip-host
+   * [data-source-term]` highlight so a FORMATTED source cell gets the same key
+   * terms — and the same clickable lookup — a plain-text one already had.
+   * Omitted by callers with no terminology surface (the agent workbench).
+   */
+  concepts?: Concept[]
 }) {
+  const t = useT()
   const safeHtml = useMemo(
-    () => looksLikeIdmlHtml(html)
-      ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
-      : sanitizeSourceDisplayHtml(html),
-    [html, idmlParagraphStyleId, idmlStyleCatalog],
+    () => {
+      const sanitized = looksLikeIdmlHtml(html)
+        ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
+        : sanitizeSourceDisplayHtml(html)
+      // Strictly after sanitizing — the source sanitizer drops data-* attrs.
+      return decorateTermsInHtml(sanitized, concepts, {
+        label: (term) => t("editor.term.managed", { term }),
+      })
+    },
+    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t],
   )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
@@ -184,7 +228,11 @@ export function EditorPlainReadText({
       )
       return
     }
-    parts.push(<span key={`text-${index}`}>{segment.text}</span>)
+    parts.push(
+      <UsfmMarkedText key={`text-${index}`} marks={segment.marks}>
+        <span>{segment.text}</span>
+      </UsfmMarkedText>,
+    )
   })
 
   return <div>{parts}</div>

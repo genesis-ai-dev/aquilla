@@ -28,6 +28,23 @@ export function verseLabelFromCanonical(value: string | null | undefined): strin
   return parseScriptureReference(value)?.verse ?? null
 }
 
+/** First/last verse labels in display order, without resolving interior cells. */
+export function verseRangeLabel(
+  cellIds: readonly string[],
+  readCanonical: (cellId: string) => string | null | undefined,
+): string | null {
+  for (let firstIndex = 0; firstIndex < cellIds.length; firstIndex++) {
+    const first = verseLabelFromCanonical(readCanonical(cellIds[firstIndex]))
+    if (!first) continue
+    for (let lastIndex = cellIds.length - 1; lastIndex > firstIndex; lastIndex--) {
+      const last = verseLabelFromCanonical(readCanonical(cellIds[lastIndex]))
+      if (last) return first === last ? first : `${first}–${last}`
+    }
+    return first
+  }
+  return null
+}
+
 export interface CellNumberLabelInput {
   lineNumbersEnabled: boolean
   cellType: string | null | undefined

@@ -14,6 +14,13 @@ export interface ChapterHealthReaders {
   getSummary(cellId: string): { status: string; translated: string } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
+  /**
+   * AQU-1083: true for a heading in a project that excludes headings from
+   * progress. The chapter's own translated/validated/total already leave
+   * these out — the store computes them — so this only decides how the
+   * square is drawn. Absent ⇒ nothing is excluded.
+   */
+  isExcluded?(cellId: string): boolean
 }
 
 export interface ChapterHealthBuilder {
@@ -57,30 +64,38 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
 
   return {
     build(chapters, readers) {
-      const nextCells = new Map<string, CellEntry>()
       const nextChapters = new Map<string, ChapterEntry>()
       let anyChapterChanged = chapters.length !== last.length
+      let membershipChanged = anyChapterChanged
 
       const result = chapters.map((source, chapterIndex) => {
         const prevChapter = chaptersByKey.get(source.key)
+        if (!prevChapter) membershipChanged = true
         const cells: CellEntry[] = []
         let cellsChanged = !prevChapter || prevChapter.cells.length !== source.cellIds.length
 
         for (const cellId of source.cellIds) {
           const summary = readers.getSummary(cellId)
           if (!summary) continue
-          const stage = cellStage(summary)
-          const health = stage === "validated" ? 100 : readers.health(cellId)
+          const excluded = readers.isExcluded?.(cellId) ?? false
+          const stage = excluded ? "excluded" as const : cellStage(summary)
+          // An excluded cell carries no health score: health measures how good
+          // a translation is, and this one is not being scored at all.
+          const health = excluded ? undefined : stage === "validated" ? 100 : readers.health(cellId)
           const hasIssue = readers.hasIssue(cellId)
           const prev = cellsById.get(cellId)
           const entry = prev && prev.stage === stage && prev.health === health && prev.hasIssue === hasIssue
             ? prev
             : { id: cellId, stage, health, hasIssue }
           if (entry !== prevChapter?.cells[cells.length]) cellsChanged = true
-          nextCells.set(cellId, entry)
+          if (cellId !== prevChapter?.cells[cells.length]?.id) membershipChanged = true
+          if (entry !== prev) cellsById.set(cellId, entry)
           cells.push(entry)
         }
-        if (prevChapter && cells.length !== prevChapter.cells.length) cellsChanged = true
+        if (prevChapter && cells.length !== prevChapter.cells.length) {
+          cellsChanged = true
+          membershipChanged = true
+        }
 
         const reusable = prevChapter
           && !cellsChanged
@@ -104,7 +119,13 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
         return chapter
       })
 
-      cellsById = nextCells
+      // A health-only update changes a few entries, not chapter membership.
+      // Avoid copying the whole file's cache; prune only after membership or
+      // ordering changes, including a previously present summary disappearing.
+      if (membershipChanged) {
+        const retained = new Set(result.flatMap(chapter => chapter.cells?.map(cell => cell.id) ?? []))
+        for (const id of cellsById.keys()) if (!retained.has(id)) cellsById.delete(id)
+      }
       chaptersByKey = nextChapters
       if (!anyChapterChanged) return last
       last = result

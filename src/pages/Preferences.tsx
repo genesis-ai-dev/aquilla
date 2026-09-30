@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Cpu, Gauge, KeyRound, PanelLeft, UserRound } from "lucide-react"
+import { Cpu, Gauge, KeyRound, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -31,8 +31,10 @@ import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
+import { LocalLlmSection } from "@/components/settings/LocalLlmSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
@@ -372,6 +374,8 @@ interface PreferenceSection {
   group: string
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
+  /** Only shown in the Tauri desktop shell (checked at render time). */
+  tauriOnly?: boolean
 }
 
 /** Former nested slugs now inlined on the index — keep redirecting for bookmarks. */
@@ -413,6 +417,15 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     render: () => <LocalModelsSection />,
   },
   {
+    slug: "local-llm",
+    titleKey: "onboarding.preferences.section.localLlm.title",
+    descriptionKey: "onboarding.preferences.section.localLlm.description",
+    group: "AI & personalization",
+    icon: ServerCog,
+    tauriOnly: true,
+    render: () => <LocalLlmSection />,
+  },
+  {
     slug: "usage",
     titleKey: "onboarding.preferences.section.usage.title",
     descriptionKey: "onboarding.preferences.section.usage.description",
@@ -450,6 +463,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
         : t("onboarding.preferences.hint.notSet"),
     "provider-keys": t("onboarding.preferences.hint.personal"),
     "local-models": t("onboarding.preferences.hint.onDevice"),
+    "local-llm": t("onboarding.preferences.hint.offlineOnly"),
     usage: t("onboarding.timeWindow.thisWeek"),
   }
 
@@ -463,7 +477,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
         <GeneralSection workspaceHint={hints.workspace} backgroundLocation={backgroundLocation} />
         {PREFERENCE_GROUPS.map((group) => (
           <NavList key={group} label={group}>
-            {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
+            {PREFERENCE_SECTIONS.filter((s) => s.group === group && (!s.tauriOnly || isTauriRuntime())).map((s) => (
               <NavRow
                 key={s.slug}
                 to={`/preferences/${s.slug}`}
@@ -496,7 +510,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   const navigate = useNavigate()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
-  if (!section) return <Navigate to="/preferences" replace />
+  if (!section || (section.tauriOnly && !isTauriRuntime())) return <Navigate to="/preferences" replace />
   if (modal) {
     // In the route-modal there is no breadcrumb, so the BackLink is the way
     // back to the index; it pops history to keep the dialog's depth intact.

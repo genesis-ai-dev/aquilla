@@ -137,8 +137,12 @@ export const MCP_TOOLS: McpToolDef[] = [
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
       'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-      'contributeToGlobalTm) are NEVER writable through any agent surface — an op naming one ' +
-      'returns permission_denied. PatchSettings must be the SOLE command in its changeset. ' +
+      'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
+      'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
+      'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +
+      'returns permission_denied naming the key in details.loosening. Call ' +
+      'describe_command({ kind: "PatchSettings" }) for the per-key direction table. ' +
+      'PatchSettings must be the SOLE command in its changeset. ' +
       'Returns { changesetId, summary, digest, mode, approvalUrl? } exactly like ' +
       'prepare_translations — nothing is applied until confirm_changeset (ask mode: a human ' +
       'approves at the approvalUrl first).',
@@ -186,6 +190,30 @@ export const MCP_TOOLS: McpToolDef[] = [
         kind: {
           type: 'string',
           description: 'Command kind to document. Omit for the index of all command kinds.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_skill',
+    description:
+      'Fetch an agent skill — a server-owned playbook that sequences existing commands and ' +
+      'tools for one workflow, so the ordering lives here and not in your chat history. Args: ' +
+      'name (optional). Omit name for the index ({ name, title, oneLiner }); pass one (e.g. ' +
+      '"project-setup") for its full Markdown body. Read project-setup BEFORE standing up a ' +
+      'partner project: it covers the intake template (GET /api/v1/external/setup-template + ' +
+      'POST .../setup-template/parse), the four fields you must never guess, the markup ' +
+      'refusal, the single ProjectSetup command, and the verification receipt. A skill stages ' +
+      'nothing on its own. An unknown name returns a not_found tool error listing the valid ' +
+      'ones. Static documentation — no projectId. (REST: GET /api/v1/external/skills and ' +
+      'GET /api/v1/external/skills/:name.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name (e.g. "project-setup"). Omit for the index of all skills.',
         },
       },
       additionalProperties: false,
@@ -275,8 +303,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'registered in the project\'s settings.targetLanes, e.g. "es", "pt" — see ' +
       'get_capabilities.multiLanguage). Pass lane to filter target cells to one lane ' +
       '(source cells are always included); omit it to get every lane — each target row ' +
-      'carries its targetLang. Returns { data, nextCursor, ... }. Use this together with ' +
-      'search_project to gather context before staging translations.',
+      'carries its targetLang. Every cell row carries `hidden` (AQU-1426): `true` means a ' +
+      'Project Lead PARKED that cell — it is out of the editor and out of every export, it ' +
+      'is not work, and you should not draft or report it. Bring one back with the ShowCell ' +
+      'command, or park one with HideCell. Returns { data, nextCursor, ... }. Use this ' +
+      'together with search_project to gather context before staging translations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -310,6 +341,40 @@ export const MCP_TOOLS: McpToolDef[] = [
         cellId: { type: 'string', description: 'Cell id whose history to read.' },
       },
       required: ['projectId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_comments',
+    description:
+      'Read reviewer comment threads (the feedback primitive) — the same threads the people ' +
+      'on this project see in the app. Args: projectId (required); fileId to narrow to one ' +
+      "file; fileId + cellId to read one cell's threads; limit (default 50, max 200) and " +
+      'cursor to page. Returns { data, nextCursor } ordered oldest-first, each item ' +
+      '{ commentId, scopeKind, fileId, cellId, cellRef, parentCommentId, body, resolved, ' +
+      'author, viaAgent, createdAt, updatedAt, deletedAt }. parentCommentId null means the ' +
+      'item IS a thread root; the replies to it carry its commentId. `author` is a stable ' +
+      'per-project pseudonym (u_3f9ab21c) unless this credential was minted to see real ' +
+      'identities — the same author is the same id within a project and a different one ' +
+      'across projects. `viaAgent` marks a comment posted through this API rather than typed ' +
+      'by a person, so you can tell your own earlier replies from a reviewer\'s. Read a ' +
+      "cell's threads before rewriting it: a reviewer may already have said what they want. " +
+      'To ANSWER a thread, stage an EmitEvents changeset (REST ' +
+      'POST .../projects/:projectId/changesets) with one comment.create carrying the thread ' +
+      "root's commentId as parentCommentId, plus that cell's fileId/cellId — it posts as you " +
+      '(the credential\'s minting user), marked "via agent", and notifies the thread the ' +
+      'normal way. A parentCommentId that does not exist fails at prepare with ' +
+      'validation_failed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Restrict to one file.' },
+        cellId: { type: 'string', description: "Restrict to one cell's threads (requires fileId)." },
+        limit: { type: 'number', description: 'Page size (default 50, max 200).' },
+        cursor: { type: 'string', description: "Opaque cursor from a previous page's nextCursor." },
+      },
+      required: ['projectId'],
       additionalProperties: false,
     },
   },
@@ -547,7 +612,17 @@ export const MCP_TOOLS: McpToolDef[] = [
       'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
       'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
       'export slots (IDML/OOXML locators) because a structural change would break its ' +
-      'round-trip export. Call describe_command for the full rules.',
+      'round-trip export. Call describe_command for the full rules.\n' +
+      '  { kind: "HideCell", fileId, cellId } / { kind: "ShowCell", fileId, cellId } — PARK a ' +
+      'cell, reversibly, or bring it back. Hiding takes the row out of the editor for ' +
+      'everyone, in every language lane, and out of every export, but DELETES NOTHING: the ' +
+      'source text, every lane\'s translation, recordings, comments and validations survive ' +
+      'and return untouched on ShowCell. Prefer this over DeleteCell for a stray heading, an ' +
+      'import artefact, or a paragraph the client does not want translated — DeleteCell is ' +
+      'the destructive one. Both require PROJECT_LEAD. Several may share one changeset, but ' +
+      'they cannot mix with other kinds and hides cannot mix with shows (stage two plans). ' +
+      'Refused at prepare when the cell does not exist or is already in the state you asked ' +
+      'for. Cell reads carry `hidden` so you can see what is already parked and skip it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -582,7 +657,8 @@ export const MCP_TOOLS: McpToolDef[] = [
           type: 'array',
           description:
             'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
-            'InsertCell / DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this ' +
+            'InsertCell / DeleteCell / SplitCell / HideCell / ShowCell commands to stage ' +
+            '(Agent API v1.1) — see this ' +
             'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
             'PlanImport is not accepted here (REST-only).',
           items: {
@@ -747,6 +823,23 @@ export const MCP_TOOLS: McpToolDef[] = [
                 required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
                 additionalProperties: false,
               },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['HideCell', 'ShowCell'],
+                    description:
+                      'HideCell parks the cell (out of the editor in every lane, out of every ' +
+                      'export) without deleting anything; ShowCell brings it back with its ' +
+                      'text, translations, recordings, comments and validations intact.',
+                  },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
             ],
           },
         },
@@ -796,7 +889,9 @@ export const MCP_TOOLS: McpToolDef[] = [
         },
         excludeFrontMatter: {
           type: 'boolean',
-          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+          description:
+            'USFM only: drop book-name/title/TOC/introduction front matter cells. Defaults to the ' +
+            "project's importExcludeFrontMatter setting (the response echoes the effective value).",
         },
       },
       required: ['projectId', 'artifactId'],
@@ -840,7 +935,9 @@ export const MCP_TOOLS: McpToolDef[] = [
         },
         excludeFrontMatter: {
           type: 'boolean',
-          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+          description:
+            'USFM only: drop book-name/title/TOC/introduction front matter cells. Defaults to the ' +
+            "project's importExcludeFrontMatter setting (the response echoes the effective value).",
         },
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },

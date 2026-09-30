@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+
+const shouldUseLocalLlm = vi.fn(async () => false)
+const completeWithLocalLlm = vi.fn(async (..._args: unknown[]) => "")
+vi.mock("@/lib/offline/local-llm-client", () => ({
+  shouldUseLocalLlm: () => shouldUseLocalLlm(),
+  completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
+}))
+
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
   clearUserProviderOverride,
@@ -53,6 +61,18 @@ describe("buildPrompt", () => {
     })
     expect(system.content).toContain("Treat every observable convention in them as binding")
     expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
+  })
+
+  it("strips trailing bare markers from source, examples and context (AQU-1465)", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "In the beginning.\n\\p",
+      examples: [{ source: "God created.\n\\p", target: "Dieu crea.\n\\p" }],
+      precedingContext: [{ source: "Earlier.\n\\p", target: "Avant.\n\\p" }],
+    })
+    const user = messages[1].content
+    expect(user).not.toContain("\\p")
+    expect(user).toContain("Source: In the beginning.\nTranslation:")
   })
 
   it("builds a prompt with examples and source text", () => {
@@ -486,7 +506,12 @@ describe("shouldPromptAiSetup", () => {
 
 describe("complete", () => {
   const fetchMock = vi.fn()
-  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock)
+    fetchMock.mockReset()
+    shouldUseLocalLlm.mockReset().mockResolvedValue(false)
+    completeWithLocalLlm.mockReset().mockResolvedValue("")
+  })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   function okJson(body: unknown): Response {
@@ -494,6 +519,12 @@ describe("complete", () => {
   }
 
   const msg = [{ role: "user" as const, content: "hi" }]
+
+  it("commits a reply without its trailing bare marker (AQU-1465)", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "Premier verset.\n\\p" } }] }))
+    const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+    expect(out).toBe("Premier verset.")
+  })
 
   it("frontier: POSTs to Frontier URL with Bearer JWT and model='default' when blank", async () => {
     fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
@@ -547,6 +578,46 @@ describe("complete", () => {
     expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBeUndefined()
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.model).toBe("gemma")
+  })
+
+  describe("offline routing to the local LLM (Phase 6)", () => {
+    it("routes to the local LLM instead of Frontier when offline in Tauri, regardless of provider", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+
+      expect(out).toBe("local translation")
+      expect(completeWithLocalLlm).toHaveBeenCalledWith(msg, { signal: undefined })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("calls onChunk once with the full local-LLM result", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("local translation")
+      const onChunk = vi.fn()
+
+      await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg, onChunk })
+
+      expect(onChunk).toHaveBeenCalledTimes(1)
+      expect(onChunk).toHaveBeenCalledWith("local translation")
+    })
+
+    it("does not require a Frontier session when routed to the local LLM", async () => {
+      shouldUseLocalLlm.mockResolvedValue(true)
+      completeWithLocalLlm.mockResolvedValue("ok")
+
+      await expect(
+        complete({ settings: { ...BASE, provider: "frontier" }, session: null, messages: msg }),
+      ).resolves.toBe("ok")
+    })
+
+    it("stays on the normal Frontier path when online (default)", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+      const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+      expect(out).toBe("translated")
+      expect(completeWithLocalLlm).not.toHaveBeenCalled()
+    })
   })
 
   // AQU-414 follow-up: frontier chat invoked from a project route carries the
@@ -956,6 +1027,51 @@ describe("selectApprovedExamples", () => {
 })
 
 // ---------------------------------------------------------------------------
+// AQU-153: retrieval hits are only examples once they are real pairs
+// ---------------------------------------------------------------------------
+
+describe("retainTranslationPairs (AQU-153)", () => {
+  it("drops source-side hits that carry no translation", () => {
+    const retained = retainTranslationPairs([
+      { cellId: "paired", source: "In the beginning", target: "Au commencement" },
+      { cellId: "untranslated", source: "God created the heavens", target: "" },
+      { cellId: "whitespace", source: "And the earth was formless", target: "   " },
+    ])
+
+    expect(retained.map((pair) => pair.cellId)).toEqual(["paired"])
+  })
+
+  it("reports zero examples for a project where nothing has been translated yet", () => {
+    // The walkthrough symptom: every retrieval hit is a source cell with no
+    // target, so the count the editor shows must be 0, not the hit count.
+    const hits = [
+      { cellId: "c1", source: "In the beginning", target: "" },
+      { cellId: "c2", source: "God created the heavens", target: "" },
+      { cellId: "c3", source: "And the earth was formless", target: "" },
+      { cellId: "c4", source: "Darkness was over the deep", target: "" },
+      { cellId: "c5", source: "And God said", target: "" },
+    ]
+
+    expect(retainTranslationPairs(hits)).toHaveLength(0)
+    expect(selectApprovedExamples(hits, [], DEFAULT_APPROVED_EXAMPLE_COUNT)).toHaveLength(0)
+  })
+
+  it("keeps a hit whose source is blank out of the pool as well", () => {
+    expect(retainTranslationPairs([{ cellId: "no-source", source: "  ", target: "Au commencement" }])).toEqual([])
+  })
+
+  it("preserves retrieval order and the hit payload of the pairs it keeps", () => {
+    const hits = [
+      { cellId: "a", source: "one", target: "un", score: 0.9 },
+      { cellId: "b", source: "two", target: "", score: 0.8 },
+      { cellId: "c", source: "three", target: "trois", score: 0.7 },
+    ]
+
+    expect(retainTranslationPairs(hits)).toEqual([hits[0], hits[2]])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Living Memory: buildRulesBlock
 // ---------------------------------------------------------------------------
 
@@ -1261,6 +1377,96 @@ describe("buildBriefBlock", () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// AQU-934: per-passage style-rule instructions resolved from the applicability
+// graph. Unlike buildRulesBlock these are natural language, so a rule that no
+// regex can express still reaches the model — and only where it applies.
+// ---------------------------------------------------------------------------
+
+describe("buildStyleRulesBlock", () => {
+  it("renders one bullet per instruction under a labeled header", () => {
+    const block = buildStyleRulesBlock(["Use formal register.", "Keep numerals as digits."])
+    expect(block).toBe(
+      "Style rules that apply to this passage (MUST follow):\n" +
+        "- Use formal register.\n" +
+        "- Keep numerals as digits.",
+    )
+  })
+
+  it("returns empty string for empty, blank, undefined, or null input", () => {
+    expect(buildStyleRulesBlock([])).toBe("")
+    expect(buildStyleRulesBlock(["   ", ""])).toBe("")
+    expect(buildStyleRulesBlock(undefined)).toBe("")
+    expect(buildStyleRulesBlock(null)).toBe("")
+  })
+
+  it("drops duplicates so a union across a batch cannot repeat a rule", () => {
+    const block = buildStyleRulesBlock(["Use formal register.", "Use formal register."])
+    expect(block.match(/Use formal register\./g)).toHaveLength(1)
+  })
+})
+
+describe("style instructions in the prompt builders", () => {
+  const styleInstructions = ["Render divine names in small caps."]
+
+  it("injects the block into the single-cell system message", () => {
+    const [sys] = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Style rules that apply to this passage")
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("injects the block into the batch system message", () => {
+    const [sys] = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, cells: [{ source: "hello" }],
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("injects the block into the paragraph system message", () => {
+    const [sys] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: "c1", source: "hello" }],
+      examples: [], styleInstructions,
+    })
+    expect(sys.content).toContain("Render divine names in small caps.")
+  })
+
+  it("leaves every prompt byte-identical when no instructions apply", () => {
+    const args = {
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [{ source: "God", target: "Dieu" }],
+    }
+    expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: [] }))
+    expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: undefined }))
+  })
+
+  it("keeps the deterministic rules block and the style block as separate blocks", () => {
+    const rule: TranslationRule = {
+      id: "r1", name: "no LORD", description: "", severity: "minor",
+      source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
+      check: { type: "target-forbids", targetPattern: "LORD" },
+    }
+    const [sys] = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [], rules: [rule], styleInstructions,
+    })
+    expect(sys.content).toContain("Project terminology and style rules (MUST follow):")
+    expect(sys.content).toContain("Style rules that apply to this passage (MUST follow):")
+    // Deterministic rules first, resolved guidance after.
+    expect(sys.content.indexOf("Project terminology and style rules"))
+      .toBeLessThan(sys.content.indexOf("Style rules that apply to this passage"))
+  })
+})
+
 describe("buildPrompt with brief summary", () => {
   it("injects the brief block into the system message when present", () => {
     const [sys] = buildPrompt({
@@ -1522,5 +1728,63 @@ describe("activeProjectIdFromPath", () => {
     expect(activeProjectIdFromPath("/settings/ai")).toBeNull()
     // /projects/archived is a static list page, not a project id.
     expect(activeProjectIdFromPath("/projects/archived")).toBeNull()
+  })
+})
+
+describe("unreviewed in-run draft context (AQU-1386)", () => {
+  const base = {
+    sourceLanguage: "English",
+    targetLanguage: "French",
+    systemPrompt: "Translate.",
+    examples: [],
+  }
+
+  it("labels a carried draft as unreviewed in the batch prompt", () => {
+    // A multi-call batch carries its own earlier drafts forward. They must be
+    // distinguishable from approved translations in the prompt, or the model
+    // treats unreviewed machine output as the project's settled style.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [
+        { source: "approved src", target: "approved tgt" },
+        { source: "drafted src", target: "drafted tgt", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: approved tgt")
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("labels a carried draft in the single-cell prompt too", () => {
+    const [, user] = buildPrompt({
+      ...base,
+      sourceText: "live source",
+      precedingContext: [{ source: "drafted src", target: "drafted tgt", draft: true }],
+    })
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("renders an unflagged row exactly as before", () => {
+    // Every existing call site omits `draft`, so the rendered prompt must be
+    // byte-identical for them.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [{ source: "approved src", target: "approved tgt" }],
+    })
+    expect(user.content).toContain("Source: approved src\nTranslation: approved tgt")
+    expect(user.content).not.toContain("unreviewed")
+  })
+
+  it("strips a trailing bare marker from a carried draft and keeps its label (AQU-1465)", () => {
+    // A batch reply can leave "\p" inside a cell's tag, so the carried draft
+    // reaches the next call's window with the marker still on it.
+    const precedingContext = [{ source: "drafted src\n\\p", target: "drafted tgt\n\\p", draft: true }]
+    const [, batchUser] = buildBatchPrompt({ ...base, cells: [{ source: "live source" }], precedingContext })
+    const [, singleUser] = buildPrompt({ ...base, sourceText: "live source", precedingContext })
+    for (const user of [batchUser, singleUser]) {
+      expect(user.content).toContain("Source: drafted src\nTranslation (unreviewed draft): drafted tgt\n")
+      expect(user.content).not.toContain("\\p")
+    }
   })
 })

@@ -106,20 +106,31 @@ export function SetupChecklistDrawer({
               description={t("onboarding.checklist.importFiles.stepDescription")}
               complete={state.importFiles}
             >
-              <ImportFilesStep
-                project={project}
-                onOpenImport={() => {
-                  // AQU-693: launching the import dialog from step 1 must NOT
-                  // count as a dismissal. Calling onOpenChange(false) here routed
-                  // through the workspace's close handler, which persists the
-                  // `setupChecklistDismissed` flag — silently ending the whole
-                  // setup flow the moment the user used step 1 as intended. The
-                  // parent (ProjectWorkspace) now owns hiding the drawer while the
-                  // import dialog is on top and reopening it afterwards, without
-                  // ever recording a dismissal.
-                  onOpenImport?.()
-                }}
-              />
+              {/* AQU-481: step 1 opens the same source-import dialog as the
+                  header button, so it carries the same PROJECT_LEAD floor
+                  (`file.create`). A viewer sees the step read-only with the
+                  role tooltip instead of a button that opens a type picker the
+                  server refuses. */}
+              <RoleGatedStep
+                roleLevel={roleLevel}
+                requiredRole={ROLE.PROJECT_LEAD}
+                actionLabel={t("onboarding.checklist.importFiles.title")}
+              >
+                <ImportFilesStep
+                  project={project}
+                  onOpenImport={() => {
+                    // AQU-693: launching the import dialog from step 1 must NOT
+                    // count as a dismissal. Calling onOpenChange(false) here routed
+                    // through the workspace's close handler, which persists the
+                    // `setupChecklistDismissed` flag — silently ending the whole
+                    // setup flow the moment the user used step 1 as intended. The
+                    // parent (ProjectWorkspace) now owns hiding the drawer while the
+                    // import dialog is on top and reopening it afterwards, without
+                    // ever recording a dismissal.
+                    onOpenImport?.()
+                  }}
+                />
+              </RoleGatedStep>
             </ChecklistItem>
 
             <ChecklistItem

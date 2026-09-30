@@ -92,3 +92,36 @@ describe("AdminRetentionSection", () => {
     expect(await screen.findByText("HTTP 500")).toBeInTheDocument()
   })
 })
+
+describe("AdminRetentionSection — AQU-942: the resolved shell survives a failed refetch", () => {
+  it("shows a first-load placeholder before the first resolve", async () => {
+    let release: (data: AdminRetention) => void = () => {}
+    mockGet.mockImplementationOnce(
+      () => new Promise<AdminRetention>((resolve) => { release = resolve }),
+    )
+    render(<AdminRetentionSection jwt="jwt" />)
+
+    expect(screen.getByRole("status", { name: "Loading retention" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+
+    release(DATA)
+    expect(await screen.findByLabelText("Range")).toBeInTheDocument()
+  })
+
+  it("keeps the figures and the Range control mounted when a refetch fails", async () => {
+    // WHY: the error gate replaced the whole section with a bare error line —
+    // including the Range select, so a range change that failed left the admin
+    // no control to change it back.
+    const { rerender } = render(<AdminRetentionSection jwt="jwt" />)
+    await screen.findByLabelText("Range")
+
+    mockGet.mockRejectedValueOnce(new Error("retention query timed out"))
+    rerender(<AdminRetentionSection jwt="jwt-rotated" />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("retention query timed out")
+    expect(screen.getByLabelText("Range")).toBeInTheDocument()
+    expect(screen.getByText("Daily active")).toBeInTheDocument()
+  })
+})

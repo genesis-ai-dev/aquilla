@@ -16,15 +16,17 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
+import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
+import { TermFormsSection } from "@/components/terminology/TermFormsSection"
 import { predictEquivalents } from "@/lib/terminology/equivalents"
-import { matchesTerm } from "@/lib/terminology/match"
+import { matchesConcept, matchesTerm } from "@/lib/terminology/match"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -105,9 +107,16 @@ function RenderingChip({
 
 type Verdict = "enforced" | "infringed" | "na"
 
-function deriveVerdict(concept: Concept, original: string, translated: string): Verdict {
-  // Wildcard-aware match (grac* matches grace/graced/gracia) via shared matcher.
-  if (!matchesTerm(original, concept.sourceTerm, { caseSensitive: concept.caseSensitive })) return "na"
+function deriveVerdict(
+  concept: Concept,
+  original: string,
+  translated: string,
+  termMatching?: TermMatchingSettings,
+): Verdict {
+  // AQU-1271: source side via the shared CONCEPT matcher (wildcards, extra
+  // forms, mark folding, project affixes, exclusions) so this page's verdicts
+  // agree with the rule engine and the editor chips.
+  if (!matchesConcept(original, concept, termMatching)) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",
@@ -161,9 +170,13 @@ interface OccurrenceRowProps {
   canEdit: boolean
   projectId: string
   username: string
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   onCellCommitted: () => void
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  termMatching?: TermMatchingSettings
 }
 
 function OccurrenceRow({
@@ -176,14 +189,15 @@ function OccurrenceRow({
   onOptimisticEdit,
   onCellCommitted,
   onJumpToCell,
+  termMatching,
 }: OccurrenceRowProps) {
   const t = useT()
-  const verdict = deriveVerdict(concept, cell.original, translated)
+  const verdict = deriveVerdict(concept, cell.original, translated, termMatching)
   const [editing, setEditing] = useState(false)
 
   const handleCommit = useCallback(
     ({ value, valueHtml }: TranslatedEditorCommit) => {
-      onOptimisticEdit(cell.id, { value, valueHtml })
+      onOptimisticEdit({ cellId: cell.id, fileId: cell.fileId }, { value, valueHtml })
       void emitTargetCellCommit({
         projectId,
         fileId: cell.fileId,
@@ -293,7 +307,10 @@ export interface TerminologyTermDetailProps {
   /** Called after any commit so the parent can trigger a revalidate. */
   onCellCommitted: () => void
   /** Optimistic patch forwarded from the parent's useCells instance. */
-  onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  onOptimisticEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string },
+  ) => void
   /** Whether the user may promote a predicted equivalent to a managed rendering. */
   canManageTermbase?: boolean
   /**
@@ -317,6 +334,20 @@ export interface TerminologyTermDetailProps {
    * so the projection replaces them wholesale. Callers emit one event.
    */
   onRenderingsChange?: (conceptId: string, renderings: TermRendering[]) => void | Promise<void>
+  /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
+  termMatching?: TermMatchingSettings
+  /**
+   * AQU-1271: replace this concept's source-matching options.
+   *
+   * Like renderings, this is a WHOLE-object write: `term.update` replaces
+   * `match_options` wholesale, so the callback receives the full pruned
+   * `TermMatchOptions` (or `undefined` when the user has cleared everything).
+   */
+  onMatchChange?: (conceptId: string, match: TermMatchOptions | undefined) => void | Promise<void>
+  /** AQU-1271: case sensitivity lives on the concept, not inside `match`. */
+  onCaseSensitiveChange?: (conceptId: string, caseSensitive: boolean) => void | Promise<void>
+  /** Offered when the project has no prefix/suffix inventory yet. */
+  onSetUpAffixes?: () => void
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -335,25 +366,29 @@ export function TerminologyTermDetail({
   examplesLoading = false,
   onJumpToCell,
   onRenderingsChange,
+  termMatching,
+  onMatchChange,
+  onCaseSensitiveChange,
+  onSetUpAffixes,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
-    () => cells.filter((c) => matchesTerm(c.original, concept.sourceTerm, { caseSensitive: concept.caseSensitive })),
-    [cells, concept.sourceTerm, concept.caseSensitive],
+    () => cells.filter((c) => matchesConcept(c.original, concept, termMatching)),
+    [cells, concept, termMatching],
   )
 
   const { enforced, infringed } = useMemo(() => {
     let enforced = 0
     let infringed = 0
     for (const c of occurrences) {
-      const v = deriveVerdict(concept, c.original, c.translated)
+      const v = deriveVerdict(concept, c.original, c.translated, termMatching)
       if (v === "enforced") enforced++
       else if (v === "infringed") infringed++
     }
     return { enforced, infringed }
-  }, [occurrences, concept])
+  }, [occurrences, concept, termMatching])
 
   // Predicted target equivalents over the loaded bilingual cell pairs. χ² + EM
   // cross-check; results stay "AI-assumed" until explicitly promoted.
@@ -527,6 +562,17 @@ export function TerminologyTermDetail({
           )}
         </div>
         )}
+
+        {/* AQU-1271: which source forms this term actually hits, and why. */}
+        <TermFormsSection
+          concept={concept}
+          cells={cells}
+          termMatching={termMatching}
+          canEdit={canManageTermbase && Boolean(onMatchChange)}
+          onMatchChange={onMatchChange}
+          onCaseSensitiveChange={onCaseSensitiveChange}
+          onSetUpAffixes={onSetUpAffixes}
+        />
       </div>
 
       {/* Managed renderings / predicted equivalents don't need the cell query. */}
@@ -576,6 +622,7 @@ export function TerminologyTermDetail({
                   onOptimisticEdit={onOptimisticEdit}
                   onCellCommitted={onCellCommitted}
                   onJumpToCell={onJumpToCell}
+                  termMatching={termMatching}
                 />
               ))}
             </ul>

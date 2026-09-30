@@ -253,6 +253,31 @@ export async function listOpenDecisions(
   return (results ?? []).map(mapRow)
 }
 
+/**
+ * The oldest still-open decision this run raised, or null (AQU-1300).
+ *
+ * Run-scoped on purpose. The autopilot parks at the next span edge while one of
+ * its own questions is unanswered, so answers stay attached to the passage that
+ * prompted them instead of arriving under fifty later drafts. Scoping this to
+ * the project instead would let one file's open question silently halt every
+ * other file in a project-wide start — a different and much worse behaviour.
+ */
+export async function findOpenDecisionForRun(
+  db: AquillaDb,
+  input: { projectId: string; runId: string },
+): Promise<ContextualDecision | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${DECISION_COLS} FROM contextual_decisions
+        WHERE project_id = ? AND run_id = ? AND status IN ('open','researching')
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    )
+    .bind(input.projectId, input.runId)
+    .first<DecisionRow>()
+  return row ? mapRow(row) : null
+}
+
 export async function countOpenDecisions(
   db: AquillaDb,
   projectId: string,

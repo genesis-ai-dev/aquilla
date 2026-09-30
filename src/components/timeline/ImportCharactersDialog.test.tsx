@@ -7,7 +7,7 @@
 // the refusal being unskippable.
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ImportCharactersDialog } from "./ImportCharactersDialog"
 
@@ -29,7 +29,7 @@ async function pick(csv: string, over: Record<string, unknown> = {}) {
     <ImportCharactersDialog
       open
       textFileName="ep101.vtt"
-      cells={cells}
+      getCells={() => cells}
       existingCount={0}
       onConfirm={onConfirm}
       onCancel={() => {}}
@@ -145,7 +145,7 @@ describe("the refusal", () => {
   it("refuses an empty file", async () => {
     render(
       <ImportCharactersDialog
-        open textFileName="ep101.vtt" cells={cells} existingCount={0}
+        open textFileName="ep101.vtt" getCells={() => cells} existingCount={0}
         onConfirm={vi.fn()} onCancel={() => {}}
       />,
     )
@@ -161,7 +161,7 @@ describe("wording", () => {
   it("says Replace once lines already carry a character", () => {
     render(
       <ImportCharactersDialog
-        open textFileName="ep101.vtt" cells={cells} existingCount={637}
+        open textFileName="ep101.vtt" getCells={() => cells} existingCount={637}
         onConfirm={vi.fn()} onCancel={() => {}}
       />,
     )
@@ -175,7 +175,7 @@ describe("wording", () => {
   it("says Import when none do", () => {
     render(
       <ImportCharactersDialog
-        open textFileName="ep101.vtt" cells={cells} existingCount={0}
+        open textFileName="ep101.vtt" getCells={() => cells} existingCount={0}
         onConfirm={vi.fn()} onCancel={() => {}}
       />,
     )
@@ -208,7 +208,7 @@ async function pickAudio(csv: string, over: Record<string, unknown> = {}) {
     <ImportCharactersDialog
       open
       textFileName="ep101.vtt"
-      cells={cells}
+      getCells={() => cells}
       audioCues={audioCues}
       existingCount={0}
       onConfirm={vi.fn()}
@@ -254,7 +254,7 @@ describe("the audio character sheet", () => {
   it("is not offered when the file has no audio cues", () => {
     render(
       <ImportCharactersDialog
-        open textFileName="ep101.vtt" cells={cells} existingCount={0}
+        open textFileName="ep101.vtt" getCells={() => cells} existingCount={0}
         onConfirm={vi.fn()} onCancel={() => {}}
       />,
     )
@@ -304,7 +304,7 @@ describe("clearing a sheet", () => {
   const both = {
     open: true,
     textFileName: "ep101.vtt",
-    cells,
+    getCells: () => cells,
     onConfirm: vi.fn(),
     onCancel: () => {},
   } as const
@@ -455,4 +455,54 @@ describe("clearing a sheet", () => {
     expect(onClearAudio).not.toHaveBeenCalled()
     expect(screen.getByTestId("import-characters-clear-audio")).toBeInTheDocument()
   })
+})
+
+
+it("only reads cells for an open preview and refreshes changed input", async () => {
+  const getCells = vi.fn(() => cells)
+  const props = { textFileName: "ep101.vtt", existingCount: 0, onConfirm: vi.fn(), onCancel: vi.fn(), getCells }
+  const { rerender } = render(<ImportCharactersDialog {...props} open={false} />)
+  expect(getCells).not.toHaveBeenCalled()
+  rerender(<ImportCharactersDialog {...props} open />)
+  expect(getCells).not.toHaveBeenCalled()
+  const upload = () => fireEvent.change(screen.getByTestId("import-characters-input"), {
+    target: { files: [new File([CSV(row("00:00:10.000", "MARY"))], "characters.csv", { type: "text/csv" })] },
+  })
+  upload()
+  await waitFor(() => expect(screen.getByTestId("import-characters-summary")).toHaveTextContent("2 lines are not in the sheet"))
+  getCells.mockClear()
+  rerender(<ImportCharactersDialog {...props} open existingCount={1} />)
+  expect(getCells).not.toHaveBeenCalled()
+  const updated = vi.fn(() => [{ ...cells[0], id: "updated-c1" }])
+  rerender(<ImportCharactersDialog {...props} open getCells={updated} />)
+  expect(updated).toHaveBeenCalled()
+  fireEvent.click(screen.getByTestId("import-characters-confirm"))
+  expect(props.onConfirm.mock.calls[0][0].assignments[0].cellId).toBe("updated-c1")
+  updated.mockClear()
+  rerender(<ImportCharactersDialog {...props} open={false} getCells={updated} />)
+  const closed = vi.fn(() => cells)
+  rerender(<ImportCharactersDialog {...props} open={false} getCells={closed} />)
+  expect(updated).not.toHaveBeenCalled()
+  expect(closed).not.toHaveBeenCalled()
+  rerender(<ImportCharactersDialog {...props} open getCells={closed} />)
+  expect(screen.getByTestId("import-characters-input")).toBeInTheDocument()
+  upload()
+  await waitFor(() => expect(screen.getByTestId("import-characters-summary")).toHaveTextContent("2 lines are not in the sheet"))
+})
+
+
+it("does not resurrect a closed sheet when its file read finishes after reopening", async () => {
+  const props = { textFileName: "ep101.vtt", existingCount: 0, onConfirm: vi.fn(), onCancel: vi.fn(), getCells: vi.fn(() => cells) }
+  const { rerender } = render(<ImportCharactersDialog {...props} open />)
+  let finish!: (value: ArrayBuffer) => void
+  const file = new File(["pending"], "characters.csv", { type: "text/csv" })
+  vi.spyOn(file, "arrayBuffer").mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  fireEvent.change(screen.getByTestId("import-characters-input"), { target: { files: [file] } })
+  rerender(<ImportCharactersDialog {...props} open={false} />)
+  rerender(<ImportCharactersDialog {...props} open />)
+  await act(async () => { finish(new TextEncoder().encode(CSV(row("00:00:10.000", "MARY"))).buffer) })
+  expect(screen.queryByTestId("import-characters-summary")).not.toBeInTheDocument()
+  expect(screen.getByTestId("import-characters-input")).toBeInTheDocument()
+  expect(props.getCells).not.toHaveBeenCalled()
+  expect(props.onConfirm).not.toHaveBeenCalled()
 })

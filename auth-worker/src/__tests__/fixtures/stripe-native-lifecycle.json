@@ -1,0 +1,831 @@
+{
+  "initial": {
+    "subscription": {
+      "currency": "usd",
+      "collection_method": "charge_automatically",
+      "id": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "active",
+      "cancel_at_period_end": false,
+      "cancel_at": null,
+      "billing_mode": {
+        "flexible": {
+          "proration_discounts": "included"
+        },
+        "type": "flexible",
+        "updated_at": 1789394121
+      },
+      "latest_invoice": "in_1UFaLu7SR91OrWMShQJQaDTV",
+      "pending_update": null,
+      "schedule": null,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_VG6Z6PyksPCXxX",
+            "object": "subscription_item",
+            "billing_thresholds": null,
+            "created": 1789394122,
+            "current_period_end": 1791986121,
+            "current_period_start": 1789394121,
+            "current_trial": null,
+            "discounts": [],
+            "metadata": {},
+            "plan": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "plan",
+              "active": true,
+              "amount": 2000,
+              "amount_decimal": "2000",
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "interval": "month",
+              "interval_count": 1,
+              "livemode": false,
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "meter": null,
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "tiers_mode": null,
+              "transform_usage": null,
+              "trial_period_days": null,
+              "usage_type": "licensed"
+            },
+            "price": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "price",
+              "active": true,
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "custom_unit_amount": null,
+              "livemode": false,
+              "lookup_key": "aquilla_native_202609_pro_month",
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "meter": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "tax_behavior": "unspecified",
+              "tiers_mode": null,
+              "transform_quantity": null,
+              "type": "recurring",
+              "unit_amount": 2000,
+              "unit_amount_decimal": "2000"
+            },
+            "quantity": 1,
+            "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+            "tax_rates": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/subscription_items?subscription=sub_1UFaLt7SR91OrWMSXXIHoNd5"
+      }
+    },
+    "invoice": {
+      "id": "in_1UFaLu7SR91OrWMShQJQaDTV",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "paid",
+      "billing_reason": "subscription_create",
+      "amount_due": 2000,
+      "amount_paid": 2000,
+      "amount_remaining": 0,
+      "currency": "usd",
+      "parent": {
+        "quote_details": null,
+        "subscription_details": {
+          "metadata": {
+            "purpose": "native-portal-probe",
+            "ticket": "AQU-837"
+          },
+          "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5"
+        },
+        "type": "subscription_details"
+      },
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_1UFaLt7SR91OrWMS7VBwy8d7",
+            "object": "line_item",
+            "amount": 2000,
+            "currency": "usd",
+            "description": "1 \u00d7 Aquilla Pro (at $20.00 / month)",
+            "discount_amounts": [],
+            "discountable": true,
+            "discounts": [],
+            "invoice": "in_1UFaLu7SR91OrWMShQJQaDTV",
+            "livemode": false,
+            "metadata": {
+              "purpose": "native-portal-probe",
+              "ticket": "AQU-837"
+            },
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": null,
+                "proration": false,
+                "proration_details": {
+                  "credited_items": null
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394121
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJN7SR91OrWMSzEu68J2x",
+                "product": "prod_VG6WxGbN40ZhVl"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": "2000"
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": 2000,
+            "taxes": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/invoices/in_1UFaLu7SR91OrWMShQJQaDTV/lines"
+      },
+      "subtotal": 2000,
+      "total": 2000,
+      "attempt_count": 1
+    }
+  },
+  "upgrade": {
+    "subscription": {
+      "id": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "active",
+      "cancel_at_period_end": false,
+      "cancel_at": null,
+      "billing_mode": {
+        "flexible": {
+          "proration_discounts": "included"
+        },
+        "type": "flexible",
+        "updated_at": 1789394121
+      },
+      "latest_invoice": "in_1UFaNI7SR91OrWMShcANPUKJ",
+      "pending_update": null,
+      "schedule": null,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_VG6Z6PyksPCXxX",
+            "object": "subscription_item",
+            "billing_thresholds": null,
+            "created": 1789394122,
+            "current_period_end": 1791986121,
+            "current_period_start": 1789394121,
+            "current_trial": null,
+            "discounts": [],
+            "metadata": {},
+            "plan": {
+              "id": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+              "object": "plan",
+              "active": true,
+              "amount": 6000,
+              "amount_decimal": "6000",
+              "billing_scheme": "per_unit",
+              "created": 1789393966,
+              "currency": "usd",
+              "interval": "month",
+              "interval_count": 1,
+              "livemode": false,
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "meter": null,
+              "nickname": null,
+              "product": "prod_VG6W6C2JBJgl1g",
+              "tiers_mode": null,
+              "transform_usage": null,
+              "trial_period_days": null,
+              "usage_type": "licensed"
+            },
+            "price": {
+              "id": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+              "object": "price",
+              "active": true,
+              "billing_scheme": "per_unit",
+              "created": 1789393966,
+              "currency": "usd",
+              "custom_unit_amount": null,
+              "livemode": false,
+              "lookup_key": "aquilla_native_202609_max_5x_month",
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "nickname": null,
+              "product": "prod_VG6W6C2JBJgl1g",
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "meter": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "tax_behavior": "unspecified",
+              "tiers_mode": null,
+              "transform_quantity": null,
+              "type": "recurring",
+              "unit_amount": 6000,
+              "unit_amount_decimal": "6000"
+            },
+            "quantity": 1,
+            "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+            "tax_rates": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/subscription_items?subscription=sub_1UFaLt7SR91OrWMSXXIHoNd5"
+      }
+    },
+    "invoice": {
+      "id": "in_1UFaNI7SR91OrWMShcANPUKJ",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "paid",
+      "billing_reason": "subscription_update",
+      "amount_due": 4000,
+      "amount_paid": 4000,
+      "amount_remaining": 0,
+      "currency": "usd",
+      "parent": {
+        "quote_details": null,
+        "subscription_details": {
+          "metadata": {
+            "purpose": "native-portal-probe",
+            "ticket": "AQU-837"
+          },
+          "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5"
+        },
+        "type": "subscription_details"
+      },
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_1UFaNI7SR91OrWMSxlxGJvNN",
+            "object": "line_item",
+            "amount": -2000,
+            "currency": "usd",
+            "description": "Unused time on Aquilla Pro after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaNI7SR91OrWMShcANPUKJ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaNI7SR91OrWMSdLi7uj9q",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": {
+                    "invoice": "in_1UFaLu7SR91OrWMShQJQaDTV",
+                    "invoice_line_items": [
+                      "il_1UFaLt7SR91OrWMS7VBwy8d7"
+                    ]
+                  }
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJN7SR91OrWMSzEu68J2x",
+                "product": "prod_VG6WxGbN40ZhVl"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": -2000,
+            "taxes": []
+          },
+          {
+            "id": "il_1UFaNJ7SR91OrWMS9EtnYSu8",
+            "object": "line_item",
+            "amount": 6000,
+            "currency": "usd",
+            "description": "Remaining time on Aquilla Max 5\u00d7 after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaNI7SR91OrWMShcANPUKJ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaNI7SR91OrWMSi5np8zD7",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": null
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+                "product": "prod_VG6W6C2JBJgl1g"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": 6000,
+            "taxes": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 2,
+        "url": "/v1/invoices/in_1UFaNI7SR91OrWMShcANPUKJ/lines"
+      },
+      "subtotal": 4000,
+      "total": 4000,
+      "attempt_count": 1
+    }
+  },
+  "downgrade": {
+    "subscription": {
+      "id": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "active",
+      "cancel_at_period_end": false,
+      "cancel_at": null,
+      "billing_mode": {
+        "flexible": {
+          "proration_discounts": "included"
+        },
+        "type": "flexible",
+        "updated_at": 1789394121
+      },
+      "latest_invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+      "pending_update": null,
+      "schedule": null,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_VG6Z6PyksPCXxX",
+            "object": "subscription_item",
+            "billing_thresholds": null,
+            "created": 1789394122,
+            "current_period_end": 1791986121,
+            "current_period_start": 1789394121,
+            "current_trial": null,
+            "discounts": [],
+            "metadata": {},
+            "plan": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "plan",
+              "active": true,
+              "amount": 2000,
+              "amount_decimal": "2000",
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "interval": "month",
+              "interval_count": 1,
+              "livemode": false,
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "meter": null,
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "tiers_mode": null,
+              "transform_usage": null,
+              "trial_period_days": null,
+              "usage_type": "licensed"
+            },
+            "price": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "price",
+              "active": true,
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "custom_unit_amount": null,
+              "livemode": false,
+              "lookup_key": "aquilla_native_202609_pro_month",
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "meter": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "tax_behavior": "unspecified",
+              "tiers_mode": null,
+              "transform_quantity": null,
+              "type": "recurring",
+              "unit_amount": 2000,
+              "unit_amount_decimal": "2000"
+            },
+            "quantity": 1,
+            "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+            "tax_rates": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/subscription_items?subscription=sub_1UFaLt7SR91OrWMSXXIHoNd5"
+      }
+    },
+    "invoice": {
+      "id": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "paid",
+      "billing_reason": "subscription_update",
+      "amount_due": 0,
+      "amount_paid": 0,
+      "amount_remaining": 0,
+      "currency": "usd",
+      "parent": {
+        "quote_details": null,
+        "subscription_details": {
+          "metadata": {
+            "purpose": "native-portal-probe",
+            "ticket": "AQU-837"
+          },
+          "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5"
+        },
+        "type": "subscription_details"
+      },
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_1UFaOk7SR91OrWMSpVkCMVWC",
+            "object": "line_item",
+            "amount": -6000,
+            "currency": "usd",
+            "description": "Unused time on Aquilla Max 5\u00d7 after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaOk7SR91OrWMSJBf6uMHO",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": {
+                    "invoice": "in_1UFaNI7SR91OrWMShcANPUKJ",
+                    "invoice_line_items": [
+                      "il_1UFaNJ7SR91OrWMS9EtnYSu8"
+                    ]
+                  }
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+                "product": "prod_VG6W6C2JBJgl1g"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": -6000,
+            "taxes": []
+          },
+          {
+            "id": "il_1UFaOl7SR91OrWMSvIDh6WRZ",
+            "object": "line_item",
+            "amount": 2000,
+            "currency": "usd",
+            "description": "Remaining time on Aquilla Pro after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaOk7SR91OrWMSl7Eg2X2K",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": null
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJN7SR91OrWMSzEu68J2x",
+                "product": "prod_VG6WxGbN40ZhVl"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": 2000,
+            "taxes": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 2,
+        "url": "/v1/invoices/in_1UFaOk7SR91OrWMSh7IR2zCQ/lines"
+      },
+      "subtotal": -4000,
+      "total": -4000,
+      "attempt_count": 0
+    }
+  },
+  "cancellation": {
+    "subscription": {
+      "id": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "active",
+      "cancel_at_period_end": false,
+      "cancel_at": 1791986121,
+      "billing_mode": {
+        "flexible": {
+          "proration_discounts": "included"
+        },
+        "type": "flexible",
+        "updated_at": 1789394121
+      },
+      "latest_invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+      "pending_update": null,
+      "schedule": null,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_VG6Z6PyksPCXxX",
+            "object": "subscription_item",
+            "billing_thresholds": null,
+            "created": 1789394122,
+            "current_period_end": 1791986121,
+            "current_period_start": 1789394121,
+            "current_trial": null,
+            "discounts": [],
+            "metadata": {},
+            "plan": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "plan",
+              "active": true,
+              "amount": 2000,
+              "amount_decimal": "2000",
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "interval": "month",
+              "interval_count": 1,
+              "livemode": false,
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "meter": null,
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "tiers_mode": null,
+              "transform_usage": null,
+              "trial_period_days": null,
+              "usage_type": "licensed"
+            },
+            "price": {
+              "id": "price_1UFaJN7SR91OrWMSzEu68J2x",
+              "object": "price",
+              "active": true,
+              "billing_scheme": "per_unit",
+              "created": 1789393965,
+              "currency": "usd",
+              "custom_unit_amount": null,
+              "livemode": false,
+              "lookup_key": "aquilla_native_202609_pro_month",
+              "metadata": {
+                "ticket": "AQU-837"
+              },
+              "nickname": null,
+              "product": "prod_VG6WxGbN40ZhVl",
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "meter": null,
+                "trial_period_days": null,
+                "usage_type": "licensed"
+              },
+              "tax_behavior": "unspecified",
+              "tiers_mode": null,
+              "transform_quantity": null,
+              "type": "recurring",
+              "unit_amount": 2000,
+              "unit_amount_decimal": "2000"
+            },
+            "quantity": 1,
+            "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+            "tax_rates": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 1,
+        "url": "/v1/subscription_items?subscription=sub_1UFaLt7SR91OrWMSXXIHoNd5"
+      }
+    },
+    "invoice": {
+      "id": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+      "customer": "cus_VG6Zn8S7XtX2YN",
+      "livemode": false,
+      "status": "paid",
+      "billing_reason": "subscription_update",
+      "amount_due": 0,
+      "amount_paid": 0,
+      "amount_remaining": 0,
+      "currency": "usd",
+      "parent": {
+        "quote_details": null,
+        "subscription_details": {
+          "metadata": {
+            "purpose": "native-portal-probe",
+            "ticket": "AQU-837"
+          },
+          "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5"
+        },
+        "type": "subscription_details"
+      },
+      "lines": {
+        "object": "list",
+        "data": [
+          {
+            "id": "il_1UFaOk7SR91OrWMSpVkCMVWC",
+            "object": "line_item",
+            "amount": -6000,
+            "currency": "usd",
+            "description": "Unused time on Aquilla Max 5\u00d7 after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaOk7SR91OrWMSJBf6uMHO",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": {
+                    "invoice": "in_1UFaNI7SR91OrWMShcANPUKJ",
+                    "invoice_line_items": [
+                      "il_1UFaNJ7SR91OrWMS9EtnYSu8"
+                    ]
+                  }
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJO7SR91OrWMS4wUWfNLB",
+                "product": "prod_VG6W6C2JBJgl1g"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": -6000,
+            "taxes": []
+          },
+          {
+            "id": "il_1UFaOl7SR91OrWMSvIDh6WRZ",
+            "object": "line_item",
+            "amount": 2000,
+            "currency": "usd",
+            "description": "Remaining time on Aquilla Pro after 14 Sep 2026",
+            "discount_amounts": [],
+            "discountable": false,
+            "discounts": [],
+            "invoice": "in_1UFaOk7SR91OrWMSh7IR2zCQ",
+            "livemode": false,
+            "metadata": {},
+            "parent": {
+              "invoice_item_details": null,
+              "subscription_item_details": {
+                "invoice_item": "ii_1UFaOk7SR91OrWMSl7Eg2X2K",
+                "proration": true,
+                "proration_details": {
+                  "credited_items": null
+                },
+                "subscription": "sub_1UFaLt7SR91OrWMSXXIHoNd5",
+                "subscription_item": "si_VG6Z6PyksPCXxX"
+              },
+              "type": "subscription_item_details"
+            },
+            "period": {
+              "end": 1791986121,
+              "start": 1789394124
+            },
+            "pretax_credit_amounts": [],
+            "pricing": {
+              "price_details": {
+                "price": "price_1UFaJN7SR91OrWMSzEu68J2x",
+                "product": "prod_VG6WxGbN40ZhVl"
+              },
+              "type": "price_details",
+              "unit_amount_decimal": null
+            },
+            "quantity": 1,
+            "quantity_decimal": "1",
+            "subtotal": 2000,
+            "taxes": []
+          }
+        ],
+        "has_more": false,
+        "total_count": 2,
+        "url": "/v1/invoices/in_1UFaOk7SR91OrWMSh7IR2zCQ/lines"
+      },
+      "subtotal": -4000,
+      "total": -4000,
+      "attempt_count": 0
+    }
+  }
+}

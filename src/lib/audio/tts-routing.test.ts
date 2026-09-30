@@ -14,12 +14,12 @@ beforeEach(() => geminiMock.mockClear())
 
 describe("provider precedence", () => {
   it("uses the voice's own provider over a conflicting project default", async () => {
-    // Force a conflict: project says omnivoice (server-only), the voice says
+    // Force a conflict: project says inworld (server-only), the voice says
     // gemini. Voice-first -> gemini synth is called. If this were project-first
-    // it would hit the omnivoice guard and reject instead, so gemini=0 and the
+    // it would hit the hosted-TTS guard and reject instead, so gemini=0 and the
     // assertion fails — i.e. this test actually catches a precedence regression.
     const settings: ProjectTtsSettings = {
-      provider: "omnivoice",
+      provider: "inworld",
       apiKey: "k",
       voices: [{ id: "v1", name: "N", provider: "gemini", voiceName: "Kore" }],
       defaultVoiceId: "v1",
@@ -29,12 +29,30 @@ describe("provider precedence", () => {
   })
 })
 
-describe("omnivoice guard", () => {
-  it("synthesizeToWavBlob refuses omnivoice (server-only)", async () => {
+describe("hosted TTS guard", () => {
+  it("synthesizeToWavBlob refuses inworld (server-only)", async () => {
+    await expect(
+      synthesizeToWavBlob("hi", {
+        voice: { id: "v", name: "N", provider: "inworld" },
+        projectProvider: "inworld",
+      }),
+    ).rejects.toThrow(/server-side/i)
+  })
+
+  it("synthesizeToWavBlob refuses leftover omnivoice as the same hosted path", async () => {
     await expect(
       synthesizeToWavBlob("hi", {
         voice: { id: "v", name: "N", provider: "omnivoice" },
         projectProvider: "omnivoice",
+      }),
+    ).rejects.toThrow(/server-side/i)
+  })
+
+  it("synthesizeToWavBlob refuses leftover kokoro as the same hosted path", async () => {
+    await expect(
+      synthesizeToWavBlob("hi", {
+        voice: { id: "v", name: "N", provider: "kokoro", voiceName: "af_heart" },
+        projectProvider: "kokoro",
       }),
     ).rejects.toThrow(/server-side/i)
   })

@@ -65,6 +65,12 @@ import {
   normalizeCompletionMaxTokens,
   resolveProvider,
 } from "@/lib/completion/completion-service"
+import {
+  CUSTOM_PRESETS,
+  endpointForPresetChange,
+  presetIdForEndpoint,
+  presetLabel,
+} from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -80,9 +86,13 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveTimingLocked, createProjectLane, renameProjectLane, setProjectLaneArchived } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
+import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
+import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
+import type { TermMatchingSettings } from "@/lib/terminology/types"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
@@ -104,11 +114,12 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
+import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -135,29 +146,40 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
-// Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
-// set per entry: `labelKey` for the two real English descriptions ("Local /
-// self-hosted…", "Other…"), translated at render via presetLabel() below.
-// The rest are brand names — i18n-exempt, left untranslated in every locale
-// like any other product/company name (OpenRouter and OpenAI are already in
-// ATOMIC_TERMS; Groq/Together AI/Mistral/DeepSeek aren't yet, but are the
-// same kind of string).
-const CUSTOM_PRESETS: { id: string; label?: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
-  { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
-  { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
-  { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
-  { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
-  { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
-  { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
+/**
+ * AQU-1068: the cell-editing tiers, in the order they are offered.
+ *
+ * The reset default leads, matching every other floor control on this page;
+ * the rest climb the ladder, matching RosterProgressSection and
+ * TermbaseEditSection.
+ *
+ * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
+ * who can edit" — on the theory that they said who is admitted more plainly
+ * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
+ * an admin who has just set someone's role on the Members panel should not have
+ * to work out which bespoke phrase covers that rank, so this is the standard
+ * ladder, spelled the standard way, and only "No one" — which is not a role —
+ * keeps a phrase of its own.
+ *
+ * `level` is what makes the two-tier labelling work, exactly as in
+ * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
+ * trigger and the message key the fuller row in the open list. "No one" has no
+ * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
+ */
+const CELL_EDITING_FLOOR_OPTIONS: readonly {
+  value: CellEditingTier
+  /** Ladder level this tier admits, or null for "none" — which is a refusal,
+   *  not a rank, and so has no place on the ladder. */
+  level: number | null
+  labelKey: MessageKey
+}[] = [
+  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
+  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
+  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
+  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
+  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
+  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
 ]
-
-/** Resolves a CUSTOM_PRESETS entry's display label: translated when `labelKey`
- * is set, else the literal (untranslated brand name). */
-function presetLabel(t: TFunction, preset: { label?: string; labelKey?: MessageKey }): string {
-  return preset.labelKey ? t(preset.labelKey) : (preset.label ?? "")
-}
 
 /**
  * Re-wraps already-known literal substrings of a translated sentence in inline
@@ -191,17 +213,6 @@ function withStyledTerms(
   })
 }
 
-function presetIdForEndpoint(endpoint: string): string {
-  const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
-  if (!trimmed) return "local"
-  for (const p of CUSTOM_PRESETS) {
-    if (!p.endpoint) continue
-    const base = p.endpoint.toLowerCase()
-    if (trimmed === base || trimmed.startsWith(base)) return p.id
-  }
-  return "custom"
-}
-
 interface Baseline {
   name: string
   sourceLanguage: string
@@ -228,8 +239,13 @@ interface Baseline {
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
+  // AQU-490: the audio policy. Separate keys, never fallbacks for the text
+  // ones.
+  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio: string[]
+  allowSelfValidationAudio: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
-  allowLineCreation: boolean
+  cellEditingFloor: CellEditingTier
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean
   timingLocked: boolean
@@ -245,6 +261,7 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  termMatching: TermMatchingSettings
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -277,9 +294,12 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
+    validationRoleFloorAudio: project.validationRoleFloorAudio ?? "reviewer",
+    validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
+    allowSelfValidationAudio: project.allowSelfValidationAudio ?? true,
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
-    allowLineCreation: project.allowLineCreation ?? false,
+    cellEditingFloor: project.cellEditingFloor ?? "none",
     // Off unless a project has said otherwise. Multi-track is capability for
     // clients who want it, and a project that never turns it on should not be
     // able to tell it was built.
@@ -296,6 +316,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
 
@@ -371,6 +392,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    lanes: sharedLanes,
+    refresh: refreshSharedSettings,
+    // AQU-1083: what "Organization default" currently resolves to, from the
+    // same response as the value it is the fallback for.
+    orgCountStructuralCells,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -389,19 +415,54 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
   // row. Local (unsynced) projects have no org floor, so the pane stays.
   const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
-  const { canViewRoster } = useOrgSettings(
+  const { canViewRoster, autoPropagateRepetitions: orgAutoPropagateRepetitions } = useOrgSettings(
     rosterOrgId,
     activeOrg?.activeOrg?.role?.level,
     project?.syncRole?.level ?? null,
   )
   const canSeeMembers = !isCloudProject || canViewRoster
   const [privilegedOpen, setPrivilegedOpen] = useState(false)
+  // project.files is a fresh array each render; key on the file ids. The key is
+  // computed here because a dependency list entry has to be a simple expression
+  // (react-hooks/use-memo).
+  const metricsFilesKey = (project?.files ?? []).map((f) => f.id).join(",")
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [(project?.files ?? []).map((f) => f.id).join(",")],
+    [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+
+  const renameLane = useCallback(async (laneId: string, name: string) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await renameProjectLane(jwt, id, laneId, name)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const createLane = useCallback(async (input: { name: string; language: string }) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await createProjectLane(jwt, id, input)
+    if (result.kind === "ok") {
+      await refreshSharedSettings()
+      return "ok" as const
+    }
+    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettings])
+
+  const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return false
+    const result = await setProjectLaneArchived(jwt, id, laneId, archived)
+    if (result.kind !== "ok") return false
+    await refreshSharedSettings()
+    return true
+  }, [session?.jwt, id, refreshSharedSettings])
   const {
     metrics: postEditMetrics,
     isLoading: metricsLoading,
@@ -517,7 +578,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
+  const [validationNamedUsersAudio, setValidationNamedUsersAudio] = useState<string[]>([])
+  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState(true)
+  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
   const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
@@ -531,6 +595,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
+  const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -579,7 +645,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
-    setAllowLineCreation(b.allowLineCreation)
+    setValidationRoleFloorAudio(b.validationRoleFloorAudio)
+    setValidationNamedUsersAudio(b.validationNamedUsersAudio)
+    setAllowSelfValidationAudio(b.allowSelfValidationAudio)
+    setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
@@ -589,6 +658,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setTermMatching(b.termMatching)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -746,7 +816,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
-      allowLineCreation !== baseline.allowLineCreation ||
+      validationRoleFloorAudio !== baseline.validationRoleFloorAudio ||
+      JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio) ||
+      allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
+      cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
@@ -755,7 +828,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -763,11 +837,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
+    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter,
+    precedingTargetCells, importExcludeFrontMatter, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -844,8 +919,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setPresetId(nextPresetId)
     const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
     if (!preset) return
-    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
-    setEndpoint(nextEndpoint)
+    setEndpoint(endpointForPresetChange(nextPresetId, endpoint))
     setConnected(false)
     setConnectionError(null)
     setModels([])
@@ -978,7 +1052,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio; changedFieldLabels.push("minimum role to validate recordings") }
+      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio; changedFieldLabels.push("validating your own recordings") }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
@@ -987,6 +1064,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
+      }
+      if (JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)) {
+        sharedUpdates.termMatching = termMatching
+        changedFieldLabels.push("term matching affixes")
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
@@ -1051,7 +1132,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
-        allowLineCreation,
+        validationRoleFloorAudio,
+        validationNamedUsersAudio,
+        allowSelfValidationAudio,
+        cellEditingFloor,
         allowTrackEditing,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
@@ -1061,6 +1145,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        termMatching,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -1094,8 +1179,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
+    // AQU-490. The note directly below is about exactly this list: handleSave
+    // closes over these, so a field missing here is a field whose change the
+    // save silently never sees.
+    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
+    // AQU-1068. Its predecessor `allowLineCreation` was missing from this list
+    // too, and the bug is invisible until you try it: handleSave closes over a
+    // stale value, the diff below sees no change, `sharedUpdates` comes out
+    // empty and NO REQUEST IS SENT AT ALL. The button reacts, the header keeps
+    // saying "Unsaved changes", and nothing in the console complains. The unit
+    // test does not catch it either — an unrelated re-render refreshes the
+    // closure in happy-dom — so exhaustive-deps is the only guard, and it is a
+    // warning among hundreds. `timingLocked` had the same hole: the timing
+    // LOCK, the one safeguard AQU-646 added, could silently fail to save.
+    // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
+    // merge that brought it here is where it became visible — dev's own
+    // handleSave list never named it either.
+    cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1161,13 +1263,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    // AQU-1068: a permission, so it lives with the roles rather than in the
+    // Timeline card it grew out of — it governs ordinary text files now, not
+    // just the timeline's silences.
+    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
+    { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
@@ -1221,10 +1327,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible resources",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1722,7 +1828,57 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             canEdit={canEditLanguages}
             disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
+            laneRecords={isCloudProject ? sharedLanes ?? undefined : undefined}
+            onRenameLane={isCloudProject ? renameLane : undefined}
+            onCreateLane={isCloudProject ? createLane : undefined}
+            onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
           />
+        )}
+
+        {searchGroupLabel("section-cell-editing")}
+        {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
+          <div id="section-cell-editing">
+            {/* AQU-1068. One setting answers WHO; the file's own nature answers
+                WHERE — a text file takes a cell anywhere, a subtitle file only
+                in a gap — so nothing here mentions timings or media. */}
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+              <SettingsRow
+                label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
+                description={t("projectSettings.cellEditing.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
+                      }))}
+                      disabled={!canEditShared}
+                      value={cellEditingFloor}
+                      onValueChange={(value) =>
+                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                      }
+                    >
+                      <SelectTrigger
+                        id="cell-editing-floor"
+                        data-testid="settings-cell-editing-floor"
+                        aria-label={t("projectSettings.cellEditing.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-bible-resources")}
@@ -2319,18 +2475,47 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               projectId={id}
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
-              hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
               validationRoleFloor={validationRoleFloor}
               validationNamedUsers={validationNamedUsers}
               allowSelfValidation={allowSelfValidation}
+              validationRoleFloorAudio={validationRoleFloorAudio}
+              validationNamedUsersAudio={validationNamedUsersAudio}
+              allowSelfValidationAudio={allowSelfValidationAudio}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
+              // AQU-1083: the last row of the validation card. Passed as a
+              // node rather than props because it patches the shared blob
+              // directly — see the component's own note for why it must not
+              // ride this page's draft/baseline state.
+              structuralCellsRow={
+                <StructuralCellsProjectSection
+                  value={sharedSettingsBlob?.countStructuralCells}
+                  orgDefault={orgCountStructuralCells ?? true}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
+              // AQU-1391: same slot treatment, same card — validation is the
+              // gesture that triggers propagation.
+              repetitionPropagationRow={
+                <RepetitionPropagationProjectSection
+                  value={sharedSettingsBlob?.autoPropagateRepetitions}
+                  orgDefault={orgAutoPropagateRepetitions}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
               onChange={(u) => {
                 if (u.validationCount !== undefined) setValidationCount(u.validationCount)
                 if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
                 if (u.validationRoleFloor !== undefined) setValidationRoleFloor(u.validationRoleFloor)
                 if (u.validationNamedUsers !== undefined) setValidationNamedUsers(u.validationNamedUsers)
                 if (u.allowSelfValidation !== undefined) setAllowSelfValidation(u.allowSelfValidation)
+                if (u.validationRoleFloorAudio !== undefined) setValidationRoleFloorAudio(u.validationRoleFloorAudio)
+                if (u.validationNamedUsersAudio !== undefined) setValidationNamedUsersAudio(u.validationNamedUsersAudio)
+                if (u.allowSelfValidationAudio !== undefined) setAllowSelfValidationAudio(u.allowSelfValidationAudio)
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
@@ -2414,23 +2599,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   </p>
                 </label>
               </div>
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id="allow-line-creation"
-                  data-testid="settings-allow-line-creation"
-                  checked={allowLineCreation}
-                  disabled={!canEditShared}
-                  onCheckedChange={(checked) => setAllowLineCreation(checked)}
-                />
-                <label htmlFor="allow-line-creation" className="text-sm">
-                  {t("projectSettings.timeline.addLinesLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.addLinesHint")}
-                  </p>
-                </label>
-              </div>
-              {/* AQU-646 stage 2. LAST in the card, because it is the widest
-                  claim of the three: the two above constrain what may move on
+              {/* AQU-646 stage 2. LAST in the card, because it is the wider
+                  claim of the two: the lock above constrains what may move on
                   a timeline, this one decides whether the timeline's own rows
                   may be added to, grouped and recoloured at all. Off by
                   default, and enforced on the server as well — the UI
@@ -2512,6 +2682,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
+            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}

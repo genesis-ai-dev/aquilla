@@ -95,10 +95,24 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
   catalog's static floor advertises each key's *default*, so an org that lowers
   `languageEditMinRole` makes the catalog conservative rather than permissive.
-- **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
-  `agentMemoryAutonomy`, `validationRoleFloor`, `validationNamedUsers`, `validationCount`,
-  `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`,
-  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents).
+- **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
+  `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
+  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
+  are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
+  oversight stages like any other (still ask-mode, still human-approved); one that would
+  LOOSEN it is `permission_denied` with `details.loosening: [{ key, current, proposed,
+  reason }]`. The direction is computed by `policyWriteDirection` / `loosensPolicy`
+  (`db/shared/policy-direction.ts`, which also exports `POLICY_DIRECTION_TABLE` — the
+  per-key table `describe_command PatchSettings` renders) against the LIVE blob at prepare
+  **and again** at commit, so a human loosening a key mid-flight cannot let a stale plan
+  apply as a loosening write. An unset key reads as its documented default, and a no-op
+  write (proposed already equals live) counts as tightening.
+  - Note on `validationNamedUsers`: the list is an ALLOWLIST of who may validate, so
+    *adding* a name admits someone new (loosening) and *dropping* one excludes them
+    (tightening); empty → named is tightening. This inverts the direction stated in
+    AQU-1282's table, which the enforcing code (`sync-worker/src/events/route.ts`)
+    contradicts.
 - `UpdateProjectSettings` (deprecated, kept): now rejects when any POLICY key's value would
   CHANGE vs the live blob (equal pass-through stays valid — existing round-trip callers keep
   working).

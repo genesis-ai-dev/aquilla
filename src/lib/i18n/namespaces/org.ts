@@ -2312,6 +2312,21 @@ export const org = defineNamespace({
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
       },
+      "org.overviewLaneTable.archivedGroup": {
+        description:
+          "Toggle for the collapsible group under the project overview's Languages table " +
+          "that tucks the project's archived (retired) target-language lanes out of the " +
+          "main list; expanding it lists them, each with an 'Archived' badge. A heading " +
+          "naming the group, with the count in parentheses — not a verb.",
+        placeholders: { count: "Number of archived lanes in the group." },
+      },
+      "org.overviewLaneTable.archivedBadge": {
+        description:
+          "Small outline badge beside one lane's name inside the expanded Archived group " +
+          "on the project overview, marking that language lane as archived (retired). It " +
+          "describes the lane, so where the word must agree with a noun it agrees with " +
+          "the word used for a language lane.",
+      },
       "org.orgProjectsDataTable.unitsColumn": {
         description:
           "Column header on the org projects table: how many of a project's planning " +

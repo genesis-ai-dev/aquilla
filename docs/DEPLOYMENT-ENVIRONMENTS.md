@@ -102,7 +102,9 @@ branches cut from `dev`; `main` is retired.
 
 1. `node scripts/release-plan.mjs` decides whether to cut, and names the
    branch and the `dev` sha to cut it from — not necessarily the tip of `dev`
-   at cut time. A release branch may carry the plain cut date,
+   at cut time, and never below what production already runs (it reads the
+   cherry-picks on the newest calver tag, which is not on `dev`, to learn
+   which `dev` PRs shipped). A release branch may carry the plain cut date,
    `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
    date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
    for how a slice is built and when it deploys itself versus waiting for a
@@ -112,9 +114,10 @@ branches cut from `dev`; `main` is retired.
    HEAD — the branch guard and the tag script both need it), run
    `pnpm run deploy:aquilla`. After the live checks pass,
    `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes the tag. The
-   date comes from the branch, NN starts at `00` and counts verified
-   production deploys in that date's series independently of the branch's own
-   `-NN` suffix, and redeploying an already-tagged commit reuses its tag. The
+   date and the first NN come from the branch: `release/YYYY/MM/DD-02` is
+   tagged `YYYY.MM.DD.02`, and a plain `release/YYYY/MM/DD` branch starts at
+   `00`. If that number is already taken, the tag takes one past the highest
+   in the series. Redeploying an already-tagged commit reuses its tag. The
    annotated tag message includes the release branch, deployed commit SHA,
    GitHub commit/checks URLs, and the Workers Builds preview URL for that
    release branch, tying the production tag back to the QA preview artifact.

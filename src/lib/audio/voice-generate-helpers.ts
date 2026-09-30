@@ -50,6 +50,8 @@ export interface GenerateCellVoiceArgs {
    * own id, as before.
    */
   voiceCellId?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 /**
@@ -120,6 +122,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       username,
       diffusionSteps,
       ...(label ? { label } : {}),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
     })
     setTtsStatus(statusKey, { kind: "idle" })

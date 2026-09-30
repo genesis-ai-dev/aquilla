@@ -80,4 +80,55 @@ describe("indexKnowledgeDoc", () => {
     await indexKnowledgeDoc({}, env.AQUILLA_PG, DOC)
     expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexStatus).toBe("failed")
   })
+  // AQU-1376: the two ways a doc used to end up stranded at `pending` forever.
+  it("hung upstream is aborted by the timeout → failed, not left pending", async () => {
+    await seed()
+    // Stands in for a response that never arrives: settles only when the job's
+    // own AbortController fires, which is exactly what real fetch does.
+    const hang = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (!signal) throw new Error("indexKnowledgeDoc must pass an abort signal")
+      signal.addEventListener("abort", () => reject(new Error("aborted")))
+    }))
+    vi.stubGlobal("fetch", hang)
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC, { timeoutMs: 20 })
+
+    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexStatus).toBe("failed")
+    expect(logged).toHaveBeenCalled()
+    logged.mockRestore()
+  })
+
+  it("logs when the compensating 'failed' write is itself what fails", async () => {
+    await seed()
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })))
+    // A db whose writes reject — the case where nothing is left to move the row
+    // off `pending`, so the log is the only trace of it.
+    const brokenDb = {
+      prepare: () => ({
+        bind: () => ({
+          run: async () => { throw new Error("connection lost") },
+          first: async () => { throw new Error("connection lost") },
+          all: async () => { throw new Error("connection lost") },
+        }),
+      }),
+    } as unknown as typeof env.AQUILLA_PG
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    // Reads come from the real db, the failing write from the broken one, so the
+    // job gets all the way to the compensating write before it blows up.
+    const db = {
+      prepare: (sql: string) =>
+        /^\s*update/i.test(sql) ? brokenDb.prepare(sql) : env.AQUILLA_PG.prepare(sql),
+    } as unknown as typeof env.AQUILLA_PG
+
+    await expect(indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, db, DOC)).resolves.toBeUndefined()
+
+    const messages = logged.mock.calls.map((call) => String(call[0]))
+    expect(messages.some((m) => m.includes("could not mark doc"))).toBe(true)
+    // The original cause is logged too, not lost behind the write failure.
+    expect(messages.some((m) => m.includes("indexing doc"))).toBe(true)
+    logged.mockRestore()
+  })
 })

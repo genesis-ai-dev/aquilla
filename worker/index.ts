@@ -91,6 +91,22 @@ async function route(req: Request, env: Env): Promise<Response> {
     return res
   }
 
+  // Hashed build output (AQU-1405). The SPA fallback rewrites *any* unknown
+  // path to index.html with a 200, so a chunk from a replaced build answers
+  // with HTML: the browser then fails the module load with an opaque parse
+  // error and caches an HTML body under a .js URL. Answer an honest 404
+  // instead, which is what a missing asset is — the tab's own recovery
+  // (src/lib/chunk-reload.ts) takes it from there.
+  if (url.pathname.startsWith("/assets/")) {
+    const asset = await env.ASSETS.fetch(req)
+    const contentType = asset.headers.get("Content-Type") ?? ""
+    if (!asset.ok || !contentType.includes("text/html")) return asset
+    return new Response("Asset not found", {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    })
+  }
+
   // Everything else: hand off to the static-asset binding.
   // Workers `not_found_handling = "single-page-application"` rewrites
   // unknown paths to index.html — React Router handles the rest.

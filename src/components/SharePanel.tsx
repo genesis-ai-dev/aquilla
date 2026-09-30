@@ -23,6 +23,7 @@ import {
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
@@ -251,7 +252,7 @@ function MembersTab({ projectId }: { projectId: string }) {
         const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
         setScopeLanes([
           { value: "", label: defaultLabel },
-          ...(settingsRes?.settings.targetLanes ?? []).map((t) => ({ value: t, label: t })),
+          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
         ])
         if (!projectRes.ok) {
           if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)

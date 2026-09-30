@@ -6,8 +6,11 @@
 //   GET  /search?projectId=&q=&lang=&limit=   any project member, gated
 //   GET  /page?projectId=&path=&maxChars=     any project member, gated
 //   POST /answers  { projectId, question, answer, status, citations }  gated
+//   GET  /tabitha?projectId=&book=&chapter=&verse=   any project member, gated
+//        TaBiThA Copilot translator brief for one verse (Verse Resources panel);
+//        see lib/tabitha/client.ts.
 //
-// All three:
+// All four:
 //   * require auth + any role on the project (the agent and UI are project-scoped),
 //   * 404 when project_settings.bibleResourcesEnabled is not true (the feature
 //     "simply isn't there" when off),
@@ -28,6 +31,7 @@ import {
   aquiferPublishAnswer,
   type AquiferPublishPayload,
 } from "../lib/aquifer/client"
+import { tabithaVerseBrief } from "../lib/tabitha/client"
 
 const aquifer = new Hono<AuthHonoEnv>()
 
@@ -75,6 +79,22 @@ aquifer.get("/page", authMiddleware, async (c) => {
 
   const res = await aquiferReadPage(c.env, path, { maxChars })
   if (!res.ok) return c.json({ error: res.error }, 502)
+  return c.json(res.data)
+})
+
+// ── GET /tabitha ────────────────────────────────────────────────────────────
+aquifer.get("/tabitha", authMiddleware, async (c) => {
+  const projectId = c.req.query("projectId") ?? ""
+  const blocked = await guard(c, projectId)
+  if (blocked) return blocked
+
+  const book = c.req.query("book") ?? ""
+  const chapter = Number(c.req.query("chapter"))
+  const verse = Number(c.req.query("verse"))
+  const res = await tabithaVerseBrief(book, chapter, verse)
+  if (!res.ok) {
+    return c.json({ error: res.error }, res.error === "unsupported reference" ? 400 : 502)
+  }
   return c.json(res.data)
 })
 

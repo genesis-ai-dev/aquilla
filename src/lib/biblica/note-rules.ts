@@ -17,6 +17,9 @@ const STRUCTURAL_APOSTROPHE_PATTERN = /^['\u02BC\u2019\u2032\u00B4]+$/
 /** Character styles that carry a chapter/verse delimiter (USFM `\c` and `\v`). */
 const VERSE_MARKER_STYLE_PATTERN = /(?:^|\/)meta(?:%3a|:)[cv](?:_sp)?$/i
 
+/** Psalm superscription paragraph styles (`head:d`, `head:d_h`). */
+const SUPERSCRIPTION_STYLE_PATTERN = /(?:^|\/)head(?:%3a|:)d(?:_h)?$/i
+
 function hasStyleToken(styleName: string, prefix: string, suffix = ""): boolean {
   return styleName.includes(`${prefix}%3a${suffix}`) || styleName.includes(`${prefix}:${suffix}`)
 }
@@ -197,6 +200,35 @@ export function isMetaVerseCharacterStyle(characterStyle: string): boolean {
  */
 export function isBiblicaVerseMarkerCharacterStyle(characterStyle: string): boolean {
   return VERSE_MARKER_STYLE_PATTERN.test(characterStyle)
+}
+
+/**
+ * Every run of a scripture paragraph that is coordinate rather than text: the
+ * invisible `meta:c` / `meta:v` delimiters plus the two numbers the layout does
+ * print, a `cv:dc` drop-cap chapter and a `cv:v` verse number.
+ *
+ * A verse-keyed scripture cell holds the words of its verse and nothing else.
+ * The printed numbers are the publisher's numbering, not translatable content —
+ * and because no cell covers them, export leaves their slots exactly as the
+ * package shipped them.
+ */
+export function isBiblicaScriptureCoordinateCharacterStyle(characterStyle: string): boolean {
+  return isBiblicaVerseMarkerCharacterStyle(characterStyle)
+    || isChapterNumberCharacterStyle(characterStyle)
+    || isVerseNumberCharacterStyle(characterStyle)
+}
+
+/**
+ * A psalm's own superscription (`head:d`, `head:d_h` — "A psalm of David").
+ *
+ * The layout sets it inside the scripture flow, ahead of the chapter's first
+ * verse and carrying no verse number of its own, so the verse it belongs to is
+ * the one it introduces. Every other `head:*` paragraph — chapter labels, the
+ * five-book headings, speaker lines — titles a passage rather than opening a
+ * verse, and keeps the chapter-range label a note gets.
+ */
+export function isBiblicaSuperscriptionStyle(paragraphStyle: string): boolean {
+  return SUPERSCRIPTION_STYLE_PATTERN.test(paragraphStyle)
 }
 
 /** True for InDesign "source serif" apostrophe glue. */

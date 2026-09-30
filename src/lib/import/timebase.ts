@@ -266,6 +266,33 @@ export function snapToFrameRatio(
   return best
 }
 
+/**
+ * Every frame-rate mistake whose ratio sits within `maxDeviation` of 1 — the
+ * candidate corrections for a file whose timings may be on the wrong clock.
+ *
+ * Deliberately CLOSE ratios only (AQU-1360). With the default 5% that is
+ * 23.976/25, 24/25, 1000/1001 and their inverses. The harmonics (50 against
+ * 25, 0.5; 60 against 24, 2.5) and the 20–25% ratios are excluded on purpose:
+ * no real millisecond subtitle mistake produces them, and when a matcher is
+ * asked to score them they only ever win by coincidence — against a start
+ * offset, a scale of 0.4 happily "matches" hundreds of cues to the wrong lines.
+ * Duplicates (24/23.976 and 30/29.97 are both exactly 1001/1000) collapse to
+ * one entry; `snapToFrameRatio` says which rates a chosen scale can be named as.
+ */
+export function frameRateScalesNear(maxDeviation = 0.05): number[] {
+  const scales: number[] = []
+  for (const from of FRAME_RATES) {
+    for (const to of FRAME_RATES) {
+      if (from.label === to.label) continue
+      const ratio = from.fps / to.fps
+      if (Math.abs(ratio - 1) > maxDeviation) continue
+      if (scales.some((s) => Math.abs(s - ratio) < 1e-9)) continue
+      scales.push(ratio)
+    }
+  }
+  return scales.sort((a, b) => a - b)
+}
+
 export interface FrameRateGuess {
   /** How the rate is written for people ("23.976"), not a rounded number. */
   label: string

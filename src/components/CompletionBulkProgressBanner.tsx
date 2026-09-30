@@ -23,7 +23,32 @@ export function CompletionBulkProgressBanner() {
   const progress = useCompletionBatchProgress()
   if (!progress) return null
 
-  const { total, done, cancelled, failed, finished } = progress
+  const { total, done, cancelled, failed, finished, unavailable } = progress
+
+  // AQU-1377: the batch was refused before it started because the AI service is
+  // unreachable. Previously completeBatch returned silently, so the click did
+  // nothing visible at all — this is the explicit message instead.
+  if (unavailable) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-sm">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+        <span>{t("editor.ai.serviceUnavailable")}</span>
+        <div className="flex-1" />
+        <AppTooltip content={t("common.dismiss")}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={dismissBatchCompletionSummary}
+            aria-label={t("common.dismiss")}
+            className="ms-1 text-muted-foreground"
+          >
+            <X />
+          </Button>
+        </AppTooltip>
+      </div>
+    )
+  }
 
   // Run is over and some cells failed: show a summary, not a progress bar.
   if (finished && failed > 0) {

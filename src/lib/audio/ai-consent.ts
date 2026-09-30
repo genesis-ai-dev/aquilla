@@ -53,7 +53,8 @@ function hasStoredConsent(id: AiModelInfo["id"]): boolean {
   } catch { return false }
 }
 
-function storeConsent(id: AiModelInfo["id"]): void {
+/** Explicit settings downloads grant the same consent as the dialog. */
+export function storeAiModelConsent(id: AiModelInfo["id"]): void {
   if (typeof localStorage === "undefined") return
   try { localStorage.setItem(KEY_PREFIX + id, "1") } catch { /* private mode */ }
 }
@@ -111,7 +112,7 @@ export function requestAiModelConsent(model: AiModelInfo): Promise<boolean> {
         // deny coalesced waiters or skip storing consent.
         if (settled) return
         settled = true
-        if (granted) storeConsent(model.id)
+        if (granted) storeAiModelConsent(model.id)
         pending = null
         notify()
         resolve(granted)

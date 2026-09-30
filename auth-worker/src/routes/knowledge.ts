@@ -415,7 +415,12 @@ projectKnowledge.post("/:projectId/knowledge/:docId/reindex", authMiddleware, as
     return c.json(body, status)
   }
 
-  await c.env.AQUILLA_PG.prepare(`UPDATE knowledge_docs SET index_status = 'pending' WHERE id = ?`)
+  // updated_at is the clock the read side uses to tell "indexing now" from
+  // "stalled since forever" (AQU-1376), so a retry has to restart it — without
+  // this an older doc would look stalled the instant it went back to pending.
+  await c.env.AQUILLA_PG.prepare(
+    `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
+  )
     .bind(docId)
     .run()
   runIndexing(c, docId)
@@ -567,7 +572,12 @@ orgKnowledge.post("/:orgId/knowledge/:docId/reindex", authMiddleware, async (c) 
     return c.json(body, status)
   }
 
-  await c.env.AQUILLA_PG.prepare(`UPDATE knowledge_docs SET index_status = 'pending' WHERE id = ?`)
+  // updated_at is the clock the read side uses to tell "indexing now" from
+  // "stalled since forever" (AQU-1376), so a retry has to restart it — without
+  // this an older doc would look stalled the instant it went back to pending.
+  await c.env.AQUILLA_PG.prepare(
+    `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
+  )
     .bind(docId)
     .run()
   runIndexing(c, docId)

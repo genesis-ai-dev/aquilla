@@ -4,7 +4,7 @@ import { AgentConnectionPage } from "../../helpers/page-objects/AgentConnectionP
 const auth = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 const sync = `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
 
-test("browser consent delivers a project credential to the agent; revocation blocks API use", async ({ alice }) => {
+test("browser consent delivers a project credential to the agent; revocation blocks API use", async ({ alice }, testInfo) => {
   // Auth worker + consent SPA + sync worker: cold route hydration watchdog.
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
@@ -20,6 +20,7 @@ test("browser consent delivers a project credential to the agent; revocation blo
   await expect(alice.getByRole("button", { name: "Authorize agent", exact: true })).toBeDisabled()
   await consent.chooseProject(seeded.projectName)
   await expect(alice.getByRole("combobox", { name: "Project" })).toContainText(seeded.projectName)
+  await alice.screenshot({ path: testInfo.outputPath("aqu-1205-consent.png"), fullPage: true })
   await consent.authorize(grant.user_code)
   const tokenResponse = await fetch(`${auth}/api/v2/agent-connect/token`, {
     method: "POST", headers: { "Content-Type": "application/json" },

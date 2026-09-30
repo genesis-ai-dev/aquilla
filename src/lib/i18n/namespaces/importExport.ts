@@ -9,6 +9,8 @@ import { defineNamespace, plural } from "./types"
  */
 export const importExport = defineNamespace({
   keys: {
+    "importExport.mediaPreview.embedded": "Embedded captions {number}",
+    "importExport.mediaPreview.embeddedLanguage": "Embedded captions {number} ({language})",
     "importExport.captionTrack.attach": "Attach captions",
     "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
     "importExport.captionTrack.title": "Attach captions to {name}",

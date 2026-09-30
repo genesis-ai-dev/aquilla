@@ -65,9 +65,7 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
-   * (they have no text cells to show) and upload immediately on selection, so
-   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
     await this.chooseImportFiles(filePath)
     await this.waitForImportSettled()
@@ -79,6 +77,12 @@ export class Workspace {
     captions: FilePayload,
   ): Promise<void> {
     await this.chooseImportFiles([media, captions])
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async previewEmbeddedMedia(media: FilePayload): Promise<void> {
+    await this.chooseImportFiles(media)
     await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }

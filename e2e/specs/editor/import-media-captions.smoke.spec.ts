@@ -128,6 +128,48 @@ test(`aligned paragraphs from ${source} reuse source timings and persist an inde
 })
 }
 
+for (const format of ["m4a", "mp4"]) {
+  test(`embedded ${format} captions define persisted source segments and preserve the original media`, async ({ alice }) => {
+    const dash = new Dashboard(alice)
+    await dash.goto()
+    const name = `Embedded captions ${Date.now()}`
+    await dash.createProject({ name, source: "en", target: "fr" })
+    await dash.openProject(name)
+    const ws = new Workspace(alice)
+    const bytes = await readFile(fileURLToPath(new URL(
+      `../../fixtures/embedded-captions.${format}`, import.meta.url,
+    )))
+    const mediaName = `embedded.${format}`
+    await ws.previewEmbeddedMedia({ name: mediaName,
+      mimeType: format === "mp4" ? "video/mp4" : "audio/mp4", buffer: bytes })
+    await expect(alice.getByLabel("Segment 1 wording", { exact: true }))
+      .toHaveValue("Embedded first caption.")
+    await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed embedded caption.")
+    await ws.confirmMediaPreview(mediaName)
+    await ws.openFileBySubstring(mediaName)
+    await ws.waitForEditor()
+    await alice.getByRole("tab", { name: "Media", exact: true }).click()
+    await expect(ws.sourceAudioClips()).toHaveCount(2)
+    await expect(ws.cellRow(0)).toContainText("Reviewed embedded caption.")
+    await expect(ws.cellRow(0)).toContainText("00:00:00.500 --> 00:00:01.500")
+    await expect(ws.cellRow(1)).toContainText("00:00:02.000 --> 00:00:03.000")
+    await alice.reload()
+    await ws.waitForEditor()
+    await expect(ws.sourceAudioClips()).toHaveCount(2)
+    await expect(ws.cellRow(0)).toContainText("Reviewed embedded caption.")
+    await expect(ws.cellRow(1)).toContainText("Embedded second caption.")
+    const downloadPromise = alice.waitForEvent("download")
+    await ws.clickDownloadOriginal()
+    const download = await downloadPromise
+    const path = await download.path()
+    expect(path).not.toBeNull()
+    expect(await readFile(path!)).toEqual(bytes)
+    await ws.sourceAudioClips().first().click()
+    await alice.getByRole("button", { name: "Play all", exact: true }).click()
+    await expect(alice.getByText("0:02.0–0:03.0 | 1.0s", { exact: true })).toBeVisible()
+  })
+}
+
 test("attaching captions adds a track and counted overwrite preserves source audio", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()

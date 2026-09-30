@@ -67,6 +67,7 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
+import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -1171,7 +1172,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * AQU-310: when `onPreview` is provided, this splits into two phases:
    *   1. Parse phase — reads all files locally, shows a preview
    *   2. Commit phase — uploads after user confirms
-   * Media files bypass preview (they have no text cells to show).
+   * Media with companion or embedded captions shows an editable cue preview.
    */
   const doImportFiles = useCallback(
     async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
@@ -1204,7 +1205,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
       // Parse text files client-side for the preview.
       const preparedByFile = new Map<File, PreparedImportFile>()
-      if (textFiles.length > 0 && onPreview) {
+      if (onPreview && (textFiles.length > 0 || mediaFiles.some(file => /\.(mp4|m4a)$/i.test(file.name)))) {
         parseAbortRef.current?.abort()
         const parseController = new AbortController()
         parseAbortRef.current = parseController
@@ -1242,13 +1243,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setImporting(false)
           setPhase("")
           return
-        } finally {
-          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
 
-        const reviewed = await reviewMediaCompanions(list, async file => {
+        let reviewed: Awaited<ReturnType<typeof reviewMediaCompanions>>
+        try {
+        reviewed = await reviewMediaCompanions(list, async file => {
           const prepared = preparedByFile.get(file)
           const format = detectFileType(file.name)
           if (!prepared || (format !== "vtt" && format !== "srt" && format !== "sbv")) {
@@ -1261,14 +1262,36 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }
         }, async (media, sources) => {
           const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+          if (parseController.signal.aborted) return null
           return new Promise(resolve => {
             mediaReviewResolver.current = resolve
             setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
           })
+        }, async media => {
+          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          parseController.signal.throwIfAborted()
+          assertSourceUploadByteLength(media.size)
+          const bytes = await media.arrayBuffer()
+          parseController.signal.throwIfAborted()
+          return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({
+            ...source, label: t(source.language
+              ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
+              number: index + 1, language: source.language ?? "",
+            }),
+          }))
         })
+        } catch (failure) {
+          if (!parseController.signal.aborted) {
+            setError(failure instanceof Error ? failure.message : t("importExport.upload.parseFailed"))
+            setImporting(false)
+          }
+          return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
+        }
         if (reviewed === null) return
         const remainingResults = reviewed.files.flatMap(file => preparedByFile.get(file)?.results ?? [])
-        if (remainingResults.length === 0 && reviewed.sources.size > 0) {
+        if (remainingResults.length === 0 && mediaFiles.length > 0) {
           await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
           return
         }

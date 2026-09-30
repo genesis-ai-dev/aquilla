@@ -8,7 +8,7 @@ const CORE_SENTINELS = [
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // AQU-1479: captions, media bytes, and staged attachments publish together.
-    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/audio\/(?:align-source-script|run-acoustic-alignment|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/alignment\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/(?:timeline-import|script-alignment)|infra\/modal\/alignment|db\/postgres\/migrations\/0117_alignment_jobs)/i,
+    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|run-acoustic-alignment|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/alignment\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/(?:timeline-import|script-alignment)|infra\/modal\/alignment|db\/postgres\/migrations\/0117_alignment_jobs)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
   },
   {

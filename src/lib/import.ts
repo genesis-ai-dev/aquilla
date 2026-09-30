@@ -1941,6 +1941,7 @@ export async function emitMediaFile(
     createdAt: new Date().toISOString(),
     cellCount: cells.length,
     orderedBy: "time",
+    hasOriginalSource: true,
   }
 }
 

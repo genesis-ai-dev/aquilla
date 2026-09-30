@@ -38,6 +38,7 @@ describe("changed-file E2E impact selection", () => {
       "sync-worker/src/alignment.ts", "shared/script-alignment.ts",
       "infra/modal/alignment.py", "infra/modal/alignment_transport.py",
       "db/postgres/migrations/0117_alignment_jobs.sql",
+      "src/lib/parsers/embedded-subtitles.ts", "sync-worker/src/audio.ts",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-media-captions.smoke.spec.ts",

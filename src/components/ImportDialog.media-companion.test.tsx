@@ -13,10 +13,34 @@ vi.mock("@/lib/import", async importOriginal => ({
 
 import { ImportDialog } from "./ImportDialog"
 import { importFile } from "@/lib/import"
+import { embeddedSubtitleFixture } from "@/lib/parsers/__fixtures__/embedded-subtitles"
 
 beforeEach(() => { vi.clearAllMocks() })
 
 describe("companion subtitles in the upload dialog", () => {
+  it("offers embedded media captions before writes and keeps short headings editable", async () => {
+    render(<ImportDialog open onOpenChange={() => {}}
+      projectId="p1" username="dev" sourceLanguage="en" targetLanguage="es"
+      getToken={async () => "token"} onImported={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /^Upload files/ }))
+    const input = document.querySelector('input[type="file"][multiple]')!
+    const media = new File([embeddedSubtitleFixture(["Heading", "Speech"], {
+      timescale: 1_000_000, durations: [1, 2_000_000],
+    })], "clip.m4a", { type: "audio/mp4" })
+    fireEvent.change(input, { target: { files: [media] } })
+    const wording = await screen.findByRole("textbox", { name: "Segment 1 wording" })
+    expect(wording).toHaveValue("Heading")
+    expect(screen.getByRole("button", { name: "Continue import" })).toBeDisabled()
+    expect(importFile).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Segment 1 end (seconds)" }),
+      { target: { value: "0.001" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue import" }))
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
+    const [committed, context] = vi.mocked(importFile).mock.calls[0]
+    expect(committed).toBe(media)
+    expect(context.mediaTextSource?.cues).toHaveLength(2)
+    expect(context.mediaTextSource?.cues[0]).toMatchObject({ original: "Heading", start: 0, end: 0.001 })
+  })
   it("flags captions beyond the media duration before any writes", async () => {
     render(<ImportDialog open onOpenChange={() => {}}
       projectId="p1" username="dev" sourceLanguage="en" targetLanguage="es"

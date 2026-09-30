@@ -12,6 +12,7 @@ import { handleAudioRequest } from "./audio"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
+import { handleAlignmentRequest } from "./alignment"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
@@ -177,6 +178,9 @@ declare global {
       /** Public base URL of THIS worker (incl. /sync prefix in prod) so Modal
        *  can reach the diarization audio + callback routes. */
       DIARIZATION_PUBLIC_BASE?: string
+      ALIGNMENT_MODAL_URL?: string
+      ALIGNMENT_SHARED_SECRET?: string
+      ALIGNMENT_PUBLIC_BASE?: string
       /** Cloudflare Email Service `send_email` binding for outbound transactional
        *  email (comment notifications). Declared only in deployed env blocks
        *  (wrangler.toml); absent locally/e2e where notifications no-op. */
@@ -339,6 +343,8 @@ const worker = {
     if (ttsResponse) return withCors(ttsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
     if (diarizationResponse) return withCors(diarizationResponse, request)
+    const alignmentResponse = await handleAlignmentRequest(request, env)
+    if (alignmentResponse) return withCors(alignmentResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)

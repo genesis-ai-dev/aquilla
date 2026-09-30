@@ -304,6 +304,7 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
+import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
 // AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
 // several of them depend on which sections are collapsed, and the stored sizes
@@ -3004,6 +3005,7 @@ export function ProjectWorkspace() {
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
   const [captionDialogFileId, setCaptionDialogFileId] = useState<string | null>(null)
+  const [alignmentDialogFileId, setAlignmentDialogFileId] = useState<string | null>(null)
   const [importCharactersOpen, setImportCharactersOpen] = useState(false)
   const [characterCheckOpen, setCharacterCheckOpen] = useState(false)
   /**
@@ -9656,6 +9658,14 @@ export function ProjectWorkspace() {
   // clearance alone. That split is why the editor takes `onRenameTrack` as its
   // own prop instead of folding it into `trackEditing`.
   const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const alignmentClipUrl = useMemo(() => {
+    const urls = new Set(audioMergedCells.flatMap(cell => {
+      const clip = sourceClipAudioForCell(cell)
+      return clip ? [clip.url] : []
+    }))
+    // A script belongs to one whole source clip. Do not choose between clips.
+    return urls.size === 1 ? [...urls][0] : undefined
+  }, [audioMergedCells])
   const captionMediaDurationMs = useMemo(() => {
     if (videoDurationForTable !== null && videoDurationForTable > 0) return videoDurationForTable * 1000
     const durations = audioMergedCells.flatMap(cell => {
@@ -12279,6 +12289,9 @@ export function ProjectWorkspace() {
                     onRequestImportCaptions={canManageSources && activeFile
                       ? () => setCaptionDialogFileId(activeFile.id) : undefined}
                     canImportCaptions={canEditTracks}
+                    onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
+                      ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
+                    canAlignScript={canEditTracks}
                     // Writes cell metadata rather than creating cells, so it
                     // sits at the contributor floor `cast.assign` requires.
                     onRequestImportCharacters={() => setImportCharactersOpen(true)}
@@ -13467,6 +13480,26 @@ export function ProjectWorkspace() {
             })
             await refresh()
           }}
+        />
+      )}
+      {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
+        && project && alignmentClipUrl && (
+        <AlignTimelineScriptDialog key={alignmentDialogFileId}
+          projectId={project.id} fileId={alignmentDialogFileId}
+          mediaName={activeFile.name} clipUrl={alignmentClipUrl}
+          language={activeSourceLanguage ?? project.sourceLanguage}
+          durationMs={captionMediaDurationMs} canEditTracks={canEditTracks}
+          cells={audioMergedCells} getToken={getTokenForFile}
+          tracks={serverTimelineTracks.filter(track =>
+            track.kind === "source-subtitles" || track.kind === "target-subtitles",
+          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
+            segmentCount: track.contentFileId
+              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+              : cellsLoading ? null : cellSummaries.length,
+          }))}
+          onSaved={async () => { refresh() }}
+          onCancel={() => setAlignmentDialogFileId(null)}
         />
       )}
       {project && activeFile && (

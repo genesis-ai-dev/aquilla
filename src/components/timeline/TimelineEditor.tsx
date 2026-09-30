@@ -253,6 +253,8 @@ export interface TimelineEditorProps {
   onRequestImportAudioVtt?(): void
   onRequestImportCaptions?(): void
   canImportCaptions?: boolean
+  onRequestAlignScript?(): void
+  canAlignScript?: boolean
   /** AQU-646 stage 6: the character spreadsheet. */
   onRequestImportCharacters?(): void
   canImportCharacters?: boolean
@@ -1022,6 +1024,8 @@ export function TimelineEditor({
   onRequestImportAudioVtt,
   onRequestImportCaptions,
   canImportCaptions = true,
+  onRequestAlignScript,
+  canAlignScript = false,
   onRequestImportCharacters,
   canImportCharacters = false,
   characterCount = 0,
@@ -2011,6 +2015,16 @@ export function TimelineEditor({
         onClick: onRequestImportCaptions,
       })
     }
+    if (onRequestAlignScript) {
+      items.push({
+        id: "align-script", label: t("importExport.scriptAlignment.align"),
+        icon: ClipboardCheck, disabled: !canAlignScript,
+        badge: canAlignScript ? undefined : <span className="text-[11px] text-muted-foreground">
+          {t("importExport.captionTrack.enableTracks")}
+        </span>,
+        onClick: onRequestAlignScript,
+      })
+    }
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
@@ -2041,6 +2055,7 @@ export function TimelineEditor({
     onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
+    onRequestAlignScript, canAlignScript,
     onRequestImportCharacters, canImportCharacters, characterCount, audioCharacterCount,
     charactersWriting,
   ])

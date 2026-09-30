@@ -33,6 +33,11 @@ describe("changed-file E2E impact selection", () => {
       "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
       "sync-worker/src/events/import-track-publication.ts",
       "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
+      "src/lib/audio/script-alignment.ts", "src/lib/audio/run-acoustic-alignment.ts",
+      "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
+      "sync-worker/src/alignment.ts", "shared/script-alignment.ts",
+      "infra/modal/alignment.py", "infra/modal/alignment_transport.py",
+      "db/postgres/migrations/0117_alignment_jobs.sql",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-media-captions.smoke.spec.ts",

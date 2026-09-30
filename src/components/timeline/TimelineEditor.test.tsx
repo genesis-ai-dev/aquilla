@@ -1802,6 +1802,15 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(attach).toHaveBeenCalledOnce()
   })
 
+  it("opens script alignment from Sources with track-editing permission", () => {
+    const align = vi.fn()
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}} onRequestAlignScript={align} canAlignScript />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Align script" }))
+    expect(align).toHaveBeenCalledOnce()
+  })
+
   it("never fills a loading caption track with the parent file's wording", () => {
     const tracks = deriveTracksForFile({ trackOverrides: {
       "source-subtitles": { contentFileId: "cue-file" },

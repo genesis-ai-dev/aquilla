@@ -4,6 +4,11 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
+import { randomUUID } from "node:crypto"
+import { jwtFor, mintSyncToken, readSeededFileEvents } from "../../helpers/seed-project"
+import { alignChunks } from "../../../src/lib/audio/timings"
+import type { CqrsEventPayloads as EventPayloads } from "../../../src/lib/sync/outbox-types"
+import type { PersistedTrackPatch } from "../../../src/lib/timeline/tracks"
 
 // AQU-1479: the real SPA parser, staged publication, Postgres projection, and
 // R2 clip must agree on supplied wording and trim boundaries after reload.
@@ -14,6 +19,113 @@ const captionSources = {
     "00:00:02.000 --> 00:00:03.000\nSecond caption.\n",
   sbv: "0:00:00.500,0:00:01.500\nFirst caption.\n\n" +
     "0:00:02.000,0:00:03.000\nSecond caption.\n",
+}
+
+for (const source of ["paste", "file"] as const) {
+test(`aligned paragraphs from ${source} reuse source timings and persist an independent track`, async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  await dash.createProject({ name: `Aligned script ${Date.now()}`, source: "en", target: "fr" })
+  const settings = new ProjectSettings(alice)
+  const projectId = settings.projectIdFromCurrentUrl()
+  await settings.enableTimelineTracks(projectId)
+  await settings.backToEditor()
+  const ws = new Workspace(alice)
+  const audio = await readFile(fileURLToPath(new URL("../../fixtures/tone-segments.mp3", import.meta.url)))
+  await ws.previewMediaWithCaptions(
+    { name: "aligned.mp3", mimeType: "audio/mpeg", buffer: audio },
+    { name: "aligned.srt", mimeType: "text/plain", buffer: Buffer.from(captionSources.srt) },
+  )
+  await ws.confirmMediaPreview("aligned.mp3")
+  await ws.openFileBySubstring("aligned.mp3")
+  await ws.waitForEditor()
+  await alice.getByRole("tab", { name: "Media", exact: true }).click()
+  const fileId = new URL(alice.url()).pathname.split("/file/")[1]
+  expect(fileId).toBeTruthy()
+  const jwt = await jwtFor("alice")
+  const events = await readSeededFileEvents(jwt, projectId, fileId)
+  const attachments = events.filter(event => event.kind === "cell.audio.attach")
+    .sort((a, b) => (a.payload as EventPayloads["cell.audio.attach"]).trimStartMs!
+      - (b.payload as EventPayloads["cell.audio.attach"]).trimStartMs!)
+  expect(attachments).toHaveLength(2)
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  for (const [index, event] of attachments.entries()) {
+    expect(event.cellId).toBeTruthy()
+    const phrase = index === 0 ? "First caption." : "Second caption."
+    // Seed the real Whisper timing producer's output through the event route.
+    const timings = alignChunks([
+      { text: index === 0 ? "First" : "Second", start: 0, end: 0.4 },
+      { text: "caption", start: 0.5, end: 1 },
+    ], phrase)
+    const response = await alice.request.post(
+      `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}/events`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { events: [{ schemaVersion: 1, id: randomUUID(), projectId, fileId,
+          cellId: event.cellId, author: "alice", clientTs: Date.now(),
+          kind: "cell.audio.attach", payload: {
+            ...(event.payload as EventPayloads["cell.audio.attach"]), timings,
+          } }] },
+      },
+    )
+    expect(response.ok()).toBe(true)
+  }
+  await alice.reload()
+  await ws.waitForEditor()
+  const modelStarts: string[] = []
+  alice.on("request", request => {
+    if (request.method() === "POST" && request.url().includes("/alignment/start")) {
+      modelStarts.push(request.url())
+    }
+  })
+  await alice.getByTestId("tl-sources-menu").click()
+  await alice.getByRole("menuitem", { name: "Align script" }).click()
+  const script = "First caption.\n\nSecond caption."
+  const scriptBytes = source === "file"
+    ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(script.replace(/\n/g, "\r\n"))])
+    : Buffer.from(script)
+  if (source === "file") {
+    await alice.getByLabel("Script file", { exact: true }).setInputFiles({
+      name: "wording.txt", mimeType: "text/plain", buffer: scriptBytes,
+    })
+    await expect(alice.getByLabel("Script", { exact: true })).toHaveValue(script)
+  } else {
+    await alice.getByLabel("Script", { exact: true }).fill(script)
+  }
+  await alice.getByRole("button", { name: "Align script", exact: true }).click()
+  await expect(alice.getByLabel("Segment 1 start (seconds)")).toHaveValue("0.5")
+  await expect(alice.getByLabel("Segment 1 end (seconds)")).toHaveValue("1.5")
+  await expect(alice.getByLabel("Segment 2 start (seconds)")).toHaveValue("2")
+  await expect(alice.getByLabel("Segment 2 end (seconds)")).toHaveValue("3")
+  await expect(alice.getByLabel("Destination track")).toHaveValue("$new-track")
+  await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed script wording.")
+  await alice.getByLabel("Track name", { exact: true }).fill("Aligned paragraph track")
+  await alice.getByRole("button", { name: "Use aligned segments", exact: true }).click()
+  await expect(alice.getByRole("dialog")).toBeHidden()
+  await ws.zoomTimelineIn()
+  await expect(alice.getByTestId("tl-editor")).toContainText("Aligned paragraph track")
+  await expect(alice.getByTestId("tl-editor")).toContainText("Reviewed script wording.")
+  await expect(ws.sourceAudioClips()).toHaveCount(2)
+  await expect(ws.cellRow(0)).toContainText("First caption.")
+  expect(modelStarts).toEqual([])
+  await alice.reload()
+  await ws.waitForEditor()
+  await expect(alice.getByTestId("tl-editor")).toContainText("Reviewed script wording.")
+  await expect(ws.sourceAudioClips()).toHaveCount(2)
+  const published = await readSeededFileEvents(jwt, projectId, fileId)
+  const trackEvent = published.find(event => event.kind === "file.track.set"
+    && (event.payload as { patch: PersistedTrackPatch | null }).patch?.name === "Aligned paragraph track")
+  expect(trackEvent).toBeTruthy()
+  const contentFileId = (trackEvent!.payload as { patch: PersistedTrackPatch | null }).patch?.contentFileId
+  if (typeof contentFileId !== "string") throw new Error("Published track has no content file")
+  const contentToken = await mintSyncToken(jwt, projectId, contentFileId)
+  const original = await alice.request.get(
+    `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
+      + `/api/v1/projects/${projectId}/files/${contentFileId}/original`,
+    { headers: { Authorization: `Bearer ${contentToken}` } },
+  )
+  expect(original.ok()).toBe(true)
+  expect(await original.body()).toEqual(scriptBytes)
+})
 }
 
 test("attaching captions adds a track and counted overwrite preserves source audio", async ({ alice }) => {
@@ -96,7 +208,7 @@ test(`media and ${format} captions publish reviewed segments and playable audio`
   const audioResponse = alice.waitForResponse(response =>
     /\/audio\/[^/?]+/.test(response.url()) &&
     response.request().method() === "GET" &&
-    Number(response.headers()["content-length"]) === audio.length,
+    response.ok(),
     { timeout: 30_000 },
   )
   await ws.confirmMediaPreview("companion.mp3")
@@ -120,7 +232,18 @@ test(`media and ${format} captions publish reviewed segments and playable audio`
   const response = await audioResponse
   expect(response.ok()).toBe(true)
   expect(response.headers()["content-type"]).toContain("audio/mpeg")
-  expect(await response.body()).toEqual(audio)
+  // Playback can use cached bytes after its one-byte availability probe.
+  // Fetch the complete stored clip with the same authorization to verify R2.
+  const authorization = response.request().headers()["authorization"]
+  const stored = await alice.request.get(response.url(), {
+    headers: {
+      ...(authorization ? { Authorization: authorization } : {}),
+      Range: "bytes=0-",
+    },
+  })
+  expect(stored.ok()).toBe(true)
+  expect(stored.headers()["content-type"]).toContain("audio/mpeg")
+  expect(await stored.body()).toEqual(audio)
   await expect(alice.getByText("0:02.0–0:03.0 | 1.0s", { exact: true })).toBeVisible()
 })
 }

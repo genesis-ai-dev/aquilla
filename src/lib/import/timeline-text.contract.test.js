@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { importTimelineTextTrack } from './timeline-text'
+import { createTimelineTextTrackImporter, importTimelineTextTrack } from './timeline-text'
 import { extractSrtStrings } from '../parsers/subtitle'
+import { alignScriptParagraphs, scriptAlignmentCues } from '../audio/script-alignment'
 import { deriveTracksForFile } from '../timeline/tracks'
 import { handleBulkImportRequest } from '../../../sync-worker/src/events/import-route'
 import { handleSourceUploadRequest } from '../../../sync-worker/src/events/source-upload-route'
+import { handleOriginalDownloadRequest } from '../../../sync-worker/src/events/original-download-route'
 import { makeTestDb } from '../../../sync-worker/src/__tests__/helpers/pg-test-db'
 import { makeTestToken } from '../../../sync-worker/src/__tests__/helpers/auth'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('caption attachment producer and publication consumer', () => {
-  it('preserves the caption bytes and creates a separate timed text track', async () => {
+  it.each(['srt', 'txt'])('preserves %s bytes and creates a separate timed text track', async format => {
     const store = await makeTestDb({
       project_settings: [{ project_id: 'p', settings: '{"allowTrackEditing":true}' }],
       files: [{ id: 'media', project_id: 'p', role: 'source', name: 'Original media' }],
@@ -26,27 +28,49 @@ describe('caption attachment producer and publication consumer', () => {
           return { key, size: bytes.byteLength }
         },
         async delete(key) { objects.delete(key) },
+        async get(key) {
+          const bytes = objects.get(key)
+          return bytes ? { body: bytes, size: bytes.byteLength,
+            async arrayBuffer() { return bytes } } : null
+        },
       },
     }
+    let publicationResponseLost = false
     const fetchImpl = vi.fn(async (url, init) => {
       const request = new Request(String(url), init)
       const response = await handleBulkImportRequest(request, env)
         ?? await handleSourceUploadRequest(request, env)
       if (!response) throw new Error(`Unhandled request: ${request.url}`)
+      if (!publicationResponseLost && init.method === 'POST'
+        && JSON.parse(init.body).trackPublication && response.ok) {
+        publicationResponseLost = true
+        return new Response('Publication response lost', { status: 400 })
+      }
       return response
     })
     const text = '1\n00:00:02,000 --> 00:00:03,000\nSecond phrase.\n\n' +
       '2\n00:00:00,500 --> 00:00:01,500\nFirst phrase.'
-    const bytes = new TextEncoder().encode(text).buffer
+    const script = 'First phrase.\n\nSecond phrase.'
+    const bytes = new TextEncoder().encode(format === 'txt' ? script : text).buffer
+    const cues = format === 'txt' ? scriptAlignmentCues(alignScriptParagraphs(script, [
+      { text: 'First', start: 0.5, end: 0.8 },
+      { text: 'phrase', start: 0.9, end: 1.5 },
+      { text: 'Second', start: 2, end: 2.3 },
+      { text: 'phrase', start: 2.4, end: 3 },
+    ])) : extractSrtStrings(text)
     try {
-      const uploaded = await importTimelineTextTrack({
+      const commit = createTimelineTextTrackImporter({
         projectId: 'p', anchorFileId: 'media', name: 'New captions', durationMs: 4000,
-        source: { cues: extractSrtStrings(text),
-          artifact: { name: 'captions.srt', format: 'srt', bytes } },
+        source: { cues,
+          artifact: { name: `captions.${format}`, format, bytes } },
         getToken: fileId => makeTestToken(env.SYNC_SECRET_KEY, {
           projectId: 'p', fileId, role: 600,
         }), fetchImpl,
       })
+      await expect(commit()).rejects.toThrow()
+      const [uploaded, concurrent] = await Promise.all([commit(), commit()])
+      expect(concurrent).toEqual(uploaded)
+      expect(await commit()).toEqual(uploaded)
       const files = await store.rows('files')
       expect(files).toHaveLength(2)
       expect(files.find(file => file.id === uploaded.fileId))
@@ -68,7 +92,17 @@ describe('caption attachment producer and publication consumer', () => {
       const artifacts = await store.rows('artifacts')
       expect(artifacts).toHaveLength(1)
       expect(objects.get(artifacts[0].r2_key)).toEqual(bytes)
-      expect(artifacts[0]).toMatchObject({ name: 'captions.srt', file_id: uploaded.fileId })
+      expect(artifacts[0]).toMatchObject({ name: `captions.${format}`, file_id: uploaded.fileId })
+      const originalToken = await makeTestToken(env.SYNC_SECRET_KEY, {
+        projectId: 'p', fileId: uploaded.fileId, role: 800,
+      })
+      const original = await handleOriginalDownloadRequest(new Request(
+        `https://sync.test/api/v1/projects/p/files/${uploaded.fileId}/original`, {
+          headers: { Authorization: `Bearer ${originalToken}` },
+        },
+      ), env)
+      expect(original.status).toBe(200)
+      expect(await original.arrayBuffer()).toEqual(bytes)
       expect(uploaded.cellCount).toBe(2)
       const replacementText = '1\n00:00:01,000 --> 00:00:02,500\nReviewed replacement.'
       let lostResponse = false

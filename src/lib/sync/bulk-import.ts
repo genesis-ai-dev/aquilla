@@ -164,9 +164,12 @@ export interface StagedAudioAttachment {
 export interface PublishStagedImportArgs {
   projectId: string
   fileId: string
+  /** Retain the reveal receipt across explicit caller retries. */
+  publishEventId?: string
   attachments?: StagedAudioAttachment[]
   /** Parent-scoped publication of a separate hidden caption file. */
   trackPublication?: Omit<ImportedTrackPublication, "eventId">
+    & Partial<Pick<ImportedTrackPublication, "eventId">>
   getToken: (fileId: string) => Promise<string | null>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -326,12 +329,13 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     fileId: args.fileId,
     cells: [],
     complete: true,
-    publishEventId: uuidv7(),
+    publishEventId: args.publishEventId ?? uuidv7(),
     ...(args.attachments?.length ? {
       attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),
     } : {}),
     ...(args.trackPublication ? {
-      trackPublication: { ...args.trackPublication, eventId: uuidv7() },
+      trackPublication: { ...args.trackPublication,
+        eventId: args.trackPublication.eventId ?? uuidv7() },
     } : {}),
     clientTs: Date.now(),
   })

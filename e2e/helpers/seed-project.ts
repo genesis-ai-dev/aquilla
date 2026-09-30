@@ -40,7 +40,10 @@ import { Workspace } from "./page-objects/Workspace"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
-const SYNC_BASE = `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
+// E2E_SYNC_BASE lets a deployed https target (the adversarial Jev suite) reuse
+// these helpers; the local stack keeps the plain-http default.
+const SYNC_BASE = process.env.E2E_SYNC_BASE
+  ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
 
 const DEFAULT_FIXTURE = path.resolve(__dirname, "../fixtures/sample.md")
 
@@ -97,11 +100,13 @@ export async function readSeededFileEvents(
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string; steeringContext?: boolean } = {},
+  opts: { name?: string; fixturePath?: string; steeringContext?: boolean; orgId?: number } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
-  await createProjectServerSide(jwt, { id: projectId, name: projectName })
+  await createProjectServerSide(jwt, {
+    id: projectId, name: projectName, ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
+  })
   // A seeded project stands in for one a team has actually set up: autopilot
   // refuses to start without both languages and an answered brief question
   // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project

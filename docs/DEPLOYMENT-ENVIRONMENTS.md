@@ -102,7 +102,9 @@ branches cut from `dev`; `main` is retired.
 
 1. `node scripts/release-plan.mjs` decides whether to cut, and names the
    branch and the `dev` sha to cut it from — not necessarily the tip of `dev`
-   at cut time. A release branch may carry the plain cut date,
+   at cut time, and never below what production already runs (it reads the
+   cherry-picks on the newest calver tag, which is not on `dev`, to learn
+   which `dev` PRs shipped). A release branch may carry the plain cut date,
    `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
    date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
    for how a slice is built and when it deploys itself versus waiting for a

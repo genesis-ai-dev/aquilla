@@ -78,16 +78,20 @@ function branchName(now, usedSuffixes) {
   return `release/${date}-${String(n).padStart(2, "0")}`
 }
 
-function cutSlice({ base, slice, reason, hold, now, usedSuffixesToday }) {
+function cutSlice({ base, slice, reason, hold, now, usedSuffixesToday, floor }) {
+  const tail = slice[slice.length - 1]
   return {
     ...base,
     cut: true,
     hold,
     reason,
     branch: branchName(now, usedSuffixesToday),
-    sha: slice[slice.length - 1].sha,
+    // A slice that ends behind the floor cuts at the floor instead: the
+    // branch then carries what production already runs plus this slice,
+    // never less (see splitReleased).
+    sha: floor && tail.behindFloor ? floor : tail.sha,
     areas: [...new Set(slice.flatMap((pr) => pr.areas))].sort(),
-    prs: slice.map(({ pathHolds, holds, ...pr }) => pr),
+    prs: slice.map(({ pathHolds, holds, behindFloor, ...pr }) => pr),
   }
 }
 
@@ -101,21 +105,29 @@ function cutSlice({ base, slice, reason, hold, now, usedSuffixesToday }) {
 // re-cherry-picked onto every slice cut before dev catches up; cutting at
 // dev's current head the instant the line is free means dev already carries
 // the fix, so the next slice just picks it up.
-export function planRelease({ openReleases, prs, now, usedSuffixesToday = [] }) {
-  const base = { openReleases, prCount: prs.length }
+//
+// floor is the newest dev commit production already runs (see splitReleased);
+// no slice cuts below it. PRs marked behindFloor sit before it on dev, so the
+// smallest cut that ships any of them is at the floor, which ships all of
+// them: they are one indivisible head of the queue.
+export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], floor }) {
+  const base = { openReleases, prCount: prs.length, floor }
   if (openReleases.length) {
     return { ...base, cut: false, hold: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [] }
   }
   if (!prs.length) return { ...base, cut: false, hold: false, reason: "no unreleased PRs", prs: [] }
 
   const decorated = prs.map((pr) => ({ ...pr, holds: prHolds(pr) }))
-  const oldest = decorated[0]
+  let behind = 0
+  while (behind < decorated.length && decorated[behind].behindFloor) behind++
+  const head = decorated.slice(0, Math.max(behind, 1))
 
-  // The oldest waiting PR itself holds: cut it alone, immediately. Everything
+  // The head of the queue holds: cut it alone, immediately. Everything
   // behind it has to wait for production order, so the human gate has to
   // appear at once.
-  if (oldest.holds) {
-    return cutSlice({ base, slice: [oldest], reason: "oldest unreleased PR holds", hold: true, now, usedSuffixesToday })
+  if (head.some((pr) => pr.holds)) {
+    const reason = head.length > 1 ? "a PR behind the deployed floor holds" : "oldest unreleased PR holds"
+    return cutSlice({ base, slice: head, reason, hold: true, now, usedSuffixesToday, floor })
   }
 
   const run = []
@@ -124,21 +136,72 @@ export function planRelease({ openReleases, prs, now, usedSuffixesToday = [] }) 
     run.push(pr)
   }
 
-  return cutSlice({ base, slice: run, reason: `${run.length} ready PR(s), no release in flight`, hold: false, now, usedSuffixesToday })
+  return cutSlice({ base, slice: run, reason: `${run.length} ready PR(s), no release in flight`, hold: false, now, usedSuffixesToday, floor })
 }
 
-const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim()
+// Which PR a first-parent commit stands for: GitHub's merge subject, or the
+// "(#N)" suffix of a squash merge. Undefined for anything else.
+export function prNumberFromSubject(subject) {
+  const number = subject.match(/^Merge pull request #(\d+)/)?.[1] ?? subject.match(/\(#(\d+)\)$/)?.[1]
+  return number === undefined ? undefined : Number(number)
+}
+
+// What a tagged release tip proves it carries from dev. A release branch is
+// built by `git cherry-pick -x -m 1 <dev merge sha>` (DEPLOYMENT-ENVIRONMENTS
+// "Cutting a release"; release/2026/09/28-04 is the shape), so the calver tag
+// sits on a pick, not on dev's first-parent line, and `<tag>..origin/dev`
+// never shrinks on its own. Each pick keeps the dev merge's subject and adds
+// a "(cherry picked from commit <sha>)" line to its body. That line is not a
+// `key: value` trailer, so `%(trailers)` never sees it: read %b. A pick made
+// without -x still carries the "Merge pull request #N" subject, so the PR
+// number is the second, weaker key.
+export function releasedMarks(tagEntries) {
+  const shas = new Set()
+  const numbers = new Set()
+  for (const { subject, body } of tagEntries) {
+    for (const [, sha] of body.matchAll(/\(cherry picked from commit ([0-9a-f]{40})\)/g)) shas.add(sha)
+    const number = prNumberFromSubject(subject)
+    if (number !== undefined) numbers.add(number)
+  }
+  return { shas, numbers }
+}
+
+// Splits dev's first-parent commits above the cut point (oldest first) into
+// the ones the tagged tip already carries and the ones still waiting.
+//
+// floor is the newest dev commit production already runs: the cut point when
+// nothing above it was picked, otherwise the newest picked commit. A hotfix
+// picked ahead of its dev order (2026.09.28.03 carried #912 while 28 older
+// dev PRs waited, #776's migration among them) puts the floor above PRs that
+// are still unreleased; those come back marked behindFloor. The range starts
+// at the cut point, not the floor, because a range starting at the floor
+// would drop those PRs from the plan and ship them without their hold.
+export function splitReleased({ devEntries, marks, cutPoint }) {
+  const released = (entry) => marks.shas.has(entry.sha) || marks.numbers.has(prNumberFromSubject(entry.subject))
+  let floorIndex = -1
+  devEntries.forEach((entry, index) => {
+    if (released(entry)) floorIndex = index
+  })
+  const floor = floorIndex === -1 ? cutPoint : devEntries[floorIndex].sha
+  const unreleased = []
+  devEntries.forEach((entry, index) => {
+    if (!released(entry)) unreleased.push({ ...entry, behindFloor: index < floorIndex })
+  })
+  return { unreleased, floor }
+}
+
+const git = (args, opts = {}) => execFileSync("git", args, { encoding: "utf8", ...opts }).trim()
 const lines = (text) => text.split("\n").filter(Boolean)
 
 function releaseRefs() {
-  return lines(git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/release/"))
+  return lines(git(["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/release/"]))
     .map((ref) => ref.replace(/^origin\//, ""))
     .filter(isReleaseBranch)
 }
 
 // A release branch is in flight until its HEAD carries a calver tag (deployed).
 function openReleaseBranches() {
-  return releaseRefs().filter((branch) => !lines(git("tag", "--points-at", `origin/${branch}`, "--list", "20*")).length)
+  return releaseRefs().filter((branch) => !lines(git(["tag", "--points-at", `origin/${branch}`, "--list", "20*"])).length)
 }
 
 function usedSuffixesToday(now) {
@@ -149,31 +212,49 @@ function usedSuffixesToday(now) {
     .map((branch) => branch.slice(prefix.length + 1))
 }
 
-function unreleasedPrs() {
-  const tags = lines(git("tag", "--list", "20*", "--sort=-v:refname"))
+// One record per first-parent commit in range, newest first, body included:
+// the pick provenance releasedMarks reads lives in %b.
+function logEntries(range, cwd) {
+  const raw = git(["log", "--first-parent", "--format=%H%x1f%cI%x1f%s%x1f%b%x1e", range], { cwd })
+  return raw.split("\x1e").map((record) => record.trim()).filter(Boolean).map((record) => {
+    const [sha, mergedAt, subject, body = ""] = record.split("\x1f")
+    return { sha, mergedAt, subject, body }
+  })
+}
+
+// Every PR merged to dev that production does not run yet, oldest first, and
+// the floor no slice may cut below. cwd is for tests driving a scratch repo.
+export function unreleasedPrs({ cwd } = {}) {
+  const tags = lines(git(["tag", "--list", "20*", "--sort=-v:refname"], { cwd }))
   // Before the first calver tag, origin/main is what production runs.
-  const range = `${tags[0] ?? "origin/main"}..origin/dev`
-  const log = lines(git("log", "--first-parent", "--format=%H%x09%cI%x09%s", range))
+  const released = tags[0] ?? "origin/main"
+  // The tagged tip is normally a pick off dev; the cut point is the newest
+  // dev commit it holds by ancestry. A tag on dev is its own cut point, and
+  // then nothing is off dev to read marks from: today's `<tag>..origin/dev`.
+  const cutPoint = git(["merge-base", released, "origin/dev"], { cwd })
+  const marks = releasedMarks(logEntries(`origin/dev..${released}`, cwd))
+  const devEntries = logEntries(`${cutPoint}..origin/dev`, cwd).reverse()
+  const { unreleased, floor } = splitReleased({ devEntries, marks, cutPoint })
   const prs = []
-  for (const entry of log) {
-    const [sha, mergedAt, subject] = entry.split("\t")
-    const number = subject.match(/^Merge pull request #(\d+)/)?.[1] ?? subject.match(/\(#(\d+)\)$/)?.[1]
-    if (!number) continue
+  for (const { sha, mergedAt, subject, behindFloor } of unreleased) {
+    const number = prNumberFromSubject(subject)
+    if (number === undefined) continue
     const parent = subject.startsWith("Merge pull request") ? `${sha}^1` : `${sha}^`
-    const files = lines(git("diff", "--name-only", parent, sha))
+    const files = lines(git(["diff", "--name-only", parent, sha], { cwd }))
     // Anything with a UI claim needs the GitHub-API walk lookup (see
     // release-plan-walk.mjs) to fill in walk; the git-only command here
     // always leaves those unknown, which holds.
     const walk = isDocsOrTestOnly(files) ? "none" : "unknown"
-    prs.push({ number: Number(number), sha, mergedAt, walk, ...classifyFiles(files) })
+    prs.push({ number, sha, mergedAt, walk, behindFloor, ...classifyFiles(files) })
   }
-  return prs.reverse()
+  return { prs, floor }
 }
 
 async function main() {
   const nowArg = process.argv.find((arg) => arg.startsWith("--now="))
   const now = nowArg ? nowArg.slice(6) : new Date().toISOString()
-  let prs = unreleasedPrs()
+  const unreleased = unreleasedPrs()
+  let { prs } = unreleased
   // Without a token this stays the git-only command: every non-docs/test PR
   // reports walk: unknown, which holds, so cuts still happen but nothing
   // deploys itself until the lookup can run.
@@ -187,6 +268,7 @@ async function main() {
     prs,
     now,
     usedSuffixesToday: usedSuffixesToday(now),
+    floor: unreleased.floor,
   })
   console.log(JSON.stringify(plan, null, 2))
 }

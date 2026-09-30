@@ -590,3 +590,94 @@ describe("GET /api/v1/ai/agent/runs — acceptance ledger", () => {
     })
   })
 })
+
+// AQU-1467 — PostHog events from a real run. Producer: runAgentLoop's tool
+// dispatch; consumer: the telemetry batch POSTed to PostHog.
+describe("POST /api/v1/ai/agent/run — PostHog telemetry", () => {
+  function namedCall(id: string, name: string, args: Record<string, unknown>) {
+    return {
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+    }
+  }
+
+  async function runWithPosthog(script: Record<string, unknown>[], posthog: "ok" | "throws") {
+    await seedProjectWorld()
+    const batches: { batch: { event: string; properties: Record<string, unknown> }[] }[] = []
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/batch/")) {
+        if (posthog === "throws") throw new Error("posthog down")
+        batches.push(JSON.parse(String(init?.body)))
+        return new Response("{}")
+      }
+      return modelTurn(script.shift()!)
+    })
+    const res = await app.request(
+      "/api/v1/ai/agent/run",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({
+          projectId: PROJECT,
+          messages: [{ role: "user", content: "PROMPT-SENTINEL read it" }],
+          context: { fileId: FILE },
+        }),
+      },
+      Object.assign(Object.create(env), { OPENROUTER_API_KEY: "test-key", POSTHOG_KEY: "phc_test" }),
+    )
+    const frames = parseFrames(await res.text())
+    // The flush is not awaited when there is no executionCtx; let it settle.
+    await vi.waitFor(() => {
+      if (posthog === "ok") expect(batches).toHaveLength(1)
+    })
+    return { frames, batches }
+  }
+
+  const SCRIPT = () => [
+    namedCall("t1", "read", { fileId: FILE, ref: "GEN 1:1" }),
+    namedCall("t2", "search", { q: "zzzz-no-such-thing-anywhere" }),
+    namedCall("t3", "no_such_tool", { x: 1 }),
+    { role: "assistant", content: "REPLY-SENTINEL done" },
+  ]
+
+  it("emits one agent_tool_run per tool call with ok / nothing-to-do / error outcomes", async () => {
+    const { batches } = await runWithPosthog(SCRIPT(), "ok")
+    expect(batches).toHaveLength(1)
+    const events = batches[0].batch
+    const runs = events.filter((e) => e.event === "agent_tool_run")
+    expect(runs.map((e) => [e.properties.tool, e.properties.outcome])).toEqual([
+      ["read", "ok"],
+      ["search", "nothing-to-do"],
+      ["no_such_tool", "error"],
+    ])
+    expect(runs[0].properties.ref).toBe("GEN 1:1")
+    expect(runs[2].properties.error_class).toBeTruthy()
+    expect(events.filter((e) => e.event === "$ai_generation")).toHaveLength(4)
+    const trace = events.filter((e) => e.event === "$ai_trace")
+    expect(trace).toHaveLength(1)
+    const raw = JSON.stringify(events)
+    expect(raw).not.toContain("PROMPT-SENTINEL")
+    expect(raw).not.toContain("REPLY-SENTINEL")
+    expect(raw).not.toContain("zzzz-no-such-thing")
+  })
+
+  it("returns the same frames when the PostHog request throws", async () => {
+    const { frames } = await runWithPosthog(SCRIPT(), "throws")
+    const types = frames.map((f) => f.type).filter((t) => t !== "budget")
+    expect(types).toEqual([
+      "run_start",
+      "code_start", // read
+      "code_result",
+      "code_start", // search
+      "code_result",
+      "code_start", // unknown tool
+      "code_result",
+      "assistant_delta",
+      "usage",
+      "done",
+    ])
+    expect(frames.at(-1)).toMatchObject({ type: "done", status: "ok" })
+  })
+})

@@ -37,8 +37,6 @@ interface Props {
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
-  /** Storage lane used when exporting translated source files. */
-  targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
   onShowDetails?: (fileId: string) => void
@@ -74,7 +72,6 @@ interface Props {
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
-  targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
@@ -357,7 +354,6 @@ export function ExpandableFileList({
       projectId,
       file,
       getToken: getTokenForFile,
-      targetLang,
     })
   }
 

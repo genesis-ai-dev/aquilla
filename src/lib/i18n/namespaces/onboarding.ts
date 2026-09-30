@@ -32,7 +32,7 @@ export const onboarding = defineNamespace({
     "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
     "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
     "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
-    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.expiry": "Access doesn't expire. You can see when it was last used and revoke it from API tokens at any time.",
     "onboarding.connect.project": "Project",
     "onboarding.connect.choose": "Choose a project",
     "onboarding.connect.noProjects": "You do not have the required access to an available project.",

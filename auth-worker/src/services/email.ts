@@ -165,7 +165,7 @@ function buildWelcomeHtml(
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #2563eb; margin-bottom: 16px;">Welcome to Aquilla, ${username} 👋</h2>
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Welcome to Aquilla, ${escapeHtml(username)} 👋</h2>
           <p>You're all set. Aquilla is where translation teams draft, review, and
              keep quality visible — together, without losing trust as you scale.</p>
           <p style="margin: 20px 0; text-align: center;">

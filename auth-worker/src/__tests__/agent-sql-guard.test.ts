@@ -620,3 +620,22 @@ describe("runGuardedSql — cross-project isolation (2026-09-28)", () => {
     if (r.ok) expect(r.rows.map((row) => row.scope_label)).toEqual([`scope for ${PROJECT}`])
   })
 })
+
+describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypasses", () => {
+  it("rejects E'…' escape strings that desync the literal mask", () => {
+    const r = guard(
+      "SELECT E'\\'' || (SELECT max(email) FROM users) || E'\\'' FROM cells WHERE project_id = :project",
+    )
+    expect(r.ok).toBe(false)
+  })
+  it("rejects U&'…' literals", () => {
+    expect(guard("SELECT U&'a' FROM cells WHERE project_id = :project").ok).toBe(false)
+  })
+  it("rejects query_to_xml (runs an unscoped query from a string)", () => {
+    const r = guard("SELECT query_to_xml('select * from users', true, false, '') FROM cells WHERE project_id = :project")
+    expect(r.ok).toBe(false)
+  })
+  it("still accepts plain literals ending in e", () => {
+    expect(guard("SELECT 'tree' FROM cells WHERE project_id = :project").ok).toBe(true)
+  })
+})

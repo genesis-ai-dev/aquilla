@@ -1014,9 +1014,7 @@ API. Four gaps, all on the path every partner USFM import takes.
   notes in `metadata.usfmNotes`, and export used to replace the whole verse span with the
   translation — so every note on a translated verse left the file silently (294 of them on
   Biblica's NRT Acts, invisible until someone proofread the typeset book). The export plan
-  now re-attaches a verse's own notes to its translation, at the end of the verse. The
-  source-side export (`side=source`, AQU-1449) does the same for a verse whose source text
-  was edited, since that edit replaces the span in exactly the same way. Offsets
+  now re-attaches a verse's own notes to its translation, at the end of the verse. Offsets
   are not preserved: a translation is a different length and word order, so the source
   offset addresses nothing in it. Placing a note back at its right point inside a
   translated verse needs a translator — that is option A in the ticket, and a separate

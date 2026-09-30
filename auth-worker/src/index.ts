@@ -81,6 +81,7 @@ import chatRoutes from "./routes/chat"
 import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
+import aiSeamsRoutes from "./routes/ai-seams"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -236,6 +237,7 @@ app.get("/", (c) =>
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
+      "/api/v1/ai/seams/classify",
     ],
   }),
 )
@@ -342,6 +344,10 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1386: seam classification for meaning-unit drafting. Session-authed;
+// batches a window of cell boundaries into one Jev decision call and falls back
+// to punctuation whenever the model is unavailable or unconfident.
+app.route("/api/v1/ai/seams", aiSeamsRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)

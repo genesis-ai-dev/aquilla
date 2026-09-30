@@ -422,6 +422,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private handleClientMessage(conn: ConnectionState, raw: string): void {
     const msg = parseProjectDoClientMessage(raw)
     if (!msg) return
+    if (msg.t === "ping") {
+      this.sendTo(conn.ws, msg.ts === undefined ? { t: "pong" } : { t: "pong", ts: msg.ts })
+      return
+    }
     const now = Date.now()
     if (msg.t === "focus.claim") {
       // [Pen test 2026-08-10] a read-only role (viewer/commenter/reviewer)

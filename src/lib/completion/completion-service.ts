@@ -18,9 +18,11 @@ import {
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
   retainTranslationPairs,
   selectApprovedExamples,
   type ChatMessage,
+  type PrecedingContextEntry,
   type ValidatedPair,
 } from "./prompt-build"
 
@@ -31,10 +33,11 @@ export {
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
   retainTranslationPairs,
   selectApprovedExamples,
 }
-export type { ChatMessage, PromptRule, ValidatedPair } from "./prompt-build"
+export type { ChatMessage, PrecedingContextEntry, PromptRule, ValidatedPair } from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -282,8 +285,9 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
-  /** Approved bilingual pairs immediately preceding the first live cell. */
-  precedingContext?: { source: string; target: string }[]
+  /** Bilingual pairs immediately preceding the first live cell. Approved
+   *  targets, plus (AQU-1386) this run's own earlier drafts marked `draft`. */
+  precedingContext?: PrecedingContextEntry[]
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -338,7 +342,7 @@ export function buildBatchPrompt(options: {
   // single-cell and paragraph recipes.
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\nTranslation: ${stripTrailingBareMarkers(ctx.target)}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${stripTrailingBareMarkers(c.source)}</v${i + 1}>`).join("\n")

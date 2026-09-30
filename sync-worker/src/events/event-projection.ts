@@ -2785,6 +2785,17 @@ case 'cell.audio.attach': {
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
+      // AQU-1453: mirror the upstream's visibility, but only when the mirror
+      // event actually carries it. An absent `hidden` must leave the downstream
+      // row's own `hidden_at` alone — every text mirror would otherwise un-park
+      // the cell it touched, and every mirror event written before this field
+      // existed would do the same on a projection rebuild. That is why the ON
+      // CONFLICT assignment below is composed rather than unconditional: there
+      // is no single value for `excluded.hidden_at` that means "don't change
+      // this", since NULL is itself the "visible" state.
+      const hiddenProvided = typeof p.hidden === 'boolean'
+      const hiddenAt = hiddenProvided && p.hidden ? event.serverTs : null
+      const hiddenAtAssign = hiddenProvided ? 'hidden_at         = excluded.hidden_at,' : ''
       stmts.push(
         db
           .prepare(
@@ -2793,13 +2804,14 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at, lane_id
+              upstream_event_id, upstream_seq, tombstoned_at, hidden_at, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL, ${laneIdResolveSql('source')}
+              ?, ?, NULL, ?, ${laneIdResolveSql('source')}
             )
             ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
+              ${hiddenAtAssign}
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),
@@ -2846,6 +2858,7 @@ case 'cell.audio.attach': {
             p.metadata != null ? JSON.stringify(p.metadata) : null,
             p.upstream.eventId,
             upstreamSeq,
+            hiddenAt,
             ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )

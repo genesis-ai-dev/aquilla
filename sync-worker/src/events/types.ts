@@ -934,6 +934,16 @@ export interface EventPayloads {
     cameraState?: string
     medium?: string
     metadata?: Record<string, unknown>
+    /**
+     * AQU-1453: the upstream cell's visibility, mirrored so a downstream starts
+     * from the curated source rather than from every cell the upstream lead
+     * parked. Present ONLY when the sync's delta window actually contained a
+     * `source.cell.visibility.set` for this cell — absent means "this mirror
+     * says nothing about visibility" and the downstream's own `hidden_at` is
+     * left as it is, which is what keeps an ordinary text mirror from
+     * un-parking a cell as a side effect.
+     */
+    hidden?: boolean
     /** True = the upstream deleted this cell. Tombstone (stamp
      *  cells.tombstoned_at), never delete the downstream row. */
     deleted?: true

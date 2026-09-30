@@ -26,6 +26,12 @@ export interface AiDraftProvenanceSnapshot {
 export interface PostEditPair {
   cellId: string
   fileId: string
+  /**
+   * Display name of the file, carried on the pair so the per-file rollup can
+   * label a row without the aggregator needing the project's file list. Absent
+   * for callers that only have an id (older tests, ad-hoc extraction).
+   */
+  fileName?: string
   aiValue: string
   humanValue: string
   ned: number
@@ -69,6 +75,7 @@ export function extractPostEditPairs(
   events: CommitEvent[],
   cellId: string,
   fileId: string,
+  fileName?: string,
 ): PostEditPair[] {
   const ordered = [...events].sort((a, b) => a.serverSeq - b.serverSeq)
   const commits = ordered.filter(
@@ -111,6 +118,7 @@ export function extractPostEditPairs(
     pairs.push({
       cellId,
       fileId,
+      ...(fileName !== undefined ? { fileName } : {}),
       aiValue,
       humanValue,
       ned: normalizedEditDistance(aiValue, humanValue),
@@ -141,10 +149,32 @@ export interface UserBucket {
   count: number
 }
 
+/**
+ * One file's rollup — the per-book view asked for in AQU-1321.
+ *
+ * It buckets by file rather than by parsed book reference deliberately. A
+ * scripture import already lands one file per book (see `getBookName` use in
+ * `src/lib/import/milestones.ts`), so for the scripture projects that asked for
+ * this the two are the same list; and unlike a book key it also works for the
+ * EBL workbooks, prose and media transcripts that have no book at all, instead
+ * of dropping them from the breakdown. Re-keying on canonical refs would need
+ * every pair to carry one, which the event payloads do not supply.
+ */
+export interface FileBucket {
+  fileId: string
+  /** Falls back to the caller's display of `fileId` when the name is unknown. */
+  fileName?: string
+  avgNed: number
+  count: number
+  /** Pairs in this file the reviewer approved with no edit at all. */
+  acceptedAsIsCount: number
+}
+
 export interface PostEditMetrics {
   pairs: PostEditPair[]
   byWeek: WeekBucket[]
   byUser: UserBucket[]
+  byFile: FileBucket[]
   overallAvgNed: number
   overallAvgReviewMs: number
   acceptanceRate: number
@@ -167,6 +197,7 @@ export function aggregatePostEditMetrics(pairs: PostEditPair[]): PostEditMetrics
       pairs: [],
       byWeek: [],
       byUser: [],
+      byFile: [],
       overallAvgNed: 0,
       overallAvgReviewMs: 0,
       acceptanceRate: 0,
@@ -176,6 +207,10 @@ export function aggregatePostEditMetrics(pairs: PostEditPair[]): PostEditMetrics
 
   const weekMap = new Map<string, { sumNed: number; count: number }>()
   const userMap = new Map<string, { sumNed: number; count: number }>()
+  const fileMap = new Map<
+    string,
+    { sumNed: number; count: number; acceptedAsIsCount: number; fileName?: string }
+  >()
   for (const pair of pairs) {
     const week = weekStart(pair.humanTs)
     const weekEntry = weekMap.get(week) ?? { sumNed: 0, count: 0 }
@@ -187,6 +222,15 @@ export function aggregatePostEditMetrics(pairs: PostEditPair[]): PostEditMetrics
     userEntry.sumNed += pair.ned
     userEntry.count++
     userMap.set(pair.author, userEntry)
+
+    const fileEntry =
+      fileMap.get(pair.fileId) ?? { sumNed: 0, count: 0, acceptedAsIsCount: 0 }
+    fileEntry.sumNed += pair.ned
+    fileEntry.count++
+    if (pair.acceptedAsIs) fileEntry.acceptedAsIsCount++
+    // First non-empty name wins; a later pair from the same file cannot rename it.
+    if (fileEntry.fileName === undefined && pair.fileName) fileEntry.fileName = pair.fileName
+    fileMap.set(pair.fileId, fileEntry)
   }
 
   const byWeek = Array.from(weekMap.entries())
@@ -195,11 +239,23 @@ export function aggregatePostEditMetrics(pairs: PostEditPair[]): PostEditMetrics
   const byUser = Array.from(userMap.entries())
     .sort(([, a], [, b]) => b.count - a.count)
     .map(([author, value]) => ({ author, avgNed: value.sumNed / value.count, count: value.count }))
+  // Heaviest-sampled file first, then by id so two files with the same count
+  // keep a stable order across refreshes rather than shuffling under the reader.
+  const byFile = Array.from(fileMap.entries())
+    .sort(([idA, a], [idB, b]) => b.count - a.count || idA.localeCompare(idB))
+    .map(([fileId, value]) => ({
+      fileId,
+      ...(value.fileName !== undefined ? { fileName: value.fileName } : {}),
+      avgNed: value.sumNed / value.count,
+      count: value.count,
+      acceptedAsIsCount: value.acceptedAsIsCount,
+    }))
 
   return {
     pairs,
     byWeek,
     byUser,
+    byFile,
     overallAvgNed: pairs.reduce((sum, pair) => sum + pair.ned, 0) / pairs.length,
     overallAvgReviewMs: pairs.reduce((sum, pair) => sum + pair.reviewTimeMs, 0) / pairs.length,
     acceptanceRate: pairs.filter((pair) => pair.acceptedAsIs).length / pairs.length,

@@ -44,6 +44,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { isBiblicaScriptureCell } from "@/lib/biblica/cell-kind"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
@@ -92,7 +93,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
-import { displayFieldLabel, useCellDisplayFields } from "@/lib/store/cell-display-fields"
+import { displayFieldLabel, displayFieldValue, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
@@ -194,7 +195,8 @@ import { ViolationToast } from "./ViolationToast"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
-import type { Concept, ConceptDraft } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
@@ -2334,6 +2336,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const isFirstOfFile = index === 0
             || cellStore.getCellView(displayCellIds[index - 1])?.fileId !== cell.fileId
           const showParagraphBoundary = cell.paragraphStart === true && !isFirstOfFile
+          // AQU-1285: a Biblica study-Bible file holds both the Bible text and
+          // the notes about it. Editing a verse and editing a note on it are
+          // different jobs, so a verse row says so — the accent and badge are
+          // the same shape the untimed rows use, and the reference pill already
+          // carries the verse ("GEN 1:1") from the cell's globalReferences.
+          const isScriptureRow = isBiblicaScriptureCell(cell.metadata)
           // p1-paragraph-ui-wiring (Task 3): only paragraph-start cells carry
           // group info; every other row gets undefined so its rail button
           // gate (paragraphGroupSize !== undefined) resolves false.
@@ -2400,6 +2408,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         data-cell-id={cell.id}
         data-index={index}
         data-untimed={untimedInTimeLens ? "true" : undefined}
+        data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
         className={cn(
@@ -2408,9 +2417,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // be caught by the row's other `group` users.
           sourceLineEditing && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
+          isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
+        {isScriptureRow && (
+          <span className="pointer-events-none absolute end-1 top-1 z-10 rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
+            {t("editor.row.scriptureBadge")}
+          </span>
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -3693,8 +3708,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   const cellId = cell.id
   if (isPerfLogEnabled()) {
-    const key = cellId.slice(0, 8)
-    rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
+    // AQU-1069: keyed by the full cell id — a leading UUIDv7 slice is the
+    // millisecond clock, so it is shared by every cell of one import and
+    // collapsed all rows into a single bucket.
+    rowRenders.set(cellId, (rowRenders.get(cellId) ?? 0) + 1)
   }
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
@@ -4073,6 +4090,8 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
+  /** Project affix inventory + fold defaults feeding the shared matcher. */
+  termMatching?: TermMatchingSettings
   onViewConcept?: (conceptId: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
@@ -4088,6 +4107,7 @@ export function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
+  termMatching,
   onViewConcept,
   inline = false,
 }: SourceWithTermLookupProps) {
@@ -4100,12 +4120,14 @@ export function SourceWithTermLookup({
   // Match whole terms over the full text with the shared matcher, not
   // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
   // equal to a single token, so an index keyed by token could never highlight
-  // one. findTermMatches also brings wildcard parity with the target-side
-  // chips (`grac*` → grace/graced).
+  // one. AQU-1272: the CONCEPT is matched, not just its headword string, so the
+  // popover lights up on the same occurrences as the chips, enforcement and the
+  // per-term stats — wildcards (`grac*` → grace/graced), mark folding, the
+  // project's affix inventory, extra `match.forms` and `excludedForms` included.
   const matches = useMemo(() => {
     const found: Array<{ start: number; end: number }> = []
     for (const concept of activeConcepts) {
-      for (const m of findTermMatches(text, concept.sourceTerm)) found.push(m)
+      for (const m of findConceptMatches(text, concept, termMatching)) found.push(m)
     }
     // Longest-first at each offset, then drop anything overlapping an already
     // taken span — a highlight may not start inside another one.
@@ -4118,7 +4140,7 @@ export function SourceWithTermLookup({
       taken = m.end
     }
     return kept
-  }, [text, activeConcepts])
+  }, [text, activeConcepts, termMatching])
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
   // Font size inherits from the source column wrapper (per-file pref) — no
@@ -4162,6 +4184,7 @@ export function SourceWithTermLookup({
         key={`term-${i}`}
         sourceTerm={matchedText}
         concepts={activeConcepts}
+        termMatching={termMatching}
         onViewConcept={onViewConcept}
       >
         <span className="terminology-highlight">
@@ -4847,8 +4870,7 @@ function MetadataFieldLabels({
   const fields = useCellDisplayFields(projectId)
   if (!metadata || fields.length === 0) return null
   const labels = fields.flatMap((key) => {
-    if (!Object.prototype.hasOwnProperty.call(metadata, key)) return []
-    const text = displayFieldLabel(metadata[key])
+    const text = displayFieldLabel(displayFieldValue(metadata, key))
     return text == null ? [] : [{ key, text }]
   })
   if (labels.length === 0) return null
@@ -6925,6 +6947,9 @@ function EditorRow({
                     cellId={cell.id}
                     staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
                     upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+                    // AQU-831: same 20px square slot as the synth/comment
+                    // badges it stacks with, so the column stays aligned.
+                    className={gutterIconShell}
                   />
                 )}
                 {showFormattingLossWarning && (
@@ -7202,6 +7227,7 @@ function EditorRow({
                   idmlStyleCatalog={idmlStyleCatalog}
                   idmlParagraphStyleId={idmlParagraphStyleId}
                   concepts={terminologyConcepts}
+                  termMatching={project.termMatching}
                 />
               </div>
             ) : (
@@ -7219,6 +7245,7 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
+                termMatching={project.termMatching}
                 onViewConcept={onOpenTerminologyConcept}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -7477,6 +7504,7 @@ function EditorRow({
                 <TermLookupPopover
                   sourceTerm={termChipState.term}
                   concepts={terminologyConcepts}
+                  termMatching={project.termMatching}
                   onViewConcept={onOpenTerminologyConcept}
                   open
                   onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}

@@ -189,6 +189,11 @@ UI chrome that used to be one smoke file per click is covered under
   `workbench-layout.test.ts`)
 - Collapsed-rail history and footer controls: covered in RTL
   (`NavHistoryControls.test.tsx`, `AppShell.test.tsx`)
+- The Assigned-to-me inbox never reports an answer it does not have: no
+  "You have no open assignments." while the scoped read is outstanding (the org
+  directory resolves asynchronously, so this is the normal cold-load path), and
+  an org switch returns to the skeleton rather than showing the previous org's
+  rows (AQU-1251 — `AssignedToMe.test.tsx`, `AssignedToMe.orgSwitch.test.tsx`).
 - DOM navigation and editing: plan inspector editor link, filename keyboard
   access, corpus rename input, read-surface button activation, and cell labels
   (`PlanInspector.test.tsx`, `ProjectOverview.test.tsx`, `FileRow.test.tsx`,
@@ -199,6 +204,13 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- AI availability after an offline → online cycle (AQU-1377): a health probe forced
+  while the browser is offline records no snapshot, the browser `online` event forces
+  a fresh probe that re-enables the AI controls, and a batch refused because the
+  service is unreachable surfaces an explicit banner instead of a silent no-op
+  (`frontier-health.test.tsx`, `useCompletion.unavailable.test.ts`). UI gating only —
+  no data, access or committed artifact is at risk, so per the rules above this stays
+  RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
   Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
@@ -214,7 +226,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
-- Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
+- Back-translation generation, editing, stale/provenance, statistical-pairs comparison, and — AQU-1408 — the two-reading order (statistical gloss above the AI reading) plus each section's visible descriptor (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
 - Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
@@ -252,6 +264,7 @@ UI chrome that used to be one smoke file per click is covered under
   and the dialog's per-format note, and
   `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
   plan against real Postgres.
+- In-app feedback (AQU-1028): the shell's Feedback button opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

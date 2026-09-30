@@ -53,6 +53,24 @@ export interface LeftDockProps {
   voicesPanel?: ReactNode
   /** Badge on the agent tab (e.g. unread) */
   agentBadge?: number
+  /**
+   * AQU-1079: a tab whose surface is currently showing OUTSIDE the dock — the
+   * Agent workbench taking over the center pane is the only one today. The
+   * rail renders that tab as active so it reads "you are here" instead of
+   * looking unvisited, and its click is routed to `onSurfaceTabToggle`.
+   *
+   * Without this the rail tracked `activeTab` (the dock's own tab) only, so
+   * while the workbench was open the Agent icon rendered inactive AND its
+   * click produced no visible change — the sidebar read as broken.
+   */
+  surfaceTab?: DockTab | null
+  /**
+   * Clicking the rail icon of `surfaceTab` while its surface is showing
+   * outside the dock. The owner closes/minimizes that surface, mirroring the
+   * dock's own "click the active tab to collapse it" toggle. Only reached from
+   * the rail — the expand affordance still goes through `onActiveTabChange`.
+   */
+  onSurfaceTabToggle?: (tab: DockTab) => void
   /** Default tab to show when dock opens */
   defaultTab?: DockTab
   /** Externally controlled active tab (useful for "open chat" button in header) */
@@ -60,10 +78,6 @@ export interface LeftDockProps {
   /** Controlled owners retain this across responsive dock unmounts. */
   restoreTab?: DockTab
   onActiveTabChange?: (tab: DockTab | null) => void
-  /** Rail item to mark active WITHOUT opening its panel — e.g. the Agent item
-   *  while the agent workbench is the center surface (its panel stays closed
-   *  during the takeover, but the rail must still show where the user is). */
-  railActiveTab?: DockTab | null
 }
 
 // ---------------------------------------------------------------------------
@@ -86,13 +100,13 @@ const TAB_META: TabMeta[] = [
 interface TabRailProps {
   tabs: TabMeta[]
   activeTab: DockTab | null
-  railActiveTab?: DockTab | null
+  surfaceTab?: DockTab | null
   agentBadge?: number
   onTabClick: (tab: DockTab) => void
   orientation: "left" | "top"
 }
 
-function TabRail({ tabs, activeTab, railActiveTab, agentBadge, onTabClick, orientation }: TabRailProps) {
+function TabRail({ tabs, activeTab, surfaceTab, agentBadge, onTabClick, orientation }: TabRailProps) {
   const t = useT()
   const isTop = orientation === "top"
 
@@ -106,7 +120,9 @@ function TabRail({ tabs, activeTab, railActiveTab, agentBadge, onTabClick, orien
     >
       {tabs.map(({ id, icon: Icon, labelKey }) => {
         const label = t(labelKey)
-        const isActive = activeTab === id || railActiveTab === id
+        // AQU-1079: active means "this tab's surface is what you are looking
+        // at" — in the dock OR taking over the center pane.
+        const isActive = activeTab === id || surfaceTab === id
         const button = (
           <button
             key={id}
@@ -173,10 +189,11 @@ export function LeftDock({
   voicesPanel,
   agentBadge,
   defaultTab = "files",
+  surfaceTab,
+  onSurfaceTabToggle,
   activeTab: controlledTab,
   restoreTab,
   onActiveTabChange,
-  railActiveTab,
 }: LeftDockProps) {
   const t = useT()
   const { position: railPosition } = useDockRailPosition()
@@ -209,6 +226,12 @@ export function LeftDock({
     if (activeTab === tab) {
       // Clicking the active tab collapses the dock
       setActiveTab(null)
+    } else if (surfaceTab === tab && onSurfaceTabToggle) {
+      // AQU-1079: this tab's surface is showing outside the dock (the Agent
+      // workbench in the center pane). Same toggle as above — hand it to the
+      // owner to close, rather than re-opening a surface that is already up
+      // and leaving the click with nothing to show for itself.
+      onSurfaceTabToggle(tab)
     } else {
       setActiveTab(tab)
     }
@@ -259,7 +282,7 @@ export function LeftDock({
             <TabRail
               tabs={visibleTabs}
               activeTab={activeTab}
-              railActiveTab={railActiveTab}
+              surfaceTab={surfaceTab}
               agentBadge={agentBadge}
               onTabClick={handleRailIconClick}
               orientation="top"
@@ -276,7 +299,7 @@ export function LeftDock({
               <TabRail
                 tabs={visibleTabs}
                 activeTab={activeTab}
-                railActiveTab={railActiveTab}
+                surfaceTab={surfaceTab}
                 agentBadge={agentBadge}
                 onTabClick={handleRailIconClick}
                 orientation="left"

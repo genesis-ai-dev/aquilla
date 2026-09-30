@@ -17,6 +17,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import type { ColumnDef } from "@tanstack/react-table"
+import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
 
 // The popover links out to the project's invite page (AQU-607), so every
@@ -25,6 +27,40 @@ function renderPopover() {
   return render(
     <MemoryRouter>
       <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />
+    </MemoryRouter>,
+  )
+}
+
+// AQU-1448: OverviewLaneTable mounts this popover inside the actions cell of a
+// lane row, and lane rows navigate to the workspace on click. Reproduce that
+// exact shape — a real DataTable with onRowClick — so the guard is pinned where
+// it actually broke, not against a stand-in <div onClick>.
+interface LaneRow { lane: string; label: string }
+
+function renderInClickableRow(onRowClick: (row: LaneRow) => void) {
+  const columns: ColumnDef<LaneRow>[] = [
+    {
+      id: "language",
+      accessorFn: (l) => l.label,
+      header: () => "Language",
+      cell: ({ row }) => row.original.label,
+    },
+    {
+      id: "actions",
+      enableSorting: false,
+      cell: () => (
+        <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />
+      ),
+    },
+  ]
+  return render(
+    <MemoryRouter>
+      <DataTable
+        columns={columns}
+        data={[{ lane: "es", label: "Spanish (es)" }]}
+        getRowId={(l) => l.lane}
+        onRowClick={onRowClick}
+      />
     </MemoryRouter>,
   )
 }
@@ -235,5 +271,42 @@ describe("StaffLanePopover", () => {
 
     const invite = screen.getByRole("link", { name: /invite them to the project/i })
     expect(invite).toHaveAttribute("href", "/project/proj-1/settings/members")
+  })
+
+  // AQU-1448: the popup is portalled out of the table, but React still bubbles
+  // its click events along the React tree — through the row. Without a guard
+  // every gesture inside the popover also counted as a row click and navigated
+  // to the workspace, unmounting the popover before anyone could be staffed.
+  describe("mounted in a clickable row (AQU-1448)", () => {
+    it("no gesture inside the popover fires the row's click handler", async () => {
+      const onRowClick = vi.fn()
+      renderInClickableRow(onRowClick)
+
+      openPopover()
+      expect(onRowClick).not.toHaveBeenCalled()
+
+      fireEvent.change(screen.getByPlaceholderText(/search your organization/i), {
+        target: { value: "mari" },
+      })
+      expect(onRowClick).not.toHaveBeenCalled()
+
+      // Picking a name advances to the role step instead of navigating away.
+      pickMaria()
+      expect(onRowClick).not.toHaveBeenCalled()
+      expect(screen.getByRole("button", { name: /add to spanish/i })).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+      await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
+      expect(onRowClick).not.toHaveBeenCalled()
+    })
+
+    it("still lets a click on the row itself open the workspace", () => {
+      const onRowClick = vi.fn()
+      renderInClickableRow(onRowClick)
+
+      fireEvent.click(screen.getByText("Spanish (es)"))
+      expect(onRowClick).toHaveBeenCalledTimes(1)
+      expect(onRowClick).toHaveBeenCalledWith({ lane: "es", label: "Spanish (es)" })
+    })
   })
 })

@@ -663,7 +663,18 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
           {checkError ?? patternError ?? sourcePatternError ?? autofixError}
         </FieldError>
       )}
-      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">
+      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:items-center sm:justify-end">
+        {/* AQU-1509: state the lane scope beside Save so nobody saves a rule
+            into the wrong lane without seeing it. */}
+        {showLanePicker && (
+          <p data-testid="rule-editor-lane-summary" className="text-xs text-muted-foreground sm:me-auto">
+            {laneChoice === null
+              ? t("rules.editor.lane.summaryAll")
+              : t("rules.editor.lane.summaryOne", {
+                  lane: laneLabels?.[laneChoice] || (laneChoice === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : laneChoice),
+                })}
+          </p>
+        )}
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("common.cancel")}
         </Button>

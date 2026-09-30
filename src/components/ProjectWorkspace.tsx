@@ -347,7 +347,6 @@ import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
-import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
@@ -11583,22 +11582,6 @@ export function ProjectWorkspace() {
       icon: Download,
       onClick: openExportFlow,
     })
-    if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
-      items.push({
-        id: "file-export-source",
-        label: t("fileDetails.exportSource"),
-        icon: Download,
-        onClick: () => {
-          if (!projectId) return
-          void exportSourceFile({
-            projectId,
-            file: activeFile,
-            getToken: getTokenForFile,
-            targetLang: activeLane,
-          })
-        },
-      })
-    }
     if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
@@ -12128,7 +12111,6 @@ export function ProjectWorkspace() {
                   validationCount={validationCount}
                   countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
-                  targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}

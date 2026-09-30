@@ -26,6 +26,8 @@ function makeDb(options: {
   lanes?: { id: string; name: string; legacy_tag: string | null; archived_at: string | null }[]
   /** AQU-1462: parsed project_settings.settings. Null means no row. */
   projectSettings?: Record<string, unknown> | null
+  /** AQU-1462: rows from project_member_lane_roles, for an external token. */
+  laneRoleRows?: { lane: string; role_level: number }[]
 }): AquillaDb {
   const {
     orgId = 1,
@@ -38,6 +40,7 @@ function makeDb(options: {
     assignmentFiles = ["file-x"],
     lanes = [],
     projectSettings = null,
+    laneRoleRows = [],
   } = options
   return {
     prepare(sql: string) {
@@ -69,6 +72,7 @@ function makeDb(options: {
               if (sql.includes("FROM assignment_cells")) {
                 return { results: assignmentFiles.map((file_id) => ({ file_id })) }
               }
+              if (sql.includes("FROM project_member_lane_roles")) return { results: laneRoleRows }
               if (sql.includes("FROM lanes")) {
                 return {
                   results: lanes.map((lane) => ({
@@ -980,5 +984,92 @@ describe("authorize() archived lanes (AQU-1462)", () => {
     const named = await authorize(token, audioAttach("es"), SECRET, db)
     expect(named.ok).toBe(false)
     if (!named.ok) expect(named.reason).toBe("lane 'Spanish' is archived")
+  })
+
+  it("says the lane does not exist when the caller may not know it (AQU-1462)", async () => {
+    const german = {
+      lanes: [{ id: "delane01", name: "German", legacy_tag: "de", archived_at: "2026-09-29T00:00:00.000Z" }],
+      projectSettings: { archivedLanes: ["de"], targetLanes: ["de"] },
+    }
+    const hidden = await authorize(
+      await makeToken({ role: 400 }),
+      makeTargetCommit({ payload: { value: "hallo", targetLang: "German" } }),
+      SECRET,
+      makeDb(german),
+      undefined,
+      "1",
+    )
+    expect(hidden.ok).toBe(false)
+    if (!hidden.ok) {
+      expect(hidden.status).toBe(403)
+      expect(hidden.reason).toBe("lane does not exist")
+      expect(hidden.reason).not.toContain("German")
+      expect(hidden.reason).not.toContain("archived")
+    }
+
+    const belowViewer = await authorize(
+      await makeToken({ role: 400, laneGrants: [{ lane: "delane01", level: 99 }] }),
+      makeTargetCommit({ payload: { value: "hallo", targetLang: "de" } }),
+      SECRET,
+      makeDb(german),
+      undefined,
+      "1",
+    )
+    expect(belowViewer.ok).toBe(false)
+    if (!belowViewer.ok) expect(belowViewer.reason).toBe("lane does not exist")
+
+    const granted = await authorize(
+      await makeToken({ role: 400, laneGrants: [{ lane: "delane01", level: 100 }] }),
+      makeTargetCommit({ payload: { value: "hallo", targetLang: "de" } }),
+      SECRET,
+      makeDb(german),
+      undefined,
+      "1",
+    )
+    expect(granted.ok).toBe(false)
+    if (!granted.ok) expect(granted.reason).toBe("lane 'German' is archived")
+
+    const maintainer = await authorize(
+      await makeToken({ role: 600 }),
+      makeTargetCommit({ payload: { value: "hallo", targetLang: "German" } }),
+      SECRET,
+      makeDb(german),
+      undefined,
+      "1",
+    )
+    expect(maintainer.ok).toBe(false)
+    if (!maintainer.ok) expect(maintainer.reason).toBe("lane 'German' is archived")
+  })
+
+  it("reads lane grants for an external token that does not carry them (AQU-1462)", async () => {
+    const db = makeDb({
+      ...archivedSpanish,
+      laneRoleRows: [{ lane: "eslane01", role_level: 400 }],
+    })
+    const event = makeTargetCommit({ payload: { value: "hola", targetLang: "es" } })
+    const granted = await authorize(
+      await makeToken({ role: 400, src: "external", userId: 42 }),
+      event,
+      SECRET,
+      db,
+      undefined,
+      "1",
+    )
+    expect(granted.ok).toBe(false)
+    if (!granted.ok) expect(granted.reason).toBe("lane 'Spanish' is archived")
+
+    const hidden = await authorize(
+      await makeToken({ role: 400, src: "external", userId: 42 }),
+      event,
+      SECRET,
+      makeDb(archivedSpanish),
+      undefined,
+      "1",
+    )
+    expect(hidden.ok).toBe(false)
+    if (!hidden.ok) {
+      expect(hidden.reason).toBe("lane does not exist")
+      expect(hidden.reason).not.toContain("Spanish")
+    }
   })
 })

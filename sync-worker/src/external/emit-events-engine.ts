@@ -36,6 +36,7 @@ import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import {
   archiveCheckApplies,
   archivedLaneReason,
@@ -274,9 +275,16 @@ export async function prepareEmitEvents(
         archivedAt: lane.archivedAt,
       }))
     const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      callerRoleLevel,
+    )
     for (const [i, e] of cmd.events.entries()) {
       if (!e.laneId || !archiveCheckApplies(e.kind)) continue
-      const archived = archivedLaneReason({ tag: e.laneId, lanes, archivedTags })
+      const archived = archivedLaneReason({ tag: e.laneId, lanes, archivedTags, visibleLaneIds })
       if (archived) return failed(i, archived)
     }
   }

@@ -62,6 +62,14 @@ describe("forbiddenReasonCopy", () => {
       "1 change wasn't saved — the Spanish lane was archived.",
     )
   })
+
+  it("does not name a lane the caller is not allowed to know (AQU-1462)", () => {
+    expect(forbiddenReasonCopy("lane does not exist")).toBe("that lane does not exist")
+    expect(forbiddenBannerMessage([entry("lane does not exist")])).toBe(
+      "1 change wasn't saved — that lane does not exist.",
+    )
+    expect(forbiddenReasonCopy("lane does not exist")).not.toMatch(/archived|german|spanish/i)
+  })
 })
 
 describe("forbiddenBannerMessage", () => {

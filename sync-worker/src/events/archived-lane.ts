@@ -38,12 +38,17 @@ function rowsFor(db: AquillaDb, projectId: string, cache: RequestCache): Promise
   return pending
 }
 
-/** Stable 403 reason, or null. `tag` of `''` is the default lane and is never refused. */
+/**
+ * Stable 403 reason, or null. `tag` of `''` is the default lane and is never refused.
+ * `visibleLaneIds` null means the caller may know every lane. A set hides the
+ * archived name from a caller who may not know that lane exists.
+ */
 export async function refusalForArchivedLane(
   db: AquillaDb,
   projectId: string,
   tag: string,
   cache: RequestCache,
+  visibleLaneIds: ReadonlySet<string> | null = null,
 ): Promise<string | null> {
   if (tag === '') return null
   const [settings, lanes] = await Promise.all([
@@ -54,5 +59,6 @@ export async function refusalForArchivedLane(
     tag,
     lanes,
     archivedTags: archivedTagsFromSettings(settings),
+    visibleLaneIds,
   })
 }

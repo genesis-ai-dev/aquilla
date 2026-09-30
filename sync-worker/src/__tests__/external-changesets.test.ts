@@ -696,6 +696,26 @@ describe('changesets — target-language lanes', () => {
     expect(archived.body.error.code).toBe('validation_failed')
     expect(archived.body.error.message).toContain("lane 'Spanish' is archived")
 
+    const walled = { ...makeEnv(tdb.db), LANE_READ_WALL: '1' }
+    const hidden = await prepare(walled, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hallo', laneId: 'es' },
+    ])
+    expect(hidden.res.status).toBe(400)
+    expect(hidden.body.error.message).toContain('lane does not exist')
+    expect(hidden.body.error.message).not.toContain('Spanish')
+    expect(hidden.body.error.message).not.toContain('archived')
+
+    await tdb.pg.query(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+       VALUES ($1, 1, 'eslane01', 100)`,
+      [PROJECT],
+    )
+    const allowedToKnow = await prepare(walled, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    expect(allowedToKnow.res.status).toBe(400)
+    expect(allowedToKnow.body.error.message).toContain("lane 'Spanish' is archived")
+
     const sibling = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'bonjour', laneId: 'fr' },
     ])

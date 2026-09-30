@@ -22,6 +22,8 @@ export interface PortfolioLane {
   laneId?: string | null
   /** Display order from `lanes.position`. */
   position?: number
+  /** AQU-1458. Absent on older servers, which means "not archived". */
+  archived?: boolean
 }
 
 export interface PortfolioProject {

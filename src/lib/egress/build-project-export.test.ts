@@ -408,6 +408,29 @@ describe("buildProjectExport — source-doc honesty & slug safety", () => {
     expect(report.files[1].notes).toBeUndefined()
   })
 
+  it("fetches plain-text source documents via raw mode, since /source now exports them translated", async () => {
+    // AQU-1472: without ?mode=raw the route returns the translation, and the
+    // "source documents" folder would quietly hold it as the original upload.
+    const fetchRawSource = vi.fn<NonNullable<BuildProjectExportDeps["fetchRawSource"]>>(
+      async () => ({
+        bytes: new TextEncoder().encode("ORIGINAL TEXT").buffer as ArrayBuffer,
+        rawOriginal: true,
+      }),
+    )
+    const fetchSidecar = vi.fn<NonNullable<BuildProjectExportDeps["fetchSidecar"]>>(
+      async () => new TextEncoder().encode("TRANSLATED").buffer as ArrayBuffer,
+    )
+    const { report } = await buildProjectExport(
+      sel([{ id: "f1", name: "blog.txt", type: "txt" }]),
+      opts({ textMode: "none", includeSourceDocs: true }),
+      makeDeps({ fetchRawSource, fetchSidecar }),
+    )
+    expect(fetchRawSource).toHaveBeenCalledTimes(1)
+    expect(fetchSidecar).not.toHaveBeenCalled()
+    expect(report.files[0].entries).toEqual(["source-documents/blog.txt"])
+    expect(report.files[0].notes).toBeUndefined()
+  })
+
   it("records the injection-honesty note when the server predates raw mode", async () => {
     // An old sync-worker ignores ?mode=raw and returns the injected
     // serialization (no raw-original header). The manifest must say so

@@ -61,13 +61,13 @@ async function show(suffix: string) {
 }
 
 function toolCtx() {
-  return { projectId: PROJECT, focusedFileId: FILE, aliases: new AliasMap() }
+  return { projectId: PROJECT, focusedFileId: FILE, lane: "", aliases: new AliasMap() }
 }
 
 describe("AQU-1424 — selectCellPairs never offers a hidden cell", () => {
   it("leaves a parked cell out of the work list the tick and the tools share", async () => {
     await seedWorld()
-    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
+    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "" })
     expect(pairs.map((p) => p.canonicalRef)).toEqual(["MRK 4:1", "MRK 4:2", "MRK 4:4"])
     // Specifically: the UNTRANSLATED set autopilot and Draft-all work from.
     expect(pairs.filter((p) => !p.target.trim()).map((p) => p.canonicalRef))
@@ -77,14 +77,14 @@ describe("AQU-1424 — selectCellPairs never offers a hidden cell", () => {
   it("offers it again the moment it is shown", async () => {
     await seedWorld()
     await show("h1")
-    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
+    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "" })
     expect(pairs.map((p) => p.canonicalRef)).toEqual(["MRK 4:1", "MRK 4:2", "MRK 4:3", "MRK 4:4"])
   })
 
   it("returns every cell of a file with nothing hidden, unchanged", async () => {
     await seedWorld()
     await show("h1")
-    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
+    const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "" })
     expect(pairs).toHaveLength(CELLS.length)
   })
 })

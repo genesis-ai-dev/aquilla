@@ -51,6 +51,7 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
   { code: "zh-Hans", englishName: "Simplified Chinese", nativeName: "简体中文", dir: "ltr" },
   { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
+  { code: "ru", englishName: "Russian", nativeName: "Русский", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

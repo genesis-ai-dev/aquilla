@@ -24,11 +24,14 @@ name: Delta sync (audio + users)
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant), OR
 #   FRONTIER_TOKEN, GITLAB_URL             GitLab token escape hatch (skips Frontier login)
-#     NOTE: when BOTH sets are present the direct FRONTIER_TOKEN wins
-#     (src/lib/migrate/gitlab/auth.ts resolveCredentialsFromEnv), so an expired
-#     FRONTIER_TOKEN shadows a valid username/password. A "401 Unauthorized"
-#     from GitLab names the path it used — rotate that secret (or delete
-#     FRONTIER_TOKEN to fall through to the password grant).
+#     When BOTH sets are present the direct FRONTIER_TOKEN is TRIED first, then
+#     verified against GitLab; if GitLab rejects it the resolver falls through
+#     to the password grant and the log says so (AQU-1347,
+#     src/lib/migrate/gitlab/auth.ts resolveCredentialsFromEnv). Before that
+#     fall-through existed, an expired FRONTIER_TOKEN silently shadowed a
+#     perfectly good username/password and took 60 nightly runs down with it
+#     (AQU-1344). A run that still fails auth names BOTH paths — rotate the
+#     secret it names.
 #   FRONTIER_D1_ACCOUNT_ID                 account containing frontier-db-v2
 #   FRONTIER_D1_DATABASE_ID                frontier-db-v2 database UUID
 #   FRONTIER_D1_API_TOKEN                  API token scoped to D1 Read only
@@ -154,28 +157,58 @@ jobs:
       - name: Build report
         if: always()
         id: report
+        env:
+          USERS_OUTCOME: ${{ steps.users.outcome }}
         run: |
           u=users.log; a=audio.log
           [ -f "$u" ] || echo "users.log missing — user pass did not produce output" > "$u"
           [ -f "$a" ] || echo "audio.log missing — audio pass did not produce output" > "$a"
 
           # ── users ──
-          u_summary=$(tail -1 "$u")
+          # migrate-users.ts ends with ONE JSON line carrying every count.
+          # `tail -1` used to be the whole report, which is why a users step
+          # that died mid-run reported its last stack-trace line as a summary
+          # and a users step that worked reported raw JSON (AQU-1347).
+          u_json=$(grep -E '^\{.*"mode"' "$u" | tail -1)
+          if [ -n "$u_json" ] && printf '%s' "$u_json" | jq -e . >/dev/null 2>&1; then
+            u_counts=$(printf '%s' "$u_json" | jq -r '
+              "imported \(.imported // 0) · already present \(.alreadyPresent // 0)" +
+              " · conflicts \(.conflicted // 0) · unsupported hash \(.unsupportedHash // 0)" +
+              " · unresolved access \(.unresolved // 0) · failed \(.failed // 0)"')
+          else
+            u_counts="no counts — the user pass produced no summary line (see the step log)"
+          fi
+          u_outcome="${USERS_OUTCOME:-unknown}"
 
-          # ── audio ── (grep -c already prints 0 when no match; no `|| echo 0`)
+          # ── audio ──
+          # `|| true` on every bare `grep -c`, and it is load-bearing. grep
+          # PRINTS 0 when nothing matches but EXITS 1, and Actions runs these
+          # blocks under `bash -e` — so on any night with no new audio (the
+          # ordinary case) the step aborted right here, silently, before
+          # writing a single line to $GITHUB_OUTPUT. The Discord post then
+          # interpolated empty strings for every value. Guarding the pipelines
+          # that end in `tail`/`awk` is unnecessary — those exit 0 on their own.
           a_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$a" | tail -1); [ -z "$a_applied" ] && a_applied="Applied ?/? (failed early)"
-          a_changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a")
+          a_changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a" || true)
           a_copied=$(grep -oE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a" | grep -oE "copied [0-9]+" | awk '{s+=$2} END{print s+0}')
           a_lfsmiss=$(grep -oE "lfs-miss [0-9]+" "$a" | awk '{s+=$2} END{print s+0}')
-          a_errors=$(grep -cE "✗ " "$a")
+          a_errors=$(grep -cE "✗ " "$a" || true)
 
+          # A failing users step MUST reach the headline. It did not before, so
+          # the report read "✅ ok" through 60 consecutive nights of the users
+          # pass dying on an expired token (AQU-1344).
           errors=$((a_errors))
-          status="✅ ok"; [ "$errors" -gt 0 ] && status="⚠️ ${errors} errors"
+          problems=""
+          [ "$u_outcome" != "success" ] && problems="users failed"
+          [ "$errors" -gt 0 ] && problems="${problems:+${problems}, }${errors} audio errors"
+          status="✅ ok"; [ -n "$problems" ] && status="⚠️ ${problems}"
           {
             echo "## Delta sync — ${status}"
             echo ""
             echo "### Users (D1 identity + GitLab access)"
-            echo "\`${u_summary}\`"
+            echo "outcome: **${u_outcome}**"
+            echo ""
+            echo "${u_counts}"
             echo ""
             echo "### Audio (takes)"
             echo "| metric | value |"
@@ -191,11 +224,19 @@ jobs:
             echo "a_applied=${a_applied}"
             echo "a_copied=${a_copied}"
             echo "errors=${errors}"
+            echo "u_outcome=${u_outcome}"
+            echo "u_counts=${u_counts}"
           } >> "$GITHUB_OUTPUT"
 
       # `secrets` can't be used in an `if:` — pass the webhook as env and guard in
       # the shell. All interpolated values are trusted (our own outputs +
       # github.run_id), never event data.
+      #
+      # A MISSING WEBHOOK IS AN ANNOTATION, NOT A LOG LINE. "skipping" printed
+      # into a step nobody opens is how the report stayed off for two months
+      # without anyone noticing the sync underneath it was also dead
+      # (AQU-1344): the thing that was supposed to raise the alarm was itself
+      # silent. ::warning:: surfaces on the run summary page instead.
       - name: Post to Discord
         if: always()
         env:
@@ -205,10 +246,15 @@ jobs:
           R_AAPPLIED: ${{ steps.report.outputs.a_applied }}
           R_ACOPIED: ${{ steps.report.outputs.a_copied }}
           R_ERRORS: ${{ steps.report.outputs.errors }}
+          R_UOUTCOME: ${{ steps.report.outputs.u_outcome }}
+          R_UCOUNTS: ${{ steps.report.outputs.u_counts }}
         run: |
-          if [ -z "$WEBHOOK" ]; then echo "no DISCORD_WEBHOOK_URL secret — skipping"; exit 0; fi
-          msg=$(printf '**Delta sync** — %s\nAudio: %s · %s takes copied\nerrors: %s\n<%s>' \
-            "$R_STATUS" "$R_AAPPLIED" "$R_ACOPIED" "$R_ERRORS" "$RUN_URL")
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning title=Delta sync report not posted::DISCORD_WEBHOOK_URL secret is not set, so this run reported to nobody. Set it in Settings → Secrets and variables → Actions."
+            exit 0
+          fi
+          msg=$(printf '**Delta sync** — %s\nUsers (%s): %s\nAudio: %s · %s takes copied\naudio errors: %s\n<%s>' \
+            "$R_STATUS" "$R_UOUTCOME" "$R_UCOUNTS" "$R_AAPPLIED" "$R_ACOPIED" "$R_ERRORS" "$RUN_URL")
           curl -fsS -H "Content-Type: application/json" \
             -d "$(jq -n --arg c "$msg" '{content:$c}')" \
-            "$WEBHOOK" || echo "discord post failed (non-fatal)"
+            "$WEBHOOK" || echo "::warning title=Delta sync report not posted::the Discord webhook call failed; the run itself is unaffected"

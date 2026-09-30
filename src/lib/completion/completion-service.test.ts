@@ -63,6 +63,18 @@ describe("buildPrompt", () => {
     expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
   })
 
+  it("strips trailing bare markers from source, examples and context (AQU-1465)", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "In the beginning.\n\\p",
+      examples: [{ source: "God created.\n\\p", target: "Dieu crea.\n\\p" }],
+      precedingContext: [{ source: "Earlier.\n\\p", target: "Avant.\n\\p" }],
+    })
+    const user = messages[1].content
+    expect(user).not.toContain("\\p")
+    expect(user).toContain("Source: In the beginning.\nTranslation:")
+  })
+
   it("builds a prompt with examples and source text", () => {
     const messages = buildPrompt({
       sourceLanguage: "English", targetLanguage: "French",
@@ -507,6 +519,12 @@ describe("complete", () => {
   }
 
   const msg = [{ role: "user" as const, content: "hi" }]
+
+  it("commits a reply without its trailing bare marker (AQU-1465)", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "Premier verset.\n\\p" } }] }))
+    const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+    expect(out).toBe("Premier verset.")
+  })
 
   it("frontier: POSTs to Frontier URL with Bearer JWT and model='default' when blank", async () => {
     fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))

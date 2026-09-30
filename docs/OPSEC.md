@@ -143,6 +143,35 @@
 > `project_members`, `agent_runs`, others) are granted to `app_runtime` but carry
 > no RLS policy, unlike `cells`/`events`/`files`/etc. — recommended as a follow-up
 > migration, not a same-day fix.
+>
+> `docs/OPSEC-REVIEW-2026-09-28.md` takes up that follow-up and finds the reason it
+> should not be done yet, plus the live vulnerability that was resting on it.
+> **OPS-37**: the in-app agent's `sql` tool required only that the substring
+> `project_id = :project` appear *somewhere* in the query, so one correctly-scoped
+> table admitted an arbitrary unscoped one —
+> `SELECT i.token, i.role_level FROM cells c CROSS JOIN project_invites i WHERE
+> c.project_id = :project` returned **every live invite token on the platform**, each a
+> working project-access credential at a stated role (invite tokens are the one
+> credential table still stored in plaintext, OPS-26). Seven more shapes were
+> reproduced: deep-link tokens + PIN hashes, cross-project draft text, the
+> assignment graph, Living Memory, org settings (the unredacted vendor API keys of
+> D7), and `… OR 1 = 1` / `NOT (…)`, which satisfied the check while neutralising it
+> on *every* table. Fixed by replacing the blocklist with a 13-table allowlist and
+> rewriting every reference into a project-scoped derived table, so scoping is
+> structural rather than a property of the model's predicate. **OPS-38**: the guard's
+> own comments delegated that residual gap to the 0034 RLS backstop — which covers 21
+> of the schema's 55 project-scoped tables, was documented in `db/postgres/RLS.md` as
+> covering nine (one of them dropped 60 migrations earlier), and is probably not in
+> the request path at all: 19 project-scoped tables on ordinary request paths were
+> never granted to `app_runtime`, so nothing can be connecting as that role, and every
+> policy here is written `TO app_runtime`. `pnpm neon:status` could not have caught it
+> either — its grant parser did not understand 0034's 30-table `GRANT`, so it verified
+> no privilege for `cells`, `events`, `files` or `comments`. Now measured by
+> `scripts/rls-coverage.test.ts`, documented accurately, and with the one question the
+> repo cannot answer (which role Hyperdrive connects as, and whether it has
+> `BYPASSRLS`) written down as an operator action rather than assumed. This is V4a's
+> shape a third time, and worse: a second control was deliberately left thinner in
+> reliance on a control nobody had measured.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -529,6 +558,8 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 | PostHog input masking | Doesn't cover console output (V3) | Fixed at the source; keep console capture off in the PostHog project |
 | Environment separation | Explicitly defeated for signing keys (V7) | Open — recommendation #1 |
 | Dependency hygiene | Audited only during reviews like this one (V6) | Schedule a recurring audit; add `overrides` for transitive `tar` |
+| **0034 RLS backstop** | Cited by four passes as the layer that catches a mis-scoped query. Covers 21 of 55 project-scoped tables, was documented as nine, and no role that can evaluate its policies appears to be in the request path (OPS-38) | Coverage now measured (`scripts/rls-coverage.test.ts`) and documented (`db/postgres/RLS.md`). **Open:** confirm which Postgres role each environment's Hyperdrive uses and whether it is `BYPASSRLS`, then either finish the `app_runtime` grants and cut over with a soak, or stop counting RLS as a layer here |
+| Agent `sql` escape hatch | Was a blocklist over the whole database whose only scoping requirement was textual (OPS-37) | Fixed — allowlist plus a structural scoping rewrite; drift-guarded against `schema.sql` and the prompt's schema card |
 | Secret hygiene | Verified by hand in June, unenforced since (V5) | Fixed — `scan:secrets` in CI |
 
 ### Regressed or unchanged since June

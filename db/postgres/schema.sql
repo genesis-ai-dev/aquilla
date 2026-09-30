@@ -272,8 +272,15 @@ CREATE TABLE project_settings (
     -- entirely (absent, not blanked). NULL/anything else = the pseudonymous
     -- default. Projected out of the blob for the same reason as the columns
     -- above: the agent read path must not load multiple MB to answer it.
-    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED
+    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED,
+    -- 0118: the v3 agent-mode react switch, projected for the 5-minute react
+    -- watcher — it asks "which projects have react on?" across the whole table
+    -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
+    -- absent/false/garbage all collapse to the documented default (off).
+    agent_react BOOLEAN
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
 );
+CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,

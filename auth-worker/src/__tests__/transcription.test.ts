@@ -1,16 +1,29 @@
 import { env } from "cloudflare:test"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { beforeAll, afterEach, describe, expect, it, vi } from "vitest"
+import { resetTranscriptionRateCache } from "../lib/billing/transcription-usage"
 import app from "../index"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.restoreAllMocks(); resetTranscriptionRateCache() })
 
 const settings = () => Object.assign(Object.create(env), {
   OPENROUTER_API_KEY: "platform-secret",
   OPENROUTER_BASE_URL: "https://upstream.example/api/v1/",
 })
 const body = { projectId: "audio-project",
-  input_audio: { data: "UklGRg==", format: "wav" } }
+  input_audio: { data: "", format: "wav" } }
+beforeAll(async () => {
+  const producerPath = new URL(
+    "../../../src/lib/audio/transcription-request.ts", import.meta.url,
+  ).pathname
+  const { buildTranscriptionRequest } = await import(producerPath)
+  body.input_audio.data = (await buildTranscriptionRequest(
+    new Float32Array(16000), body.projectId,
+  )).input_audio.data
+})
+const catalog = () => Response.json({ data: [
+  { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+] })
 
 async function owner() {
   await seedUser(1, "audio-owner")
@@ -52,6 +65,7 @@ describe("hosted transcription", () => {
     const jwt = await owner()
     const upstreamBodies: Record<string, unknown>[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("/models?")) return catalog()
       expect(String(input)).toBe("https://upstream.example/api/v1/audio/transcriptions")
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer platform-secret")
       const payload = JSON.parse(String(init?.body))
@@ -90,7 +104,8 @@ describe("hosted transcription", () => {
 
   it("rejects provider text without timings", async () => {
     const jwt = await owner()
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ text: "hello" }))
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json({ text: "hello" }))
     const response = await app.request("/api/v1/audio/transcriptions", {
       method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
     }, settings())

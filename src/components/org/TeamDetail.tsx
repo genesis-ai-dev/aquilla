@@ -5,6 +5,7 @@ import { AlertTriangle, FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Use
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { TeamRoleSelect } from "./TeamRoleSelect"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
@@ -15,6 +16,12 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
+import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
+import { formatScopePath } from "@/lib/access/scope-path"
+import type { GrantOrigin, ScopePath } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
@@ -36,6 +43,7 @@ import {
   attachProject,
   changeProjectRole,
   detachProject,
+  setTeamMemberRole,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
@@ -125,6 +133,11 @@ export function TeamDetail() {
   const isOwner = (activeOrg?.role.level ?? 0) >= 700
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
+  // AQU-1352 P2: org maintainer+, or a team maintainer on this team, may set
+  // team roles, capped at their own level (server enforces the same gate).
+  const myTeamRole = team?.members.find((m) => m.username === session?.username)?.teamRoleLevel ?? 0
+  const teamRoleCap = Math.max(activeOrg?.role.level ?? 0, myTeamRole)
+  const canEditTeamRoles = teamRoleCap >= 600
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const teamRequestRef = useRef(0)
@@ -480,6 +493,73 @@ export function TeamDetail() {
         },
       },
       {
+        id: "teamRole",
+        accessorFn: (m) => m.teamRoleLevel ?? 0,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.teamDetail.teamRoleColumn")} />,
+        meta: { className: "w-[16rem] whitespace-nowrap" },
+        cell: ({ row }) => {
+          const m = row.original
+          const current = m.teamRoleLevel ?? null
+          const canEditRow = canEditTeamRoles && (current ?? 0) <= teamRoleCap
+          // AQU-1352 §3.7 rule 1: a NULL team role inherits the org role; a set
+          // one is a direct grant at this team. The effective role is the higher.
+          const orgRef = activeOrgId != null && activeOrg?.name
+            ? { type: "org" as const, id: String(activeOrgId), name: activeOrg.name }
+            : null
+          const origin: GrantOrigin = current == null
+            ? { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+            : { kind: "direct" }
+          const orgLevel = m.roleLevel ?? null
+          const effective = current == null ? orgLevel : Math.max(current, orgLevel ?? 0)
+          const effectiveOrigin: GrantOrigin = current != null && current >= (orgLevel ?? 0)
+            ? { kind: "direct" }
+            : { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+          const select = (
+            <TeamRoleSelect
+              username={m.username}
+              value={current}
+              canEdit={canEditRow}
+              maxLevel={teamRoleCap}
+              onChange={async (level) => {
+                if (!jwt || activeOrgId == null || groupIdNum == null) return
+                try {
+                  await setTeamMemberRole(jwt, activeOrgId, groupIdNum, m.userId, level)
+                  await refetch()
+                } catch (error) {
+                  toast.add({
+                    type: "error",
+                    title: t("org.teamDetail.teamRoleUpdateFailed"),
+                    description: toUserFacingError(error, "team").message,
+                  })
+                }
+              }}
+            />
+          )
+          return (
+            <span className="inline-flex items-center gap-2">
+              <GrantOriginBadge origin={origin} />
+              {/* Editors keep the select: choosing a team role is how a direct
+                  team grant is created. Read-only viewers get "Set at <org>". */}
+              {canEditRow ? select : (
+                <InheritedRoleControl origin={origin} hrefFor={(scope) => (scope.type === "org" ? `/orgs/${scope.id}/members` : undefined)}>
+                  {select}
+                </InheritedRoleControl>
+              )}
+              {/* Only when the org role outranks the team role; otherwise the
+                  Role column / select already say it. */}
+              {current != null && effective !== current && (
+                <EffectiveRoleCell
+                  className="text-xs text-muted-foreground"
+                  directRoleLevel={current}
+                  effectiveRoleLevel={effective}
+                  effectiveOrigin={effectiveOrigin}
+                />
+              )}
+            </span>
+          )
+        },
+      },
+      {
         id: "added",
         accessorFn: (m) => {
           const ts = m.addedAt != null ? Date.parse(m.addedAt) : Number.NaN
@@ -511,10 +591,14 @@ export function TeamDetail() {
         ),
       },
     ],
-    [isOwner, t],
+    [isOwner, t, canEditTeamRoles, teamRoleCap, jwt, activeOrgId, activeOrg?.name, groupIdNum, refetch],
   )
 
   const teamDescription = team?.description?.trim() || null
+  const teamScopePath: ScopePath = [
+    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
+    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
+  ]
 
   return (
     <AppShell
@@ -665,8 +749,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      {team.name}
+                      <ScopeBreadcrumb path={teamScopePath} />
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -850,7 +935,7 @@ export function TeamDetail() {
                       <DialogContent className="max-w-md gap-4">
                         <DialogHeader>
                           <DialogTitle>
-                            {t("org.teamDetail.addMembersDialogTitle", { name: team.name })}
+                            {t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
                           </DialogTitle>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-2">

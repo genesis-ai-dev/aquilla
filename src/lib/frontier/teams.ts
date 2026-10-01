@@ -6,7 +6,15 @@ import type { MemberGrantResult } from "./members"
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
   id: number; name: string; description?: string | null
-  members: Array<{ userId: number; username: string; email?: string | null; roleLevel: number | null; addedAt?: string | null }>
+  members: Array<{
+    userId: number
+    username: string
+    email?: string | null
+    roleLevel: number | null
+    /** AQU-1352 P2: team-scope role; null/absent = inherits via per-project grants only. */
+    teamRoleLevel?: number | null
+    addedAt?: string | null
+  }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt?: string | null }>
 }
 function authHeaders(jwt: string): HeadersInit { return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` } }
@@ -110,4 +118,20 @@ export async function changeProjectRole(jwt: string, orgId: number, groupId: num
 export async function detachProject(jwt: string, orgId: number, groupId: number, projectId: string): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "", "project")
+}
+
+/** AQU-1352 P2: set a member's team-scope role (null = inherit / none). */
+export async function setTeamMemberRole(
+  jwt: string,
+  orgId: number,
+  groupId: number,
+  userId: number,
+  roleLevel: number | null,
+): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members/${userId}`, {
+    method: "PATCH",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ roleLevel }),
+  })
+  if (!res.ok) throw new UserError(res.status, await res.text().catch(() => ""), "team")
 }

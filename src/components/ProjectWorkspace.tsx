@@ -71,6 +71,7 @@ import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
+import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
   ALL_ORGS_PARAM,
   editorReturnFromLocation,
@@ -953,7 +954,31 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/terminology") ||
       location.pathname.endsWith("/agent") ||
       PROJECT_MEMORY_PATH_RE.test(location.pathname)
-    ) return
+    ) {
+      // AQU-1496: normally these surfaces inherit the open file from this
+      // component's own state, because hopping surfaces keeps the instance
+      // (see ProjectWorkspaceRoute). On a COLD mount of one of these URLs — a
+      // reload or a deep link — there is no such state, and the agent
+      // workbench reads the open file directly, so with none it renders
+      // "Choose a file" with "0 cells". Re-seed it from the evidence the URL
+      // and the last-location store carry. No navigate: the surface owns the
+      // URL, only the selection is restored.
+      if (!activeFileIdRef.current) {
+        const seeded = resolveOverlayFileId({
+          projectId,
+          returnPath: editorReturnFromLocation(
+            location.pathname,
+            location.search,
+            projectId,
+          ),
+          savedFileId: readLastLocation(currentUsernameRef.current, projectId)?.fileId,
+          legacyFileId: readLastActiveFileId(projectId),
+          knownFileIds: fileIds,
+        })
+        if (seeded) setSelectedFileId(seeded)
+      }
+      return
+    }
 
     // A file is already in the URL: leave it unless the project genuinely
     // doesn't have it (and it isn't a still-pending optimistic import).
@@ -1030,6 +1055,9 @@ export function ProjectWorkspace() {
     projectFiles,
     workspaceTabs.tabs,
     redirectTo,
+    // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
+    // `location.pathname` already arrives through `redirectTo`.
+    location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
   // File-scoped target import dialog ("Import target translations into this file").
@@ -1070,7 +1098,13 @@ export function ProjectWorkspace() {
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
     if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
+    // AQU-1496: fall back to whatever file the workspace actually has open.
+    // Without it, a fileless surface reached without a `?return=` hand-off
+    // (a bare link, or a reload after the file was re-seeded from the
+    // last-location store) sent "back to the editor" to the bare editor path
+    // instead of the file the user was looking at.
     return editorReturnFromLocation(location.pathname, location.search, projectId)
+      ?? (activeFileId ? workspaceReturnPath(projectId, activeFileId) : null)
   }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
 
   const openOverlay = useCallback((

@@ -5,6 +5,7 @@
 // the plan with a digest, and inserts a staged changeset (idempotent on the
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
@@ -1139,8 +1140,7 @@ async function prepareCreateProject(
   cmd: CreateProjectCommand,
   env: ExternalEnv,
 ): Promise<Response> {
-  // Scope: a project-scoped credential can NEVER create a project. (Act tokens
-  // are project-scoped at mint, so CreateProject is ask-mode-only by design.)
+  // Scope: a project-scoped credential cannot create another project.
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
   }
@@ -1156,7 +1156,7 @@ async function prepareCreateProject(
 
   // An org-scoped credential may only create into its own org.
   const targetOrgStr = orgId == null ? null : String(orgId)
-  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+  if (!credentialAllowsOrganization(cred, targetOrgStr)) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
 
@@ -1249,7 +1249,7 @@ async function prepareCreateOrg(
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
   }
-  if (cred.orgId != null) {
+  if (cred.orgId != null || cred.orgIds !== undefined) {
     return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
   }
 

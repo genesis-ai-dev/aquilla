@@ -201,6 +201,11 @@ export interface Env {
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
+  /** OAuth issuer for MCP hosts (ChatGPT plugin, Claude, Codex): this
+   *  worker's public base, e.g. https://api.aquilla.app/identity. Must equal
+   *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
+   *  names as the authorization server. Falls back to the request origin. */
+  MCP_OAUTH_ISSUER?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may

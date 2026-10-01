@@ -48,14 +48,17 @@ import {
   setPrimaryRendering,
   canEditTermbase,
   canEditTermCells,
+  canSuggestTerm,
   resolveTermbaseEditFloor,
 } from "@/lib/terminology/glossary-view"
+import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
-import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
-import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { exportConceptsCsv } from "@/lib/terminology/csv"
+import { exportConceptsTbx } from "@/lib/terminology/tbx"
+import { importTermbaseFile } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -203,6 +206,11 @@ export function GlossaryEditor({
   // AQU-822: the floor is the org's configured termbaseEditMinRole (carried on
   // the project record), not a hardcoded project_lead level.
   const canManage = canEditTermbase(project?.syncRole, project?.termbaseEditMinRole)
+  // AQU-872: adding a term is a SEPARATE, lower question — a contributor may
+  // propose one as a draft, which enforces nothing until a manager approves it
+  // (see `canSuggestTerm`). Everything else on this surface — editing,
+  // approving, archiving, importing, merging — still asks `canManage`.
+  const canSuggest = canSuggestTerm(project?.syncRole)
   // AQU-208: below the floor the termbase controls stay visible but disabled,
   // and the hover names the caller's role and the one that owns the termbase.
   const termbaseDenial = canManage
@@ -212,6 +220,12 @@ export function GlossaryEditor({
         resolveTermbaseEditFloor(project?.termbaseEditMinRole),
         project?.syncRole?.level,
       )
+  // Below CONTRIBUTOR (a viewer, a commenter) even a suggestion is refused, and
+  // the hover names the contributor bar rather than the management floor —
+  // quoting the higher one would misstate what the user actually needs.
+  const suggestDenial = canSuggest
+    ? null
+    : denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level)
   // The drill-down commits through `target.cell.commit`, so it asks the same
   // role-policy question the editor does.
   const canEditCells = canEditTermCells(project?.syncRole)
@@ -231,6 +245,14 @@ export function GlossaryEditor({
   // below the floor, whose button stays disabled after the read recovers.
   const termbaseWriteDenial =
     termbaseDenial ??
+    (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
+  // AQU-872: Add term rides the suggestion bar, but keeps the unknown-termbase
+  // stop — a create is still a delta against the last known termbase, so a
+  // suggestion written over a failed read doubles terms on recovery exactly as
+  // an import would.
+  const canAddTerm = canSuggest && !termbaseUnknown
+  const addTermDenial =
+    suggestDenial ??
     (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
 
   const { active, suggested, archived } = useMemo(
@@ -308,10 +330,14 @@ export function GlossaryEditor({
     termbaseUnknownRef.current = termbaseUnknown
   }, [termbaseUnknown])
 
-  const guard = () => {
+  // AQU-872: parameterized on the permission because the two authority levels
+  // deny for different reasons — the management verbs name the termbase floor,
+  // a refused suggestion names the contributor bar. The unknown-termbase stop
+  // below applies to both: it is about the delta, not about the role.
+  const guardWith = (allowed: boolean, denial: string) => {
     if (!project) return null
-    if (!canManage) {
-      setError(t("terminology.editor.errorRequiresProjectLead"))
+    if (!allowed) {
+      setError(denial)
       return null
     }
     // Every write emits a DELTA against the last known termbase. When the read
@@ -325,6 +351,9 @@ export function GlossaryEditor({
     }
     return { ...project, terminology: conceptsRef.current }
   }
+
+  const guard = () => guardWith(canManage, t("terminology.editor.errorRequiresProjectLead"))
+  const suggestGuard = () => guardWith(canSuggest, t("terminology.editor.errorBlocked"))
 
   const onEditSource = useCallback(
     (cid: string, sourceTerm: string) => {
@@ -402,7 +431,7 @@ export function GlossaryEditor({
   )
 
   const handleAddTerm = useCallback(() => {
-    const p = guard()
+    const p = suggestGuard()
     if (!p) return
     const source = newSource.trim()
     const rendering = newRendering.trim()
@@ -411,12 +440,18 @@ export function GlossaryEditor({
       return
     }
     const renderings: TermRendering[] = [{ rendering, status: "preferred" }]
-    void persist(addConcept(p, { sourceTerm: source, renderings, status: "active" }))
+    // AQU-872: at or above the termbase floor the term goes in enforced; below
+    // it the same form files a DRAFT, which lands in the Suggested group for a
+    // manager to approve and compiles to no rules in the meantime. Adding it
+    // active would be approving it, which is exactly the authority a
+    // contributor does not have.
+    const status = canManage ? "active" : "draft"
+    void persist(addConcept(p, { sourceTerm: source, renderings, status }))
     setError(null)
     setNewSource("")
     setNewRendering("")
     setAddOpen(false)
-  }, [project, canManage, persist, newSource, newRendering])
+  }, [project, canManage, canSuggest, persist, newSource, newRendering])
 
   function handleAddOpenChange(open: boolean) {
     setAddOpen(open)
@@ -514,9 +549,14 @@ export function GlossaryEditor({
       reader.onload = () => {
         try {
           const text = String(reader.result ?? "")
-          const imported = file.name.toLowerCase().endsWith(".tbx")
-            ? importConceptsTbx(text)
-            : importConceptsCsv(text)
+          const imported = importTermbaseFile(file.name, text)
+          // AQU-684: a file that yields nothing used to persist an unchanged
+          // list and look like success — the exact way a FLEx export failed
+          // silently. Say so instead.
+          if (imported.length === 0) {
+            setError(t("terminology.editor.errorImportFailed"))
+            return
+          }
           void persist({ terminology: [...(p.terminology ?? []), ...imported] })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
@@ -583,7 +623,7 @@ export function GlossaryEditor({
         <input
           ref={importInputRef}
           type="file"
-          accept=".csv,.tsv,.tbx"
+          accept=".csv,.tsv,.tbx,.lift,.xml"
           className="hidden"
           disabled={!canWriteTermbase}
           onChange={(e) => {
@@ -650,10 +690,10 @@ export function GlossaryEditor({
         </Button>
         {/* i18n-exempt "glossary" is a view token, not copy */}
         {view === "glossary" && (
-          <DisabledFieldTooltip disabled={!canWriteTermbase} tooltip={termbaseWriteDenial}>
+          <DisabledFieldTooltip disabled={!canAddTerm} tooltip={addTermDenial}>
             <Button
               size="sm"
-              disabled={!canWriteTermbase}
+              disabled={!canAddTerm}
               onClick={() => setAddOpen(true)}
               aria-label={t("terminology.editor.addTerm")}
             >
@@ -668,8 +708,14 @@ export function GlossaryEditor({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("terminology.editor.addTerm")}</DialogTitle>
+            {/* AQU-872: say which of the two things this form does before it is
+                submitted. Below the floor it files a suggestion, and a
+                translator who expected the term to start being checked would
+                otherwise read the silent draft row as the feature not working. */}
             <DialogDescription>
-              {t("terminology.editor.addTermDescription")}
+              {canManage
+                ? t("terminology.editor.addTermDescription")
+                : t("terminology.editor.addTermSuggestionDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
@@ -751,8 +797,15 @@ export function GlossaryEditor({
               concepts={concepts}
               cells={detailCells}
               termMatching={project?.termMatching}
+              // AQU-663: lets a row name the file the infringing cell is in.
+              files={projectFiles}
               onJumpToCell={({ cellId, fileId }) => {
-                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
+                // `&flash=1` (AQU-1278) because the row named a specific cell
+                // by its ref — a scroll with nothing marking the landed row is
+                // indistinguishable from a link that did nothing. No `lane=`:
+                // this inbox is not lane-scoped, and an emitted lane param
+                // would override whatever lane the editor was last on.
+                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}&flash=1`)
               }}
             />
           )}

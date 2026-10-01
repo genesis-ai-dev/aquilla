@@ -24,18 +24,33 @@ function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  return a.targetLang
-    ? `${base}?lane=${encodeURIComponent(a.targetLang)}`
-    : base
+  const lane = a.laneId || a.targetLang
+  return lane
+    ? `${base}?lane=${encodeURIComponent(lane)}`
+    : `${base}?lane=`
 }
-
-/** Stable identities so a pending/empty render never re-triggers memos. */
-const NO_ROWS: MyOrgAssignment[] = []
-const NO_LANE_LABELS = new Map<string, string>()
 
 function progressPct(a: MyOrgAssignment): number {
   return a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
 }
+
+/**
+ * One settled answer for one `(jwt, orgId)` request (AQU-1251). Carrying the
+ * request identity on the result is what lets the component decide whether it
+ * is still loading by looking at state it already has, instead of trusting a
+ * separate `loading` flag to have been updated by the right effect run.
+ */
+interface InboxResult {
+  jwt: string
+  orgId: number
+  rows: MyOrgAssignment[]
+  laneLabels: Map<string, string>
+  error: string | null
+}
+
+/** Stable empties — identity feeds `useMemo` deps, so fresh ones would churn. */
+const NO_ROWS: MyOrgAssignment[] = []
+const NO_LANE_LABELS: Map<string, string> = new Map()
 
 /**
  * The assignee's "Assigned to me" inbox — the caller's open assignments across
@@ -53,58 +68,59 @@ export function AssignedToMe() {
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
 
-  /**
-   * AQU-1173: the fetch result is stored together with the `(jwt, org)` it
-   * answers for, and `loading` / `rows` / `error` are DERIVED from that
-   * pairing instead of living in states of their own.
-   *
-   * Held separately, `loading` lagged one commit behind `activeOrgId`:
-   * OrgProvider resolves the active org after mount, so the table first
-   * mounted carrying the previous `loading === false` and rendered the
-   * settled "no assignments" table for one frame before the effect set
-   * loading back to true. Deriving closes that window structurally —
-   * `loading` flips in the same render `activeOrgId` does — so the table
-   * never shows a settled state for an org whose fetch has not returned.
-   */
-  const [resolved, setResolved] = useState<{
-    jwt: string
-    orgId: number
-    rows: MyOrgAssignment[]
-    laneLabels: Map<string, string>
-    error: string | null
-  } | null>(null)
+  // AQU-1251: rows, error and "am I loading" are ONE value keyed to the request
+  // that produced it, derived during render — never three `useState`s an effect
+  // has to keep in step.
+  //
+  // They used to be separate, with `loading` flipped inside the fetch effect.
+  // That left a render where the table was already on screen but the effect for
+  // the current org had not run yet, so a stale `loading === false` painted an
+  // authoritative "You have no open assignments." before the skeleton appeared.
+  // `activeOrgId` is null during startup while the org directory resolves, and
+  // that null took the early-return branch below and set `loading` false — so
+  // the flash happened on a normal page load, not just under test. It also made
+  // the skeleton assertion in AssignedToMe.test.tsx order-dependent: whether the
+  // bad render was still on screen when the assertion ran came down to how
+  // quickly React flushed the effect, which is exactly the machine-speed
+  // dependency AGENTS.md rule 15 forbids.
+  //
+  // Keying the result to `(jwt, orgId)` closes the window by construction: a
+  // result for a different org cannot satisfy the current request, so `loading`
+  // stays true until the answer for THIS org is in hand.
+  const [result, setResult] = useState<InboxResult | null>(null)
   const laneFallbackLabel = t("org.projectOverview.laneDefaultFallback")
 
-  const current = resolved?.jwt === jwt && resolved?.orgId === activeOrgId ? resolved : null
-  const loading = jwt != null && activeOrgId != null && current === null
-  const rows = current?.rows ?? NO_ROWS
-  const defaultLaneLabelByProjectId = current?.laneLabels ?? NO_LANE_LABELS
-  const error = current?.error ?? null
+  const settled =
+    result && result.jwt === jwt && result.orgId === activeOrgId ? result : null
+  const loading = jwt != null && activeOrgId != null && settled == null
+  const rows = settled?.rows ?? NO_ROWS
+  const error = settled?.error ?? null
+  const defaultLaneLabelByProjectId = settled?.laneLabels ?? NO_LANE_LABELS
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
     let cancelled = false
     void (async () => {
       try {
+        // AQU-729: lane labels are display-only. A portfolio miss must not
+        // hide the assignments themselves — that is the bug this list is
+        // here to avoid.
         const [all, portfolio] = await Promise.all([
           getMyAssignmentsForOrg(jwt, activeOrgId),
-          getPortfolio(jwt, activeOrgId),
+          getPortfolio(jwt, activeOrgId).catch(() => []),
         ])
         if (cancelled) return
-        setResolved({
-          jwt,
-          orgId: activeOrgId,
-          rows: all,
-          laneLabels: new Map(portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""])),
-          error: null,
-        })
+        const laneLabels = new Map(
+          portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""]),
+        )
+        setResult({ jwt, orgId: activeOrgId, rows: all, laneLabels, error: null })
       } catch (e) {
         if (cancelled) return
-        setResolved({
+        setResult({
           jwt,
           orgId: activeOrgId,
-          rows: [],
-          laneLabels: new Map(),
+          rows: NO_ROWS,
+          laneLabels: NO_LANE_LABELS,
           error: e instanceof Error ? e.message : String(e),
         })
       }
@@ -128,6 +144,7 @@ export function AssignedToMe() {
               <span className="truncate">{a.scopeLabel}</span>
               <AssignmentLaneBadge
                 targetLang={a.targetLang}
+                laneName={a.laneName}
                 defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
                 fallbackLabel={laneFallbackLabel}
               />
@@ -245,6 +262,7 @@ export function AssignedToMe() {
                   a.targetLang ?? "",
                   defaultLaneLabelByProjectId.get(a.projectId) ?? "",
                   laneFallbackLabel,
+                  a.laneName,
                 )
                 return (
                   a.scopeLabel.toLowerCase().includes(q) ||

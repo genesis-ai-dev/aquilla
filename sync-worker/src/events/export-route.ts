@@ -10,9 +10,9 @@
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
 // `?mode=raw` skips the parse/serialize overlay and returns the stored
-// original upload verbatim (X-Export-Mode: raw-original). Only USFM needs
-// the branch — binary sidecar formats and unserialized formats already
-// return their stored bytes as-is.
+// original upload verbatim (X-Export-Mode: raw-original). Only USFM and plain
+// text need the branch — binary sidecar formats and unserialized formats
+// already return their stored bytes as-is.
 //
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
@@ -32,6 +32,7 @@ import {
   countLossyVerses,
 } from "../lib/usfm-lossless"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
+import { buildPlainTextExport } from "./plaintext-export"
 
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -200,6 +201,24 @@ export async function handleExportSourceRequest(
           // The exact original is recoverable, but translated cells have not
           // been injected. The import manifest reports content-only fidelity.
           "X-Export-Mode": "raw-original",
+        },
+      }),
+      request,
+    )
+  }
+
+  // AQU-1472: plain text has a target serializer — the same paragraph rules as
+  // the in-app export, built from the projection. `?mode=raw` skips it and
+  // falls through to the stored upload below, which is what the project
+  // export's "source documents" folder asks for.
+  if (blob.format === "txt" && !rawMode) {
+    const body = await buildPlainTextExport(db, projectId, fileId, lane, { validatedOnly })
+    return withCors(
+      new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
         },
       }),
       request,

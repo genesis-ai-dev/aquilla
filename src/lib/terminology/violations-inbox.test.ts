@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   parseTerminologyRuleId,
   groupTerminologyInfractions,
+  violationCellRef,
 } from "./violations-inbox"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import type { Concept } from "./types"
@@ -42,6 +43,49 @@ describe("parseTerminologyRuleId", () => {
     expect(parseTerminologyRuleId("term:abc-123")).toBeNull()
     expect(parseTerminologyRuleId("term:abc-123:bogus")).toBeNull()
     expect(parseTerminologyRuleId("term::approved")).toBeNull()
+  })
+})
+
+// AQU-663 regression guard: the inbox used to name an infringing cell by its
+// raw internal id, which tells a reviewer nothing about which verse is in
+// breach. These pin the ref/tag preference order AND the rule that no branch
+// may ever hand back something that looks like an internal id.
+describe("violationCellRef (AQU-663)", () => {
+  it("prefers the canonical context ref", () => {
+    expect(
+      violationCellRef({
+        context: "GEN 1:1",
+        globalReferences: ["gen-1-1"],
+        cellLabel: "Row 1",
+      }),
+    ).toBe("GEN 1:1")
+  })
+
+  it("falls back to the first usable global reference when context is empty", () => {
+    expect(
+      violationCellRef({ context: "   ", globalReferences: ["GEN 1:2"], cellLabel: "Row 2" }),
+    ).toBe("GEN 1:2")
+  })
+
+  it("falls back to the human cellLabel when no ref/tag exists", () => {
+    expect(violationCellRef({ globalReferences: [], cellLabel: "Scene 4" })).toBe("Scene 4")
+  })
+
+  it("skips UUID-shaped candidates — importers store opaque ids as refs", () => {
+    // If this regressed, the raw internal id would come straight back in
+    // through `context` and the fix would be cosmetic only.
+    const uuid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    expect(violationCellRef({ context: uuid, globalReferences: [uuid] })).toBeNull()
+    expect(violationCellRef({ context: uuid, globalReferences: [uuid], cellLabel: "GEN 1:3" })).toBe(
+      "GEN 1:3",
+    )
+  })
+
+  it("returns null — never an id — when the cell is absent or carries nothing nameable", () => {
+    expect(violationCellRef(undefined)).toBeNull()
+    expect(violationCellRef(null)).toBeNull()
+    expect(violationCellRef({})).toBeNull()
+    expect(violationCellRef({ context: "", globalReferences: [""], cellLabel: "  " })).toBeNull()
   })
 })
 

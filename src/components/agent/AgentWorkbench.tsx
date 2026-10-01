@@ -44,7 +44,7 @@ import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
-import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
+import { AgentContextPane, type AgentTargetCommitOutcome, type AgentWorkbenchCell } from "./AgentContextPane"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
@@ -88,7 +88,10 @@ export interface AgentWorkbenchProps {
     scopeAvailable?: boolean
     loading?: boolean
     editable?: boolean
-    onCommitTarget?: (cellId: string, snapshot: TranslatedEditorCommit) => void | Promise<void>
+    onCommitTarget?: (
+      cellId: string,
+      snapshot: TranslatedEditorCommit,
+    ) => AgentTargetCommitOutcome | void | Promise<AgentTargetCommitOutcome | void>
     isAnonymous?: boolean
     isCompletionConfigured?: boolean
     isCompletionAvailable?: boolean
@@ -102,6 +105,9 @@ export interface AgentWorkbenchProps {
     validationRequirement?: number
     canValidate?: boolean
     onValidationChange?: (cellId: string, validated: boolean) => unknown
+    /** AQU-1497: a settled human validation on the Target pane — the workspace
+     *  fills the file's repeated source segments from it (AQU-1391). */
+    onCellValidated?: (cellId: string) => unknown
     cellLockHolders?: ReadonlyMap<string, string>
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void
@@ -556,6 +562,7 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
                   validationRequirement={workspace?.validationRequirement}
                   canValidate={workspace?.canValidate}
                   onValidationChange={workspace?.onValidationChange}
+                  onCellValidated={workspace?.onCellValidated}
                   cellLockHolders={workspace?.cellLockHolders}
                   onClaimCell={workspace?.onClaimCell}
                   onReleaseCell={workspace?.onReleaseCell}

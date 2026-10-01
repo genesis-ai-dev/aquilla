@@ -44,7 +44,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
-import { isBiblicaScriptureCell } from "@/lib/biblica/cell-kind"
+import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
@@ -2344,7 +2344,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // different jobs, so a verse row says so — the accent and badge are
           // the same shape the untimed rows use, and the reference pill already
           // carries the verse ("GEN 1:1") from the cell's globalReferences.
-          const isScriptureRow = isBiblicaScriptureCell(cell.metadata)
+          const isScriptureRow = isPartnerScriptureCell(cell.metadata)
           // p1-paragraph-ui-wiring (Task 3): only paragraph-start cells carry
           // group info; every other row gets undefined so its rail button
           // gate (paragraphGroupSize !== undefined) resolves false.

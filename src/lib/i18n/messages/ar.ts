@@ -1484,7 +1484,7 @@ export const ar: Catalog = {
   "audio.recordingModal.nextCellTooltip": "الخلية التالية (→)",
   "audio.recordingModal.retakeTooltip": "إعادة التسجيل (Esc)",
   "audio.recordingModal.retakeButton": "إعادة التسجيل",
-  "audio.recordingModal.saveTooltip": "حفظ (Space أو Enter)",
+  "audio.recordingModal.saveTooltip": "حفظ (Enter)",
   "audio.recordingModal.stopTooltip": "إيقاف (Space أو Esc)",
   "audio.recordingModal.startButton": "بدء",
   "audio.recordingModal.startTooltip": "بدء التسجيل (Space)",

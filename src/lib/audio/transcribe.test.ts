@@ -232,6 +232,23 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     expect(input).not.toHaveProperty("transcription")
   })
 
+  it("transcribes a trimmed take's kept part only, word times still on the clip's clock (AQU-1210)", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola", "mundo"])
+    __setTranscribeAudioForTests(impl)
+    const cell = makeCell()
+    cell.attachments![FULL_ID] = { ...cell.attachments![FULL_ID], trimStartMs: 700, trimEndMs: 2900 } as never
+
+    await transcribeCell({ cell, session, projectId: "proj-1" })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toEqual({ trimStartMs: 700, trimEndMs: 2900 })
+    const input = emitCellAudioAttach.mock.calls[0][0] as { timings: Array<{ t0: number; t1: number }> }
+    // The fake heard "hola" at 0–1s INTO the window, i.e. 0.7–1.7s into the take.
+    expect(input.timings[0].t0).toBeCloseTo(0.7)
+    expect(input.timings[0].t1).toBeCloseTo(1.7)
+  })
+
   it("does not pass a trim for recorded takes (whole clip)", async () => {
     await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
     const impl = fakeTranscribe(["hola"])

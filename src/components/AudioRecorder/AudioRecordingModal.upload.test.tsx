@@ -344,7 +344,7 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
     // Auto-advance really is on — otherwise this passes for the wrong reason,
     // and the default is the whole point (it is what the operator hit).
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
 
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
     await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the attach DID happen

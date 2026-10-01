@@ -188,6 +188,13 @@ export interface TranslatedEditorCommit {
   value: string
   /** HTML form of editor content (only the allowed inline marks survive). */
   valueHtml: string
+  /**
+   * Set on the one commit an exact-match Insert produces (AQU-1393), and on no
+   * other. That text is another cell's translation dropped in whole — not
+   * wording the translator has reviewed for THIS cell — so a host that
+   * validates human edits on commit must leave this one unvalidated.
+   */
+  tmInsert?: true
 }
 
 export interface FootnoteInsertionAnchor {
@@ -1421,7 +1428,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     }
   }, [])
 
-  commitEditorSnapshot.current = () => {
+  commitEditorSnapshot.current = (reason) => {
     if (!editor) return
     if (idleTimerRef.current !== null) {
       clearTimeout(idleTimerRef.current)
@@ -1434,7 +1441,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
       lastCommittedRef.current = text
       lastCommittedHtmlRef.current = html
-      onCommitRef.current({ value: text, valueHtml: html })
+      // AQU-1393: the host tells an Insert apart from typing by this flag alone
+      // — both arrive through this one commit path.
+      onCommitRef.current(
+        reason === "tm-insert"
+          ? { value: text, valueHtml: html, tmInsert: true }
+          : { value: text, valueHtml: html },
+      )
     }
   }
 

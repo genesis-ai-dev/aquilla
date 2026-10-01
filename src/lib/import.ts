@@ -22,7 +22,7 @@ import { proxyOrigin } from "./net/resource-proxy"
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
-import { detectFileType, isMediaFileType } from "./parsers/types"
+import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { tileSegments } from "./timeline/tile-segments"
@@ -79,6 +79,7 @@ import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
+import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
 import { getBookName } from "./file-labeling/bible-book-names"
@@ -576,7 +577,7 @@ export interface ImportFileResult {
  * TMX files participate in translation-memory retrieval even though their
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
-  return fileType === "tmx" ? "translation-memory" : fileType
+  return fileType === "tmx" ? TRANSLATION_MEMORY_FILE_KIND : fileType
 }
 
 /** Merge caller-supplied provenance into the versioned import summary. */
@@ -1307,7 +1308,7 @@ export async function importTranslationNotes(
       name: file.name,
       fileType: "tsv",
       role: "source",
-      kind: "translation-notes",
+      kind: TRANSLATION_NOTES_FILE_KIND,
       importFormat: "tn-tsv",
       parserVersion: "tn-tsv-v1",
     },

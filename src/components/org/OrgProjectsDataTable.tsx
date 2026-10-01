@@ -54,6 +54,12 @@ export type OrgProjectRow = PortfolioProject & {
   orgName?: string | null
   origin?: "member" | "shared"
   isNew?: boolean
+  /**
+   * AQU-1070: set when the row is a soft-archived project shown inline by the
+   * list's "Show archived" toggle. Absent/null for every live row, so the
+   * default list is unchanged.
+   */
+  archivedAt?: string | null
 }
 
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
@@ -288,16 +294,23 @@ export function OrgProjectsDataTable({
 
   const tableData = useMemo(() => projects, [projects])
 
+  const archivedProjectIds = useMemo(
+    () => new Set(projects.filter((p) => p.archivedAt).map((p) => p.id)),
+    [projects],
+  )
+
   const canAssignProject = useCallback(
     (projectId: string) =>
       Boolean(jwt && author != null) &&
       !embedded &&
+      // AQU-1070: nothing about an archive should invite new work into it.
+      !archivedProjectIds.has(projectId) &&
       canOpenAssignUi(
         roleByProjectId?.get(projectId)?.level ?? null,
         allowSelfAssignment,
         assignmentMinRole,
       ),
-    [jwt, author, embedded, roleByProjectId, allowSelfAssignment, assignmentMinRole],
+    [jwt, author, embedded, archivedProjectIds, roleByProjectId, allowSelfAssignment, assignmentMinRole],
   )
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
@@ -579,7 +592,7 @@ export function OrgProjectsDataTable({
           return (
             <span data-testid="project-table-deadline-status" className="block min-w-0 overflow-hidden">
               <ProjectStatus
-                archived={false}
+                archived={Boolean(p.archivedAt)}
                 reasons={portfolioAttentionReasons(p, tableNow)}
                 deadlineAt={p.deadlineAt}
               />
@@ -611,6 +624,10 @@ export function OrgProjectsDataTable({
           meta: { align: "right" as const, className: "w-10" },
           cell: ({ row }) => {
             const p = row.original
+            // AQU-1070: an archived row has no menu (see renderRowMenuItems), so
+            // it gets no ⋯ trigger either — the button reads its items from
+            // context and would otherwise open an empty popup.
+            if (p.archivedAt) return null
             return (
               <DataTableRowActionsButton
                 label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
@@ -652,8 +669,11 @@ export function OrgProjectsDataTable({
         getRowAttributes={(p) => ({
           "data-project-id": p.id,
           ...(p.origin === "shared" ? { "data-origin": "shared" } : {}),
+          ...(p.archivedAt ? { "data-archived": "true" } : {}),
         })}
-        rowClassName="group"
+        // AQU-1070: archived rows read as greyed-out so a PM scanning the list
+        // can tell a stood-down language from a live one without reading chips.
+        rowClassName={(p) => cn("group", p.archivedAt && "opacity-60")}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[...lensToSorting(initialLens)]}
@@ -708,7 +728,13 @@ export function OrgProjectsDataTable({
         renderRowMenuItems={
           embedded
             ? undefined
-            : (p) => (
+            : (p) =>
+                // AQU-1070: every entry here puts work or people INTO a project
+                // — Assign work, Add member, and (on desktop) taking a copy
+                // offline to edit. None of that belongs on an archive, and the
+                // workspace can't be opened while archived anyway, so the row
+                // carries no menu at all rather than a menu of dead ends.
+                p.archivedAt ? null : (
                 <>
                   {canAssignProject(p.id) && (
                     <MenuItem

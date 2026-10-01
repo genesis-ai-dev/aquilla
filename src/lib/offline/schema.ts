@@ -168,6 +168,40 @@ const events = {
       side: Schema.Literal("source", "target"),
     }),
   }),
+  // Batched forms of cellSynced/cellRemoved for bulk writes (download and
+  // catch-up). One event per page of rows instead of one per row: a download
+  // was ~16k events, and the leader worker takes long enough to persist a
+  // backlog that size that a reload in the meantime can strand it holding the
+  // OPFS files (see leader-watchdog.ts, livestorejs/livestore#244).
+  cellsSynced: Events.clientOnly({
+    name: "v1.CellsSynced",
+    schema: Schema.Struct({
+      projectId: Schema.String,
+      fileId: Schema.String,
+      rows: Schema.Array(
+        Schema.Struct({
+          cellId: Schema.String,
+          side: Schema.Literal("source", "target"),
+          value: Schema.NullOr(Schema.String),
+          valueHtml: Schema.NullOr(Schema.String),
+          eventId: Schema.NullOr(Schema.String),
+          sourceEventId: Schema.NullOr(Schema.String),
+          validated: Schema.Boolean,
+          aiDrafted: Schema.Boolean,
+          sequenceIndex: Schema.Number,
+          canonicalRef: Schema.NullOr(Schema.String),
+        }),
+      ),
+    }),
+  }),
+  cellsRemoved: Events.clientOnly({
+    name: "v1.CellsRemoved",
+    schema: Schema.Struct({
+      projectId: Schema.String,
+      fileId: Schema.String,
+      cells: Schema.Array(Schema.Struct({ cellId: Schema.String, side: Schema.Literal("source", "target") })),
+    }),
+  }),
   eventQueued: Events.clientOnly({
     name: "v1.EventQueued",
     schema: Schema.Struct({
@@ -250,6 +284,14 @@ const materializers = State.SQLite.materializers(events, {
   },
   "v1.CellRemoved": ({ projectId, fileId, cellId, side }) =>
     tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side) }),
+  "v1.CellsSynced": ({ projectId, fileId, rows }) =>
+    rows.map((row) => {
+      const args = { projectId, fileId, ...row }
+      const id = cellRowId(projectId, fileId, row.cellId, row.side)
+      return tables.cells.insert({ id, ...args }).onConflict("id", "update", args)
+    }),
+  "v1.CellsRemoved": ({ projectId, fileId, cells }) =>
+    cells.map(({ cellId, side }) => tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side) })),
 
   "v1.EventQueued": ({ id, projectId, fileId, cellId, kind, payload, parentId, author, schemaVersion, clientTs, createdAt }) =>
     tables.eventQueue.insert({
